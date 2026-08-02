@@ -59,7 +59,21 @@ function report(error: unknown, stderr: NodeJS.WriteStream): ExitCode {
   return 1;
 }
 
+/**
+ * A closed pipe is a normal way for a command to end — `nav issue list | head`
+ * closes stdout as soon as it has enough. Without this, node turns that into an
+ * unhandled EPIPE and a stack trace.
+ */
+function exitQuietlyOnClosedPipe(stream: NodeJS.WriteStream): void {
+  stream.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code === "EPIPE") process.exit(0);
+    throw error;
+  });
+}
+
 const isMain = process.argv[1] !== undefined && import.meta.filename === process.argv[1];
 if (isMain) {
+  exitQuietlyOnClosedPipe(process.stdout);
+  exitQuietlyOnClosedPipe(process.stderr);
   process.exitCode = run();
 }

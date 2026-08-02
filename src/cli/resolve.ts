@@ -11,11 +11,22 @@ import { fail } from "./errors.ts";
 const NOUN: Record<EntityKind, string> = { issue: "issue", pr: "pull request" };
 const COMMAND: Record<EntityKind, string> = { issue: "nav issue", pr: "nav pr" };
 
+/**
+ * Accept a whole entity directory name wherever an ID is expected.
+ *
+ * Shell completion offers `<id>-<slug>` names, and they are what a user copies
+ * out of a path or a forge URL; the ID is simply its first eight characters.
+ */
+export function asId(argument: string): string {
+  const match = /^([a-z][a-z0-9]{7})-[a-z0-9-]+$/.exec(argument.toLowerCase());
+  return match ? (match[1] as string) : argument;
+}
+
 /** Resolve an ID or unambiguous prefix to an entity of the expected kind. */
 export function resolveEntity(repo: Repo, prefix: string, kind: EntityKind): EntityRecord {
   const entities = allEntities(repo);
   const resolution = resolvePrefix(
-    prefix,
+    asId(prefix),
     entities.map((e) => e.id),
   );
 

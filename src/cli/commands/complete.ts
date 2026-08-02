@@ -37,12 +37,16 @@ function completionsFor(ctx: Ctx, words: string[]): string[] {
   return words.length === 2 ? entityCandidates(ctx, kind) : [];
 }
 
+/**
+ * Bare IDs and full directory names, so a user can complete either the short
+ * form they would type or the readable name they would recognize.
+ */
 function entityCandidates(ctx: Ctx, kind: EntityKind): string[] {
   try {
     const repo = loadRepo(ctx, { includeComments: false });
     return allEntities(repo)
       .filter((entity) => entity.kind === kind)
-      .map((entity) => entity.id)
+      .flatMap((entity) => [entity.id, entity.dirName])
       .sort();
   } catch {
     return [];

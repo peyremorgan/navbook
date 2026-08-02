@@ -49,9 +49,21 @@ jobs:
           node-version: 24
       - run: npm ci
       - run: npm run build
-      - name: conformance suite against built dist
+      - name: configure git identity
         run: |
           git config --global user.name "CI"
           git config --global user.email "ci@example.invalid"
           git config --global init.defaultBranch main
-          NAV_BIN="node $PWD/dist/cli/main.js" node --test "test/conformance/**/*.test.ts"
+      - name: conformance suite against the built package
+        run: NAV_BIN="node $PWD/dist/cli/main.js" node --test "test/conformance/**/*.test.ts"
+      - name: performance budget against the built package
+        run: NAV_BIN="node $PWD/dist/cli/main.js" npm run bench
+      - name: npx smoke test from a packed tarball
+        run: |
+          npm pack --silent
+          mkdir -p /tmp/smoke && cd /tmp/smoke && npm init -y >/dev/null
+          npm install --silent "$GITHUB_WORKSPACE"/navbook-*.tgz
+          git init -q -b main smoke && cd smoke
+          ../node_modules/.bin/nav init
+          ../node_modules/.bin/nav issue open "Smoke test" -m "It runs."
+          ../node_modules/.bin/nav doctor

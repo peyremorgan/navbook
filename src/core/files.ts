@@ -79,12 +79,17 @@ export function parseFile(text: string): ParsedFile {
   const problems: Problem[] = nav.errors.map((message) => ({
     message: `invalid YAML: ${message}`,
   }));
-  return { nav, fm: normalizeFrontmatter(nav), raw: toPlain(nav), body: nav.body, problems };
+  // One conversion out of the YAML document, shared by both views of it.
+  const raw = toPlain(nav);
+  return { nav, fm: normalizeFrontmatter(nav, raw), raw, body: nav.body, problems };
 }
 
 /** Coerce spec-typed frontmatter keys; leave unknown keys exactly as parsed. */
-export function normalizeFrontmatter(nav: NavDoc): Record<string, unknown> {
-  const raw = toPlain(nav);
+export function normalizeFrontmatter(
+  nav: NavDoc,
+  parsed?: Record<string, unknown>,
+): Record<string, unknown> {
+  const raw = parsed ?? toPlain(nav);
   const out: Record<string, unknown> = {};
   for (const key of keysInOrder(nav)) {
     if (key === "") continue;

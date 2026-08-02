@@ -31,8 +31,9 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "check": "biome check . && tsc --noEmit",
-    "test": "node --test \"test/**/*.test.ts\"",
-    "prepack": "npm run build"
+    "test": "node --test \"test/{unit,cli,conformance}/**/*.test.ts\"",
+    "prepack": "npm run build",
+    "bench": "node --test \"test/perf/**/*.test.ts\""
   },
   "dependencies": {
     "commander": "^14.0.2",
