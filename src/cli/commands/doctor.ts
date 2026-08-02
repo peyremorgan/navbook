@@ -97,9 +97,14 @@ function applyFixes(ctx: Ctx, diagnostics: readonly Diagnostic[]): string[] {
 }
 
 function describeFix(op: FileOp): string {
-  return op.op === "move"
-    ? `moved ${repoPath(op.from)} to ${repoPath(op.to)}`
-    : `wrote ${repoPath(op.path)}`;
+  switch (op.op) {
+    case "move":
+      return `moved ${repoPath(op.from)} to ${repoPath(op.to)}`;
+    case "remove":
+      return `removed ${repoPath(op.path)}`;
+    default:
+      return `wrote ${repoPath(op.path)}`;
+  }
 }
 
 /** Build the repository model from what is staged rather than the working tree. */

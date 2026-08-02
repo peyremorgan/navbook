@@ -1,0 +1,13 @@
+spec-version: 1
+description: content git cannot give back stops the deletion when there is no answer to the question and no --force
+init: {from: before}
+run:
+  before:
+    - write: {path: .navbook/issues/open/bqlybac0-login-timeout/notes.md, content: "draft\n"}
+  command: [issue, delete, bqly]
+expect:
+  exit: 1
+  stdout: expected/stdout.txt
+  stderr-contains: ["was not deleted"]
+  tree: expected/tree
+  commits: []

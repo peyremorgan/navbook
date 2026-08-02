@@ -1,7 +1,7 @@
 /**
  * `nav pr <verb>` — spec 04 §4.3.
  *
- * The seven shared verbs come from `entity.ts`; this module adds the three that
+ * The eight shared verbs come from `entity.ts`; this module adds the three that
  * only pull requests have (`update`, `review`, `merge`) and the parts of the
  * shared verbs that must reach across branches, because a PR's files live on
  * the branch it proposes to merge (spec 03 §3.5).

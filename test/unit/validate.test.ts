@@ -312,6 +312,28 @@ describe("D8 dangling references", () => {
       [],
     );
   });
+
+  it("does not warn about trailers naming an entity a later commit deleted", () => {
+    assert.deepEqual(
+      validateTree(tree({ "issues/open/bqlybac0-x/issue.md": issue() }), {
+        commitMessages: [
+          "docs(issue): delete #mz4kq1rv\n",
+          "docs(issue): comment on #mz4kq1rv\n\nRefs: mz4kq1rv\n",
+        ],
+      }),
+      [],
+    );
+  });
+
+  it("still warns about prose pointing at a deleted entity, which is editable", () => {
+    assert.deepEqual(
+      codes(
+        { "issues/open/bqlybac0-x/issue.md": issue("t", "", "duplicate of #mz4kq1rv") },
+        { commitMessages: ["docs(issue): delete #mz4kq1rv\n"] },
+      ),
+      ["D8"],
+    );
+  });
 });
 
 describe("diagnostic ordering", () => {

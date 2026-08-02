@@ -1,0 +1,4 @@
+#bqlybac0 has changes that are not committed:
+  ?? .navbook/issues/open/bqlybac0-login-timeout/notes.md
+Deleting it loses them; everything else can be recovered from history.
+Delete .navbook/issues/open/bqlybac0-login-timeout/ anyway? [y/N] 

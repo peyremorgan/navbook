@@ -19,6 +19,27 @@ export function stagedContent(cwd: string, path: string): string | null {
   return result.code === 0 ? result.stdout : null;
 }
 
+/**
+ * Everything under `pathspec` that differs from HEAD — staged, unstaged or
+ * untracked — as the `XY path` lines `git status --short` would print.
+ *
+ * Used to tell content git could give back from content it could not, so a
+ * destructive command only stops to ask when there is something to lose.
+ */
+export function uncommittedPaths(cwd: string, pathspec: string): string[] {
+  const args = ["status", "--porcelain", "-z", "--untracked-files=all", "--", pathspec];
+  const fields = splitNul(git(args, { cwd }));
+  const entries: string[] = [];
+  for (let i = 0; i < fields.length; i++) {
+    const entry = fields[i] as string;
+    entries.push(entry);
+    // A rename or copy is reported as one record followed by its origin path
+    // in a field of its own; that field is not a status entry.
+    if (entry.startsWith("R") || entry.startsWith("C")) i++;
+  }
+  return entries;
+}
+
 /** Repository-relative paths of every file in the index. */
 export function indexPaths(cwd: string): string[] {
   return splitNul(git(["ls-files", "--cached", "-z"], { cwd }));

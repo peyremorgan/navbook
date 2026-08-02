@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { extractProseRefs, extractTrailerRefs } from "../../src/core/refs.ts";
+import { extractDeletedId, extractProseRefs, extractTrailerRefs } from "../../src/core/refs.ts";
 
 describe("extractProseRefs", () => {
   it("finds mid-line references", () => {
@@ -76,5 +76,26 @@ describe("extractTrailerRefs", () => {
 
   it("finds nothing in a message with no trailers", () => {
     assert.deepEqual(extractTrailerRefs("just a subject line\n"), { refs: [], closes: [] });
+  });
+});
+
+describe("extractDeletedId", () => {
+  it("reads the id out of a delete subject, for either kind", () => {
+    assert.equal(extractDeletedId("docs(issue): delete #bqlybac0\n"), "bqlybac0");
+    assert.equal(extractDeletedId("docs(pr): delete #dk3mp2x9\n"), "dk3mp2x9");
+  });
+
+  it("tolerates the leading newline git log leaves between messages", () => {
+    assert.equal(extractDeletedId("\ndocs(issue): delete #bqlybac0\n"), "bqlybac0");
+  });
+
+  it("ignores any other subject", () => {
+    assert.equal(extractDeletedId("docs(issue): close #bqlybac0\n"), null);
+    assert.equal(extractDeletedId("feat: delete #bqlybac0\n"), null);
+    assert.equal(extractDeletedId("docs(issue): delete #bqlybac0 by hand\n"), null);
+  });
+
+  it("reads only the subject, never the body", () => {
+    assert.equal(extractDeletedId("feat: cleanup\n\ndocs(issue): delete #bqlybac0\n"), null);
   });
 });

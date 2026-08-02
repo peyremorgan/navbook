@@ -57,6 +57,8 @@ The format is designed so that the *frequency* of conflicts tracks the
 | Close on one side, edit in place on the other | Rename on one side, edit on the other | Git follows the rename and applies the edit at the new path: the entity ends up closed, carrying both intents. See 3.3.2 |
 | Close on one side, slug rename on the other | Rename/rename to two different destinations | **Genuine contradiction**; git cannot choose. See 3.4 |
 | Both sides close with different `resolution:` values | Identical rename, contradictory content | Small content conflict in one short file — exactly where a human decision belongs. See 3.4 |
+| Delete on one side, edit of the same `issue.md`/`pr.md` on the other | Modify/delete conflict; git leaves the edited file in the tree | **Genuine contradiction**: one side says the entity should not exist, the other is still working on it. Decide, then either finish the deletion or keep the file. See 3.3.3 |
+| Delete on one side, new comment on the other | No conflict: git removes the files it knows about and keeps the added one | Merges clean but leaves a directory holding a comment and no entity file, which `doctor` reports as D1. `--fix` cannot reunite it with anything — the entity is gone — so remove the leftover directory by hand. See 3.3.3 |
 | Two PRs merged that both moved their own PR dir | Distinct directories | Merges clean |
 
 ### 3.3.1 Comments racing a status change
@@ -110,6 +112,25 @@ not "one side changed status", which git resolves sensibly, but one of:
 
 Both surface loudly, and neither can lose data: the losing side's content is
 still in the conflict markers and in history.
+
+### 3.3.3 Deletion racing anything else
+
+Deletion is the one operation that does not compose, because it is the one that
+says the entity should not exist. Verified against git 2.43:
+
+- Racing an **edit** of the entity file, git reports a modify/delete conflict
+  and leaves the edited file in the tree. This is the right outcome: the two
+  sides genuinely disagree about whether the entity exists, and a human picks.
+  Finish the deletion (remove the directory) or keep the file.
+- Racing a **new comment**, git merges clean — it removes the files the delete
+  removed and keeps the file the other side added. What survives is a directory
+  holding a comment and no `issue.md`/`pr.md`, which `doctor` reports under D1.
+  Unlike the orphan of 3.3.1 there is nothing to reunite it with, so `--fix`
+  cannot repair it and `nav delete` cannot target it (it no longer parses as an
+  entity); remove the directory by hand.
+
+Neither case can lose committed data: the deleted content remains in history,
+recoverable with `git checkout <commit>^ -- <path>`.
 
 ## 3.4 Contradictory status changes
 

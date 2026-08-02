@@ -16,7 +16,7 @@ import {
 } from "./files.ts";
 import { isId } from "./id.ts";
 import type { FileOp } from "./ops.ts";
-import { extractProseRefs, extractTrailerRefs } from "./refs.ts";
+import { extractDeletedId, extractProseRefs, extractTrailerRefs } from "./refs.ts";
 import { parseDirName } from "./slug.ts";
 import {
   allEntities,
@@ -301,11 +301,21 @@ function checkDanglingRefs(
       report(comment.path, extractProseRefs(comment.body), "prose");
   }
 
+  // An entity that a later commit deleted is absent on purpose. History cannot
+  // be rewritten to match, so warning about the trailers that named it while it
+  // existed would be standing noise about nothing anyone can fix. Prose and
+  // frontmatter references to it are still reported: those live in files.
+  const deleted = new Set<string>();
+  for (const message of commitMessages) {
+    const id = extractDeletedId(message);
+    if (id !== null) deleted.add(id);
+  }
+
   const seen = new Set<string>();
   for (const message of commitMessages) {
     const { refs, closes } = extractTrailerRefs(message);
     for (const id of [...refs, ...closes]) {
-      if (knownIds.has(id) || seen.has(id)) continue;
+      if (knownIds.has(id) || deleted.has(id) || seen.has(id)) continue;
       seen.add(id);
       out.push({
         check: "D8",

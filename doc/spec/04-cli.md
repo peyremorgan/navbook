@@ -40,7 +40,7 @@ Entity commands follow a noun-verb shape with one verb vocabulary shared by
 both entity kinds:
 
 ```
-nav {issue | pr} {open | list | show | edit | comment | close | reopen}
+nav {issue | pr} {open | list | show | edit | comment | close | reopen | delete}
 ```
 
 plus three PR-only verbs (`update`, `review`, `merge`) and repository-level
@@ -91,10 +91,25 @@ other kind MUST fail with a pointer to the right noun (e.g.
 - `nav issue close <id> [--resolution R] [--duplicate-of <id>]` — move the
   directory to `closed/`, optionally set `resolution:`.
 - `nav issue reopen <id>` — move back to `open/`; remove `resolution:`.
+- `nav issue delete <id> [-f|--force]` — remove the entity's directory and
+  everything in it. Closing records how work ended; deleting says it should
+  never have been filed — a duplicate opened twice, an issue meant for another
+  repository — so it removes rather than moves, and it accepts an entity in any
+  status, `archive/` included. What git already holds is recoverable from
+  history, so the command MUST delete without asking when the directory is
+  clean, and MUST print what would be lost and ask for confirmation when it
+  holds uncommitted changes; `--force` skips the question. A refusal (including
+  a declined prompt, and an unanswerable one where stdin is not a terminal) MUST
+  leave the tree untouched and exit 1.
+
+  With `--commit`, the subject is `docs(<kind>): delete #<id>` and the commit
+  MUST carry no `Refs:`/`Closes:` trailer: it would name the entity the commit
+  removes and so dangle by construction. Doctor reads that subject back — see
+  D8 below.
 
 ### Pull requests — `nav pr <verb>`
 
-The seven shared verbs, plus `update`, `review`, and `merge`:
+The eight shared verbs, plus `update`, `review`, and `merge`:
 
 - `nav pr open [--target BRANCH] [--title T] [--draft]` — on the current
   branch: mint an ID, create `prs/open/<id>-<slug>/pr.md` with `source` = the
@@ -113,6 +128,12 @@ The seven shared verbs, plus `update`, `review`, and `merge`:
   [02 §2.8](02-data-model.md), performed for the user.
 - `nav pr reopen <id>` — move a `prs/closed/` entry back to `prs/open/`;
   remove `resolution:`. A merged PR cannot be reopened.
+- `nav pr delete <id> [-f|--force]` — as `nav issue delete`, with one
+  difference: it MUST act on the checked-out tree alone. Unlike `close`, it
+  does not fetch the directory from the ref that carries it — a copy brought
+  onto this branch only to be removed again would leave the original in place
+  on its source branch, which is not what the user asked for. Delete a pull
+  request on the branch that holds it.
 - `nav pr update <id>` — append a revision entry for the current `HEAD`
   (refuses if `HEAD` equals the last recorded head).
 - `nav pr review <id> [--approve | --request-changes] [-m TEXT | --edit] [--file PATH --line N[-M]]`
@@ -173,6 +194,12 @@ Doctor checks (E = error → exit 2, W = warning → exit 0 with report):
 | D8 | Dangling `#id` / trailer references | W |
 | D9 | `prs/open/` entry whose head is an ancestor of the current branch, when that branch is the PR's own `target` ("merged but not archived", [03 §3.5](03-merge-and-branches.md)) | W |
 | D10 | Frontmatter timestamps wildly inconsistent with git history | W |
+
+D8 MUST NOT report a trailer naming an entity that a `docs(<kind>): delete
+#<id>` commit later removed. The entity is absent on purpose and history cannot
+be rewritten to agree, so the warning would name nothing anyone can act on.
+Prose and frontmatter references to a deleted entity are still reported: those
+live in files the user can edit.
 
 D7, D9 and D10 read git history and are therefore skipped by `--staged` (the
 commit being validated does not exist yet) and wherever the history is

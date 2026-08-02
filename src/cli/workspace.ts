@@ -14,6 +14,7 @@ import {
   readFileSync,
   renameSync,
   rmdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, posix, relative, sep } from "node:path";
@@ -120,6 +121,14 @@ export function applyOps(ctx: Ctx, ops: readonly FileOp[]): ApplyResult {
       touched.add(repoPath(op.path));
       continue;
     }
+    if (op.op === "remove") {
+      const target = absPath(ctx, op.path);
+      if (!existsSync(target)) fail(`cannot remove ${repoPath(op.path)}: it does not exist`);
+      rmSync(target, { recursive: true });
+      pruneEmptyParents(ctx, dirname(target));
+      touched.add(repoPath(op.path));
+      continue;
+    }
     const from = absPath(ctx, op.from);
     const to = absPath(ctx, op.to);
     if (!existsSync(from)) fail(`cannot move ${repoPath(op.from)}: it does not exist`);
@@ -135,9 +144,10 @@ export function applyOps(ctx: Ctx, ops: readonly FileOp[]): ApplyResult {
 }
 
 /**
- * Remove directories left empty by a move, up to (but never including) the
- * `.navbook/` root. Git does not track empty directories, so leaving them
- * behind would make the working tree disagree with a fresh clone.
+ * Remove directories left empty by a move or a removal, up to (but never
+ * including) the `.navbook/` root. Git does not track empty directories, so
+ * leaving them behind would make the working tree disagree with a fresh clone.
+ * The status directories survive because each holds a `.gitkeep`.
  */
 function pruneEmptyParents(ctx: Ctx, startDir: string): void {
   let current = startDir;

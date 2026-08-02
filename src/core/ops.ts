@@ -17,7 +17,9 @@ export type FileOp =
   /** Create or overwrite a file, creating parent directories as needed. */
   | { op: "write"; path: string; content: string }
   /** Rename a file or a whole directory; refuses when the destination exists. */
-  | { op: "move"; from: string; to: string };
+  | { op: "move"; from: string; to: string }
+  /** Delete a file, or a directory and everything under it. */
+  | { op: "remove"; path: string };
 
 export interface Trailer {
   key: "Refs" | "Closes";
@@ -30,14 +32,20 @@ export interface Plan {
   trailers: Trailer[];
 }
 
-/** Paths (relative to `.navbook/`) an operation may legitimately touch. */
+/**
+ * Paths (relative to `.navbook/`) an operation may legitimately touch.
+ *
+ * A directory stands for everything beneath it: the `--commit` guard treats a
+ * staged path as related when it is one of these or lives under one.
+ */
 export function planPaths(plan: Plan): string[] {
   const paths = new Set<string>();
   for (const op of plan.ops) {
-    if (op.op === "write") paths.add(op.path);
-    else {
+    if (op.op === "move") {
       paths.add(op.from);
       paths.add(op.to);
+    } else {
+      paths.add(op.path);
     }
   }
   return [...paths];
@@ -209,6 +217,29 @@ export function rewriteFrontmatter(
   const nav = parseDoc(serializeDoc(entity.parsed.nav));
   patchDoc(nav, Object.fromEntries(meaningful));
   return serializeDoc(nav);
+}
+
+/* ----------------------------------------------------------------- deletion */
+
+/**
+ * Remove an entity's directory outright — spec 04 §4.3.
+ *
+ * Closing records an outcome; deleting says the entity should never have
+ * existed, which is why it takes the whole directory (comments and any extra
+ * files with it) from wherever it sits, including `archive/`.
+ *
+ * The commit carries no trailer on purpose. Every other verb refers to the
+ * entity it touched, but here the entity is gone by definition, so a `Refs:`
+ * would be a dangling reference the moment it was written — exactly what
+ * doctor check D8 exists to report. The subject still names the ID, which
+ * keeps the deletion greppable without warning about itself.
+ */
+export function planDelete(entity: EntityRecord): Plan {
+  return {
+    ops: [{ op: "remove", path: entity.dirPath }],
+    message: docsSubject(entity.kind, "delete", entity.id),
+    trailers: [],
+  };
 }
 
 /* ------------------------------------------------------------ pull requests */

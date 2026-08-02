@@ -13,6 +13,7 @@ import {
   type CloseOptions,
   cmdClose,
   cmdComment,
+  cmdDelete,
   cmdEdit,
   cmdList,
   cmdReopen,
@@ -275,6 +276,14 @@ export function addSharedVerbs(
     .description(`move the ${noun} back to open/ and clear its resolution`)
     .option("--commit", commitHelp(kind))
     .action((id: string, opts) => cmdReopen(getCtx(), kind, id, opts));
+
+  parent
+    .command("delete")
+    .argument("<id>", "ID or unambiguous prefix")
+    .description(`remove the ${noun}'s directory, whatever its status`)
+    .option("-f, --force", "do not ask, even when the directory holds uncommitted changes")
+    .option("--commit", commitHelp(kind))
+    .action((id: string, opts) => cmdDelete(getCtx(), kind, id, opts));
 }
 
 export function collect(value: string, previous: string[]): string[] {

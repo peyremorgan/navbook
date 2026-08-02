@@ -79,7 +79,7 @@ No operation exists that only the tool can perform correctly.
 Everything is noun-verb, with one verb vocabulary shared by both entity kinds.
 
 ```
-nav {issue|pr} {open|list|show|edit|comment|close|reopen}
+nav {issue|pr} {open|list|show|edit|comment|close|reopen|delete}
 nav pr {update|review|merge}
 nav {init|id|doctor|install|uninstall}
 ```
@@ -92,6 +92,7 @@ usually enough. A full directory name works too.
 | `nav issue open <title>` | File an issue. `-m TEXT`, or `$EDITOR` opens on the new file. |
 | `nav issue list [query]` | Filtered table; `--json` for one JSON object per line. |
 | `nav issue close <id> [--resolution R]` | Move it to `closed/`. |
+| `nav issue delete <id>` | Remove its directory entirely — for the duplicate you filed twice. Asks first if it holds uncommitted changes; `--force` skips that. |
 | `nav pr open [--target BRANCH]` | Open a PR from the current branch, pinning the exact head and merge base under review. |
 | `nav pr review <id> --approve` | Record a verdict bound to a specific revision. |
 | `nav pr list --all-refs` | Find PRs on branches you have fetched but not checked out. |

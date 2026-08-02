@@ -25,18 +25,22 @@ import {
   type Plan,
   planClose,
   planComment,
+  planDelete,
+  planPaths,
   planReopen,
 } from "../../core/ops.ts";
 import { isQueryError, matchesQuery, parseQuery, type Query } from "../../core/query.ts";
 import type { EntityKind, EntityRecord, Repo } from "../../core/tree.ts";
-import { commitReport, runPlan } from "../commit-flow.ts";
+import { uncommittedPaths } from "../../git/index-ops.ts";
+import { assertNoUnrelatedStaged, commitReport, runPlan } from "../commit-flow.ts";
 import type { Ctx } from "../context.ts";
 import { openInEditor } from "../editor.ts";
 import { fail } from "../errors.ts";
+import { askYesNo } from "../prompt.ts";
 import { renderDetail } from "../render/detail.ts";
 import { type Column, renderTable } from "../render/table.ts";
 import { resolveComment, resolveEntity } from "../resolve.ts";
-import { absPath, loadRepo, loadRepoForQuery, scanAllIds } from "../workspace.ts";
+import { absPath, loadRepo, loadRepoForQuery, repoPath, scanAllIds } from "../workspace.ts";
 import { composeFile } from "./compose.ts";
 
 export interface GlobalFlags {
@@ -280,4 +284,48 @@ export function rewritePlan(entity: EntityRecord, build: () => Plan): Plan {
 
 function destination(entity: EntityRecord, status: string): string {
   return `${entity.kind === "issue" ? "issues" : "prs"}/${status}/${entity.dirName}`;
+}
+
+/* ------------------------------------------------------------------- delete */
+
+export interface DeleteOptions extends GlobalFlags {
+  force?: boolean;
+}
+
+/**
+ * Remove an entity's directory — spec 04 §4.3.
+ *
+ * Closing records how work ended; deleting says it should never have been
+ * filed, which is why it takes the directory rather than moving it, and why it
+ * works whatever the status. Whatever git already holds can be recovered from
+ * history, so the command only stops to ask when it would destroy something
+ * git could not give back.
+ */
+export function cmdDelete(ctx: Ctx, kind: EntityKind, prefix: string, opts: DeleteOptions): void {
+  const entity = resolveEntity(loadRepo(ctx), prefix, kind);
+  const plan = planDelete(entity);
+
+  // Ahead of the question, not after it: --commit refuses outright while
+  // unrelated work is staged, and confirming a deletion that then cannot
+  // happen is a worse experience than being told why up front. runPlan checks
+  // again below, against an index nothing has touched in between.
+  if (opts.commit) assertNoUnrelatedStaged(ctx, planPaths(plan).map(repoPath));
+  if (!opts.force) confirmLoss(ctx, entity);
+
+  const result = runPlan(ctx, plan, { commit: opts.commit });
+  ctx.stdout.write(`Deleted #${entity.id}  ${NAVBOOK_ROOT}/${entity.dirPath}/\n`);
+  if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
+}
+
+/** Ask before destroying content that is not in git yet. */
+function confirmLoss(ctx: Ctx, entity: EntityRecord): void {
+  const uncommitted = uncommittedPaths(ctx.repoRoot, repoPath(entity.dirPath));
+  if (uncommitted.length === 0) return;
+
+  ctx.stdout.write(`#${entity.id} has changes that are not committed:\n`);
+  for (const entry of uncommitted) ctx.stdout.write(`  ${entry}\n`);
+  ctx.stdout.write("Deleting it loses them; everything else can be recovered from history.\n");
+  if (!askYesNo(ctx, `Delete ${NAVBOOK_ROOT}/${entity.dirPath}/ anyway? [y/N] `)) {
+    fail(`#${entity.id} was not deleted`);
+  }
 }

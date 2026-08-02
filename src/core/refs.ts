@@ -18,6 +18,20 @@ export function extractProseRefs(markdown: string): string[] {
   return [...out];
 }
 
+/**
+ * The subject `nav {issue|pr} delete --commit` writes, as built by
+ * `docsSubject(kind, "delete", id)`. Reading it back is what lets doctor tell
+ * an entity that was deliberately removed from one that went missing.
+ */
+const DELETE_SUBJECT = /^docs\((?:issue|pr)\): delete #([a-z][a-z0-9]{7})$/;
+
+/** The entity ID a commit deleted, or null when it deleted none. */
+export function extractDeletedId(message: string): string | null {
+  const subject = message.trimStart().split("\n", 1)[0] ?? "";
+  const match = DELETE_SUBJECT.exec(subject);
+  return match ? (match[1] as string) : null;
+}
+
 export interface TrailerRefs {
   refs: string[];
   closes: string[];

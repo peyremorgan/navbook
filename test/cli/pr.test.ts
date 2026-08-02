@@ -400,6 +400,40 @@ describe("nav pr close", () => {
   });
 });
 
+describe("nav pr delete", () => {
+  it("removes the directory on the branch that holds it", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      const result = repo.nav(["pr", "delete", "dk3m", "--commit"]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /Deleted #dk3mp2x9 {2}\.navbook\/prs\/open\/dk3mp2x9-/);
+      assert.equal(
+        repo.git(["log", "-1", "--format=%s"]).stdout.trim(),
+        "docs(pr): delete #dk3mp2x9",
+      );
+      assert.equal(existsSync(join(repo.dir, ".navbook/prs/open/dk3mp2x9-refactor-auth")), false);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("acts on the checked-out tree only, never fetching the directory from a branch", () => {
+    // `nav pr close` deliberately reaches onto the source branch to record a
+    // decision. Deleting must not: removing a copy it had to fetch first would
+    // leave the original in place on the branch it came from.
+    const { repo } = withOpenPr();
+    try {
+      const result = repo.nav(["pr", "delete", "dk3m", "--force"]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /no pull request matches 'dk3m'/);
+      assert.equal(result.stdout.includes("Brought"), false, result.stdout);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
 describe("history-based doctor checks", () => {
   it("D9 reports a merged but unarchived pull request only on its target branch", () => {
     const { repo } = withOpenPr({ advanceMain: true });

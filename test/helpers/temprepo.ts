@@ -24,7 +24,8 @@ export interface RunResult {
 export interface TempRepo {
   dir: string;
   home: string;
-  nav(args: string[], env?: NodeJS.ProcessEnv): RunResult;
+  /** `input` is fed to stdin; without it the command reads EOF, as in a pipeline. */
+  nav(args: string[], env?: NodeJS.ProcessEnv, input?: string): RunResult;
   git(args: string[], env?: NodeJS.ProcessEnv): RunResult;
   write(relativePath: string, content: string): void;
   /** Write an executable shell script outside the repo and return its path. */
@@ -69,10 +70,16 @@ export function makeTempRepo(): TempRepo {
   mkdirSync(dir, { recursive: true });
   mkdirSync(home, { recursive: true });
 
-  const runIn = (command: string[], args: string[], env?: NodeJS.ProcessEnv): RunResult => {
+  const runIn = (
+    command: string[],
+    args: string[],
+    env?: NodeJS.ProcessEnv,
+    input?: string,
+  ): RunResult => {
     const result = spawnSync(command[0] as string, [...command.slice(1), ...args], {
       cwd: dir,
       encoding: "utf8",
+      input,
       env: { ...deterministicEnv(home), ...env },
     });
     if (result.error) throw result.error;
@@ -83,7 +90,7 @@ export function makeTempRepo(): TempRepo {
     dir,
     home,
     git: (args, env) => runIn(["git"], args, env),
-    nav: (args, env) => runIn(navCommand(), args, env),
+    nav: (args, env, input) => runIn(navCommand(), args, env, input),
     write(relativePath, content) {
       const target = join(dir, ...relativePath.split("/"));
       mkdirSync(dirname(target), { recursive: true });

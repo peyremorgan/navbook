@@ -45,7 +45,7 @@ Each decision below is expanded in the linked document.
 | Branch of record | The repository's default branch | Feature branches stage issue changes like code changes; merging publishes them | 03 |
 | v1 scope | Core format + CLI; sync/gateways reserved as future hooks | Prove the format tool-independent before building bridges | 06 |
 | CLI naming | `nav` binary; configurable git alias defaulting to `git nav` | Short to type; `nav` verified unclaimed by any widely used program (checked 2026-08: no exact-name hit in Debian/Ubuntu, Homebrew, or npm bins; the only bare `nav` command belongs to the niche server-side NAV network-monitoring suite). Alias name stays configurable (e.g. `git issue`) | 04 |
-| CLI structure | Noun-verb: `nav {issue\|pr} {open\|list\|show\|edit\|comment\|close\|reopen}` + PR-only `update`/`review`/`merge` + root utilities (`nav id`, `nav doctor`, setup) | One shared verb vocabulary is easier to learn and remember than per-entity command names | 04 |
+| CLI structure | Noun-verb: `nav {issue\|pr} {open\|list\|show\|edit\|comment\|close\|reopen\|delete}` + PR-only `update`/`review`/`merge` + root utilities (`nav id`, `nav doctor`, setup) | One shared verb vocabulary is easier to learn and remember than per-entity command names | 04 |
 | Implementation | TypeScript reference implementation now; Rust CLI rewrite when mature, cross-checked against it | Measured trade-offs (see 05); the TS core survives as the future web layer | 05 |
 | v1 extras | Query syntax, git hook validation, shell completions (all environment setup unified under `nav install`); no web viewer yet | Selected scope | 04 |
 

@@ -1,0 +1,10 @@
+spec-version: 1
+description: deleting removes the whole directory, comments and all, under a subject that carries no trailer
+init: {from: before}
+run:
+  command: [issue, delete, bqly, --commit]
+expect:
+  exit: 0
+  stdout: expected/stdout.txt
+  tree: expected/tree
+  commits: ["docs(issue): delete #bqlybac0\n"]

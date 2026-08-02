@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { makeNavRepo, makeTempRepo, type TempRepo } from "../helpers/temprepo.ts";
@@ -395,6 +395,183 @@ describe("concurrent comments never conflict", () => {
         false,
         "the orphan holds comments but no issue.md, which is what makes it detectable",
       );
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+describe("nav issue delete", () => {
+  /** A repository holding one committed issue, `del11111`, with a comment. */
+  function seeded(): TempRepo {
+    const repo = makeNavRepo();
+    repo.nav(["issue", "open", "Filed twice", "-m", "Body.", "--commit"], { NAV_IDS: "del11111" });
+    repo.nav(["issue", "comment", "del1", "-m", "A note.", "--commit"], { NAV_IDS: "del22222" });
+    return repo;
+  }
+
+  const dirOf = (repo: TempRepo, path = "issues/open/del11111-filed-twice"): string =>
+    join(repo.dir, ".navbook", path);
+
+  it("removes the directory and stages the deletion", () => {
+    const repo = seeded();
+    try {
+      const result = repo.nav(["issue", "delete", "del1"]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /^Deleted #del11111 {2}\.navbook\/issues\/open\/del11111-/m);
+      assert.equal(existsSync(dirOf(repo)), false, "the directory is gone");
+
+      const staged = repo.git(["diff", "--cached", "--name-status"]).stdout;
+      assert.match(staged, /^D\t\.navbook\/issues\/open\/del11111-filed-twice\/issue\.md$/m);
+      assert.match(staged, /^D\t.*del11111-filed-twice\/comments\/.*-del22222\.md$/m);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("leaves the status directory itself in place", () => {
+    const repo = seeded();
+    try {
+      assert.equal(repo.nav(["issue", "delete", "del1"]).code, 0);
+      assert.ok(existsSync(join(repo.dir, ".navbook/issues/open/.gitkeep")));
+      assert.equal(repo.nav(["issue", "list"]).code, 0, "the tree is still a Navbook tree");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("commits under a delete subject with no trailer, leaving doctor quiet", () => {
+    const repo = seeded();
+    try {
+      const result = repo.nav(["issue", "delete", "del1", "--commit"]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /Committed docs\(issue\): delete #del11111/);
+
+      const message = repo.git(["log", "-1", "--format=%B"]).stdout;
+      assert.equal(message.trim(), "docs(issue): delete #del11111");
+      assert.equal(/^(Refs|Closes):/m.test(message), false, "no trailer to dangle");
+
+      // The earlier open/comment commits still name #del11111; deleting on
+      // purpose is not a fault, so D8 must not report them.
+      const doctor = repo.nav(["doctor"]);
+      assert.equal(doctor.code, 0, doctor.stderr);
+      assert.equal(doctor.stdout.includes("D8"), false, doctor.stdout);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("deletes a closed issue, and an archived one, pruning the empty archive", () => {
+    const repo = seeded();
+    try {
+      assert.equal(repo.nav(["issue", "close", "del1", "--commit"]).code, 0);
+      assert.equal(repo.nav(["issue", "delete", "del1", "--commit"]).code, 0);
+      assert.equal(existsSync(dirOf(repo, "issues/closed/del11111-filed-twice")), false);
+
+      repo.write(
+        ".navbook/archive/2019/issues/closed/arc11111-ancient/issue.md",
+        "---\ntitle: Ancient\nauthor: a@b.co\ncreated: 2019-01-01T00:00:00Z\n---\n\nBody.\n",
+      );
+      repo.commitAll("chore: archive");
+      assert.equal(repo.nav(["issue", "delete", "arc1", "--commit"]).code, 0);
+      assert.equal(
+        existsSync(join(repo.dir, ".navbook/archive")),
+        false,
+        "the emptied archive year is pruned rather than left behind",
+      );
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  describe("uncommitted changes", () => {
+    /** The seeded issue, plus an edit and an untracked file inside its directory. */
+    function dirty(): TempRepo {
+      const repo = seeded();
+      writeFileSync(join(dirOf(repo), "issue.md"), "---\ntitle: Edited\n---\n\nx\n", "utf8");
+      writeFileSync(join(dirOf(repo), "notes.md"), "draft\n", "utf8");
+      return repo;
+    }
+
+    it("refuses rather than guessing when nothing can answer the question", () => {
+      const repo = dirty();
+      try {
+        const result = repo.nav(["issue", "delete", "del1"]);
+        assert.equal(result.code, 1);
+        assert.match(result.stdout, /has changes that are not committed/);
+        assert.match(result.stdout, /notes\.md/);
+        assert.match(result.stderr, /#del11111 was not deleted/);
+        assert.ok(existsSync(dirOf(repo)), "nothing was removed");
+        assert.equal(repo.git(["diff", "--cached", "--name-only"]).stdout, "");
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("goes ahead when answered yes", () => {
+      const repo = dirty();
+      try {
+        const result = repo.nav(["issue", "delete", "del1"], undefined, "y\n");
+        assert.equal(result.code, 0, result.stderr);
+        assert.equal(existsSync(dirOf(repo)), false);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("does not ask at all with --force", () => {
+      const repo = dirty();
+      try {
+        const result = repo.nav(["issue", "delete", "del1", "--force"]);
+        assert.equal(result.code, 0, result.stderr);
+        assert.equal(result.stdout.includes("not committed"), false, result.stdout);
+        assert.equal(existsSync(dirOf(repo)), false);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("treats an issue that was never committed as unrecoverable, and says so", () => {
+      const repo = makeNavRepo();
+      try {
+        repo.nav(["issue", "open", "Just filed", "-m", "Body."], { NAV_IDS: "new11111" });
+        const head = repo.git(["rev-parse", "HEAD"]).stdout.trim();
+
+        assert.equal(repo.nav(["issue", "delete", "new1"]).code, 1, "asks before losing it");
+
+        const forced = repo.nav(["issue", "delete", "new1", "--commit", "--force"]);
+        assert.equal(forced.code, 0, forced.stderr);
+        assert.match(forced.stdout, /Nothing to commit/, "there was nothing in history to remove");
+        assert.equal(repo.git(["rev-parse", "HEAD"]).stdout.trim(), head);
+        assert.equal(existsSync(join(repo.dir, ".navbook/issues/open/new11111-just-filed")), false);
+      } finally {
+        repo.cleanup();
+      }
+    });
+  });
+
+  it("refuses --commit with unrelated staged work, before asking anything", () => {
+    const repo = seeded();
+    try {
+      writeFileSync(join(dirOf(repo), "notes.md"), "draft\n", "utf8");
+      repo.write("app.py", "print('hi')\n");
+      repo.git(["add", "app.py"]);
+
+      const result = repo.nav(["issue", "delete", "del1", "--commit"]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /--commit refuses to run with unrelated changes/);
+      assert.equal(result.stdout.includes("not committed"), false, "it never got as far as asking");
+      assert.ok(existsSync(dirOf(repo)));
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("reports an id that resolves to nothing, and one of the wrong kind", () => {
+    const repo = seeded();
+    try {
+      assert.match(repo.nav(["issue", "delete", "zzzzzzzz"]).stderr, /no issue matches/);
+      assert.match(repo.nav(["issue", "delete", "del"]).stderr, /too short/);
     } finally {
       repo.cleanup();
     }

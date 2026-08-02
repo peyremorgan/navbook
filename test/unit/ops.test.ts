@@ -6,6 +6,7 @@ import {
   planArchiveMerged,
   planClose,
   planComment,
+  planDelete,
   planEntityOpen,
   planInit,
   planMergedBlock,
@@ -274,6 +275,37 @@ describe("planMergedBlock", () => {
   });
 });
 
+describe("planDelete", () => {
+  it("removes the whole directory, whatever the status", () => {
+    for (const status of ["open", "closed"]) {
+      assert.deepEqual(
+        planDelete(issueEntity("", status)).ops,
+        [{ op: "remove", path: `issues/${status}/bqlybac0-login-timeout` }],
+        `status ${status}`,
+      );
+    }
+  });
+
+  it("scopes the subject by kind and writes no trailer", () => {
+    const plan = planDelete(issueEntity());
+    assert.equal(plan.message, "docs(issue): delete #bqlybac0");
+    // A trailer would name the entity the commit removes: dangling by
+    // construction, which is what doctor's D8 exists to report.
+    assert.deepEqual(plan.trailers, []);
+    assert.equal(planDelete(prEntity(ONE_REVISION)).message, "docs(pr): delete #dk3mp2x9");
+  });
+
+  it("keeps the archive prefix of an archived entity", () => {
+    const entity = entityFrom(
+      "archive/2019/issues/closed/bqlybac0-login-timeout/issue.md",
+      "---\ntitle: Login times out\nauthor: alice@example.com\ncreated: 2019-01-02T09:14:00Z\n---\n\nBody.\n",
+    );
+    assert.deepEqual(planDelete(entity).ops, [
+      { op: "remove", path: "archive/2019/issues/closed/bqlybac0-login-timeout" },
+    ]);
+  });
+});
+
 describe("planPaths", () => {
   it("lists both sides of a move so the commit guard can allow them", () => {
     assert.deepEqual(planPaths(planClose(issueEntity(), { resolution: "fixed" })).sort(), [
@@ -281,5 +313,9 @@ describe("planPaths", () => {
       "issues/closed/bqlybac0-login-timeout/issue.md",
       "issues/open/bqlybac0-login-timeout",
     ]);
+  });
+
+  it("lists a removed directory, which stands for everything beneath it", () => {
+    assert.deepEqual(planPaths(planDelete(issueEntity())), ["issues/open/bqlybac0-login-timeout"]);
   });
 });

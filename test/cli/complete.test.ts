@@ -46,7 +46,16 @@ describe("nav __complete", () => {
     try {
       const issueVerbs = complete(repo, ["issue"]);
       const prVerbs = complete(repo, ["pr"]);
-      assert.deepEqual(issueVerbs, ["open", "list", "show", "edit", "comment", "close", "reopen"]);
+      assert.deepEqual(issueVerbs, [
+        "open",
+        "list",
+        "show",
+        "edit",
+        "comment",
+        "close",
+        "reopen",
+        "delete",
+      ]);
       for (const verb of ["update", "review", "merge"]) {
         assert.ok(prVerbs.includes(verb), `pr should offer ${verb}`);
         assert.equal(issueVerbs.includes(verb), false, `issues should not offer ${verb}`);
