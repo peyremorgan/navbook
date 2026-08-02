@@ -17,10 +17,11 @@ import {
   validateIssue,
   validatePr,
 } from "../../core/files.ts";
+import { FrontmatterError } from "../../core/frontmatter.ts";
 import { commentJson, entityJson, NAVBOOK_ROOT, toNdjson } from "../../core/json.ts";
-import { type CloseInput, planClose, planComment, planReopen } from "../../core/ops.ts";
+import { type CloseInput, type Plan, planClose, planComment, planReopen } from "../../core/ops.ts";
 import { isQueryError, matchesQuery, parseQuery, type Query } from "../../core/query.ts";
-import { allIds, type EntityKind, type EntityRecord, type Repo } from "../../core/tree.ts";
+import type { EntityKind, EntityRecord, Repo } from "../../core/tree.ts";
 import { commitReport, runPlan } from "../commit-flow.ts";
 import type { Ctx } from "../context.ts";
 import { openInEditor } from "../editor.ts";
@@ -28,7 +29,7 @@ import { fail } from "../errors.ts";
 import { renderDetail } from "../render/detail.ts";
 import { type Column, renderTable } from "../render/table.ts";
 import { resolveComment, resolveEntity } from "../resolve.ts";
-import { absPath, loadRepo, loadRepoForQuery, repoPath, stage } from "../workspace.ts";
+import { absPath, loadRepo, loadRepoForQuery, scanAllIds } from "../workspace.ts";
 import { composeFile } from "./compose.ts";
 
 export interface GlobalFlags {
@@ -156,17 +157,16 @@ export function cmdEdit(ctx: Ctx, kind: EntityKind, prefix: string, opts: Global
     ctx.stderr.write(`${ctx.colors.yellow("warning:")} ${entity.filePath}: ${problem}\n`);
   }
 
-  const plan = {
-    ops: [],
+  // The edited file is the operation's own output, so it belongs in the plan:
+  // that is what tells the --commit guard which staged path is expected.
+  const plan: Plan = {
+    ops: [{ op: "write", path: entity.filePath, content: readFileSync(target, "utf8") }],
     message: `nb: edit #${entity.id}`,
-    trailers: [{ key: "Refs" as const, id: entity.id }],
+    trailers: [{ key: "Refs", id: entity.id }],
   };
-  stage(ctx, [repoPath(entity.filePath)]);
+  runPlan(ctx, plan, { commit: opts.commit });
   ctx.stdout.write(`Edited #${entity.id}  ${NAVBOOK_ROOT}/${entity.filePath}\n`);
-  if (opts.commit) {
-    runPlan(ctx, plan, { commit: true });
-    ctx.stdout.write(`${commitReport(plan)}\n`);
-  }
+  if (opts.commit) ctx.stdout.write(`${commitReport(plan)}\n`);
 }
 
 function revalidate(path: string, kind: EntityKind): string[] {
@@ -210,7 +210,7 @@ export function cmdComment(ctx: Ctx, kind: EntityKind, prefix: string, opts: Com
     validate: (parsed) => validateComment(parsed, { onPr: kind === "pr" }),
   });
 
-  const id = ctx.mintId(new Set(allIds(repo).map((entry) => entry.id)));
+  const id = ctx.mintId(scanAllIds(ctx.navRoot));
   const { plan, path } = planComment(entity, id, ctx.now(), composed.content, { review: isReview });
   runPlan(ctx, plan, { commit: opts.commit });
 
@@ -237,7 +237,7 @@ export function cmdClose(ctx: Ctx, kind: EntityKind, prefix: string, opts: Close
     input.duplicateOf = target.id;
   }
 
-  const plan = planClose(entity, input);
+  const plan = rewritePlan(entity, () => planClose(entity, input));
   runPlan(ctx, plan, { commit: opts.commit });
   ctx.stdout.write(`Closed #${entity.id}  ${NAVBOOK_ROOT}/${destination(entity, "closed")}/\n`);
   if (opts.commit) ctx.stdout.write(`${commitReport(plan)}\n`);
@@ -250,10 +250,25 @@ export function cmdReopen(ctx: Ctx, kind: EntityKind, prefix: string, opts: Glob
     fail(`#${entity.id} is merged; a merged pull request cannot be reopened`);
   }
 
-  const plan = planReopen(entity);
+  const plan = rewritePlan(entity, () => planReopen(entity));
   runPlan(ctx, plan, { commit: opts.commit });
   ctx.stdout.write(`Reopened #${entity.id}  ${NAVBOOK_ROOT}/${destination(entity, "open")}/\n`);
   if (opts.commit) ctx.stdout.write(`${commitReport(plan)}\n`);
+}
+
+/**
+ * Build a plan that rewrites an entity file, turning a malformed-frontmatter
+ * failure into an operational error that names the file and the way out.
+ */
+export function rewritePlan(entity: EntityRecord, build: () => Plan): Plan {
+  try {
+    return build();
+  } catch (error) {
+    if (!(error instanceof FrontmatterError)) throw error;
+    fail(`${NAVBOOK_ROOT}/${entity.filePath}: ${error.message}`, [
+      "fix the file by hand, or run 'nav doctor' to see what is wrong",
+    ]);
+  }
 }
 
 function destination(entity: EntityRecord, status: string): string {

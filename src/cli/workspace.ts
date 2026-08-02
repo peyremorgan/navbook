@@ -17,9 +17,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, posix, relative, sep } from "node:path";
+import { parseCommentFileName } from "../core/comments.ts";
 import { NAVBOOK_ROOT } from "../core/json.ts";
 import type { FileOp } from "../core/ops.ts";
 import { needsComments, type Query } from "../core/query.ts";
+import { parseDirName } from "../core/slug.ts";
 import { type NavTree, parseTree, type Repo } from "../core/tree.ts";
 import { gitMaybe } from "../git/exec.ts";
 import { add } from "../git/index-ops.ts";
@@ -158,6 +160,40 @@ export function stage(ctx: Ctx, paths: readonly string[]): void {
     return tracked !== null && tracked !== "";
   });
   add(ctx.repoRoot, stageable);
+}
+
+/**
+ * Every ID in the repository, read from names alone.
+ *
+ * Entity IDs are in directory names and comment IDs are in filenames (§2.2,
+ * §2.6), so uniqueness can be checked without opening a single file — which
+ * keeps `open` fast while still honouring "unique across all entity and
+ * comment IDs".
+ */
+export function scanAllIds(navRoot: string): Set<string> {
+  const ids = new Set<string>();
+  if (!existsSync(navRoot)) return ids;
+
+  const walk = (dir: string, depth: number): void => {
+    let entries: Dirent<string>[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true, encoding: "utf8" });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const parsed = parseDirName(entry.name);
+        if (parsed) ids.add(parsed.id);
+        if (depth < 6) walk(join(dir, entry.name), depth + 1);
+      } else if (entry.isFile()) {
+        const comment = parseCommentFileName(entry.name);
+        if (comment) ids.add(comment.id);
+      }
+    }
+  };
+  walk(navRoot, 0);
+  return ids;
 }
 
 /** Repository-relative path of an absolute path, in POSIX form. */

@@ -1,0 +1,11 @@
+spec-version: 1
+description: a close and a slug rename move the same directory to two different places, which is the rename/rename conflict git cannot resolve for you
+history:
+  - {id: base, branch: main, apply: history/00-base, message: "nb: open #bqlybac0", date: 2026-08-01T10:00:00Z}
+  - {id: closer, branch: closer, from: base, apply: history/01-close, rm: [".navbook/issues/open/bqlybac0-login-timeout"], message: "nb: close #bqlybac0", date: 2026-08-05T10:00:00Z}
+  - {id: renamer, branch: renamer, from: base, apply: history/02-rename, rm: [".navbook/issues/open/bqlybac0-login-timeout"], message: "nb: edit #bqlybac0", date: 2026-08-05T11:00:00Z}
+run:
+  checkout: closer
+  git: [merge, --no-edit, renamer]
+expect:
+  exit: 1

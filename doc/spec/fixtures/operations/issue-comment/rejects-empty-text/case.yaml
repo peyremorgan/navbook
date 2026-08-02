@@ -1,0 +1,11 @@
+spec-version: 1
+description: an empty comment is refused rather than written as a blank file
+init: {from: before, date: 2026-08-02T12:00:00Z}
+run:
+  command: [issue, comment, bqly, -m, "   "]
+  env: {NAV_IDS: "t5kr1gq6"}
+expect:
+  exit: 1
+  stdout: ""
+  stderr-contains: ["empty"]
+  tree: expected/tree

@@ -1,0 +1,12 @@
+spec-version: 1
+description: once the same file is staged, --staged reports it, which is how the pre-commit hook blocks
+init: {from: before, date: 2026-08-02T12:00:00Z}
+run:
+  before:
+    - write: {path: .navbook/issues/open/Bad_Name/issue.md, content: "---\ntitle: t\n---\n\nbody\n"}
+    - git: [add, -A]
+  command: [doctor, --staged, --json]
+expect:
+  exit: 2
+  diagnostics:
+    - {check: D1, level: error, path: .navbook/issues/open/Bad_Name/issue.md}

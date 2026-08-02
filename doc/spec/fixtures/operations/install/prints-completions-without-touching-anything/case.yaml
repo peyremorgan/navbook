@@ -1,0 +1,5 @@
+spec-version: 1
+description: asking for a completion script prints it and changes nothing, so it never prompts
+init: {from: before, date: 2026-08-02T12:00:00Z}
+run: {command: [install, "--completions=fish"]}
+expect: {exit: 0, stdout: expected/stdout.txt, tree: expected/tree}

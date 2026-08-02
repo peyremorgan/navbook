@@ -1,0 +1,10 @@
+spec-version: 1
+description: without an editor configured, edit says what to do instead of failing obscurely
+init: {from: before, date: 2026-08-02T12:00:00Z}
+run:
+  command: [issue, edit, bqly]
+  env: {EDITOR: "", VISUAL: ""}
+expect:
+  exit: 1
+  stdout: ""
+  stderr-contains: ["no editor configured"]

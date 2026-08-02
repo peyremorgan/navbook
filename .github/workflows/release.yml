@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+
+      - name: the tag must match the package version
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          packaged="$(node -p 'require("./package.json").version')"
+          if [ "$tagged" != "$packaged" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package version $packaged" >&2
+            exit 1
+          fi
+
+      - run: npm run check
+      - run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@example.invalid"
+          git config --global init.defaultBranch main
+      - run: npm test
+      - run: npm run build
+
+      - name: the built package must pass the conformance suite too
+        run: NAV_BIN="node $PWD/dist/cli/main.js" node --test "test/conformance/**/*.test.ts"
+
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

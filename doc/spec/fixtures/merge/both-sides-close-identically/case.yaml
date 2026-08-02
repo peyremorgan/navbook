@@ -1,0 +1,12 @@
+spec-version: 1
+description: an identical close on both sides is an identical rename, which merges clean
+history:
+  - {id: base, branch: main, apply: history/00-base, message: "nb: open #bqlybac0", date: 2026-08-01T10:00:00Z}
+  - {id: alice, branch: alice, from: base, apply: history/01-alice, rm: [".navbook/issues/open/bqlybac0-login-timeout"], message: "nb: close #bqlybac0", date: 2026-08-05T10:00:00Z}
+  - {id: bob, branch: bob, from: base, apply: history/02-bob, rm: [".navbook/issues/open/bqlybac0-login-timeout"], message: "nb: close #bqlybac0", date: 2026-08-05T11:00:00Z}
+run:
+  checkout: alice
+  git: [merge, --no-edit, bob]
+expect:
+  exit: 0
+  tree: expected/tree

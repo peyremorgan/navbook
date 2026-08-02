@@ -61,9 +61,10 @@ function resolveShell(value: string | boolean | undefined, ctx: Ctx): Shell {
 export function cmdInstall(ctx: Ctx, opts: InstallOptions): void {
   const selective = isSelective(opts);
 
-  // `--completions=SHELL` given explicitly prints the script and changes
-  // nothing, so it never prompts (spec 04 §4.3).
-  if (selective && typeof opts.completions === "string" && opts.completions !== "") {
+  // Asking for completions explicitly prints the script and changes nothing,
+  // so it never prompts; only install-everything mode writes the file
+  // (spec 04 §4.3). A bare `--completions` is the explicit form.
+  if (selective && opts.completions !== undefined) {
     ctx.stdout.write(completionScript(resolveShell(opts.completions, ctx)));
     return;
   }

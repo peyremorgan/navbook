@@ -63,6 +63,13 @@ export function serializeDoc(nav: NavDoc): string {
 }
 
 function serializeYaml(doc: Document): string {
+  if (doc.errors.length > 0) {
+    // The YAML parser refuses to stringify a document it could not parse, and
+    // a caller rewriting frontmatter would otherwise get its bare message.
+    throw new FrontmatterError(
+      `frontmatter is not valid YAML and cannot be rewritten: ${doc.errors[0]?.message ?? "parse error"}`,
+    );
+  }
   if (doc.contents === null || doc.contents === undefined) return "";
   if (isMap(doc.contents) && doc.contents.items.length === 0) return "";
   const text = doc.toString({

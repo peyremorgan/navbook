@@ -66,11 +66,17 @@ export function threadOrder<T extends { id: string; replyTo?: string; fileName: 
   }
 
   const out: ThreadItem<T>[] = [];
+  // Guard on identity, not id: duplicate ids are a doctor error (D3), and
+  // until they are fixed the thread must still show each file exactly once.
+  const emitted = new Set<T>();
   const walk = (comment: T, depth: number): void => {
+    if (emitted.has(comment)) return;
+    emitted.add(comment);
     out.push({ comment, depth });
     for (const child of children.get(comment.id) ?? []) walk(child, depth + 1);
   };
   for (const root of roots) walk(root, 0);
+  for (const comment of sorted) walk(comment, 0);
   return out;
 }
 

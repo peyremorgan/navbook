@@ -5,11 +5,10 @@
 import { existsSync } from "node:fs";
 import { NAVBOOK_ROOT } from "../../core/json.ts";
 import { planInit } from "../../core/ops.ts";
-import { allIds } from "../../core/tree.ts";
 import { commitReport, runPlan } from "../commit-flow.ts";
 import type { Ctx } from "../context.ts";
 import { fail } from "../errors.ts";
-import { loadRepo } from "../workspace.ts";
+import { scanAllIds } from "../workspace.ts";
 import type { GlobalFlags } from "./entity.ts";
 
 /** Create the `.navbook/` skeleton. */
@@ -31,10 +30,7 @@ export function cmdInit(ctx: Ctx, opts: GlobalFlags): void {
 
 /** Mint and print a fresh ID, for hand-editors and scripts. */
 export function cmdId(ctx: Ctx, opts: { count?: number }): void {
-  const taken = new Set<string>();
-  if (ctx.hasNavbook) {
-    for (const entry of allIds(loadRepo(ctx))) taken.add(entry.id);
-  }
+  const taken = ctx.hasNavbook ? scanAllIds(ctx.navRoot) : new Set<string>();
   const count = opts.count ?? 1;
   if (!Number.isInteger(count) || count < 1) fail("--count must be a positive integer");
   for (let i = 0; i < count; i++) {

@@ -1,0 +1,12 @@
+spec-version: 1
+description: closing on one side while the other edits the issue in place composes cleanly - git follows the rename and applies the edit at the new path, so the issue ends up closed and carrying both intents
+history:
+  - {id: base, branch: main, apply: history/00-base, message: "nb: open #bqlybac0", date: 2026-08-01T10:00:00Z}
+  - {id: closer, branch: closer, from: base, apply: history/01-close, rm: [".navbook/issues/open/bqlybac0-login-timeout"], message: "nb: close #bqlybac0", date: 2026-08-05T10:00:00Z}
+  - {id: editor, branch: editor, from: base, apply: history/02-edit, message: "nb: edit #bqlybac0", date: 2026-08-05T11:00:00Z}
+run:
+  checkout: closer
+  git: [merge, --no-edit, editor]
+expect:
+  exit: 0
+  tree: expected/tree

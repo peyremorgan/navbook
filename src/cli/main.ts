@@ -3,6 +3,7 @@
  * `nav` entry point.
  */
 
+import { realpathSync } from "node:fs";
 import { CommanderError } from "commander";
 import { type Ctx, makeContext } from "./context.ts";
 import { type ExitCode, NavError } from "./errors.ts";
@@ -71,8 +72,25 @@ function exitQuietlyOnClosedPipe(stream: NodeJS.WriteStream): void {
   });
 }
 
-const isMain = process.argv[1] !== undefined && import.meta.filename === process.argv[1];
-if (isMain) {
+/**
+ * True when this file is the program being run.
+ *
+ * The paths are resolved through symlinks first: npm installs the binary as a
+ * link in `node_modules/.bin`, so `process.argv[1]` is the link while
+ * `import.meta.filename` is its target. Comparing them raw makes the installed
+ * CLI silently do nothing.
+ */
+function invokedDirectly(): boolean {
+  const entry = process.argv[1];
+  if (entry === undefined) return false;
+  try {
+    return realpathSync(entry) === realpathSync(import.meta.filename);
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly()) {
   exitQuietlyOnClosedPipe(process.stdout);
   exitQuietlyOnClosedPipe(process.stderr);
   process.exitCode = run();

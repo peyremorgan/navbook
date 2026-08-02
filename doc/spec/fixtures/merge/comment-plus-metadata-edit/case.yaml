@@ -1,0 +1,12 @@
+spec-version: 1
+description: a comment and a triage edit touch different files and compose without conflict
+history:
+  - {id: base, branch: main, apply: history/00-base, message: "nb: open #bqlybac0", date: 2026-08-01T10:00:00Z}
+  - {id: commenter, branch: commenter, from: base, apply: history/01-comment, message: "nb: comment on #bqlybac0", date: 2026-08-05T10:00:00Z}
+  - {id: triage, branch: triage, from: base, apply: history/02-triage, message: "nb: edit #bqlybac0", date: 2026-08-05T11:00:00Z}
+run:
+  checkout: commenter
+  git: [merge, --no-edit, triage]
+expect:
+  exit: 0
+  tree: expected/tree

@@ -51,7 +51,9 @@ The format is designed so that the *frequency* of conflicts tracks the
 | Comment added + issue closed (dir moved), entity already had comments | Directory rename on one side, file addition on the other | Git ≥ 2.18 relocates the comment into the moved directory. Clean with `merge.directoryRenames=true`; with git's default that same relocation is reported as a "file location" conflict to confirm. See 3.3.1 |
 | Comment added + issue closed (dir moved), entity had **no** comments yet | Same, but `comments/` is new on one side and renamed on neither | Git cannot infer the move and leaves the comment at the old path. `doctor` reports the orphan; `--fix` moves it. See 3.3.1 |
 | Both sides close the same issue | Identical rename | Merges clean if `issue.md` edits are identical; else a small content conflict (e.g. two different `resolution:` values — pick one) |
-| Close on one side, reopen (or stay-open edit) on the other | Rename/rename or rename/edit divergence | **Genuine contradiction**; see 3.4 |
+| Close on one side, edit in place on the other | Rename on one side, edit on the other | Git follows the rename and applies the edit at the new path: the entity ends up closed, carrying both intents. See 3.3.2 |
+| Close on one side, slug rename on the other | Rename/rename to two different destinations | **Genuine contradiction**; git cannot choose. See 3.4 |
+| Both sides close with different `resolution:` values | Identical rename, contradictory content | Small content conflict in one short file — exactly where a human decision belongs. See 3.4 |
 | Two PRs merged that both moved their own PR dir | Distinct directories | Merges clean |
 
 ### 3.3.1 Comments racing a status change
@@ -87,10 +89,29 @@ Implementations MUST NOT work around this by writing placeholder files into
 `comments/`. An empty directory that exists only to shape a future merge is
 hidden state, and git does not track empty directories in any case.
 
+### 3.3.2 Status changes usually compose
+
+Verified against git 2.43: a status change is a directory rename, and git's
+rename detection carries the *other* side's edits and additions across it. A
+close racing an in-place edit therefore merges clean, with the entity closed
+and the edit applied — as does a reopen racing an edit, with the reopen
+winning.
+
+This is stronger than it first appears. The contradiction that needs a human is
+not "one side changed status", which git resolves sensibly, but one of:
+
+- **two different destinations** for the same directory (a close racing a slug
+  rename), which is a rename/rename conflict; or
+- **contradictory content** at the same destination (two closes recording
+  different resolutions), which is a content conflict in a short file.
+
+Both surface loudly, and neither can lose data: the losing side's content is
+still in the conflict markers and in history.
+
 ## 3.4 Contradictory status changes
 
-When git surfaces a status conflict (or, worse, auto-resolves a rename badly),
-the invariant to restore is:
+When git surfaces one of the conflicts of 3.3.2 (or, worse, auto-resolves a
+rename badly), the invariant to restore is:
 
 > **An entity ID MUST exist in exactly one status directory.**
 

@@ -17,8 +17,10 @@ import {
   validateComment,
   validatePr,
 } from "../../core/files.ts";
+import { MIN_PREFIX_LENGTH, resolvePrefix } from "../../core/id.ts";
 import { entityJson, NAVBOOK_ROOT, toNdjson } from "../../core/json.ts";
 import {
+  type FileOp,
   type MergedBlock,
   planComment,
   planEntityOpen,
@@ -27,7 +29,7 @@ import {
   RevisionUnchangedError,
 } from "../../core/ops.ts";
 import { isQueryError, matchesQuery, parseQuery } from "../../core/query.ts";
-import { allEntities, allIds, type EntityRecord, parseTree } from "../../core/tree.ts";
+import { allEntities, type EntityRecord, parseTree } from "../../core/tree.ts";
 import { gitMaybe } from "../../git/exec.ts";
 import { isAncestor, mergeBase, objectExists } from "../../git/history.ts";
 import { add, commit, composeMessage } from "../../git/index-ops.ts";
@@ -40,7 +42,13 @@ import {
   mergeHead,
   mergeNoCommit,
 } from "../../git/merge.ts";
-import { catBlobs, listBranchRefs, lsTreeNames, lsTreeRecursive } from "../../git/refscan.ts";
+import {
+  catBlobs,
+  listBranchRefs,
+  lsTreeNames,
+  lsTreeRecursive,
+  type Ref,
+} from "../../git/refscan.ts";
 import {
   currentBranch,
   defaultBranch,
@@ -51,8 +59,8 @@ import {
 import { commitReport, runPlan } from "../commit-flow.ts";
 import { type Ctx, nowIso } from "../context.ts";
 import { fail } from "../errors.ts";
-import { resolveEntity } from "../resolve.ts";
-import { applyOps, loadRepo, repoPath, stage } from "../workspace.ts";
+import { asId, resolveEntity } from "../resolve.ts";
+import { applyOps, loadRepo, repoPath, requireNavbook, scanAllIds, stage } from "../workspace.ts";
 import { composeFile } from "./compose.ts";
 import {
   type CloseOptions,
@@ -61,6 +69,7 @@ import {
   currentAuthor,
   type GlobalFlags,
   type ListOptions,
+  rewritePlan,
 } from "./entity.ts";
 
 const PR_OPEN_DIR = "prs/open";
@@ -78,7 +87,7 @@ export interface PrOpenOptions extends GlobalFlags {
 }
 
 export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
-  const repo = loadRepo(ctx, { includeComments: false });
+  requireNavbook(ctx);
   const source = currentBranch(ctx.repoRoot);
   if (!source) fail("HEAD is detached; check out the branch the pull request rides on");
 
@@ -118,7 +127,7 @@ export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
 
   const finalTitle =
     typeof composed.parsed.fm.title === "string" ? composed.parsed.fm.title : title;
-  const id = ctx.mintId(new Set(allIds(repo).map((entry) => entry.id)));
+  const id = ctx.mintId(scanAllIds(ctx.navRoot));
   const { plan, dirPath } = planEntityOpen("pr", id, finalTitle, composed.content);
 
   runPlan(ctx, plan, { commit: opts.commit });
@@ -150,7 +159,9 @@ export function cmdPrUpdate(ctx: Ctx, prefix: string, opts: GlobalFlags): void {
     plan = planPrUpdate(entity, { head, base, date: nowIso(ctx) });
   } catch (error) {
     if (error instanceof RevisionUnchangedError) fail(error.message);
-    throw error;
+    plan = rewritePlan(entity, () => {
+      throw error;
+    });
   }
 
   runPlan(ctx, plan, { commit: opts.commit });
@@ -207,7 +218,7 @@ export function cmdPrReview(ctx: Ctx, prefix: string, opts: ReviewOptions): void
     validate: (parsed) => validateComment(parsed, { onPr: true }),
   });
 
-  const id = ctx.mintId(new Set(allIds(repo).map((entry) => entry.id)));
+  const id = ctx.mintId(scanAllIds(ctx.navRoot));
   const { plan, path } = planComment(entity, id, ctx.now(), composed.content, {
     review: isReview,
   });
@@ -256,7 +267,11 @@ export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void 
   if (opts.json) {
     if (matched.length === 0) return;
     ctx.stdout.write(
-      `${toNdjson(matched.map((entry) => entityJson(entry.entity, { refs: entry.refs })))}\n`,
+      `${toNdjson(
+        matched.map((entry) =>
+          entityJson(entry.entity, { refs: entry.refs.map((ref) => ref.short) }),
+        ),
+      )}\n`,
     );
     return;
   }
@@ -273,7 +288,9 @@ export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void 
       {
         header: "refs",
         value: (entity: EntityRecord) =>
-          (matched.find((entry) => entry.entity.id === entity.id)?.refs ?? []).join(","),
+          (matched.find((entry) => entry.entity.id === entity.id)?.refs ?? [])
+            .map((ref) => ref.short)
+            .join(","),
       },
     ],
   });
@@ -281,7 +298,7 @@ export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void 
 
 interface FoundPr {
   entity: EntityRecord;
-  refs: string[];
+  refs: Ref[];
 }
 
 /**
@@ -323,11 +340,11 @@ function scanRefsForOpenPrs(ctx: Ctx): FoundPr[] {
 
       const existing = byId.get(entity.id);
       if (!existing) {
-        byId.set(entity.id, { entity, refs: [ref.short] });
+        byId.set(entity.id, { entity, refs: [ref] });
       } else {
-        existing.refs.push(ref.short);
-        // Prefer the copy from a local branch: it is the one you can act on.
-        if (!ref.remote && existing.refs[0]?.includes("/")) existing.entity = entity;
+        // Prefer the copy on a local branch: it is the one you can act on.
+        if (!ref.remote && existing.refs.every((seen) => seen.remote)) existing.entity = entity;
+        existing.refs.push(ref);
       }
     }
   }
@@ -386,13 +403,16 @@ export function cmdPrMerge(ctx: Ctx, prefix: string | undefined, opts: MergeOpti
     // A fast-forward creates no commit to carry the move, so the archive
     // happens in the immediate follow-up commit that spec 02 §2.8 allows.
     fastForward(ctx.repoRoot, sourceRef);
-    archiveAndRecord(ctx, entity.id, null);
+    const archived = archiveIntoIndex(ctx, entity.id);
+    recordMergedBlock(ctx, archived, null);
     return;
   }
 
   if (mergeNoCommit(ctx.repoRoot, sourceRef) === "conflict") reportConflict(ctx, entity.id);
-  const mergeSha = commitMerge(ctx.repoRoot, message);
-  archiveAndRecord(ctx, entity.id, mergeSha);
+  // The move is staged into the merge itself (04 §4.3), so the commit that
+  // lands the branch is also the commit that files the discussion as merged.
+  const archived = archiveIntoIndex(ctx, entity.id);
+  recordMergedBlock(ctx, archived, commitMerge(ctx.repoRoot, message));
 }
 
 /** Finish a merge that was interrupted by conflicts. */
@@ -411,10 +431,12 @@ function finishMerge(ctx: Ctx, prefix: string | undefined): void {
   const title = stringField(entity, "title");
   const message = composeMessage(`Merge #${entity.id}: ${title}`, [{ key: "Refs", id: entity.id }]);
 
-  const mergeSha = isMergeInProgress(ctx.repoRoot)
+  const inProgress = isMergeInProgress(ctx.repoRoot);
+  const archived = archiveIntoIndex(ctx, entity.id);
+  const mergeSha = inProgress
     ? commitMerge(ctx.repoRoot, message)
     : (resolveSha(ctx.repoRoot, "HEAD") ?? null);
-  archiveAndRecord(ctx, entity.id, mergeSha);
+  recordMergedBlock(ctx, archived, mergeSha);
 }
 
 /** The PR whose source branch this in-progress merge is bringing in. */
@@ -446,22 +468,28 @@ function pendingMergePr(ctx: Ctx, prefix: string | undefined): EntityRecord {
 }
 
 /**
- * Move the PR into `prs/merged/` and record the `merged:` block.
- *
- * The merge commit's own SHA cannot be known inside that commit, so the block
- * is written in a follow-up commit (spec 02 §2.7).
+ * Move the pull request into `prs/merged/` and stage the move without
+ * committing, so the commit that lands the branch is also the commit that
+ * files the discussion as merged (spec 04 §4.3).
  */
-function archiveAndRecord(ctx: Ctx, id: string, mergeSha: string | null): void {
-  const repo = loadRepo(ctx);
-  const entity = repo.byId.get(id);
+function archiveIntoIndex(ctx: Ctx, id: string): EntityRecord {
+  const entity = loadRepo(ctx).byId.get(id);
   if (entity?.kind !== "pr") {
     fail(`#${id} did not arrive on this branch; the merge may not have carried its files`);
   }
-  if (entity.status === "merged") {
-    ctx.stdout.write(`#${id} is already archived under ${NAVBOOK_ROOT}/prs/merged/\n`);
-    return;
-  }
+  if (entity.status === "merged") return entity;
 
+  const targetDir = `prs/merged/${entity.dirName}`;
+  applyOps(ctx, [{ op: "move", from: entity.dirPath, to: targetDir }]);
+  stage(ctx, [repoPath(entity.dirPath), repoPath(targetDir)]);
+  return { ...entity, status: "merged", dirPath: targetDir, filePath: `${targetDir}/pr.md` };
+}
+
+/**
+ * Record the `merged:` block in a follow-up commit. A merge commit cannot name
+ * its own SHA, so this step is necessarily separate (spec 02 §2.7).
+ */
+function recordMergedBlock(ctx: Ctx, entity: EntityRecord, mergeSha: string | null): void {
   const identity = ctx.identity();
   const merged: MergedBlock = {
     date: nowIso(ctx),
@@ -469,17 +497,20 @@ function archiveAndRecord(ctx: Ctx, id: string, mergeSha: string | null): void {
     ...(mergeSha ? { commit: mergeSha } : {}),
   };
 
-  const targetDir = `prs/merged/${entity.dirName}`;
-  applyOps(ctx, [
-    { op: "move", from: entity.dirPath, to: targetDir },
-    ...planMergedBlock({ ...entity, dirPath: targetDir, filePath: `${targetDir}/pr.md` }, merged)
-      .ops,
-  ]);
-  stage(ctx, [repoPath(entity.dirPath), repoPath(targetDir)]);
-  const message = composeMessage(`nb: merge #${id}`, [{ key: "Refs", id }]);
-  commit(ctx.repoRoot, message);
+  let ops: FileOp[];
+  try {
+    ops = planMergedBlock(entity, merged).ops;
+  } catch (error) {
+    // The branch is already merged at this point, so say plainly what is left.
+    fail(`#${entity.id} merged, but ${NAVBOOK_ROOT}/${entity.filePath} could not be updated`, [
+      `  ${error instanceof Error ? error.message : String(error)}`,
+      "the merge itself is committed; fix the file and commit the 'merged:' block by hand",
+    ]);
+  }
+  applyOps(ctx, ops);
+  commit(ctx.repoRoot, composeMessage(`nb: merge #${entity.id}`, [{ key: "Refs", id: entity.id }]));
 
-  ctx.stdout.write(`Merged #${id}  ${NAVBOOK_ROOT}/${targetDir}/\n`);
+  ctx.stdout.write(`Merged #${entity.id}  ${NAVBOOK_ROOT}/${entity.dirPath}/\n`);
   if (mergeSha) ctx.stdout.write(`Merge commit ${mergeSha.slice(0, 12)}\n`);
 }
 
@@ -507,21 +538,39 @@ interface LocatedPr {
  */
 function locatePr(ctx: Ctx, prefix: string): LocatedPr {
   const found = scanRefsForOpenPrs(ctx);
-  const matches = found.filter((entry) => entry.entity.id.startsWith(prefix.toLowerCase()));
-  if (matches.length === 0) fail(`no open pull request matches '${prefix}' on any fetched branch`);
-  if (matches.length > 1) {
-    fail(
-      `'${prefix}' is ambiguous`,
-      matches.map((entry) => `  #${entry.entity.id}  ${stringField(entry.entity, "title")}`),
-    );
+  const resolution = resolvePrefix(
+    asId(prefix),
+    found.map((entry) => entry.entity.id),
+  );
+  if (!resolution.ok) {
+    switch (resolution.reason) {
+      case "too-short":
+        fail(
+          `'${prefix}' is too short; ID prefixes must be at least ${MIN_PREFIX_LENGTH} characters`,
+        );
+        break;
+      case "not-found":
+        fail(`no open pull request matches '${prefix}' on any fetched branch`);
+        break;
+      default:
+        fail(
+          `'${prefix}' is ambiguous; ${resolution.matches.length} pull requests match`,
+          resolution.matches.map((id) => {
+            const match = found.find((entry) => entry.entity.id === id);
+            return `  #${id}  ${match ? stringField(match.entity, "title") : ""}`;
+          }),
+        );
+    }
   }
 
-  const entry = matches[0] as FoundPr;
+  const entry = found.find((candidate) => candidate.entity.id === resolution.id) as FoundPr;
+  // `source:` is only SHOULD, so fall back to a local ref before a remote one:
+  // a local branch is the copy the user can actually merge.
   const declared = stringField(entry.entity, "source");
   const ref =
-    entry.refs.find((candidate) => candidate === declared) ??
-    entry.refs.find((candidate) => !candidate.includes("/")) ??
-    (entry.refs[0] as string);
+    entry.refs.find((candidate) => candidate.short === declared)?.short ??
+    entry.refs.find((candidate) => !candidate.remote)?.short ??
+    (entry.refs[0]?.short as string);
   return { entity: entry.entity, sourceRef: ref };
 }
 
@@ -537,8 +586,9 @@ function locatePr(ctx: Ctx, prefix: string): LocatedPr {
  */
 export function cmdPrClose(ctx: Ctx, prefix: string, opts: CloseOptions): void {
   const repo = loadRepo(ctx, { includeComments: false });
+  const wanted = asId(prefix).toLowerCase();
   const present = allEntities(repo).some(
-    (entity) => entity.kind === "pr" && entity.id.startsWith(prefix.toLowerCase()),
+    (entity) => entity.kind === "pr" && entity.id.startsWith(wanted),
   );
   if (!present) {
     const materialized = materializeFromRef(ctx, prefix);

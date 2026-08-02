@@ -1,0 +1,13 @@
+spec-version: 1
+description: a plain comment on a pull request is an ordinary comment file, with no verdict and no revision binding
+history:
+  - {id: base, branch: main, apply: history/00-base, message: "feat: initial code", date: 2026-08-01T10:00:00Z}
+  - {id: feat, branch: feat/auth, from: base, apply: history/01-feat, message: "feat: rework auth tokens", date: 2026-08-04T16:00:00Z}
+run:
+  checkout: feat/auth
+  before:
+    - nav: [pr, open, --title, "Refactor auth token handling", -m, "Replaces the ad-hoc token cache.", --commit]
+      env: {NAV_NOW: "2026-08-04T16:40:00Z", NAV_IDS: "dk3mp2x9"}
+  command: [pr, comment, dk3m, -m, "Rebased on main, will re-run CI."]
+  env: {NAV_IDS: "q8zm3vp1", NAV_NOW: "2026-08-05T10:14:33Z"}
+expect: {exit: 0, stdout: expected/stdout.txt, tree: expected/tree}

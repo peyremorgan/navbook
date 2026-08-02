@@ -1,0 +1,10 @@
+spec-version: 1
+description: --staged validates what the commit would create, ignoring an unstaged file on disk
+init: {from: before, date: 2026-08-02T12:00:00Z}
+run:
+  before:
+    - write: {path: .navbook/issues/open/Bad_Name/issue.md, content: "---\ntitle: t\n---\n\nbody\n"}
+  command: [doctor, --staged, --json]
+expect:
+  exit: 0
+  diagnostics: []
