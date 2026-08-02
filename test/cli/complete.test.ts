@@ -36,6 +36,7 @@ describe("nav __complete", () => {
       for (const command of ["issue", "pr", "init", "id", "doctor", "install"]) {
         assert.ok(candidates.includes(command), `expected ${command}`);
       }
+      assert.equal(candidates.includes("help"), false, "there is no help subcommand to offer");
     } finally {
       repo.cleanup();
     }

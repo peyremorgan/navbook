@@ -64,8 +64,21 @@ function commitHelp(kind?: EntityKind): string {
   return `wrap the change in a 'docs${kind ? `(${kind})` : ""}:' commit`;
 }
 
+/**
+ * Drop the implicit `help [command]` verb Commander gives every command that
+ * has subcommands: it prints exactly what `--help` prints, so `nav issue help
+ * open` and `nav issue open --help` are two spellings of one thing. `--help`
+ * is the one that stays.
+ *
+ * Applied at each level that has subcommands — the setting is per-command and
+ * deliberately not inherited, so the nouns do not pick it up from the root.
+ */
+function withoutHelpVerb(command: Command): Command {
+  return command.helpCommand(false);
+}
+
 export function buildProgram(getCtx: () => Ctx): Command {
-  const program = new Command();
+  const program = withoutHelpVerb(new Command());
   program
     .name("nav")
     .description("Git-native issue and pull-request tracking, stored as files in your repository")
@@ -125,7 +138,7 @@ export function buildProgram(getCtx: () => Ctx): Command {
 }
 
 function buildPrCommand(getCtx: () => Ctx): Command {
-  const pr = new Command("pr").description("work with pull requests");
+  const pr = withoutHelpVerb(new Command("pr")).description("work with pull requests");
 
   pr.command("open")
     .description("open a pull request from the current branch")
@@ -184,7 +197,7 @@ function stringOf(entity: { fm: Record<string, unknown> }, key: string): string 
 }
 
 function buildIssueCommand(getCtx: () => Ctx): Command {
-  const issue = new Command("issue").description("work with issues");
+  const issue = withoutHelpVerb(new Command("issue")).description("work with issues");
 
   issue
     .command("open")

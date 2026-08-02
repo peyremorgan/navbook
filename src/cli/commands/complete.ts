@@ -10,7 +10,7 @@ import { allEntities, type EntityKind } from "../../core/tree.ts";
 import type { Ctx } from "../context.ts";
 import { loadRepo } from "../workspace.ts";
 
-const ROOT_COMMANDS = ["issue", "pr", "init", "id", "doctor", "install", "uninstall", "help"];
+const ROOT_COMMANDS = ["issue", "pr", "init", "id", "doctor", "install", "uninstall"];
 const SHARED_VERBS = ["open", "list", "show", "edit", "comment", "close", "reopen", "delete"];
 const PR_VERBS = [...SHARED_VERBS, "update", "review", "merge"];
 const QUERY_KEYS = ["status:", "label:", "assignee:", "author:", "milestone:"];
