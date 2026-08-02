@@ -3,6 +3,7 @@ title: nav pr merge --continue, to finish a merge after conflict resolution
 author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-08-02T15:09:43Z
 labels: [milestone-3, pr]
+resolution: fixed
 ---
 
 When `git merge` conflicts inside `nav pr merge`, the directory move to `prs/merged/` and the `merged:` block still have to happen once the human has resolved the conflict.
