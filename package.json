@@ -1,6 +1,6 @@
 {
   "name": "@navbook/cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Git-native issue and pull-request tracking as plaintext files in your repository",
   "keywords": [
     "issues",

@@ -3,6 +3,8 @@
  * both entity kinds, plus root-level utilities.
  */
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Command, Option } from "commander";
 import type { EntityKind } from "../core/tree.ts";
 import { cmdComplete } from "./commands/complete.ts";
@@ -30,7 +32,20 @@ import {
 } from "./commands/pr.ts";
 import type { Ctx } from "./context.ts";
 
-export const VERSION = "0.1.0";
+/**
+ * Read straight from package.json rather than duplicating the version as a
+ * literal: a hardcoded copy silently drifts the moment a release is cut
+ * without updating both places (which is exactly what shipped as 0.1.1).
+ * `../../package.json` is the package root from both `src/cli/` in dev and
+ * `dist/cli/` after the build — the same relative depth either way.
+ */
+function readOwnVersion(): string {
+  const path = fileURLToPath(new URL("../../package.json", import.meta.url));
+  const pkg = JSON.parse(readFileSync(path, "utf8")) as { version: string };
+  return pkg.version;
+}
+
+export const VERSION = readOwnVersion();
 
 const QUERY_HELP = `Query terms AND together. Terms:
   status:open|closed|merged   entity status (path); 'merged' is PR-only
