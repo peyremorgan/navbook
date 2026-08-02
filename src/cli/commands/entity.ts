@@ -171,9 +171,9 @@ export function cmdEdit(ctx: Ctx, kind: EntityKind, prefix: string, opts: Global
     message: docsSubject(entity.kind, "edit", entity.id),
     trailers: [{ key: "Refs", id: entity.id }],
   };
-  runPlan(ctx, plan, { commit: opts.commit });
+  const result = runPlan(ctx, plan, { commit: opts.commit });
   ctx.stdout.write(`Edited #${entity.id}  ${NAVBOOK_ROOT}/${entity.filePath}\n`);
-  if (opts.commit) ctx.stdout.write(`${commitReport(plan)}\n`);
+  if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
 }
 
 function revalidate(path: string, kind: EntityKind): string[] {
@@ -219,12 +219,12 @@ export function cmdComment(ctx: Ctx, kind: EntityKind, prefix: string, opts: Com
 
   const id = ctx.mintId(scanAllIds(ctx.navRoot));
   const { plan, path } = planComment(entity, id, ctx.now(), composed.content, { review: isReview });
-  runPlan(ctx, plan, { commit: opts.commit });
+  const result = runPlan(ctx, plan, { commit: opts.commit });
 
   ctx.stdout.write(
     `${isReview ? "Reviewed" : "Commented on"} #${entity.id}  ${NAVBOOK_ROOT}/${path}  (#${id})\n`,
   );
-  if (opts.commit) ctx.stdout.write(`${commitReport(plan)}\n`);
+  if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
 }
 
 /* ------------------------------------------------------------ close/reopen */
@@ -245,9 +245,9 @@ export function cmdClose(ctx: Ctx, kind: EntityKind, prefix: string, opts: Close
   }
 
   const plan = rewritePlan(entity, () => planClose(entity, input));
-  runPlan(ctx, plan, { commit: opts.commit });
+  const result = runPlan(ctx, plan, { commit: opts.commit });
   ctx.stdout.write(`Closed #${entity.id}  ${NAVBOOK_ROOT}/${destination(entity, "closed")}/\n`);
-  if (opts.commit) ctx.stdout.write(`${commitReport(plan)}\n`);
+  if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
 }
 
 export function cmdReopen(ctx: Ctx, kind: EntityKind, prefix: string, opts: GlobalFlags): void {
@@ -258,9 +258,9 @@ export function cmdReopen(ctx: Ctx, kind: EntityKind, prefix: string, opts: Glob
   }
 
   const plan = rewritePlan(entity, () => planReopen(entity));
-  runPlan(ctx, plan, { commit: opts.commit });
+  const result = runPlan(ctx, plan, { commit: opts.commit });
   ctx.stdout.write(`Reopened #${entity.id}  ${NAVBOOK_ROOT}/${destination(entity, "open")}/\n`);
-  if (opts.commit) ctx.stdout.write(`${commitReport(plan)}\n`);
+  if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
 }
 
 /**

@@ -275,6 +275,21 @@ describe("--commit", () => {
       repo.cleanup();
     }
   });
+
+  it("says so instead of failing when the change turned out to be a no-op", () => {
+    const repo = makeNavRepo();
+    try {
+      repo.nav(["issue", "open", "Unchanged", "-m", "Body.", "--commit"], { NAV_IDS: "noc11111" });
+      const before = repo.git(["rev-parse", "HEAD"]).stdout.trim();
+
+      const result = repo.nav(["issue", "edit", "noc1", "--commit"], { EDITOR: NOOP_EDITOR });
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /Nothing to commit/);
+      assert.equal(repo.git(["rev-parse", "HEAD"]).stdout.trim(), before, "no commit was made");
+    } finally {
+      repo.cleanup();
+    }
+  });
 });
 
 describe("concurrent comments never conflict", () => {

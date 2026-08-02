@@ -17,10 +17,10 @@ export function cmdInit(ctx: Ctx, opts: GlobalFlags): void {
     fail(`${NAVBOOK_ROOT}/ already exists at the repository root`);
   }
   const plan = planInit();
-  runPlan(ctx, plan, { commit: opts.commit });
+  const result = runPlan(ctx, plan, { commit: opts.commit });
   ctx.stdout.write(`Created ${NAVBOOK_ROOT}/\n`);
   if (opts.commit) {
-    ctx.stdout.write(`${commitReport(plan)}\n`);
+    ctx.stdout.write(`${commitReport(result)}\n`);
   } else {
     // Say so plainly: a later --commit refuses to run while this is staged.
     ctx.stdout.write("The skeleton is staged; commit it, or re-run with --commit.\n");

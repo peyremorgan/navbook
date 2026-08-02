@@ -43,6 +43,9 @@ export interface RunPlanOptions {
 export interface RunPlanResult {
   touched: string[];
   committed: boolean;
+  /** The commit subject on its own. */
+  subject: string;
+  /** The whole commit message, subject plus trailers. */
   message: string;
 }
 
@@ -53,11 +56,16 @@ export function runPlan(ctx: Ctx, plan: Plan, opts: RunPlanOptions): RunPlanResu
 
   const { touched } = applyOps(ctx, plan.ops);
   const message = composeMessage(plan.message, plan.trailers);
-  if (opts.commit) commit(ctx.repoRoot, message);
-  return { touched, committed: opts.commit === true, message };
+  // A plan can land as a no-op: an edit that changed nothing, or a delete of an
+  // entity that was never committed in the first place. git refuses an empty
+  // commit, and it is right to — there is nothing to record. Report that
+  // plainly instead of surfacing git's failure for a command that succeeded.
+  const committed = opts.commit === true && stagedPaths(ctx.repoRoot).length > 0;
+  if (committed) commit(ctx.repoRoot, message);
+  return { touched, committed, subject: plan.message, message };
 }
 
-/** The one-line report printed after a committed change. */
-export function commitReport(plan: Plan): string {
-  return `Committed ${plan.message}`;
+/** The one-line report printed after a `--commit` run. */
+export function commitReport(result: RunPlanResult): string {
+  return result.committed ? `Committed ${result.subject}` : "Nothing to commit";
 }

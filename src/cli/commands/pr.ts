@@ -130,10 +130,10 @@ export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
   const id = ctx.mintId(scanAllIds(ctx.navRoot));
   const { plan, dirPath } = planEntityOpen("pr", id, finalTitle, composed.content);
 
-  runPlan(ctx, plan, { commit: opts.commit });
+  const result = runPlan(ctx, plan, { commit: opts.commit });
   ctx.stdout.write(`Created ${NAVBOOK_ROOT}/${dirPath}/  (#${id})\n`);
   ctx.stdout.write(`Targets ${target}, from ${source} at ${head.slice(0, 12)}\n`);
-  if (opts.commit) ctx.stdout.write(`${commitReport(plan)}\n`);
+  if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
 }
 
 function lastCommitSubject(ctx: Ctx): string | null {
@@ -164,10 +164,10 @@ export function cmdPrUpdate(ctx: Ctx, prefix: string, opts: GlobalFlags): void {
     });
   }
 
-  runPlan(ctx, plan, { commit: opts.commit });
+  const result = runPlan(ctx, plan, { commit: opts.commit });
   const count = readRevisions(entity.fm).length + 1;
   ctx.stdout.write(`Recorded revision ${count} of #${entity.id}  head ${head.slice(0, 12)}\n`);
-  if (opts.commit) ctx.stdout.write(`${commitReport(plan)}\n`);
+  if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
 }
 
 /* ------------------------------------------------------------------- review */
@@ -222,12 +222,12 @@ export function cmdPrReview(ctx: Ctx, prefix: string, opts: ReviewOptions): void
   const { plan, path } = planComment(entity, id, ctx.now(), composed.content, {
     review: isReview,
   });
-  runPlan(ctx, plan, { commit: opts.commit });
+  const result = runPlan(ctx, plan, { commit: opts.commit });
 
   const label = verdict ? `Reviewed (${verdict})` : "Commented on";
   ctx.stdout.write(`${label} #${entity.id}  ${NAVBOOK_ROOT}/${path}  (#${id})\n`);
   if (isReview) ctx.stdout.write(`Bound to revision ${revision.slice(0, 12)}\n`);
-  if (opts.commit) ctx.stdout.write(`${commitReport(plan)}\n`);
+  if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
 }
 
 /** Accept a full SHA or an unambiguous prefix of a recorded revision head. */

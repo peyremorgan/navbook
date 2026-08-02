@@ -47,7 +47,7 @@ export function cmdIssueOpen(ctx: Ctx, title: string, opts: IssueOpenOptions): v
   const id = ctx.mintId(scanAllIds(ctx.navRoot));
   const { plan, dirPath } = planEntityOpen("issue", id, finalTitle, composed.content);
 
-  runPlan(ctx, plan, { commit: opts.commit });
+  const result = runPlan(ctx, plan, { commit: opts.commit });
   ctx.stdout.write(`Created ${NAVBOOK_ROOT}/${dirPath}/  (#${id})\n`);
-  if (opts.commit) ctx.stdout.write(`${commitReport(plan)}\n`);
+  if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
 }
