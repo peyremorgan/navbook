@@ -58,6 +58,22 @@ export interface StructuralProblem {
   message: string;
 }
 
+/**
+ * An entity directory whose name is well formed but which has no `issue.md` /
+ * `pr.md`. The usual cause is a comment stranded by a merge (spec 03 §3.3.1);
+ * recording the stray files lets `doctor --fix` reunite them with their entity.
+ */
+export interface OrphanDirectory {
+  kind: EntityKind;
+  id: string;
+  dirName: string;
+  dirPath: string;
+  status: Status;
+  archived: boolean;
+  /** Comment files found under the orphaned directory. */
+  commentPaths: string[];
+}
+
 export interface Repo {
   issues: EntityRecord[];
   prs: EntityRecord[];
@@ -65,6 +81,8 @@ export interface Repo {
   byId: Map<string, EntityRecord>;
   /** Grammar and layout faults found while walking the tree (doctor check D1). */
   problems: StructuralProblem[];
+  /** Well-named directories that hold no entity file (spec 03 §3.3.1). */
+  orphans: OrphanDirectory[];
   /** False when the caller deliberately skipped reading comment files. */
   commentsLoaded: boolean;
   /** Paths that were tolerated but not interpreted (reserved names, §2.10). */
@@ -97,8 +115,9 @@ export function parseTree(files: NavTree, opts: { commentsLoaded?: boolean } = {
   const prs: EntityRecord[] = [];
   const byId = new Map<string, EntityRecord>();
 
+  const orphans: OrphanDirectory[] = [];
   for (const draft of [...drafts.values()].sort((a, b) => (a.dirPath < b.dirPath ? -1 : 1))) {
-    const record = materialize(draft, files, problems);
+    const record = materialize(draft, files, problems, orphans);
     if (!record) continue;
     (record.kind === "issue" ? issues : prs).push(record);
     if (!byId.has(record.id)) byId.set(record.id, record);
@@ -109,6 +128,7 @@ export function parseTree(files: NavTree, opts: { commentsLoaded?: boolean } = {
     prs,
     byId,
     problems,
+    orphans,
     commentsLoaded: opts.commentsLoaded !== false,
     reserved,
   };
@@ -216,17 +236,28 @@ function materialize(
   draft: EntityDraft,
   files: NavTree,
   problems: StructuralProblem[],
+  orphans: OrphanDirectory[],
 ): EntityRecord | null {
+  const parsedName = parseDirName(draft.dirName);
+  if (!parsedName) return null;
+
   const expectedFile = draft.kind === "issue" ? "issue.md" : "pr.md";
   if (!draft.entityFile) {
     problems.push({
       path: draft.dirPath,
       message: `entity directory is missing its ${expectedFile} (§2.1)`,
     });
+    orphans.push({
+      kind: draft.kind,
+      id: parsedName.id,
+      dirName: draft.dirName,
+      dirPath: draft.dirPath,
+      status: draft.status,
+      archived: draft.archived,
+      commentPaths: [...draft.comments.values()].sort(),
+    });
     return null;
   }
-  const parsedName = parseDirName(draft.dirName);
-  if (!parsedName) return null;
 
   const text = files.get(draft.entityFile) ?? "";
   let parsed: ParsedFile;

@@ -1,0 +1,5 @@
+spec-version: 1
+description: unusual but legal hand edits must pass; doctor enforces the spec, not a house style
+init: {from: tree}
+run: {command: [doctor, --json]}
+expect: {exit: 0, diagnostics: []}

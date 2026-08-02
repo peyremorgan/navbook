@@ -1,0 +1,10 @@
+spec-version: 1
+description: D1 rejects a directory name, a comment filename and a status directory that break the grammars
+init: {from: tree}
+run: {command: [doctor, --json]}
+expect:
+  exit: 2
+  diagnostics:
+    - {check: D1, level: error, path: .navbook/issues/open/Bad_Name/issue.md}
+    - {check: D1, level: error, path: .navbook/issues/open/bqlybac0-ok/comments/notes.md}
+    - {check: D1, level: error, path: .navbook/issues/triage/mz4kq1rv-x/issue.md}

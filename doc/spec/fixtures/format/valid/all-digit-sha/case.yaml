@@ -1,0 +1,5 @@
+spec-version: 1
+description: an all-digit commit SHA survives YAML's number resolution, so D6 still matches it
+init: {from: tree}
+run: {command: [doctor, --json]}
+expect: {exit: 0, diagnostics: []}

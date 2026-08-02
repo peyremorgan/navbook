@@ -13,6 +13,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmdirSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, posix, relative, sep } from "node:path";
@@ -123,11 +124,30 @@ export function applyOps(ctx: Ctx, ops: readonly FileOp[]): ApplyResult {
     if (existsSync(to)) fail(`cannot move ${repoPath(op.from)}: ${repoPath(op.to)} already exists`);
     mkdirSync(dirname(to), { recursive: true });
     renameSync(from, to);
+    pruneEmptyParents(ctx, dirname(from));
     touched.add(repoPath(op.from));
     touched.add(repoPath(op.to));
   }
   stage(ctx, [...touched]);
   return { touched: [...touched].sort() };
+}
+
+/**
+ * Remove directories left empty by a move, up to (but never including) the
+ * `.navbook/` root. Git does not track empty directories, so leaving them
+ * behind would make the working tree disagree with a fresh clone.
+ */
+function pruneEmptyParents(ctx: Ctx, startDir: string): void {
+  let current = startDir;
+  while (current.startsWith(ctx.navRoot) && current !== ctx.navRoot) {
+    try {
+      if (readdirSync(current).length > 0) return;
+      rmdirSync(current);
+    } catch {
+      return;
+    }
+    current = dirname(current);
+  }
 }
 
 /** Stage paths, tolerating those that no longer exist and were never tracked. */

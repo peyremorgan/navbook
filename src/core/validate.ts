@@ -96,12 +96,36 @@ export function hasErrors(diagnostics: readonly Diagnostic[]): boolean {
 /* --------------------------------------------------------------- D1 : names */
 
 function checkNames(repo: Repo): Diagnostic[] {
-  return repo.problems.map((problem) => ({
-    check: "D1" as const,
-    level: "error" as const,
-    path: problem.path,
-    message: problem.message,
-  }));
+  const fixes = new Map<string, FileOp[]>();
+  for (const orphan of repo.orphans) {
+    const entity = repo.byId.get(orphan.id);
+    if (!entity || entity.kind !== orphan.kind || orphan.commentPaths.length === 0) continue;
+    // The entity lives elsewhere: the stray comments belong with it (03 §3.3.1).
+    fixes.set(
+      orphan.dirPath,
+      orphan.commentPaths.map((path) => ({
+        op: "move" as const,
+        from: path,
+        to: `${entity.dirPath}/comments/${path.slice(path.lastIndexOf("/") + 1)}`,
+      })),
+    );
+  }
+
+  return repo.problems.map((problem) => {
+    const fix = fixes.get(problem.path);
+    const orphan = repo.orphans.find((o) => o.dirPath === problem.path);
+    const entity = orphan ? repo.byId.get(orphan.id) : undefined;
+    return {
+      check: "D1" as const,
+      level: "error" as const,
+      path: problem.path,
+      message:
+        fix && entity
+          ? `${problem.message}; #${orphan?.id} lives at ${entity.dirPath}, so its ${fix.length} stray comment file(s) belong there`
+          : problem.message,
+      ...(fix ? { fix } : {}),
+    };
+  });
 }
 
 /* --------------------------------------------------------- D2 : frontmatter */
@@ -338,7 +362,7 @@ export function checkTimestampSkew(
 /** Where a merged-but-unarchived pull request should be moved (check D9). */
 export function planD9Fix(entity: EntityRecord): FileOp[] {
   const target = `${statusDir("pr", "merged")}/${entity.dirName}`;
-  return [{ op: "move-dir", from: entity.dirPath, to: target }];
+  return [{ op: "move", from: entity.dirPath, to: target }];
 }
 
 /** Validate a bare entity directory name, used by `doctor` on hand-made trees. */

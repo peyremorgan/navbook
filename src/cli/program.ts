@@ -5,6 +5,8 @@
 
 import { Command, Option } from "commander";
 import type { EntityKind } from "../core/tree.ts";
+import { cmdComplete } from "./commands/complete.ts";
+import { cmdDoctor } from "./commands/doctor.ts";
 import {
   cmdClose,
   cmdComment,
@@ -15,6 +17,7 @@ import {
   type ExtraColumn,
 } from "./commands/entity.ts";
 import { cmdId, cmdInit } from "./commands/init.ts";
+import { cmdInstall, cmdUninstall } from "./commands/install.ts";
 import { cmdIssueOpen } from "./commands/issue.ts";
 import type { Ctx } from "./context.ts";
 
@@ -51,6 +54,40 @@ export function buildProgram(getCtx: () => Ctx): Command {
     .description("mint and print a fresh Navbook ID")
     .option("-n, --count <n>", "how many IDs to print", (value) => Number.parseInt(value, 10), 1)
     .action((opts) => cmdId(getCtx(), opts));
+
+  program
+    .command("doctor")
+    .description("check the tree against the specification")
+    .option("--staged", "check only what is staged in the index (used by the pre-commit hook)")
+    .option("--fix", "apply the mechanical repairs offered by the diagnostics")
+    .option("--json", "one JSON object per diagnostic, newline-delimited")
+    .action((opts) => cmdDoctor(getCtx(), opts));
+
+  program
+    .command("install")
+    .description("set up the git alias, merge config, pre-commit hook and completions")
+    .addOption(new Option("--alias [name]", "git alias name (default: nav)"))
+    .option("--hooks", "install the pre-commit hook")
+    .addOption(new Option("--completions [shell]", "bash, zsh or fish (default: $SHELL)"))
+    .option("--merge-config", "set merge.directoryRenames=true in this repository")
+    .option("-y, --yes", "do not ask for confirmation")
+    .action((opts) => cmdInstall(getCtx(), opts));
+
+  program
+    .command("uninstall")
+    .description("remove what nav install set up")
+    .addOption(new Option("--alias [name]", "git alias name (default: nav)"))
+    .option("--hooks", "remove the pre-commit hook block")
+    .addOption(new Option("--completions [shell]", "bash, zsh or fish (default: $SHELL)"))
+    .option("--merge-config", "unset merge.directoryRenames")
+    .option("-y, --yes", "do not ask for confirmation")
+    .action((opts) => cmdUninstall(getCtx(), opts));
+
+  program
+    .command("__complete", { hidden: true })
+    .description("internal: print completion candidates for the words typed so far")
+    .argument("[words...]")
+    .action((words: string[]) => cmdComplete(getCtx(), words));
 
   program.addCommand(buildIssueCommand(getCtx));
   return program;

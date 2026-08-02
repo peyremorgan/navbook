@@ -20,8 +20,13 @@ export function cmdInit(ctx: Ctx, opts: GlobalFlags): void {
   const plan = planInit();
   runPlan(ctx, plan, { commit: opts.commit });
   ctx.stdout.write(`Created ${NAVBOOK_ROOT}/\n`);
+  if (opts.commit) {
+    ctx.stdout.write(`${commitReport(plan)}\n`);
+  } else {
+    // Say so plainly: a later --commit refuses to run while this is staged.
+    ctx.stdout.write("The skeleton is staged; commit it, or re-run with --commit.\n");
+  }
   ctx.stdout.write(`Next: nav issue open "Something is broken"\n`);
-  if (opts.commit) ctx.stdout.write(`${commitReport(plan)}\n`);
 }
 
 /** Mint and print a fresh ID, for hand-editors and scripts. */

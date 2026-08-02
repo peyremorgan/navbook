@@ -1,2 +1,3 @@
 Created .navbook/
+The skeleton is staged; commit it, or re-run with --commit.
 Next: nav issue open "Something is broken"

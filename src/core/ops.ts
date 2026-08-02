@@ -14,8 +14,10 @@ import { dirName as makeDirName, slugify } from "./slug.ts";
 import { type EntityKind, type EntityRecord, type Status, statusDir } from "./tree.ts";
 
 export type FileOp =
+  /** Create or overwrite a file, creating parent directories as needed. */
   | { op: "write"; path: string; content: string }
-  | { op: "move-dir"; from: string; to: string };
+  /** Rename a file or a whole directory; refuses when the destination exists. */
+  | { op: "move"; from: string; to: string };
 
 export interface Trailer {
   key: "Refs" | "Closes";
@@ -173,7 +175,7 @@ function moveWithFrontmatter(
   const ops: FileOp[] = [];
   const targetDir = `${statusDir(entity.kind, status)}/${entity.dirName}`;
   const moved = targetDir !== entity.dirPath;
-  if (moved) ops.push({ op: "move-dir", from: entity.dirPath, to: targetDir });
+  if (moved) ops.push({ op: "move", from: entity.dirPath, to: targetDir });
 
   const fileName = entity.kind === "issue" ? "issue.md" : "pr.md";
   const rewritten = rewriteFrontmatter(entity, changes);

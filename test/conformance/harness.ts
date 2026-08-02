@@ -61,6 +61,11 @@ export interface CaseManifest {
     commits?: string[];
     /** Substrings that must appear in stderr (for error-message fixtures). */
     "stderr-contains"?: string[];
+    /**
+     * Diagnostics `nav doctor --json` must report, compared by check code,
+     * level and path only. Messages are implementation-defined.
+     */
+    diagnostics?: { check: string; level: string; path: string }[];
   };
 }
 
@@ -154,6 +159,7 @@ export function runCase(caseDir: string): CaseResult {
       ...checkStream("stdout", manifest.expect?.stdout, stdout, caseDir, substitute),
       ...checkStream("stderr", manifest.expect?.stderr, stderr, caseDir, substitute),
       ...checkStderrContains(manifest, stderr),
+      ...checkDiagnostics(manifest, stdout),
       ...checkTree(manifest, caseDir, repo, substitute),
       ...checkCommits(manifest, repo, execution.baseline, substitute),
     ];
@@ -337,6 +343,39 @@ function checkStderrContains(manifest: CaseManifest, stderr: string): string[] {
   return wanted
     .filter((needle) => !stderr.includes(needle))
     .map((needle) => `stderr should contain ${JSON.stringify(needle)} but was:\n${stderr}`);
+}
+
+/**
+ * Compare `nav doctor --json` output by check code, level and path. Diagnostic
+ * wording is implementation-defined and is deliberately never compared.
+ */
+function checkDiagnostics(manifest: CaseManifest, stdout: string): string[] {
+  const expected = manifest.expect?.diagnostics;
+  if (expected === undefined) return [];
+
+  let actual: { check: string; level: string; path: string }[];
+  try {
+    actual = stdout
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => {
+        const parsed = JSON.parse(line) as { check: string; level: string; path: string };
+        return { check: parsed.check, level: parsed.level, path: parsed.path };
+      });
+  } catch (error) {
+    return [
+      `stdout is not newline-delimited JSON: ${error instanceof Error ? error.message : error}`,
+    ];
+  }
+
+  const key = (d: { check: string; level: string; path: string }): string =>
+    `${d.check} ${d.level} ${d.path}`;
+  const want = expected.map(key).sort();
+  const got = actual.map(key).sort();
+  if (want.join("\n") === got.join("\n")) return [];
+  return [
+    `diagnostics differ:\n--- expected ---\n${want.join("\n")}\n--- actual ---\n${got.join("\n")}`,
+  ];
 }
 
 function checkTree(

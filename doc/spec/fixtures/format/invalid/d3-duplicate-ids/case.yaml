@@ -1,0 +1,8 @@
+spec-version: 1
+description: D3 treats a repeated id as data corruption and never tries to repair it
+init: {from: tree}
+run: {command: [doctor, --json]}
+expect:
+  exit: 2
+  diagnostics:
+    - {check: D3, level: error, path: .navbook/issues/open/bqlybac0-one}

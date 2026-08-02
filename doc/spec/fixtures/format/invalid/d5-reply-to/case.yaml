@@ -1,0 +1,8 @@
+spec-version: 1
+description: D5 - reply-to must name a comment of the same entity
+init: {from: tree}
+run: {command: [doctor, --json]}
+expect:
+  exit: 2
+  diagnostics:
+    - {check: D5, level: error, path: .navbook/issues/open/bqlybac0-x/comments/2026-08-03T141207Z-t5kr1gq6.md}

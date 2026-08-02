@@ -88,7 +88,7 @@ describe("planClose and planReopen", () => {
   it("moves the directory and records a resolution", () => {
     const plan = planClose(issueEntity(), { resolution: "fixed" });
     assert.deepEqual(plan.ops[0], {
-      op: "move-dir",
+      op: "move",
       from: "issues/open/bqlybac0-login-timeout",
       to: "issues/closed/bqlybac0-login-timeout",
     });
@@ -112,7 +112,7 @@ describe("planClose and planReopen", () => {
   it("moves without rewriting when no resolution is given", () => {
     const plan = planClose(issueEntity());
     assert.equal(plan.ops.length, 1);
-    assert.equal(plan.ops[0]?.op, "move-dir");
+    assert.equal(plan.ops[0]?.op, "move");
   });
 
   it("implies the duplicate resolution when only --duplicate-of is given", () => {
@@ -154,7 +154,7 @@ describe("planClose and planReopen", () => {
   it("only moves when reopening an entity that had no resolution", () => {
     const plan = planReopen(issueEntity("", "closed"));
     assert.equal(plan.ops.length, 1);
-    assert.equal(plan.ops[0]?.op, "move-dir");
+    assert.equal(plan.ops[0]?.op, "move");
   });
 });
 

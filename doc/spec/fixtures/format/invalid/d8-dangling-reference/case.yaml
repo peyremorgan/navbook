@@ -1,0 +1,9 @@
+spec-version: 1
+description: D8 warns about dangling references but never fails - the target may live on an unfetched branch
+init: {from: tree}
+run: {command: [doctor, --json]}
+expect:
+  exit: 0
+  diagnostics:
+    - {check: D8, level: warning, path: .navbook/issues/open/bqlybac0-x/issue.md}
+    - {check: D8, level: warning, path: .navbook/issues/open/bqlybac0-x/issue.md}

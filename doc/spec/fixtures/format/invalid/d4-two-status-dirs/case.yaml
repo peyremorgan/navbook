@@ -1,0 +1,8 @@
+spec-version: 1
+description: D4 - an entity id must exist in exactly one status directory (spec 03 section 3.4)
+init: {from: tree}
+run: {command: [doctor, --json]}
+expect:
+  exit: 2
+  diagnostics:
+    - {check: D4, level: error, path: .navbook/issues/closed/bqlybac0-x}

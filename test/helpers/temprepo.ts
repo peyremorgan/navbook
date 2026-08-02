@@ -49,7 +49,9 @@ export function deterministicEnv(home: string, date = FIXTURE_DATE): NodeJS.Proc
     LC_ALL: "C",
     LANG: "C",
     NO_COLOR: "1",
-    GIT_CONFIG_GLOBAL: "/dev/null",
+    // A writable but private global config: isolated from the developer's own
+    // settings, while still letting `nav install --alias` do its work.
+    GIT_CONFIG_GLOBAL: join(home, "gitconfig"),
     GIT_CONFIG_SYSTEM: "/dev/null",
     GIT_AUTHOR_NAME: FIXTURE_IDENTITY.name,
     GIT_AUTHOR_EMAIL: FIXTURE_IDENTITY.email,

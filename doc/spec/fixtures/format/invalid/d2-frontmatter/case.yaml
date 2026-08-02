@@ -1,0 +1,11 @@
+spec-version: 1
+description: D2 requires the mandatory keys, forbids a status key, and rejects an empty description
+init: {from: tree}
+run: {command: [doctor, --json]}
+expect:
+  exit: 2
+  diagnostics:
+    - {check: D2, level: error, path: .navbook/issues/open/bqlybac0-missing-keys/issue.md}
+    - {check: D2, level: error, path: .navbook/issues/open/bqlybac0-missing-keys/issue.md}
+    - {check: D2, level: error, path: .navbook/issues/open/bqlybac0-missing-keys/issue.md}
+    - {check: D2, level: error, path: .navbook/issues/open/mz4kq1rv-empty-body/issue.md}
