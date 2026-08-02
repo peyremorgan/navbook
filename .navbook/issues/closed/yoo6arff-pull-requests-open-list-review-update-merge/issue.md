@@ -3,6 +3,7 @@ title: "Pull requests: open, list, review, update, merge"
 author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-08-02T15:09:42Z
 labels: [milestone-3, pr]
+resolution: fixed
 ---
 
 Implement the PR-only verbs from spec 04 §4.3 on top of the shared verb vocabulary already in `src/cli/commands/entity.ts`.
