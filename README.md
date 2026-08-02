@@ -21,7 +21,7 @@ ID         STATUS  TITLE                                LABELS
 
 $ nav issue close bqly --resolution fixed --commit
 Closed #bqlybac0  .navbook/issues/closed/bqlybac0-login-timeout/
-Committed nb: close #bqlybac0
+Committed docs(issue): close #bqlybac0
 ```
 
 That last command moved a directory and made a commit. On the branch that fixes
@@ -98,8 +98,10 @@ usually enough. A full directory name works too.
 | `nav pr merge <id>` | Merge into the checked-out target, archiving the discussion into its history. |
 | `nav doctor [--fix]` | Check the tree against the specification. |
 
-`--commit` on any mutating command wraps the change in a well-formed `nb:`
-commit. Without it, changes are left staged for your own commit.
+`--commit` on any mutating command wraps the change in a well-formed
+Conventional Commits `docs` commit (`docs(issue): close #bqlybac0`,
+`docs(pr): merge #dk3mp2x9`). Without it, changes are left staged for your own
+commit.
 
 ### Query syntax
 

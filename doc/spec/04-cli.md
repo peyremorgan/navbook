@@ -23,7 +23,8 @@ with the user's confirmation).
 - **ID arguments** accept any unambiguous prefix (≥ 4 chars); ambiguity is an
   error listing the candidates.
 - `--commit` on any mutating command wraps the change in a well-formed commit
-  (`nb: <action> #<id>` message, `Refs:`/`Closes:` trailer as appropriate).
+  (`docs(issue): <action> #<id>` or `docs(pr): <action> #<id>` message per
+  §3.2, `Refs:`/`Closes:` trailer as appropriate).
   Without it, changes are left staged in the working tree for the user's own
   commit. `--commit` MUST refuse to run with unrelated changes already staged.
 - Author identity is taken from `git config user.name` / `user.email`.

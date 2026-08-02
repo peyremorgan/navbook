@@ -26,9 +26,12 @@ short-lived branches, not parked inside long-lived feature branches.
 
 ## 3.2 Commit conventions
 
-- Commits that only touch `.navbook/` SHOULD use a message starting with
-  `nb: ` (e.g. `nb: close #bqlybac0`, `nb: comment on #dk3mp2x9`) so history
-  readers can filter them at a glance.
+- Commits that only touch `.navbook/` SHOULD use a [Conventional
+  Commits](https://www.conventionalcommits.org/) subject of type `docs`, scoped
+  by entity kind: `docs(issue): <action> #<id>` or `docs(pr): <action> #<id>`
+  (e.g. `docs(issue): close #bqlybac0`, `docs(pr): comment on #dk3mp2x9`), so
+  history readers can filter them at a glance. A tracker-wide change that names
+  no entity uses the unscoped `docs:` (e.g. `docs: initialize navbook`).
 - To view code history without tracker noise:
   `git log -- ':!.navbook'`. CI pipelines that should not run for tracker-only
   commits SHOULD use an equivalent path filter on `.navbook/`.
