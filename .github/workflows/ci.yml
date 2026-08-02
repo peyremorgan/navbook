@@ -62,7 +62,7 @@ jobs:
         run: |
           npm pack --silent
           mkdir -p /tmp/smoke && cd /tmp/smoke && npm init -y >/dev/null
-          npm install --silent "$GITHUB_WORKSPACE"/navbook-*.tgz
+          npm install --silent "$GITHUB_WORKSPACE"/navbook-cli-*.tgz
           git init -q -b main smoke && cd smoke
           ../node_modules/.bin/nav init
           ../node_modules/.bin/nav issue open "Smoke test" -m "It runs."

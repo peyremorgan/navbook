@@ -1,6 +1,6 @@
 {
-  "name": "navbook",
-  "version": "0.1.0",
+  "name": "@navbook/cli",
+  "version": "0.1.1",
   "description": "Git-native issue and pull-request tracking as plaintext files in your repository",
   "keywords": [
     "issues",
@@ -12,8 +12,11 @@
   ],
   "license": "MIT",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
-    "nav": "./dist/cli/main.js"
+    "nav": "dist/cli/main.js"
   },
   "engines": {
     "node": ">=24"

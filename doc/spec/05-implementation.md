@@ -20,10 +20,11 @@ is mature and widely installed.
 ## 5.2 TypeScript reference implementation
 
 - **Runtime:** Node ≥ 24 (runs TypeScript natively — no build step in
-  development). Published to npm as `navbook` (the package keeps the project
-  name; the binary it installs is `nav`) with a compiled JS `dist/` so the
-  installed CLI does not depend on type-stripping behavior; `npx navbook` is
-  the zero-install trial path (npm runs the package's single binary).
+  development). Published to npm as `@navbook/cli` under the `navbook` org
+  scope (the binary it installs is `nav`; the scope leaves room for future
+  packages such as `@navbook/core`) with a compiled JS `dist/` so the
+  installed CLI does not depend on type-stripping behavior; `npx @navbook/cli`
+  is the zero-install trial path (npm runs the package's single binary).
 - **Dependencies:** deliberately minimal. A YAML parser (`yaml`) and an
   argument parser; no framework. Every dependency added to the core is a
   liability for the Rust rewrite (behavior to reproduce) and MUST be justified.

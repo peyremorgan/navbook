@@ -32,7 +32,7 @@ the bug, the fix and the close travel together — merging the branch merges bot
 Requires Node 24 or newer and a working `git`.
 
 ```sh
-npm install -g navbook     # or: npx navbook <command>
+npm install -g @navbook/cli     # or: npx @navbook/cli <command>
 cd your-repo
 nav init
 nav install                # git alias, merge config, pre-commit hook, completions
