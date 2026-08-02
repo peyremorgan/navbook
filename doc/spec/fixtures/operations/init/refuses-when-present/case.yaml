@@ -1,0 +1,11 @@
+spec-version: 1
+description: nav init refuses to run twice rather than disturbing an existing tree
+init:
+  from: before
+run:
+  command: [init]
+expect:
+  exit: 1
+  stdout: ""
+  stderr-contains: ["already exists"]
+  tree: expected/tree

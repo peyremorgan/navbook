@@ -1,0 +1,5 @@
+spec-version: 1
+description: closing an already-closed issue is an operational error, not a silent no-op
+init: {from: before}
+run: {command: [issue, close, mz4k]}
+expect: {exit: 1, stdout: "", stderr-contains: ["already closed"], tree: expected/tree}

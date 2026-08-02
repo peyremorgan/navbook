@@ -1,0 +1,9 @@
+spec-version: 1
+description: nav init creates the .navbook skeleton with committable empty status directories
+run:
+  command: [init]
+expect:
+  exit: 0
+  stdout: expected/stdout.txt
+  tree: expected/tree
+  commits: []

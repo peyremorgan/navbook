@@ -1,0 +1,11 @@
+spec-version: 1
+description: an issue description must not be empty, and nothing is created when it is
+init: {from: before}
+run:
+  command: [issue, open, "No body", -m, "   "]
+  env: {NAV_NOW: "2026-08-10T12:00:00Z", NAV_IDS: "w2rfk8na"}
+expect:
+  exit: 1
+  stdout: ""
+  stderr-contains: ["empty"]
+  tree: expected/tree

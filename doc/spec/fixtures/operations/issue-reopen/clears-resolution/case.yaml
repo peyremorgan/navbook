@@ -1,0 +1,9 @@
+spec-version: 1
+description: reopening moves the directory back and removes the resolution it was closed with
+init: {from: before}
+run: {command: [issue, reopen, mz4k, --commit]}
+expect:
+  exit: 0
+  stdout: expected/stdout.txt
+  tree: expected/tree
+  commits: ["nb: reopen #mz4kq1rv\n\nRefs: mz4kq1rv\n"]

@@ -1,0 +1,51 @@
+/**
+ * Index and commit operations.
+ */
+
+import type { Trailer } from "../core/ops.ts";
+import { git, gitRun, splitNul } from "./exec.ts";
+
+/** Repository-relative paths currently staged in the index. */
+export function stagedPaths(cwd: string): string[] {
+  const head = gitRun(["rev-parse", "--verify", "--quiet", "HEAD"], { cwd });
+  const args =
+    head.code === 0 ? ["diff", "--cached", "--name-only", "-z"] : ["ls-files", "--cached", "-z"];
+  return splitNul(git(args, { cwd }));
+}
+
+/** Contents of a staged file, or null when it is not in the index. */
+export function stagedContent(cwd: string, path: string): string | null {
+  const result = gitRun(["show", `:${path}`], { cwd });
+  return result.code === 0 ? result.stdout : null;
+}
+
+/** Repository-relative paths of every file in the index. */
+export function indexPaths(cwd: string): string[] {
+  return splitNul(git(["ls-files", "--cached", "-z"], { cwd }));
+}
+
+/** Stage the given paths, including deletions. */
+export function add(cwd: string, paths: readonly string[]): void {
+  if (paths.length === 0) return;
+  git(["add", "--all", "--", ...paths], { cwd });
+}
+
+/** Move a tracked path, staging the rename. */
+export function move(cwd: string, from: string, to: string): void {
+  git(["mv", "--", from, to], { cwd });
+}
+
+/** Compose a commit message from a subject and its trailers. */
+export function composeMessage(subject: string, trailers: readonly Trailer[]): string {
+  if (trailers.length === 0) return `${subject}\n`;
+  const lines = trailers.map((t) => `${t.key}: ${t.id}`);
+  return `${subject}\n\n${lines.join("\n")}\n`;
+}
+
+/** Create a commit from what is currently staged. */
+export function commit(cwd: string, message: string, opts: { allowEmpty?: boolean } = {}): string {
+  const args = ["commit", "--quiet", "-m", message];
+  if (opts.allowEmpty) args.push("--allow-empty");
+  git(args, { cwd });
+  return git(["rev-parse", "HEAD"], { cwd }).trim();
+}

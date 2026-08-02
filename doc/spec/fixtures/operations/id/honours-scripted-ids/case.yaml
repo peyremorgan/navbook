@@ -1,0 +1,9 @@
+spec-version: 1
+description: nav id mints a valid identifier; NAV_IDS makes it reproducible
+run:
+  command: [id, -n, "2"]
+  env:
+    NAV_IDS: bqlybac0,mz4kq1rv
+expect:
+  exit: 0
+  stdout: expected/stdout.txt

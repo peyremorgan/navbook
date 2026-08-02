@@ -1,0 +1,11 @@
+spec-version: 1
+description: closing moves the directory and records a resolution; the comment travels with it
+init: {from: before}
+run:
+  command: [issue, close, bqly, --resolution, fixed, --commit]
+  env: {NAV_NOW: "2026-08-10T12:00:00Z"}
+expect:
+  exit: 0
+  stdout: expected/stdout.txt
+  tree: expected/tree
+  commits: ["nb: close #bqlybac0\n\nCloses: bqlybac0\n"]

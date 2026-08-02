@@ -1,0 +1,5 @@
+spec-version: 1
+description: --json emits one JSON object per entity, newline-delimited, identity keys first
+init: {from: before}
+run: {command: [issue, list, "status:open", "status:closed", --json]}
+expect: {exit: 0, stdout: expected/stdout.txt}

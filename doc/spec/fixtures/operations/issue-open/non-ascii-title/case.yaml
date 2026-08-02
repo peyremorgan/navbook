@@ -1,0 +1,7 @@
+spec-version: 1
+description: a title with no ASCII alphanumerics still yields a directory name matching the grammar
+init: {from: before}
+run:
+  command: [issue, open, "日本語のタイトル", -m, "Body."]
+  env: {NAV_NOW: "2026-08-10T12:00:00Z", NAV_IDS: "w2rfk8na"}
+expect: {exit: 0, stdout: expected/stdout.txt, tree: expected/tree}

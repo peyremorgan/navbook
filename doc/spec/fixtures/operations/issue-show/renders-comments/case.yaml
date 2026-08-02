@@ -1,0 +1,5 @@
+spec-version: 1
+description: show renders metadata, description and the comment thread
+init: {from: before}
+run: {command: [issue, show, bqly]}
+expect: {exit: 0, stdout: expected/stdout.txt}

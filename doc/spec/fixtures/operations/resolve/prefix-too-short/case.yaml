@@ -1,0 +1,5 @@
+spec-version: 1
+description: ID prefixes shorter than four characters are refused
+init: {from: before}
+run: {command: [issue, show, bql]}
+expect: {exit: 1, stdout: "", stderr-contains: ["at least 4 characters"]}

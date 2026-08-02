@@ -1,0 +1,2 @@
+Created .navbook/
+Next: nav issue open "Something is broken"

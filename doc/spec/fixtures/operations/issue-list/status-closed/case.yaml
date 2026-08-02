@@ -1,0 +1,5 @@
+spec-version: 1
+description: a status term selects other status directories
+init: {from: before}
+run: {command: [issue, list, "status:closed"]}
+expect: {exit: 0, stdout: expected/stdout.txt}

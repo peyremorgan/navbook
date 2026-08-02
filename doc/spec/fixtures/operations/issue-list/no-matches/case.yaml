@@ -1,0 +1,5 @@
+spec-version: 1
+description: a query matching nothing reports so on stdout and still exits zero
+init: {from: before}
+run: {command: [issue, list, "label:nonexistent"]}
+expect: {exit: 0, stdout: expected/stdout.txt}

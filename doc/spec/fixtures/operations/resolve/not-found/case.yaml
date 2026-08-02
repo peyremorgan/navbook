@@ -1,0 +1,5 @@
+spec-version: 1
+description: an ID matching nothing is an operational error
+init: {from: before}
+run: {command: [issue, show, zzzz9999]}
+expect: {exit: 1, stdout: "", stderr-contains: ["no issue matches"]}

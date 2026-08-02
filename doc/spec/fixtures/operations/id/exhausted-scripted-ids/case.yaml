@@ -1,0 +1,9 @@
+spec-version: 1
+description: an implementation under test must fail loudly when NAV_IDS runs out, never fall back to randomness
+run:
+  command: [id, -n, "2"]
+  env:
+    NAV_IDS: bqlybac0
+expect:
+  exit: 1
+  stderr-contains: ["NAV_IDS"]

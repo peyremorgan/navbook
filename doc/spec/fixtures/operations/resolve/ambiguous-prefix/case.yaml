@@ -1,0 +1,5 @@
+spec-version: 1
+description: an ambiguous prefix is an error that lists every candidate
+init: {from: before}
+run: {command: [issue, show, bqly]}
+expect: {exit: 1, stdout: "", stderr: expected/stderr.txt}

@@ -1,0 +1,14 @@
+spec-version: 1
+description: --commit refuses when unrelated work is already staged, and writes nothing
+init: {from: before}
+run:
+  before:
+    - write: {path: app.py, content: "print('hello')\n"}
+    - git: [add, app.py]
+  command: [issue, close, bqly, --resolution, fixed, --commit]
+expect:
+  exit: 1
+  stdout: ""
+  stderr-contains: ["unrelated changes already staged", "app.py"]
+  tree: expected/tree
+  commits: []

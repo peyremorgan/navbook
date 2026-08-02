@@ -1,0 +1,5 @@
+spec-version: 1
+description: listing defaults to status:open and renders a column-aligned table
+init: {from: before}
+run: {command: [issue, list]}
+expect: {exit: 0, stdout: expected/stdout.txt}

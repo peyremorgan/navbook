@@ -1,0 +1,5 @@
+spec-version: 1
+description: --duplicate-of implies the duplicate resolution and resolves its target by prefix
+init: {from: before}
+run: {command: [issue, close, bqly, --duplicate-of, mz4k]}
+expect: {exit: 0, stdout: expected/stdout.txt, tree: expected/tree}

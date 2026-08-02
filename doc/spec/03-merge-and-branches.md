@@ -48,10 +48,44 @@ The format is designed so that the *frequency* of conflicts tracks the
 | Two comments, same entity | Distinct files | Merges clean, always |
 | Comment + metadata edit, same issue | Distinct files (`comments/*` vs `issue.md`) | Merges clean |
 | Two edits of the same `issue.md`/`pr.md` | Textual conflict in a small YAML+Markdown file | Resolve by hand; both intents usually compose (e.g. keep both labels) |
-| Comment added + issue closed (dir moved) | Directory rename on one side, file addition on the other | Git ≥ 2.18 (merge-ort) relocates the new comment into the moved directory automatically. On older gits, resolve by moving the comment file manually. Same-status result either way |
+| Comment added + issue closed (dir moved), entity already had comments | Directory rename on one side, file addition on the other | Git ≥ 2.18 relocates the comment into the moved directory. Clean with `merge.directoryRenames=true`; with git's default that same relocation is reported as a "file location" conflict to confirm. See 3.3.1 |
+| Comment added + issue closed (dir moved), entity had **no** comments yet | Same, but `comments/` is new on one side and renamed on neither | Git cannot infer the move and leaves the comment at the old path. `doctor` reports the orphan; `--fix` moves it. See 3.3.1 |
 | Both sides close the same issue | Identical rename | Merges clean if `issue.md` edits are identical; else a small content conflict (e.g. two different `resolution:` values — pick one) |
 | Close on one side, reopen (or stay-open edit) on the other | Rename/rename or rename/edit divergence | **Genuine contradiction**; see 3.4 |
 | Two PRs merged that both moved their own PR dir | Distinct directories | Merges clean |
+
+### 3.3.1 Comments racing a status change
+
+Git infers a *directory* rename from the renames of the files inside it, then
+looks up the added file's immediate parent directory. Two consequences follow,
+both verified against git 2.43:
+
+**Configure `merge.directoryRenames`.** When the entity already has a
+`comments/` directory, the close renames it and git does place the new comment
+at the new path — but under git's default (`conflict`) it also marks that path
+unmerged, so the merge stops and asks the author to confirm the placement. The
+content is already correct; `git add` on the path and a commit finish it. With
+`merge.directoryRenames=true` the same merge completes with no conflict at all.
+Repositories using Navbook SHOULD therefore set:
+
+```
+git config merge.directoryRenames true
+```
+
+`nav install` offers exactly this, and it is the difference between "merges
+clean" and "merges correctly but stops to ask" for the single most common
+concurrent pair in the whole system.
+
+**The first-comment race is not repairable by git.** When the racing comment is
+the entity's *first*, `comments/` exists only on the commenting side, so no
+rename exists to follow and no setting helps: the comment lands under the old
+status directory. This is visible rather than silent — the old path is left
+holding a `comments/` directory with no `issue.md`, which violates 2.1 and is a
+`doctor` error whose `--fix` is a single move.
+
+Implementations MUST NOT work around this by writing placeholder files into
+`comments/`. An empty directory that exists only to shape a future merge is
+hidden state, and git does not track empty directories in any case.
 
 ## 3.4 Contradictory status changes
 

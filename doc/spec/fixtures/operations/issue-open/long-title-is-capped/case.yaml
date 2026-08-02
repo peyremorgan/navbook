@@ -1,0 +1,7 @@
+spec-version: 1
+description: a long title is capped at fifty slug characters and never ends in a hyphen
+init: {from: before}
+run:
+  command: [issue, open, "The quick brown fox jumps over the lazy dog and keeps running", -m, "Body."]
+  env: {NAV_NOW: "2026-08-10T12:00:00Z", NAV_IDS: "w2rfk8na"}
+expect: {exit: 0, stdout: expected/stdout.txt, tree: expected/tree}

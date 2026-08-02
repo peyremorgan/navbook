@@ -1,0 +1,11 @@
+spec-version: 1
+description: commenting creates a distinct timestamped file, so concurrent comments can never conflict
+init: {from: before}
+run:
+  command: [issue, comment, bqly, -m, "Raising the LB idle timeout to 60 s fixes it.", --commit]
+  env: {NAV_NOW: "2026-08-04T09:30:12Z", NAV_IDS: "w2rfk8na"}
+expect:
+  exit: 0
+  stdout: expected/stdout.txt
+  tree: expected/tree
+  commits: ["nb: comment on #bqlybac0\n\nRefs: bqlybac0\n"]

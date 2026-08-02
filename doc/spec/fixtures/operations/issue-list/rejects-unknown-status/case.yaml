@@ -1,0 +1,5 @@
+spec-version: 1
+description: merged is a pull-request status and is rejected for issues
+init: {from: before}
+run: {command: [issue, list, "status:merged"]}
+expect: {exit: 1, stdout: "", stderr-contains: ["unknown status 'merged' for issues"]}

@@ -1,0 +1,7 @@
+spec-version: 1
+description: --reply-to records the comment being answered, resolving it by prefix
+init: {from: before}
+run:
+  command: [issue, comment, bqly, -m, "Confirmed on production too.", --reply-to, t5kr]
+  env: {NAV_NOW: "2026-08-04T09:30:12Z", NAV_IDS: "w2rfk8na"}
+expect: {exit: 0, stdout: expected/stdout.txt, tree: expected/tree}
