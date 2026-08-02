@@ -8,4 +8,4 @@ expect:
   exit: 0
   stdout: expected/stdout.txt
   tree: expected/tree
-  commits: ["nb: close #bqlybac0\n\nCloses: bqlybac0\n"]
+  commits: ["docs(issue): close #bqlybac0\n\nCloses: bqlybac0\n"]

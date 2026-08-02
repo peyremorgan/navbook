@@ -43,6 +43,17 @@ export function planPaths(plan: Plan): string[] {
   return [...paths];
 }
 
+/**
+ * Commit subject for a change to one entity, e.g. `docs(issue): close #bqlybac0`.
+ *
+ * Conventional Commits, scoped by entity kind: history readers filter Navbook's
+ * commits with the same `docs` type they already use for documentation, and the
+ * scope says at a glance whether an issue or a pull request moved (spec 03 §3.2).
+ */
+export function docsSubject(kind: EntityKind, action: string, id: string): string {
+  return `docs(${kind}): ${action} #${id}`;
+}
+
 /* --------------------------------------------------------------------- init */
 
 /** The `.navbook/` skeleton, with `.gitkeep` files so empty status dirs commit. */
@@ -50,7 +61,8 @@ export function planInit(): Plan {
   const dirs = ["issues/open", "issues/closed", "prs/open", "prs/merged", "prs/closed"];
   return {
     ops: dirs.map((dir) => ({ op: "write" as const, path: `${dir}/.gitkeep`, content: "" })),
-    message: "nb: initialize navbook",
+    // No entity to scope to: init creates the whole skeleton.
+    message: "docs: initialize navbook",
     trailers: [],
   };
 }
@@ -84,7 +96,7 @@ export function planEntityOpen(
   return {
     plan: {
       ops: [{ op: "write", path: filePath, content }],
-      message: `nb: open #${id}`,
+      message: docsSubject(kind, "open", id),
       trailers: [],
     },
     id,
@@ -114,7 +126,7 @@ export function planComment(
   return {
     plan: {
       ops: [{ op: "write", path, content }],
-      message: `nb: ${opts.review ? "review" : "comment on"} #${entity.id}`,
+      message: docsSubject(entity.kind, opts.review ? "review" : "comment on", entity.id),
       trailers: [{ key: "Refs", id: entity.id }],
     },
     id,
@@ -137,7 +149,7 @@ export function planClose(entity: EntityRecord, input: CloseInput = {}): Plan {
   if (input.duplicateOf) changes["duplicate-of"] = input.duplicateOf;
   return {
     ops: moveWithFrontmatter(entity, "closed", changes),
-    message: `nb: close #${entity.id}`,
+    message: docsSubject(entity.kind, "close", entity.id),
     trailers: [{ key: "Closes", id: entity.id }],
   };
 }
@@ -149,7 +161,7 @@ export function planReopen(entity: EntityRecord): Plan {
   if (entity.fm.resolution === "superseded") changes["superseded-by"] = undefined;
   return {
     ops: moveWithFrontmatter(entity, "open", changes),
-    message: `nb: reopen #${entity.id}`,
+    message: docsSubject(entity.kind, "reopen", entity.id),
     trailers: [{ key: "Refs", id: entity.id }],
   };
 }
@@ -158,7 +170,7 @@ export function planReopen(entity: EntityRecord): Plan {
 export function planArchiveMerged(entity: EntityRecord): Plan {
   return {
     ops: moveWithFrontmatter(entity, "merged", {}),
-    message: `nb: archive merged #${entity.id}`,
+    message: docsSubject(entity.kind, "archive merged", entity.id),
     trailers: [{ key: "Refs", id: entity.id }],
   };
 }
@@ -216,7 +228,7 @@ export function planPrUpdate(entity: EntityRecord, revision: Revision): Plan {
   appendListItem(nav, "revisions", revision);
   return {
     ops: [{ op: "write", path: entity.filePath, content: serializeDoc(nav) }],
-    message: `nb: update #${entity.id}`,
+    message: docsSubject(entity.kind, "update", entity.id),
     trailers: [{ key: "Refs", id: entity.id }],
   };
 }
@@ -234,7 +246,7 @@ export function planMergedBlock(entity: EntityRecord, merged: MergedBlock): Plan
   patchDoc(nav, { merged });
   return {
     ops: [{ op: "write", path: entity.filePath, content: serializeDoc(nav) }],
-    message: `nb: merge #${entity.id}`,
+    message: docsSubject(entity.kind, "merge", entity.id),
     trailers: [{ key: "Refs", id: entity.id }],
   };
 }

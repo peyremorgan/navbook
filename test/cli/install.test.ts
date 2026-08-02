@@ -180,7 +180,9 @@ describe("the pre-commit hook", () => {
         NAV_IDS: "hok11111",
       });
 
-      const result = repo.git(["commit", "-m", "nb: open #hok11111"], { PATH: pathWithNav(repo) });
+      const result = repo.git(["commit", "-m", "docs(issue): open #hok11111"], {
+        PATH: pathWithNav(repo),
+      });
       assert.equal(result.code, 0, `warnings must not block:\n${result.stdout}${result.stderr}`);
     } finally {
       repo.cleanup();

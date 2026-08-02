@@ -48,7 +48,7 @@ history:
     from: base                    # branch off a named earlier commit
     apply: history/01-feat
     rm: [".navbook/issues/open/bqlybac0-login-timeout"]   # a move is rm + apply
-    message: "nb: close #bqlybac0"
+    message: "docs(issue): close #bqlybac0"
     date: 2026-08-01T11:00:00Z
 
 run:
@@ -67,7 +67,7 @@ expect:
   stderr-contains: ["is ambiguous"]  # optional substring assertions
   tree: expected/tree             # exact `.navbook/` after the command
   commits:                        # commits created by the command, newest first
-    - "nb: close #bqlybac0\n\nCloses: bqlybac0\n"
+    - "docs(issue): close #bqlybac0\n\nCloses: bqlybac0\n"
 ```
 
 `expect.tree` points at a directory that itself contains `.navbook/…`, so an

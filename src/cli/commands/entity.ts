@@ -19,7 +19,14 @@ import {
 } from "../../core/files.ts";
 import { FrontmatterError } from "../../core/frontmatter.ts";
 import { commentJson, entityJson, NAVBOOK_ROOT, toNdjson } from "../../core/json.ts";
-import { type CloseInput, type Plan, planClose, planComment, planReopen } from "../../core/ops.ts";
+import {
+  type CloseInput,
+  docsSubject,
+  type Plan,
+  planClose,
+  planComment,
+  planReopen,
+} from "../../core/ops.ts";
 import { isQueryError, matchesQuery, parseQuery, type Query } from "../../core/query.ts";
 import type { EntityKind, EntityRecord, Repo } from "../../core/tree.ts";
 import { commitReport, runPlan } from "../commit-flow.ts";
@@ -161,7 +168,7 @@ export function cmdEdit(ctx: Ctx, kind: EntityKind, prefix: string, opts: Global
   // that is what tells the --commit guard which staged path is expected.
   const plan: Plan = {
     ops: [{ op: "write", path: entity.filePath, content: readFileSync(target, "utf8") }],
-    message: `nb: edit #${entity.id}`,
+    message: docsSubject(entity.kind, "edit", entity.id),
     trailers: [{ key: "Refs", id: entity.id }],
   };
   runPlan(ctx, plan, { commit: opts.commit });

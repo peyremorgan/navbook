@@ -1,2 +1,2 @@
 Commented on #bqlybac0  .navbook/issues/open/bqlybac0-login-timeout/comments/2026-08-04T093012Z-w2rfk8na.md  (#w2rfk8na)
-Committed nb: comment on #bqlybac0
+Committed docs(issue): comment on #bqlybac0

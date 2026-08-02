@@ -460,7 +460,7 @@ describe("history-based doctor checks", () => {
       const path = ".navbook/issues/open/odd11111-odd/issue.md";
       const text = readFileSync(join(repo.dir, path), "utf8");
       repo.write(path, text.replace(/^created: .*/m, "created: 2019-01-01T00:00:00Z"));
-      repo.commitAll("nb: open #odd11111");
+      repo.commitAll("docs(issue): open #odd11111");
 
       const result = repo.nav(["doctor"]);
       assert.equal(result.code, 0, "D10 is a warning");

@@ -1,9 +1,9 @@
 spec-version: 1
 description: an identical rename with contradictory content is a small content conflict in one short file, which is exactly where a human decision is needed
 history:
-  - {id: base, branch: main, apply: history/00-base, message: "nb: open #bqlybac0", date: 2026-08-01T10:00:00Z}
-  - {id: fixed, branch: fixed, from: base, apply: history/01-fixed, rm: [".navbook/issues/open/bqlybac0-login-timeout"], message: "nb: close #bqlybac0", date: 2026-08-05T10:00:00Z}
-  - {id: wontfix, branch: wontfix, from: base, apply: history/02-wontfix, rm: [".navbook/issues/open/bqlybac0-login-timeout"], message: "nb: close #bqlybac0", date: 2026-08-05T11:00:00Z}
+  - {id: base, branch: main, apply: history/00-base, message: "docs(issue): open #bqlybac0", date: 2026-08-01T10:00:00Z}
+  - {id: fixed, branch: fixed, from: base, apply: history/01-fixed, rm: [".navbook/issues/open/bqlybac0-login-timeout"], message: "docs(issue): close #bqlybac0", date: 2026-08-05T10:00:00Z}
+  - {id: wontfix, branch: wontfix, from: base, apply: history/02-wontfix, rm: [".navbook/issues/open/bqlybac0-login-timeout"], message: "docs(issue): close #bqlybac0", date: 2026-08-05T11:00:00Z}
 run:
   checkout: fixed
   git: [merge, --no-edit, wontfix]

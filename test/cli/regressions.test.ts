@@ -41,7 +41,7 @@ describe("edit --commit", () => {
       assert.equal(result.code, 0, result.stderr);
 
       const committed = repo.git(["show", "--name-only", "--format=%s", "HEAD"]).stdout;
-      assert.match(committed, /nb: edit #edt11111/);
+      assert.match(committed, /docs\(issue\): edit #edt11111/);
       assert.match(committed, /edt11111-editable\/issue\.md/);
       assert.equal(repo.git(["status", "--porcelain"]).stdout.trim(), "", "nothing left staged");
     } finally {
@@ -124,7 +124,7 @@ describe("nav pr merge", () => {
       repo.git(["checkout", "--quiet", "feat/auth"]);
       const path = ".navbook/prs/open/dk3mp2x9-refactor-auth/pr.md";
       repo.write(path, readFileSync(join(repo.dir, path), "utf8").replace(/^source: .*\n/m, ""));
-      repo.commitAll("nb: edit #dk3mp2x9");
+      repo.commitAll("docs(pr): edit #dk3mp2x9");
       repo.git(["update-ref", "refs/remotes/origin/feat/auth", "HEAD"]);
       repo.git(["checkout", "--quiet", "main"]);
 

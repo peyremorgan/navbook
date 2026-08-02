@@ -43,6 +43,11 @@ const QUERY_HELP = `Query terms AND together. Terms:
 Same-key terms OR for single-valued fields (status, author, milestone) and AND
 for multi-valued ones (label, assignee). The default query is status:open.`;
 
+/** Help for `--commit`, naming the subject the verb commits under (spec 03 §3.2). */
+function commitHelp(kind?: EntityKind): string {
+  return `wrap the change in a 'docs${kind ? `(${kind})` : ""}:' commit`;
+}
+
 export function buildProgram(getCtx: () => Ctx): Command {
   const program = new Command();
   program
@@ -55,7 +60,7 @@ export function buildProgram(getCtx: () => Ctx): Command {
   program
     .command("init")
     .description("create the .navbook/ skeleton at the repository root")
-    .option("--commit", "wrap the change in an 'nb:' commit")
+    .option("--commit", commitHelp())
     .action((opts) => cmdInit(getCtx(), opts));
 
   program
@@ -115,13 +120,13 @@ function buildPrCommand(getCtx: () => Ctx): Command {
     .option("--label <label>", "add a label (repeatable)", collect, [])
     .option("--assignee <email>", "assign to a person (repeatable)", collect, [])
     .option("--milestone <name>", "milestone")
-    .option("--commit", "wrap the change in an 'nb:' commit")
+    .option("--commit", commitHelp("pr"))
     .action((opts) => cmdPrOpen(getCtx(), opts));
 
   pr.command("update")
     .argument("<id>", "ID or unambiguous prefix")
     .description("append a revision pinning the current HEAD")
-    .option("--commit", "wrap the change in an 'nb:' commit")
+    .option("--commit", commitHelp("pr"))
     .action((id: string, opts) => cmdPrUpdate(getCtx(), id, opts));
 
   pr.command("review")
@@ -133,7 +138,7 @@ function buildPrCommand(getCtx: () => Ctx): Command {
     .option("--revision <sha>", "bind to this revision instead of the latest")
     .option("--file <path>", "anchor the comment to a file")
     .option("--line <n|start-end>", "anchor the comment to a line or range")
-    .option("--commit", "wrap the change in an 'nb:' commit")
+    .option("--commit", commitHelp("pr"))
     .action((id: string, opts) => cmdPrReview(getCtx(), id, opts));
 
   pr.command("merge")
@@ -173,7 +178,7 @@ function buildIssueCommand(getCtx: () => Ctx): Command {
     .option("--label <label>", "add a label (repeatable)", collect, [])
     .option("--assignee <email>", "assign to a person (repeatable)", collect, [])
     .option("--milestone <name>", "milestone")
-    .option("--commit", "wrap the change in an 'nb:' commit")
+    .option("--commit", commitHelp("issue"))
     .action((title, opts) => cmdIssueOpen(getCtx(), title, opts));
 
   addSharedVerbs(issue, "issue", getCtx, { extraColumns: [] });
@@ -224,7 +229,7 @@ export function addSharedVerbs(
     .command("edit")
     .argument("<id>", "ID or unambiguous prefix")
     .description(`open the ${noun}'s file in $EDITOR`)
-    .option("--commit", "wrap the change in an 'nb:' commit")
+    .option("--commit", commitHelp(kind))
     .action((id: string, opts) => cmdEdit(getCtx(), kind, id, opts));
 
   parent
@@ -233,7 +238,7 @@ export function addSharedVerbs(
     .description(`add a comment to a ${noun}`)
     .option("-m, --message <text>", "comment text; without it $EDITOR is opened")
     .option("--reply-to <comment-id>", "comment this one replies to")
-    .option("--commit", "wrap the change in an 'nb:' commit")
+    .option("--commit", commitHelp(kind))
     .action((id: string, opts) => cmdComment(getCtx(), kind, id, opts));
 
   parent
@@ -242,7 +247,7 @@ export function addSharedVerbs(
     .description(`move the ${noun} to closed/`)
     .option("--resolution <value>", "why it was closed, e.g. fixed, wontfix, duplicate")
     .option("--duplicate-of <id>", "the entity this duplicates (implies duplicate)")
-    .option("--commit", "wrap the change in an 'nb:' commit")
+    .option("--commit", commitHelp(kind))
     .action((id: string, opts) => {
       const options: CloseOptions = { ...opts, duplicateOf: opts.duplicateOf };
       if (shared.runClose) shared.runClose(getCtx(), id, options);
@@ -253,7 +258,7 @@ export function addSharedVerbs(
     .command("reopen")
     .argument("<id>", "ID or unambiguous prefix")
     .description(`move the ${noun} back to open/ and clear its resolution`)
-    .option("--commit", "wrap the change in an 'nb:' commit")
+    .option("--commit", commitHelp(kind))
     .action((id: string, opts) => cmdReopen(getCtx(), kind, id, opts));
 }
 

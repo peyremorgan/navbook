@@ -2,7 +2,7 @@
  * The `--commit` flag — spec 04 §4.2.
  *
  * Without it, a mutating command leaves its changes staged for the user's own
- * commit. With it, the change is wrapped in a well-formed `nb:` commit — but
+ * commit. With it, the change is wrapped in a well-formed `docs` commit — but
  * only if nothing unrelated is staged, so the user never has work swept into a
  * tracker commit by accident.
  */
@@ -46,7 +46,7 @@ export interface RunPlanResult {
   message: string;
 }
 
-/** Apply a plan and, with `--commit`, wrap it in its `nb:` commit. */
+/** Apply a plan and, with `--commit`, wrap it in its `docs` commit. */
 export function runPlan(ctx: Ctx, plan: Plan, opts: RunPlanOptions): RunPlanResult {
   const allowed = planPaths(plan).map(repoPath);
   if (opts.commit) assertNoUnrelatedStaged(ctx, allowed);

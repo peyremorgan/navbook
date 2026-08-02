@@ -20,8 +20,8 @@ import {
 import { MIN_PREFIX_LENGTH, resolvePrefix } from "../../core/id.ts";
 import { entityJson, NAVBOOK_ROOT, toNdjson } from "../../core/json.ts";
 import {
-  type FileOp,
   type MergedBlock,
+  type Plan,
   planComment,
   planEntityOpen,
   planMergedBlock,
@@ -497,9 +497,9 @@ function recordMergedBlock(ctx: Ctx, entity: EntityRecord, mergeSha: string | nu
     ...(mergeSha ? { commit: mergeSha } : {}),
   };
 
-  let ops: FileOp[];
+  let plan: Plan;
   try {
-    ops = planMergedBlock(entity, merged).ops;
+    plan = planMergedBlock(entity, merged);
   } catch (error) {
     // The branch is already merged at this point, so say plainly what is left.
     fail(`#${entity.id} merged, but ${NAVBOOK_ROOT}/${entity.filePath} could not be updated`, [
@@ -507,8 +507,8 @@ function recordMergedBlock(ctx: Ctx, entity: EntityRecord, mergeSha: string | nu
       "the merge itself is committed; fix the file and commit the 'merged:' block by hand",
     ]);
   }
-  applyOps(ctx, ops);
-  commit(ctx.repoRoot, composeMessage(`nb: merge #${entity.id}`, [{ key: "Refs", id: entity.id }]));
+  applyOps(ctx, plan.ops);
+  commit(ctx.repoRoot, composeMessage(plan.message, plan.trailers));
 
   ctx.stdout.write(`Merged #${entity.id}  ${NAVBOOK_ROOT}/${entity.dirPath}/\n`);
   if (mergeSha) ctx.stdout.write(`Merge commit ${mergeSha.slice(0, 12)}\n`);

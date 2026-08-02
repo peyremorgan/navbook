@@ -1,2 +1,2 @@
 Reopened #mz4kq1rv  .navbook/issues/open/mz4kq1rv-crash-on-empty-file/
-Committed nb: reopen #mz4kq1rv
+Committed docs(issue): reopen #mz4kq1rv

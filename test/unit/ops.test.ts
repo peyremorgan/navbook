@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { newIssueFile, parseFile, readRevisions, validateIssue } from "../../src/core/files.ts";
 import {
+  docsSubject,
+  planArchiveMerged,
   planClose,
   planComment,
   planEntityOpen,
@@ -17,6 +19,7 @@ import { type EntityRecord, type NavTree, parseTree } from "../../src/core/tree.
 const SHA_A = "4f2c9d1e8a7b3c5d9e0f1a2b3c4d5e6f7a8b9c0d";
 const SHA_B = "91d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0";
 const SHA_C = "0011223344556677889900aabbccddeeff001122";
+const ONE_REVISION = `  - head: ${SHA_A}\n    base: ${SHA_B}\n    date: 2026-08-04T16:40:00Z\n`;
 
 function entityFrom(path: string, content: string): EntityRecord {
   const repo = parseTree(new Map([[path, content]]) as NavTree);
@@ -37,6 +40,13 @@ const prEntity = (revisions: string, extra = ""): EntityRecord =>
     `---\ntitle: Auth\nauthor: ked@example.com\ncreated: 2026-08-04T16:40:00Z\ntarget: main\nsource: feat/auth\n${extra}revisions:\n${revisions}---\n\nBody.\n`,
   );
 
+describe("docsSubject", () => {
+  it("scopes a Conventional Commits docs subject by entity kind", () => {
+    assert.equal(docsSubject("issue", "close", "bqlybac0"), "docs(issue): close #bqlybac0");
+    assert.equal(docsSubject("pr", "comment on", "dk3mp2x9"), "docs(pr): comment on #dk3mp2x9");
+  });
+});
+
 describe("planInit", () => {
   it("creates every status directory with a .gitkeep", () => {
     const plan = planInit();
@@ -47,7 +57,7 @@ describe("planInit", () => {
       "prs/merged/.gitkeep",
       "prs/open/.gitkeep",
     ]);
-    assert.equal(plan.message, "nb: initialize navbook");
+    assert.equal(plan.message, "docs: initialize navbook");
     assert.deepEqual(plan.trailers, []);
   });
 });
@@ -68,7 +78,7 @@ describe("planEntityOpen", () => {
     );
     assert.equal(result.dirPath, "issues/open/bqlybac0-login-times-out-on-slow-connections");
     assert.equal(result.filePath, `${result.dirPath}/issue.md`);
-    assert.equal(result.plan.message, "nb: open #bqlybac0");
+    assert.equal(result.plan.message, "docs(issue): open #bqlybac0");
     assert.deepEqual(result.plan.trailers, [], "opening carries the id in its subject already");
     assert.deepEqual(validateIssue(parseFile(content)), []);
   });
@@ -100,6 +110,13 @@ describe("planClose and planReopen", () => {
     );
     assert.match(write?.op === "write" ? write.content : "", /resolution: fixed/);
     assert.deepEqual(plan.trailers, [{ key: "Closes", id: "bqlybac0" }]);
+  });
+
+  it("scopes the commit subject by entity kind", () => {
+    assert.equal(planClose(issueEntity()).message, "docs(issue): close #bqlybac0");
+    assert.equal(planClose(prEntity(ONE_REVISION)).message, "docs(pr): close #dk3mp2x9");
+    assert.equal(planReopen(issueEntity("", "closed")).message, "docs(issue): reopen #bqlybac0");
+    assert.equal(planReopen(prEntity(ONE_REVISION)).message, "docs(pr): reopen #dk3mp2x9");
   });
 
   it("writes the rewritten file at the destination, not the source", () => {
@@ -170,23 +187,38 @@ describe("planComment", () => {
       path,
       "issues/open/bqlybac0-login-timeout/comments/2026-08-03T141207Z-t5kr1gq6.md",
     );
-    assert.equal(plan.message, "nb: comment on #bqlybac0");
+    assert.equal(plan.message, "docs(issue): comment on #bqlybac0");
     assert.deepEqual(plan.trailers, [{ key: "Refs", id: "bqlybac0" }]);
   });
 
   it("says 'review' in the commit subject for a review", () => {
-    const { plan } = planComment(issueEntity(), "t5kr1gq6", new Date(), "---\n---\n\nx\n", {
-      review: true,
-    });
-    assert.equal(plan.message, "nb: review #bqlybac0");
+    const { plan } = planComment(
+      prEntity(ONE_REVISION),
+      "t5kr1gq6",
+      new Date(),
+      "---\n---\n\nx\n",
+      {
+        review: true,
+      },
+    );
+    assert.equal(plan.message, "docs(pr): review #dk3mp2x9");
+  });
+});
+
+describe("planArchiveMerged", () => {
+  it("moves the pull request into prs/merged/ under a pr-scoped subject", () => {
+    const plan = planArchiveMerged(prEntity(ONE_REVISION));
+    assert.deepEqual(plan.ops, [
+      { op: "move", from: "prs/open/dk3mp2x9-auth", to: "prs/merged/dk3mp2x9-auth" },
+    ]);
+    assert.equal(plan.message, "docs(pr): archive merged #dk3mp2x9");
+    assert.deepEqual(plan.trailers, [{ key: "Refs", id: "dk3mp2x9" }]);
   });
 });
 
 describe("planPrUpdate", () => {
-  const oneRevision = `  - head: ${SHA_A}\n    base: ${SHA_B}\n    date: 2026-08-04T16:40:00Z\n`;
-
   it("appends a revision without touching the existing entries", () => {
-    const plan = planPrUpdate(prEntity(oneRevision), {
+    const plan = planPrUpdate(prEntity(ONE_REVISION), {
       head: SHA_C,
       base: SHA_B,
       date: "2026-08-06T10:00:00Z",
@@ -197,13 +229,13 @@ describe("planPrUpdate", () => {
     assert.equal(revisions.length, 2);
     assert.equal(revisions[0]?.head, SHA_A, "the first entry is untouched");
     assert.equal(revisions[1]?.head, SHA_C);
-    assert.equal(plan.message, "nb: update #dk3mp2x9");
+    assert.equal(plan.message, "docs(pr): update #dk3mp2x9");
   });
 
   it("refuses when HEAD already is the latest recorded revision", () => {
     assert.throws(
       () =>
-        planPrUpdate(prEntity(oneRevision), {
+        planPrUpdate(prEntity(ONE_REVISION), {
           head: SHA_A,
           base: SHA_B,
           date: "2026-08-06T10:00:00Z",
@@ -213,7 +245,7 @@ describe("planPrUpdate", () => {
   });
 
   it("allows re-recording a head that is not the latest entry", () => {
-    const two = `${oneRevision}  - head: ${SHA_C}\n    base: ${SHA_B}\n    date: 2026-08-05T10:00:00Z\n`;
+    const two = `${ONE_REVISION}  - head: ${SHA_C}\n    base: ${SHA_B}\n    date: 2026-08-05T10:00:00Z\n`;
     const plan = planPrUpdate(prEntity(two), {
       head: SHA_A,
       base: SHA_B,
@@ -226,10 +258,7 @@ describe("planPrUpdate", () => {
 
 describe("planMergedBlock", () => {
   it("records date, author and merge commit", () => {
-    const entity = prEntity(
-      `  - head: ${SHA_A}\n    base: ${SHA_B}\n    date: 2026-08-04T16:40:00Z\n`,
-    );
-    const plan = planMergedBlock(entity, {
+    const plan = planMergedBlock(prEntity(ONE_REVISION), {
       date: "2026-08-07T12:00:00Z",
       by: "ked@example.com",
       commit: SHA_C,
@@ -241,7 +270,7 @@ describe("planMergedBlock", () => {
       by: "ked@example.com",
       commit: SHA_C,
     });
-    assert.equal(plan.message, "nb: merge #dk3mp2x9");
+    assert.equal(plan.message, "docs(pr): merge #dk3mp2x9");
   });
 });
 

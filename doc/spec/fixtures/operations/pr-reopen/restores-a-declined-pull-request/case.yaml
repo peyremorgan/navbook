@@ -9,7 +9,7 @@ run:
     - nav: [pr, open, --title, "Refactor auth token handling", -m, "Replaces the ad-hoc token cache.", --commit]
       env: {NAV_NOW: "2026-08-04T16:40:00Z"}
     - nav: [pr, close, dk3m, --resolution, declined]
-    - git: [commit, -qam, "nb: close #dk3mp2x9"]
+    - git: [commit, -qam, "docs(pr): close #dk3mp2x9"]
   command: [pr, reopen, dk3m]
   env: {NAV_IDS: "dk3mp2x9"}
 expect: {exit: 0, stdout: expected/stdout.txt, tree: expected/tree}

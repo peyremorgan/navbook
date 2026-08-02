@@ -1,2 +1,2 @@
 Closed #bqlybac0  .navbook/issues/closed/bqlybac0-login-timeout/
-Committed nb: close #bqlybac0
+Committed docs(issue): close #bqlybac0

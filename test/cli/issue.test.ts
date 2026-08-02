@@ -189,7 +189,7 @@ describe("nav issue edit", () => {
   before(() => {
     repo = makeNavRepo();
     repo.nav(["issue", "open", "Editable", "-m", "Body."], { NAV_IDS: "edt11111" });
-    repo.commitAll("nb: open #edt11111");
+    repo.commitAll("docs(issue): open #edt11111");
   });
   after(() => repo.cleanup());
 
@@ -219,7 +219,7 @@ describe("staging without --commit", () => {
   before(() => {
     repo = makeNavRepo();
     repo.nav(["issue", "open", "Stageable", "-m", "Body."], { NAV_IDS: "stg11111" });
-    repo.commitAll("nb: open #stg11111");
+    repo.commitAll("docs(issue): open #stg11111");
   });
   after(() => repo.cleanup());
 
@@ -229,7 +229,7 @@ describe("staging without --commit", () => {
     assert.match(staged, /^R/m, "git sees a rename");
     assert.match(staged, /issues\/closed\/stg11111-stageable\/issue\.md/);
     assert.equal(
-      repo.git(["log", "--oneline"]).stdout.includes("nb: close"),
+      repo.git(["log", "--oneline"]).stdout.includes("docs(issue): close"),
       false,
       "nothing committed",
     );
@@ -248,7 +248,7 @@ describe("--commit", () => {
     const repo = makeNavRepo();
     try {
       repo.nav(["issue", "open", "Committed", "-m", "Body."], { NAV_IDS: "cmt11111" });
-      repo.commitAll("nb: open #cmt11111");
+      repo.commitAll("docs(issue): open #cmt11111");
       repo.write("app.py", "print('hi')\n");
 
       const result = repo.nav(["issue", "close", "cmt1", "--commit"]);
@@ -269,8 +269,8 @@ describe("--commit", () => {
       repo.nav(["issue", "comment", "trl1", "-m", "A note.", "--commit"], { NAV_IDS: "trl22222" });
       repo.nav(["issue", "close", "trl1", "--commit"]);
       const log = repo.git(["log", "--format=%B%x00"]).stdout;
-      assert.match(log, /nb: close #trl11111\n\nCloses: trl11111/);
-      assert.match(log, /nb: comment on #trl11111\n\nRefs: trl11111/);
+      assert.match(log, /docs\(issue\): close #trl11111\n\nCloses: trl11111/);
+      assert.match(log, /docs\(issue\): comment on #trl11111\n\nRefs: trl11111/);
     } finally {
       repo.cleanup();
     }
