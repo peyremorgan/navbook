@@ -106,7 +106,10 @@ The seven shared verbs, plus `update`, `review`, and `merge`:
 - `nav pr show <id>`, `nav pr edit <id>`, `nav pr comment <id> ...` — as the
   corresponding `issue` verbs, operating on `pr.md`.
 - `nav pr close <id> [--resolution declined]` — record the PR under
-  `prs/closed/` on the current branch.
+  `prs/closed/` on the current branch. A PR's files normally live on its source
+  branch, so when the ID is not present in the checked-out tree the directory is
+  first checked out from the ref that carries it — the manual recipe of
+  [02 §2.8](02-data-model.md), performed for the user.
 - `nav pr reopen <id>` — move a `prs/closed/` entry back to `prs/open/`;
   remove `resolution:`. A merged PR cannot be reopened.
 - `nav pr update <id>` — append a revision entry for the current `HEAD`
@@ -117,7 +120,17 @@ The seven shared verbs, plus `update`, `review`, and `merge`:
 - `nav pr merge <id> [--no-ff]` — from the target branch: `git merge` the
   source branch with the PR directory moved to `prs/merged/` inside the merge
   commit, then record the `merged:` block in a follow-up commit
-  (the merge SHA is unknowable inside the merge itself).
+  (the merge SHA is unknowable inside the merge itself). When the merge can
+  fast-forward and `--no-ff` was not given, there is no merge commit to carry
+  the move, so the archive and the `merged:` block are written together in the
+  immediate follow-up commit that [02 §2.8](02-data-model.md) allows; the block
+  then has no `commit:` key, because no merge commit exists to name.
+- `nav pr merge --continue [<id>]` — finish a merge that stopped for conflict
+  resolution. `nav pr merge` never aborts a conflicted merge: the author's
+  resolution is worth keeping, and the remaining steps (moving the directory
+  and recording `merged:`) are exactly what is easy to forget. `--continue`
+  refuses while any path is still unmerged, and infers the pull request from
+  `MERGE_HEAD` when no ID is given.
 
 ### Query grammar
 
@@ -157,8 +170,19 @@ Doctor checks (E = error → exit 2, W = warning → exit 0 with report):
 | D6 | Review `revision` matches a recorded revision entry | E |
 | D7 | `revisions` list non-empty; entries append-only vs git history | E |
 | D8 | Dangling `#id` / trailer references | W |
-| D9 | `prs/open/` entry whose head is an ancestor of the current branch ("merged but not archived", 3.5) | W |
+| D9 | `prs/open/` entry whose head is an ancestor of the current branch, when that branch is the PR's own `target` ("merged but not archived", [03 §3.5](03-merge-and-branches.md)) | W |
 | D10 | Frontmatter timestamps wildly inconsistent with git history | W |
+
+D7, D9 and D10 read git history and are therefore skipped by `--staged` (the
+commit being validated does not exist yet) and wherever the history is
+unavailable — a shallow clone, or a `revision.head` on a branch nobody has
+fetched. An absent object is not evidence of a fault.
+
+"Wildly inconsistent" in D10 is deliberately not a fixed number in this
+specification. Implementations MUST document the threshold they use; the
+reference implementation warns beyond **48 hours**, which absorbs offline work,
+a delayed push and timezone confusion while still catching a timestamp typed
+with the wrong year.
 
 Hand-edits that are unusual but valid MUST pass: doctor enforces the spec, not
 a house style.

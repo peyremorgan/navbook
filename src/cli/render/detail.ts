@@ -19,8 +19,11 @@ export function renderDetail(entity: EntityRecord, opts: DetailOptions): string 
   const lines: string[] = [];
   lines.push(`${c.bold(`#${entity.id}`)} ${entity.title}`);
 
+  const labelWidth = 11;
   for (const [label, value] of metadataRows(entity)) {
-    lines.push(`${c.dim(`${label}:`.padEnd(10))}${value}`);
+    // A continuation row (empty label) is indented to line up under the value.
+    const cell = label === "" ? " ".repeat(labelWidth) : c.dim(`${label}:`.padEnd(labelWidth));
+    lines.push(`${cell}${value}`);
   }
 
   const body = entity.body.trim();

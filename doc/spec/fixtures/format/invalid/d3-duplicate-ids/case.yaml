@@ -1,6 +1,6 @@
 spec-version: 1
 description: D3 treats a repeated id as data corruption and never tries to repair it
-init: {from: tree}
+init: {from: tree, date: 2026-08-02T12:00:00Z}
 run: {command: [doctor, --json]}
 expect:
   exit: 2

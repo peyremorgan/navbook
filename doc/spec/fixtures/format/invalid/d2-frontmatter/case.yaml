@@ -1,6 +1,6 @@
 spec-version: 1
 description: D2 requires the mandatory keys, forbids a status key, and rejects an empty description
-init: {from: tree}
+init: {from: tree, date: 2026-08-02T12:00:00Z}
 run: {command: [doctor, --json]}
 expect:
   exit: 2

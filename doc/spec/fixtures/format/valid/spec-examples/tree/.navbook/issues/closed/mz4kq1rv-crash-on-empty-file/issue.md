@@ -1,7 +1,7 @@
 ---
 title: Crash on empty file
 author: bob@example.com
-created: 2026-07-30T11:00:00Z
+created: 2026-08-02T11:00:00Z
 resolution: fixed
 ---
 

@@ -8,6 +8,7 @@ import type { EntityKind } from "../core/tree.ts";
 import { cmdComplete } from "./commands/complete.ts";
 import { cmdDoctor } from "./commands/doctor.ts";
 import {
+  type CloseOptions,
   cmdClose,
   cmdComment,
   cmdEdit,
@@ -19,6 +20,14 @@ import {
 import { cmdId, cmdInit } from "./commands/init.ts";
 import { cmdInstall, cmdUninstall } from "./commands/install.ts";
 import { cmdIssueOpen } from "./commands/issue.ts";
+import {
+  cmdPrClose,
+  cmdPrList,
+  cmdPrMerge,
+  cmdPrOpen,
+  cmdPrReview,
+  cmdPrUpdate,
+} from "./commands/pr.ts";
 import type { Ctx } from "./context.ts";
 
 export const VERSION = "0.1.0";
@@ -90,7 +99,67 @@ export function buildProgram(getCtx: () => Ctx): Command {
     .action((words: string[]) => cmdComplete(getCtx(), words));
 
   program.addCommand(buildIssueCommand(getCtx));
+  program.addCommand(buildPrCommand(getCtx));
   return program;
+}
+
+function buildPrCommand(getCtx: () => Ctx): Command {
+  const pr = new Command("pr").description("work with pull requests");
+
+  pr.command("open")
+    .description("open a pull request from the current branch")
+    .option("--target <branch>", "branch to merge into (default: the repository's default branch)")
+    .option("--title <text>", "one-line summary (default: the last commit's subject)")
+    .option("-m, --message <text>", "description text; without it $EDITOR is opened")
+    .option("--draft", "not yet requesting review")
+    .option("--label <label>", "add a label (repeatable)", collect, [])
+    .option("--assignee <email>", "assign to a person (repeatable)", collect, [])
+    .option("--milestone <name>", "milestone")
+    .option("--commit", "wrap the change in an 'nb:' commit")
+    .action((opts) => cmdPrOpen(getCtx(), opts));
+
+  pr.command("update")
+    .argument("<id>", "ID or unambiguous prefix")
+    .description("append a revision pinning the current HEAD")
+    .option("--commit", "wrap the change in an 'nb:' commit")
+    .action((id: string, opts) => cmdPrUpdate(getCtx(), id, opts));
+
+  pr.command("review")
+    .argument("<id>", "ID or unambiguous prefix")
+    .description("review a pull request, bound to a specific revision")
+    .option("--approve", "record an approving verdict")
+    .option("--request-changes", "record a request-changes verdict")
+    .option("-m, --message <text>", "review text; without it $EDITOR is opened")
+    .option("--revision <sha>", "bind to this revision instead of the latest")
+    .option("--file <path>", "anchor the comment to a file")
+    .option("--line <n|start-end>", "anchor the comment to a line or range")
+    .option("--commit", "wrap the change in an 'nb:' commit")
+    .action((id: string, opts) => cmdPrReview(getCtx(), id, opts));
+
+  pr.command("merge")
+    .argument("[id]", "ID or unambiguous prefix")
+    .description("merge a pull request into the checked-out target branch")
+    .option("--no-ff", "always create a merge commit")
+    .option("--continue", "finish a merge that stopped for conflict resolution")
+    // Commander models `--no-ff` as the negation of an implicit `--ff`.
+    .action((id: string | undefined, opts) =>
+      cmdPrMerge(getCtx(), id, { ...opts, noFf: opts.ff === false }),
+    );
+
+  addSharedVerbs(pr, "pr", getCtx, {
+    extraColumns: [{ header: "target", value: (entity) => stringOf(entity, "target") }],
+    runClose: (ctx, id, options) => cmdPrClose(ctx, id, options),
+    configureList: (command) => {
+      command.option("--all-refs", "scan all local and fetched remote branches, not just this one");
+    },
+    runList: (ctx, terms, options) => cmdPrList(ctx, terms, options),
+  });
+  return pr;
+}
+
+function stringOf(entity: { fm: Record<string, unknown> }, key: string): string {
+  const value = entity.fm[key];
+  return typeof value === "string" ? value : "";
 }
 
 function buildIssueCommand(getCtx: () => Ctx): Command {
@@ -107,8 +176,18 @@ function buildIssueCommand(getCtx: () => Ctx): Command {
     .option("--commit", "wrap the change in an 'nb:' commit")
     .action((title, opts) => cmdIssueOpen(getCtx(), title, opts));
 
-  addSharedVerbs(issue, "issue", getCtx, []);
+  addSharedVerbs(issue, "issue", getCtx, { extraColumns: [] });
   return issue;
+}
+
+export interface SharedVerbOptions {
+  extraColumns: ExtraColumn[];
+  /** Extra options the noun's `list` accepts, e.g. `--all-refs` for PRs. */
+  configureList?: (command: Command) => void;
+  /** Listing implementation, when the noun needs more than the shared one. */
+  runList?: (ctx: Ctx, terms: string[], options: Record<string, unknown>) => void;
+  /** Close implementation, when the noun needs more than the shared one. */
+  runClose?: (ctx: Ctx, id: string, options: CloseOptions) => void;
 }
 
 /** Register the verbs both nouns share, so their behavior can never drift. */
@@ -116,17 +195,23 @@ export function addSharedVerbs(
   parent: Command,
   kind: EntityKind,
   getCtx: () => Ctx,
-  extraColumns: ExtraColumn[],
+  shared: SharedVerbOptions,
 ): void {
   const noun = kind === "issue" ? "issue" : "pull request";
+  const { extraColumns } = shared;
 
-  parent
+  const list = parent
     .command("list")
     .argument("[query...]", "query terms; default status:open")
     .description(`list ${kind === "issue" ? "issues" : "pull requests"} matching a query`)
     .addHelpText("after", `\n${QUERY_HELP}`)
-    .option("--json", "one JSON object per entity, newline-delimited")
-    .action((terms: string[], opts) => cmdList(getCtx(), kind, terms, { ...opts, extraColumns }));
+    .option("--json", "one JSON object per entity, newline-delimited");
+  shared.configureList?.(list);
+  list.action((terms: string[], opts) =>
+    shared.runList
+      ? shared.runList(getCtx(), terms, { ...opts, extraColumns })
+      : cmdList(getCtx(), kind, terms, { ...opts, extraColumns }),
+  );
 
   parent
     .command("show")
@@ -158,12 +243,11 @@ export function addSharedVerbs(
     .option("--resolution <value>", "why it was closed, e.g. fixed, wontfix, duplicate")
     .option("--duplicate-of <id>", "the entity this duplicates (implies duplicate)")
     .option("--commit", "wrap the change in an 'nb:' commit")
-    .action((id: string, opts) =>
-      cmdClose(getCtx(), kind, id, {
-        ...opts,
-        duplicateOf: opts.duplicateOf,
-      }),
-    );
+    .action((id: string, opts) => {
+      const options: CloseOptions = { ...opts, duplicateOf: opts.duplicateOf };
+      if (shared.runClose) shared.runClose(getCtx(), id, options);
+      else cmdClose(getCtx(), kind, id, options);
+    });
 
   parent
     .command("reopen")

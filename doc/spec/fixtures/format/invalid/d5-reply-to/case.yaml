@@ -1,6 +1,6 @@
 spec-version: 1
 description: D5 - reply-to must name a comment of the same entity
-init: {from: tree}
+init: {from: tree, date: 2026-08-03T00:00:00Z}
 run: {command: [doctor, --json]}
 expect:
   exit: 2

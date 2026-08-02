@@ -36,8 +36,8 @@ export interface HistoryStep {
 
 /** One setup action: run nav, run git, or put a file in the working tree. */
 export type SetupStep =
-  | { nav: string[] }
-  | { git: string[] }
+  | { nav: string[]; env?: Record<string, string> }
+  | { git: string[]; env?: Record<string, string> }
   | { write: { path: string; content?: string } };
 
 export interface CaseManifest {
@@ -125,10 +125,7 @@ function executeCase(caseDir: string): Execution {
   const baseline = headSha(repo);
   const blank = { manifest, repo, code: -1, stdout: "", stderr: "", baseline, shas };
 
-  for (const step of manifest.run?.before ?? []) {
-    const failure = runSetupStep(repo, step);
-    if (failure) return { ...blank, setupFailure: failure };
-  }
+  // Check out first, then set up: a setup step usually acts on that branch.
   if (manifest.run?.checkout) {
     const result = repo.git(["checkout", "--quiet", manifest.run.checkout]);
     if (result.code !== 0) {
@@ -138,12 +135,25 @@ function executeCase(caseDir: string): Execution {
       };
     }
   }
-
   const env = { ...(manifest.run?.env ?? {}) };
+  for (const step of manifest.run?.before ?? []) {
+    // Setup steps get the same NAV_NOW / NAV_IDS hooks, so a fixture that
+    // prepares state with `nav` is as reproducible as the command under test.
+    const failure = runSetupStep(repo, step, env);
+    if (failure) return { ...blank, setupFailure: failure };
+  }
+
   const result = manifest.run?.git
     ? repo.git(manifest.run.git, env)
     : repo.nav(manifest.run?.command ?? [], env);
+  // Commits the command itself created are addressable as head, head-1, ...
+  // so a fixture can name a merge commit it could not have known in advance.
   shas.head = headSha(repo) ?? "";
+  for (let back = 1; back <= 3; back++) {
+    const sha = repo.git(["rev-parse", "--verify", "--quiet", `HEAD~${back}`]);
+    if (sha.code !== 0) break;
+    shas[`head-${back}`] = sha.stdout.trim();
+  }
   return { manifest, repo, baseline, shas, ...result };
 }
 
@@ -209,13 +219,16 @@ export function recordCase(caseDir: string): { code: number; wrote: string[] } {
   }
 }
 
-function runSetupStep(repo: TempRepo, step: SetupStep): string | null {
+function runSetupStep(repo: TempRepo, step: SetupStep, env: NodeJS.ProcessEnv): string | null {
   if ("write" in step) {
     repo.write(step.write.path, step.write.content ?? "");
     return null;
   }
+  // NAV_IDS is consumed per process, so a step that mints ids needs its own
+  // slice of the list rather than sharing the command's.
+  const stepEnv = { ...env, ...(step.env ?? {}) };
   const [label, args] = "nav" in step ? (["nav", step.nav] as const) : (["git", step.git] as const);
-  const result = label === "nav" ? repo.nav(args) : repo.git(args);
+  const result = label === "nav" ? repo.nav(args, stepEnv) : repo.git(args, stepEnv);
   return result.code === 0 ? null : `setup '${label} ${args.join(" ")}' failed: ${result.stderr}`;
 }
 
@@ -290,6 +303,9 @@ function headSha(repo: TempRepo): string | null {
 
 type Substituter = (text: string) => string;
 
+/** How many characters of a SHA the CLI shows in human-facing output. */
+const SHORT_SHA_LENGTH = 12;
+
 /**
  * Expected files reference commit SHAs by the history step that produced them
  * (`{{sha:feat}}`, `{{head}}`), so a fixture stays hand-editable: changing an
@@ -297,12 +313,15 @@ type Substituter = (text: string) => string;
  */
 function makeSubstituter(shas: Record<string, string>): Substituter {
   return (text) =>
-    text.replace(/\{\{(sha:([a-z0-9_-]+)|head)\}\}/gi, (match, _all, name?: string) => {
-      const key = name ?? "head";
-      const sha = shas[key];
-      if (!sha) throw new Error(`fixture expects ${match} but no such commit was recorded`);
-      return sha;
-    });
+    text.replace(
+      /\{\{(sha|short):([a-z0-9_-]+)\}\}|\{\{(head|short-head)\}\}/gi,
+      (match, kind?: string, name?: string, bare?: string) => {
+        const key = name ?? "head";
+        const sha = shas[key];
+        if (!sha) throw new Error(`fixture expects ${match} but no such commit was recorded`);
+        return kind === "short" || bare === "short-head" ? sha.slice(0, SHORT_SHA_LENGTH) : sha;
+      },
+    );
 }
 
 /** The inverse of {@link makeSubstituter}, used when recording a fixture. */
@@ -314,6 +333,12 @@ function makeUnsubstituter(shas: Record<string, string>): Substituter {
     let out = text;
     for (const [name, sha] of entries) {
       out = out.split(sha).join(name === "head" ? "{{head}}" : `{{sha:${name}}}`);
+    }
+    // Abbreviated SHAs appear in human-facing output. Replace them only after
+    // the full ones, so a full SHA is never partly rewritten.
+    for (const [name, sha] of entries) {
+      const short = sha.slice(0, SHORT_SHA_LENGTH);
+      out = out.split(short).join(name === "head" ? "{{short-head}}" : `{{short:${name}}}`);
     }
     return out;
   };

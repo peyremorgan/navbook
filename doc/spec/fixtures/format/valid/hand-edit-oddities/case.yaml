@@ -1,5 +1,5 @@
 spec-version: 1
 description: unusual but legal hand edits must pass; doctor enforces the spec, not a house style
-init: {from: tree}
+init: {from: tree, date: 2026-08-02T12:00:00Z}
 run: {command: [doctor, --json]}
 expect: {exit: 0, diagnostics: []}

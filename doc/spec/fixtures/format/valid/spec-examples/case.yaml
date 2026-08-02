@@ -1,5 +1,5 @@
 spec-version: 1
 description: every example tree from the specification parses with no diagnostics
-init: {from: tree}
+init: {from: tree, date: 2026-08-03T12:00:00Z}
 run: {command: [doctor, --json]}
 expect: {exit: 0, diagnostics: []}

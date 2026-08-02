@@ -128,9 +128,12 @@ spec-level facts, not bugs:
 3. **Merging is the state change.** The merge that lands the source branch
    carries the PR directory (moved to `prs/merged/`) into the target's
    history. If the mover forgets, the PR arrives in `prs/open/` on the target
-   branch; `doctor` flags any `prs/open/` entry whose latest `revision.head`
-   is an ancestor of the current branch head as "merged but not archived",
-   with the move as the suggested fix.
+   branch; `doctor` flags a `prs/open/` entry as "merged but not
+   archived" when the checked-out branch is the PR's own `target` *and* the
+   entry's latest `revision.head` is an ancestor of that branch's head, with the
+   move as the suggested fix. Both conditions are required: on the PR's source
+   branch its head is trivially an ancestor of `HEAD`, so testing ancestry alone
+   would report every open pull request as merged.
 
 ## 3.6 Scale and housekeeping
 

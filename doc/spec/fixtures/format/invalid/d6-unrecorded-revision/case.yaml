@@ -1,6 +1,6 @@
 spec-version: 1
 description: D6 - a verdict must name a recorded revision head, which is what stops a force-push inheriting an approval
-init: {from: tree}
+init: {from: tree, date: 2026-08-05T00:00:00Z}
 run: {command: [doctor, --json]}
 expect:
   exit: 2

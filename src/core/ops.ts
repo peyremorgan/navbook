@@ -224,7 +224,8 @@ export function planPrUpdate(entity: EntityRecord, revision: Revision): Plan {
 export interface MergedBlock {
   date: string;
   by: string;
-  commit: string;
+  /** Absent after a fast-forward, which creates no merge commit to name. */
+  commit?: string;
 }
 
 /** Record the `merged:` block after the merge commit exists (§2.7). */

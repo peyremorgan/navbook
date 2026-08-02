@@ -1,0 +1,492 @@
+/**
+ * Pull-request behavior that needs a real repository with branches: merges in
+ * all their shapes, cross-branch discovery, and the history-based checks.
+ */
+
+import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, it } from "node:test";
+import { makeNavRepo, type TempRepo } from "../helpers/temprepo.ts";
+
+interface Scenario {
+  repo: TempRepo;
+  /** SHA of the feature branch tip that the PR pinned. */
+  head: string;
+}
+
+/**
+ * A repository with `main`, a `feat/auth` branch, and an open PR on it.
+ * `advanceMain` makes the branches diverge so a merge cannot fast-forward.
+ */
+function withOpenPr(opts: { advanceMain?: boolean; commitPr?: boolean } = {}): Scenario {
+  const repo = makeNavRepo();
+  repo.write("app.txt", "original\n");
+  repo.commitAll("feat: initial code");
+
+  repo.git(["checkout", "--quiet", "-b", "feat/auth"]);
+  repo.write("auth.txt", "token handling\n");
+  repo.commitAll("feat: rework auth tokens");
+  const head = repo.git(["rev-parse", "HEAD"]).stdout.trim();
+
+  const args = ["pr", "open", "--title", "Refactor auth", "-m", "Body."];
+  if (opts.commitPr !== false) args.push("--commit");
+  const opened = repo.nav(args, { NAV_IDS: "dk3mp2x9", NAV_NOW: "2026-08-04T16:40:00Z" });
+  assert.equal(opened.code, 0, opened.stderr);
+
+  repo.git(["checkout", "--quiet", "main"]);
+  if (opts.advanceMain) {
+    repo.write("other.txt", "unrelated\n");
+    repo.commitAll("feat: unrelated work on main");
+  }
+  return { repo, head };
+}
+
+function prFile(repo: TempRepo, status: string): string {
+  return readFileSync(
+    join(repo.dir, `.navbook/prs/${status}/dk3mp2x9-refactor-auth/pr.md`),
+    "utf8",
+  );
+}
+
+describe("nav pr open", () => {
+  it("pins the head and merge base, and names the source and target", () => {
+    const { repo, head } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      const text = prFile(repo, "open");
+      assert.match(text, new RegExp(`head: ${head}`));
+      assert.match(text, /target: main/);
+      assert.match(text, /source: feat\/auth/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses on a detached HEAD, where there is no source branch to name", () => {
+    const repo = makeNavRepo();
+    try {
+      repo.write("app.txt", "x\n");
+      repo.commitAll("feat: code");
+      repo.git(["checkout", "--quiet", "--detach", "HEAD"]);
+      const result = repo.nav(["pr", "open", "--title", "T", "-m", "B."]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /detached/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses a target branch that does not exist", () => {
+    const repo = makeNavRepo();
+    try {
+      repo.write("app.txt", "x\n");
+      repo.commitAll("feat: code");
+      repo.git(["checkout", "--quiet", "-b", "feat/x"]);
+      const result = repo.nav(["pr", "open", "--target", "nope", "--title", "T", "-m", "B."]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /does not exist/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+describe("nav pr review", () => {
+  it("binds to the latest revision, and an older one on request", () => {
+    const { repo, head } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      repo.write("auth.txt", "token handling\nfix\n");
+      repo.commitAll("fix: address review");
+      repo.nav(["pr", "update", "dk3m", "--commit"], { NAV_NOW: "2026-08-06T09:00:00Z" });
+      const second = repo.git(["rev-parse", "HEAD~1"]).stdout.trim();
+
+      repo.nav(["pr", "review", "dk3m", "--approve", "-m", "LGTM.", "--commit"], {
+        NAV_IDS: "aaa11111",
+        NAV_NOW: "2026-08-06T10:00:00Z",
+      });
+      const latest = readFileSync(
+        join(
+          repo.dir,
+          ".navbook/prs/open/dk3mp2x9-refactor-auth/comments/2026-08-06T100000Z-aaa11111.md",
+        ),
+        "utf8",
+      );
+      assert.match(latest, new RegExp(`revision: ${second}`), "defaults to the newest revision");
+
+      repo.nav(
+        [
+          "pr",
+          "review",
+          "dk3m",
+          "--approve",
+          "-m",
+          "Old.",
+          "--revision",
+          head.slice(0, 8),
+          "--commit",
+        ],
+        {
+          NAV_IDS: "bbb22222",
+          NAV_NOW: "2026-08-06T11:00:00Z",
+        },
+      );
+      const older = readFileSync(
+        join(
+          repo.dir,
+          ".navbook/prs/open/dk3mp2x9-refactor-auth/comments/2026-08-06T110000Z-bbb22222.md",
+        ),
+        "utf8",
+      );
+      assert.match(older, new RegExp(`revision: ${head}`));
+      assert.equal(repo.nav(["doctor"]).code, 0, "both verdicts name recorded revisions");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses a revision the pull request never recorded", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      const result = repo.nav([
+        "pr",
+        "review",
+        "dk3m",
+        "--approve",
+        "-m",
+        "x",
+        "--revision",
+        "deadbeef",
+      ]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /no recorded revision starting with/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses two verdicts at once", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      const result = repo.nav([
+        "pr",
+        "review",
+        "dk3m",
+        "--approve",
+        "--request-changes",
+        "-m",
+        "x",
+      ]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /not both/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+describe("nav pr list --all-refs", () => {
+  it("finds a pull request on a branch that is not checked out", () => {
+    const { repo } = withOpenPr();
+    try {
+      assert.match(repo.nav(["pr", "list"]).stdout, /No pull requests match/);
+      const all = repo.nav(["pr", "list", "--all-refs"]);
+      assert.equal(all.code, 0, all.stderr);
+      assert.match(all.stdout, /#dk3mp2x9/);
+      assert.match(all.stdout, /feat\/auth/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("reports each PR once, listing every ref it was found on", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["branch", "backup/auth", "feat/auth"]);
+      const listed = repo.nav(["pr", "list", "--all-refs", "--json"]).stdout.trim().split("\n");
+      assert.equal(listed.length, 1, "deduplicated by id");
+      const entry = JSON.parse(listed[0] as string) as { refs: string[] };
+      assert.deepEqual([...entry.refs].sort(), ["backup/auth", "feat/auth"]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("ignores branches that have no .navbook at all", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "--orphan", "unrelated"]);
+      repo.git(["rm", "-rf", "-q", "--cached", "."]);
+      repo.write("readme.txt", "nothing to do with navbook\n");
+      repo.commitAll("chore: unrelated root");
+      repo.git(["checkout", "--quiet", "main"]);
+      const all = repo.nav(["pr", "list", "--all-refs"]);
+      assert.equal(all.code, 0, all.stderr);
+      assert.match(all.stdout, /#dk3mp2x9/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+describe("nav pr merge", () => {
+  it("fast-forwards without a merge commit, and records no commit SHA", () => {
+    const { repo } = withOpenPr();
+    try {
+      const result = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(result.stdout.includes("Merge commit"), false);
+
+      const text = prFile(repo, "merged");
+      assert.match(text, /^merged:$/m);
+      assert.equal(/^ {2}commit:/m.test(text), false, "a fast-forward has no merge commit to name");
+      assert.equal(repo.git(["log", "--merges", "--oneline"]).stdout.trim(), "");
+      assert.equal(repo.nav(["doctor"]).code, 0);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("creates a merge commit when the branches diverged, and records it", () => {
+    const { repo } = withOpenPr({ advanceMain: true });
+    try {
+      const result = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      assert.equal(result.code, 0, result.stderr);
+
+      const merges = repo.git(["log", "--merges", "--format=%s"]).stdout.trim();
+      assert.equal(merges, "Merge #dk3mp2x9: Refactor auth");
+      const sha = repo.git(["rev-list", "--merges", "-1", "HEAD"]).stdout.trim();
+      assert.match(prFile(repo, "merged"), new RegExp(`commit: ${sha}`));
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("honours --no-ff even when a fast-forward was possible", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.nav(["pr", "merge", "dk3m", "--no-ff"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      assert.match(repo.git(["log", "--merges", "--format=%s"]).stdout, /Merge #dk3mp2x9/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("carries the whole discussion into the target's history", () => {
+    const { repo } = withOpenPr({ advanceMain: true });
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      repo.nav(["pr", "review", "dk3m", "--approve", "-m", "Looks good.", "--commit"], {
+        NAV_IDS: "aaa11111",
+        NAV_NOW: "2026-08-06T10:00:00Z",
+      });
+      repo.git(["checkout", "--quiet", "main"]);
+      repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+
+      const shown = repo.nav(["pr", "show", "dk3m"]).stdout;
+      assert.match(shown, /Looks good\./);
+      assert.match(shown, /status: *merged/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses when the working tree is dirty", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.write("app.txt", "uncommitted edit\n");
+      const result = repo.nav(["pr", "merge", "dk3m"]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /working tree has changes/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses to merge the same pull request twice", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      // The stale source branch still carries the PR under prs/open/, so it is
+      // still discoverable; what stops a second merge is the ancestry check.
+      const again = repo.nav(["pr", "merge", "dk3m"]);
+      assert.equal(again.code, 1);
+      assert.match(again.stderr, /already contained in main/);
+      assert.match(again.stderr, /doctor --fix/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("stops on conflict, keeps the resolution, and finishes with --continue", () => {
+    const repo = makeNavRepo();
+    try {
+      repo.write("app.txt", "original\n");
+      repo.commitAll("feat: initial code");
+      repo.git(["checkout", "--quiet", "-b", "feat/auth"]);
+      repo.write("app.txt", "from the branch\n");
+      repo.commitAll("feat: change app");
+      repo.nav(["pr", "open", "--title", "Conflicting", "-m", "Body.", "--commit"], {
+        NAV_IDS: "dk3mp2x9",
+        NAV_NOW: "2026-08-04T16:40:00Z",
+      });
+      repo.git(["checkout", "--quiet", "main"]);
+      repo.write("app.txt", "from main\n");
+      repo.commitAll("feat: conflicting change on main");
+
+      const stopped = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      assert.equal(stopped.code, 1);
+      assert.match(stopped.stderr, /produced conflicts/);
+      assert.match(stopped.stderr, /--continue/);
+      assert.match(repo.git(["status", "--porcelain"]).stdout, /^UU app\.txt$/m);
+
+      const tooEarly = repo.nav(["pr", "merge", "--continue"]);
+      assert.equal(tooEarly.code, 1);
+      assert.match(tooEarly.stderr, /unresolved conflicts/);
+
+      repo.write("app.txt", "resolved by hand\n");
+      repo.git(["add", "app.txt"]);
+      const finished = repo.nav(["pr", "merge", "--continue"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      assert.equal(finished.code, 0, finished.stderr);
+
+      assert.equal(readFileSync(join(repo.dir, "app.txt"), "utf8"), "resolved by hand\n");
+      assert.ok(existsSync(join(repo.dir, ".navbook/prs/merged/dk3mp2x9-conflicting/pr.md")));
+      assert.match(repo.git(["log", "--merges", "--format=%s"]).stdout, /Merge #dk3mp2x9/);
+      assert.equal(repo.nav(["doctor"]).code, 0);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses unless the pull request's own target branch is checked out", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      const result = repo.nav(["pr", "merge", "dk3m"]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /targets 'main'/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+describe("nav pr close", () => {
+  it("brings a pull request from its source branch to record the decline", () => {
+    const { repo } = withOpenPr();
+    try {
+      const result = repo.nav(["pr", "close", "dk3m", "--resolution", "declined"]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /Brought #dk3mp2x9 onto this branch/);
+      assert.match(prFile(repo, "closed"), /resolution: declined/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("will not reopen a merged pull request", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      const result = repo.nav(["pr", "reopen", "dk3m"]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /merged/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+describe("history-based doctor checks", () => {
+  it("D9 reports a merged but unarchived pull request only on its target branch", () => {
+    const { repo } = withOpenPr({ advanceMain: true });
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      assert.equal(repo.nav(["doctor"]).stdout.includes("D9"), false, "not on the source branch");
+
+      repo.git(["checkout", "--quiet", "main"]);
+      repo.git(["merge", "--no-ff", "--no-edit", "--quiet", "feat/auth"]);
+      const flagged = repo.nav(["doctor"]);
+      assert.equal(flagged.code, 0, "a warning must not fail the check");
+      assert.match(flagged.stdout, /D9/);
+      assert.match(flagged.stdout, /merged into this branch/);
+
+      const fixed = repo.nav(["doctor", "--fix"]);
+      assert.match(fixed.stdout, /prs\/merged\/dk3mp2x9-refactor-auth/);
+      assert.equal(repo.nav(["doctor"]).stdout.includes("D9"), false);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("D7 catches a revision entry that was edited after being recorded", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      const path = ".navbook/prs/open/dk3mp2x9-refactor-auth/pr.md";
+      const text = readFileSync(join(repo.dir, path), "utf8");
+      repo.write(path, text.replace(/head: [0-9a-f]{40}/, `head: ${"a".repeat(40)}`));
+      repo.commitAll("chore: tamper with a recorded revision");
+
+      const result = repo.nav(["doctor"]);
+      assert.equal(result.code, 2);
+      assert.match(result.stdout, /D7/);
+      assert.match(result.stdout, /only be appended/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("D7 accepts an honest append", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      repo.write("auth.txt", "token handling\nmore\n");
+      repo.commitAll("fix: more work");
+      repo.nav(["pr", "update", "dk3m", "--commit"], { NAV_NOW: "2026-08-06T09:00:00Z" });
+      assert.equal(repo.nav(["doctor"]).code, 0);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("D10 warns about a timestamp far from the commit that introduced it", () => {
+    const repo = makeNavRepo();
+    try {
+      repo.nav(["issue", "open", "Odd", "-m", "Body."], { NAV_IDS: "odd11111" });
+      const path = ".navbook/issues/open/odd11111-odd/issue.md";
+      const text = readFileSync(join(repo.dir, path), "utf8");
+      repo.write(path, text.replace(/^created: .*/m, "created: 2019-01-01T00:00:00Z"));
+      repo.commitAll("nb: open #odd11111");
+
+      const result = repo.nav(["doctor"]);
+      assert.equal(result.code, 0, "D10 is a warning");
+      assert.match(result.stdout, /D10/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("D10 leaves imported and archived entities alone", () => {
+    const repo = makeNavRepo();
+    try {
+      repo.write(
+        ".navbook/issues/open/imp11111-imported/issue.md",
+        "---\ntitle: Imported\nauthor: a@b.co\ncreated: 2019-01-01T00:00:00Z\nimported-from: github:acme/repo#42\n---\n\nBody.\n",
+      );
+      repo.write(
+        ".navbook/archive/2019/issues/closed/arc11111-archived/issue.md",
+        "---\ntitle: Archived\nauthor: a@b.co\ncreated: 2019-01-01T00:00:00Z\n---\n\nBody.\n",
+      );
+      repo.commitAll("chore: import and archive");
+      const result = repo.nav(["doctor"]);
+      assert.equal(result.code, 0);
+      assert.equal(result.stdout.includes("D10"), false, result.stdout);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});

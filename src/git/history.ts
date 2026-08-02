@@ -1,0 +1,98 @@
+/**
+ * Reading history, for the doctor checks that cannot be decided from the tree
+ * alone (D7, D9, D10) and for pinning pull-request revisions.
+ */
+
+import { git, gitMaybe, gitRun, splitLines } from "./exec.ts";
+
+/** ASCII SOH/STX: separators that cannot occur in a commit message or path. */
+const RECORD_SEPARATOR = "\u0001";
+const FIELD_SEPARATOR = "\u0002";
+
+export interface FileVersion {
+  sha: string;
+  /** The file's path in that commit, which a rename may have changed. */
+  path: string;
+  authored: Date;
+}
+
+/**
+ * Every commit that touched `path`, oldest first, following renames.
+ *
+ * `--follow` reports the path as it stood at each commit, which is what makes a
+ * `pr.md` readable across its move from `prs/open/` to `prs/merged/`.
+ */
+export function fileVersions(cwd: string, path: string): FileVersion[] {
+  const output = gitMaybe(
+    ["log", "--follow", "--name-only", "--format=%x01%H%x02%aI", "--", path],
+    { cwd },
+  );
+  if (output === null) return [];
+
+  const versions: FileVersion[] = [];
+  for (const record of output.split(RECORD_SEPARATOR)) {
+    if (record.trim() === "") continue;
+    const [header, ...rest] = record.split("\n");
+    const [sha, authored] = (header ?? "").split(FIELD_SEPARATOR);
+    if (!sha || !authored) continue;
+    const names = rest.filter((line) => line.trim() !== "");
+    const date = new Date(authored);
+    if (Number.isNaN(date.getTime())) continue;
+    versions.push({ sha, path: names[0] ?? path, authored: date });
+  }
+  return versions.reverse();
+}
+
+/** File contents at a commit, or null when the path did not exist there. */
+export function blobAt(cwd: string, sha: string, path: string): string | null {
+  const result = gitRun(["show", `${sha}:${path}`], { cwd });
+  return result.code === 0 ? result.stdout : null;
+}
+
+/** The commit that introduced `path`, following renames. */
+export function addedAt(cwd: string, path: string): FileVersion | null {
+  return fileVersions(cwd, path)[0] ?? null;
+}
+
+/** True when `ancestor` is an ancestor of `descendant` (or the same commit). */
+export function isAncestor(cwd: string, ancestor: string, descendant: string): boolean {
+  return gitRun(["merge-base", "--is-ancestor", ancestor, descendant], { cwd }).code === 0;
+}
+
+/** The merge base of two revisions, or null when they share no history. */
+export function mergeBase(cwd: string, a: string, b: string): string | null {
+  return gitMaybe(["merge-base", a, b], { cwd });
+}
+
+/** True when the object exists locally; false for an unfetched commit. */
+export function objectExists(cwd: string, sha: string): boolean {
+  return gitRun(["cat-file", "-e", `${sha}^{commit}`], { cwd }).code === 0;
+}
+
+/** Commit messages of the given revision range, newest first. */
+export function commitMessages(cwd: string, range: string, limit = 100): string[] {
+  const output = gitMaybe(["log", "--format=%B%x00", "-n", String(limit), range], { cwd });
+  if (output === null) return [];
+  return output.split("\0").filter((message) => message.trim() !== "");
+}
+
+/** Branch names that contain the given commit. */
+export function branchesContaining(cwd: string, sha: string): string[] {
+  const output = gitMaybe(["branch", "--all", "--format=%(refname:short)", "--contains", sha], {
+    cwd,
+  });
+  return output === null ? [] : splitLines(output);
+}
+
+/** Author date of a commit. */
+export function authoredAt(cwd: string, sha: string): Date | null {
+  const value = gitMaybe(["show", "-s", "--format=%aI", sha], { cwd });
+  if (value === null) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Resolve a revision, throwing a useful message when it does not exist. */
+export function requireSha(cwd: string, rev: string): string {
+  return git(["rev-parse", "--verify", `${rev}^{commit}`], { cwd }).trim();
+}

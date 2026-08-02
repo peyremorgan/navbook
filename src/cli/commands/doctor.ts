@@ -9,11 +9,12 @@
 import { NAVBOOK_ROOT } from "../../core/json.ts";
 import type { FileOp } from "../../core/ops.ts";
 import { parseTree, type Repo } from "../../core/tree.ts";
-import { type Diagnostic, hasErrors, validateRepo } from "../../core/validate.ts";
+import { type Diagnostic, hasErrors, sortDiagnostics, validateRepo } from "../../core/validate.ts";
 import { git, gitMaybe, splitNul } from "../../git/exec.ts";
 import { stagedContent, stagedPaths } from "../../git/index-ops.ts";
 import type { Ctx } from "../context.ts";
 import { NavError } from "../errors.ts";
+import { runHistoryChecks } from "../history-checks.ts";
 import { applyOps, loadRepo, repoPath, requireNavbook } from "../workspace.ts";
 
 export interface DoctorOptions {
@@ -25,7 +26,12 @@ export interface DoctorOptions {
 export function cmdDoctor(ctx: Ctx, opts: DoctorOptions): void {
   requireNavbook(ctx);
   const repo = opts.staged ? stagedRepo(ctx) : loadRepo(ctx);
-  const diagnostics = validateRepo(repo, { commitMessages: recentCommitMessages(ctx, opts) });
+  const diagnostics = sortDiagnostics([
+    ...validateRepo(repo, { commitMessages: recentCommitMessages(ctx, opts) }),
+    // History-dependent checks are skipped for --staged: the commit being made
+    // does not exist yet, so there is nothing for them to read.
+    ...(opts.staged ? [] : runHistoryChecks(ctx, repo)),
+  ]);
 
   const applied = opts.fix ? applyFixes(ctx, diagnostics) : [];
   const remaining = opts.fix ? diagnostics.filter((d) => !d.fix) : diagnostics;

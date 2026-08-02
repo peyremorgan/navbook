@@ -1,6 +1,6 @@
 spec-version: 1
 description: D8 warns about dangling references but never fails - the target may live on an unfetched branch
-init: {from: tree}
+init: {from: tree, date: 2026-08-02T12:00:00Z}
 run: {command: [doctor, --json]}
 expect:
   exit: 0
