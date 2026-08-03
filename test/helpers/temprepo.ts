@@ -41,12 +41,21 @@ export function navCommand(): string[] {
   return [process.execPath, join(PROJECT_ROOT, "src", "cli", "main.ts")];
 }
 
-/** Environment that makes git and nav byte-for-byte reproducible. */
+/**
+ * Environment that makes git and nav byte-for-byte reproducible.
+ *
+ * `NAV_NOW` is pinned alongside the git dates, not left to the wall clock:
+ * without it every `created:` stamp drifts away from the commit that carries
+ * it, and the suite starts failing D10 (timestamp skew) purely because time
+ * has passed since the fixture date. Tests that need a different instant pass
+ * their own `NAV_NOW`, which overrides this one.
+ */
 export function deterministicEnv(home: string, date = FIXTURE_DATE): NodeJS.ProcessEnv {
   return {
     PATH: process.env.PATH,
     HOME: home,
     TZ: "UTC",
+    NAV_NOW: date,
     LC_ALL: "C",
     LANG: "C",
     NO_COLOR: "1",
