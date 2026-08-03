@@ -60,16 +60,28 @@ jobs:
           git config --global user.name "CI"
           git config --global user.email "ci@example.invalid"
           git config --global init.defaultBranch main
-      - name: conformance suite against the built package
-        run: NAV_BIN="node $PWD/dist/cli/main.js" node --test "test/conformance/**/*.test.ts"
-      - name: performance budget against the built package
-        run: NAV_BIN="node $PWD/dist/cli/main.js" pnpm bench
-      - name: npx smoke test from a packed tarball
+      - name: conformance suite against the built CLI
+        run: NAV_BIN="node $PWD/packages/cli/dist/main.js" pnpm test:conformance
+      - name: performance budget against the built CLI
+        run: NAV_BIN="node $PWD/packages/cli/dist/main.js" pnpm bench
+
+      # The steps above still resolve @navbook/core through the workspace link,
+      # so they exercise dist over sources. Installing both tarballs into a
+      # scratch project is what proves the published artifacts work on their
+      # own — including publishConfig.exports and the workspace: rewrite.
+      - name: install both tarballs and run the CLI
         run: |
-          pnpm pack --pack-destination "$RUNNER_TEMP"
+          pnpm --filter @navbook/core pack --pack-destination "$RUNNER_TEMP"
+          pnpm --filter @navbook/cli pack --pack-destination "$RUNNER_TEMP"
           mkdir -p /tmp/smoke && cd /tmp/smoke && npm init -y >/dev/null
+          # Core first: the cli tarball names a version that is not on the
+          # registry yet, so it must already be installed to satisfy it.
+          npm install --silent "$RUNNER_TEMP"/navbook-core-*.tgz
           npm install --silent "$RUNNER_TEMP"/navbook-cli-*.tgz
           git init -q -b main smoke && cd smoke
+          ../node_modules/.bin/nav --version
           ../node_modules/.bin/nav init
           ../node_modules/.bin/nav issue open "Smoke test" -m "It runs."
           ../node_modules/.bin/nav doctor
+      - name: conformance suite against the installed package
+        run: NAV_BIN="node /tmp/smoke/node_modules/.bin/nav" pnpm test:conformance

@@ -1,52 +1,28 @@
 {
-  "name": "@navbook/cli",
-  "version": "0.1.2",
-  "description": "Git-native issue and pull-request tracking as plaintext files in your repository",
-  "keywords": [
-    "issues",
-    "tracker",
-    "git",
-    "pull-request",
-    "offline",
-    "markdown"
-  ],
+  "name": "navbook-workspace",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Workspace root for @navbook/core and @navbook/cli",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.18.0",
-  "publishConfig": {
-    "access": "public"
-  },
-  "bin": {
-    "nav": "dist/cli/main.js"
-  },
   "engines": {
     "node": ">=24"
   },
-  "files": [
-    "dist"
-  ],
-  "exports": {
-    ".": "./dist/core/index.js",
-    "./core": "./dist/core/index.js"
-  },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck && tsc --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "check": "biome check . && tsc --noEmit",
-    "test": "node --test \"test/{unit,cli,conformance}/**/*.test.ts\"",
-    "prepack": "pnpm build",
-    "bench": "node --test \"test/perf/**/*.test.ts\""
-  },
-  "dependencies": {
-    "commander": "^14.0.2",
-    "picocolors": "^1.1.1",
-    "yaml": "^2.8.4"
+    "check": "biome check . && pnpm typecheck",
+    "test": "pnpm -r test && pnpm test:conformance",
+    "test:conformance": "node --test \"test/conformance/**/*.test.ts\"",
+    "bench": "pnpm --filter @navbook/cli bench"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.6",
     "@types/node": "^24.10.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "yaml": "^2.8.4"
   }
 }

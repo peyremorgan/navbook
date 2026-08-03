@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!dist", "!doc/spec/fixtures", "!**/*.md"]
+    "includes": ["**", "!**/dist", "!doc/spec/fixtures", "!**/*.md"]
   },
   "formatter": {
     "enabled": true,

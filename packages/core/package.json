@@ -1,0 +1,43 @@
+{
+  "name": "@navbook/core",
+  "version": "0.2.0",
+  "description": "The shared implementation behind Navbook's front ends: format logic, git plumbing, workspace I/O and operations",
+  "keywords": [
+    "issues",
+    "tracker",
+    "git",
+    "pull-request",
+    "offline",
+    "markdown"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "prepack": "pnpm build",
+    "prepublishOnly": "node ../../script/require-pnpm.js"
+  },
+  "dependencies": {
+    "yaml": "^2.8.4"
+  }
+}

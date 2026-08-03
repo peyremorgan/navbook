@@ -115,9 +115,12 @@ random/clock behavior; nothing else about the implementation changes.
 ## Running the suite
 
 ```sh
-npm test                                   # everything, against src/
-NAV_BIN="node dist/cli/main.js" npm test   # against the built package
-NAV_BIN=/path/to/rust/nav npm test         # against another implementation
+pnpm test                    # everything, against the TypeScript sources
+pnpm test:conformance        # this suite on its own
+
+# against another implementation, or a built one
+NAV_BIN="node packages/cli/dist/main.js" pnpm test:conformance
+NAV_BIN=/path/to/rust/nav pnpm test:conformance
 ```
 
 `NAV_BIN` is split on whitespace; the first word is the executable.

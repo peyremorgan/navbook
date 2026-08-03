@@ -152,10 +152,20 @@ clone to see what is open.
 
 ```sh
 pnpm install
-pnpm test          # unit, CLI and conformance suites
+pnpm test          # every package's suite, plus conformance
 pnpm check         # lint and type-check
 pnpm bench         # the performance budget, on its own machine
 ```
+
+The repository is a pnpm workspace of two packages. `packages/core`
+(`@navbook/core`) is the whole implementation — format logic, git plumbing,
+workspace I/O, and the operations behind each verb — and knows nothing about
+terminals. `packages/cli` (`@navbook/cli`) adds argument parsing, `$EDITOR`,
+prompts and rendering, and installs the `nav` binary. The API server behind
+the planned web client will be a third consumer of the same library
+([spec 05 §5.2](doc/spec/05-implementation.md)). Development needs no build
+step: the library's entry point is its TypeScript source, and Node runs it
+directly.
 
 The [conformance fixtures](doc/spec/fixtures/README.md) are golden repositories
 that any implementation must pass; they run against `$NAV_BIN`, so the same

@@ -18,7 +18,7 @@ Functionality first, technical details after:
 | 3 | [03-merge-and-branches.md](03-merge-and-branches.md) | **Normative.** Branch semantics, concurrent-edit scenarios, conflict resolution |
 | 4 | [04-cli.md](04-cli.md) | The `nav` CLI: commands, query syntax, hooks, completions, exit codes |
 | 5 | [05-implementation.md](05-implementation.md) | Reference implementation (TypeScript), planned Rust rewrite, conformance testing |
-| 6 | [06-future.md](06-future.md) | Reserved extension points: forge sync, non-committer gateways, web viewer, signatures |
+| 6 | [06-future.md](06-future.md) | Reserved extension points: forge sync, non-committer gateways, the web client, signatures |
 
 The keywords MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY are used as described in
 RFC 2119. Documents 02 and 03 are normative; the others are informative except where
@@ -47,7 +47,7 @@ Each decision below is expanded in the linked document.
 | CLI naming | `nav` binary; configurable git alias defaulting to `git nav` | Short to type; `nav` verified unclaimed by any widely used program (checked 2026-08: no exact-name hit in Debian/Ubuntu, Homebrew, or npm bins; the only bare `nav` command belongs to the niche server-side NAV network-monitoring suite). Alias name stays configurable (e.g. `git issue`) | 04 |
 | CLI structure | Noun-verb: `nav {issue\|pr} {open\|list\|show\|edit\|comment\|close\|reopen\|delete}` + PR-only `update`/`review`/`merge` + root utilities (`nav id`, `nav doctor`, setup) | One shared verb vocabulary is easier to learn and remember than per-entity command names | 04 |
 | Implementation | TypeScript reference implementation now; Rust CLI rewrite when mature, cross-checked against it | Measured trade-offs (see 05); the TS core survives as the future web layer | 05 |
-| v1 extras | Query syntax, git hook validation, shell completions (all environment setup unified under `nav install`); no web viewer yet | Selected scope | 04 |
+| v1 extras | Query syntax, git hook validation, shell completions (all environment setup unified under `nav install`); no web client yet | Selected scope | 04 |
 
 ## Prior art
 

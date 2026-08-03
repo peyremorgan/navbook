@@ -1,0 +1,40 @@
+{
+  "name": "@navbook/cli",
+  "version": "0.2.0",
+  "description": "Git-native issue and pull-request tracking as plaintext files in your repository",
+  "keywords": [
+    "issues",
+    "tracker",
+    "git",
+    "pull-request",
+    "offline",
+    "markdown"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "nav": "dist/main.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/cli/**/*.test.ts\"",
+    "bench": "node --test \"test/perf/**/*.test.ts\"",
+    "prepack": "pnpm build",
+    "prepublishOnly": "node ../../script/require-pnpm.js"
+  },
+  "dependencies": {
+    "@navbook/core": "workspace:*",
+    "commander": "^14.0.2",
+    "picocolors": "^1.1.1"
+  }
+}

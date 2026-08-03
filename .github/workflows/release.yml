@@ -21,14 +21,16 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
 
-      - name: the tag must match the package version
+      - name: the tag must match both package versions
         run: |
           tagged="${GITHUB_REF_NAME#v}"
-          packaged="$(node -p 'require("./package.json").version')"
-          if [ "$tagged" != "$packaged" ]; then
-            echo "tag $GITHUB_REF_NAME does not match package version $packaged" >&2
-            exit 1
-          fi
+          for pkg in core cli; do
+            packaged="$(node -p "require('./packages/$pkg/package.json').version")"
+            if [ "$tagged" != "$packaged" ]; then
+              echo "tag $GITHUB_REF_NAME does not match @navbook/$pkg version $packaged" >&2
+              exit 1
+            fi
+          done
 
       - run: pnpm check
       - run: |
@@ -38,10 +40,16 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
-      - name: the built package must pass the conformance suite too
-        run: NAV_BIN="node $PWD/dist/cli/main.js" node --test "test/conformance/**/*.test.ts"
+      - name: the built CLI must pass the conformance suite too
+        run: NAV_BIN="node $PWD/packages/cli/dist/main.js" pnpm test:conformance
 
-      - run: pnpm publish --access public --no-git-checks
+      # Core first: the CLI depends on this exact version, so publishing it
+      # second means the dependency is already resolvable on the registry.
+      - run: pnpm --filter @navbook/core publish --access public --no-git-checks
+        env:
+          NPM_CONFIG_PROVENANCE: true
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: pnpm --filter @navbook/cli publish --access public --no-git-checks
         env:
           NPM_CONFIG_PROVENANCE: true
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

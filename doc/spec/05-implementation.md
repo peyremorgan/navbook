@@ -5,8 +5,8 @@
 Two implementations are planned, in sequence:
 
 1. **TypeScript reference implementation** (now). It defines behavior wherever
-   the prose spec is ambiguous, ultimately survives as the web-facing
-   implementation, and serves as the cross-check oracle for:
+   the prose spec is ambiguous, ultimately survives as the implementation
+   behind the web client's server, and serves as the cross-check oracle for:
 2. **Rust CLI rewrite** (when the format and CLI surface have stabilized). At
    that point the Rust binary becomes the recommended installation for CLI use,
    and the TypeScript codebase refocuses on the web/GUI layer. The two are kept
@@ -20,20 +20,30 @@ is mature and widely installed.
 ## 5.2 TypeScript reference implementation
 
 - **Runtime:** Node ≥ 24 (runs TypeScript natively — no build step in
-  development). Published to npm as `@navbook/cli` under the `navbook` org
-  scope (the binary it installs is `nav`; the scope leaves room for future
-  packages such as `@navbook/core`) with a compiled JS `dist/` so the
-  installed CLI does not depend on type-stripping behavior; `npx @navbook/cli`
-  is the zero-install trial path (npm runs the package's single binary).
-- **Dependencies:** deliberately minimal. A YAML parser (`yaml`) and an
-  argument parser; no framework. Every dependency added to the core is a
-  liability for the Rust rewrite (behavior to reproduce) and MUST be justified.
-- **Structure:** `core/` (pure functions: parse/serialize/validate/query — no
-  I/O, no git), `git/` (subprocess calls to the `git` binary; no libgit
-  bindings, so the CLI's git behavior is definitionally the user's git), and
-  `cli/` (argument handling and rendering over `core`). The `core`/`cli` split
-  is load-bearing: `core` is the part that later runs in a browser, and the
-  part whose behavior the Rust rewrite must reproduce function-for-function.
+  development). Two packages are published to npm under the `navbook` org
+  scope, in lockstep at one version: `@navbook/core`, the implementation, and
+  `@navbook/cli`, which depends on it and installs the `nav` binary. Both ship
+  a compiled JS `dist/` so installed code does not depend on type-stripping
+  behavior; `npx @navbook/cli` is the zero-install trial path.
+- **Dependencies:** deliberately minimal. A YAML parser (`yaml`) in the core
+  and an argument parser in the CLI; no framework. Every dependency added to
+  the core is a liability for the Rust rewrite (behavior to reproduce) and MUST
+  be justified.
+- **Structure:** `@navbook/core` is four layers in dependency order — `core/`
+  (pure functions: parse/serialize/validate/query/plan — no I/O, no git),
+  `git/` (subprocess calls to the `git` binary; no libgit bindings, so
+  Navbook's git behavior is definitionally the user's git), `workspace/`
+  (reading and mutating a real `.navbook/` tree, plus the context an operation
+  runs in), and `ops/` (the verbs of [04 §4.3](04-cli.md), each taking resolved
+  inputs and returning what happened). `@navbook/cli` is argument handling,
+  `$EDITOR` and prompt interaction, and rendering over `ops/`.
+- **Why the split is load-bearing:** `core/` is the layer the Rust rewrite must
+  reproduce function-for-function. The library as a whole is what lets a second
+  front end exist without reimplementing anything — the API server behind the
+  planned web client ([06 §6.3](06-future.md)) runs the same operations the CLI
+  does. Two rules keep that true: no layer below `cli/` writes to a stream or
+  knows what an exit code is, and an operation that must stop and ask is split
+  into a plan half and an execute half rather than calling back into its caller.
 - **Performance budget:** cold `nav issue list` on a 1 000-issue repo MUST
   complete in under 500 ms on commodity hardware. (Measured floor: ~40 ms
   Node startup + ~110 ms with one heavy import — import cost is the budget's
@@ -87,5 +97,6 @@ rendering a 1 000-commit repo's history; axum 0.8 vs fastify 5.11 on Node
 
 Interpretation for Navbook: server throughput is irrelevant at team scale;
 the decisive numbers are invocation latency and distribution weight (Rust) vs
-iteration speed, contributor pool, and browser-sharable core (TypeScript).
-Hence: TypeScript while the spec moves, Rust when it stops moving.
+iteration speed, contributor pool, and a core shared with the web client's
+server (TypeScript). Hence: TypeScript while the spec moves, Rust when it
+stops moving.

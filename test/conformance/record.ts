@@ -9,10 +9,10 @@
  */
 
 import { join } from "node:path";
-import { PROJECT_ROOT } from "../helpers/temprepo.ts";
+import { REPO_ROOT } from "../../packages/cli/test/helpers/temprepo.ts";
 import { discoverCases, recordCase } from "./harness.ts";
 
-const FIXTURE_ROOT = join(PROJECT_ROOT, "doc", "spec", "fixtures");
+const FIXTURE_ROOT = join(REPO_ROOT, "doc", "spec", "fixtures");
 const targets = process.argv.slice(2);
 const cases = targets.length > 0 ? targets : discoverCases(FIXTURE_ROOT);
 

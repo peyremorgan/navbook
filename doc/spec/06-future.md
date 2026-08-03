@@ -33,12 +33,32 @@ the committer), and pushes to the default branch or opens a PR with the new
 issue. The 15-year-running precedent is ikiwiki/git-annex's CGI-to-commit
 tracker.
 
-## 6.3 Web viewer
+## 6.3 Web client
 
-A read-only local/hosted viewer (`nav serve`) rendering issues, PR
-discussions, and boards from any checkout. It grows out of the TypeScript
-implementation's `core/` ([05 §5.2](05-implementation.md)) and stays outside
-the correctness path: it renders the files; it never owns state.
+A browser interface so that filing an issue, commenting and reviewing do not
+require a terminal — the audience is everyone on a project who is not working
+from a checkout. Design principles fixed now:
+
+- **A server, not a browser build.** The web client is a thin UI over an API
+  server (GraphQL) that imports `@navbook/core`
+  ([05 §5.2](05-implementation.md)) and runs the same operations the CLI runs.
+  Nothing about the format is reimplemented for the web, and no Navbook logic
+  ships to the browser.
+- **The server owns a clone, not a database.** It works against its own
+  server-side checkout, synchronised with a central origin — pull before an
+  operation, push after it. Git remains the single source of truth and the
+  only durable state; the clone is a working copy that can be thrown away and
+  made again. Nothing index-like is introduced ([§6.6](#66-explicitly-rejected-directions)).
+- **Read *and* write.** This is the substantive change from a viewer: the
+  server commits on a signed-in person's behalf, which is precisely the
+  non-committer gateway of [§6.2](#62-non-committer-gateway) — `author:` records
+  the person, the committer is the gateway, and that is why `author` is data
+  rather than derived. Contention with concurrent CLI users is handled by the
+  ordinary merge rules of [03 §3.3](03-merge-and-branches.md); the server gets
+  no privileged path.
+- **Conflicts surface, they are not resolved.** A push the server cannot
+  fast-forward is reported to the person who made the change, not merged
+  heuristically on their behalf.
 
 ## 6.4 Cryptographic attestation
 

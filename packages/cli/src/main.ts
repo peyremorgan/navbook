@@ -1,0 +1,106 @@
+#!/usr/bin/env node
+/**
+ * `nav` entry point.
+ */
+
+import { realpathSync } from "node:fs";
+import { WorkspaceError } from "@navbook/core";
+import { CommanderError } from "commander";
+import { type Ctx, makeContext } from "./context.ts";
+import { type ExitCode, NavError } from "./errors.ts";
+import { buildProgram } from "./program.ts";
+
+export interface RunOptions {
+  argv?: string[];
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  stdout?: NodeJS.WriteStream;
+  stderr?: NodeJS.WriteStream;
+}
+
+/** Run the CLI and return its exit code. Never throws for expected failures. */
+export function run(opts: RunOptions = {}): ExitCode {
+  const argv = opts.argv ?? process.argv.slice(2);
+  const stdout = opts.stdout ?? process.stdout;
+  const stderr = opts.stderr ?? process.stderr;
+
+  let ctx: Ctx | null = null;
+  const getCtx = (): Ctx => {
+    ctx ??= makeContext({ cwd: opts.cwd, env: opts.env, stdout, stderr });
+    return ctx;
+  };
+
+  const program = buildProgram(getCtx);
+  program.exitOverride();
+  program.configureOutput({
+    writeOut: (text) => stdout.write(text),
+    writeErr: (text) => stderr.write(text),
+  });
+
+  try {
+    program.parse(argv, { from: "user" });
+    return 0;
+  } catch (error) {
+    return report(error, stderr);
+  }
+}
+
+function report(error: unknown, stderr: NodeJS.WriteStream): ExitCode {
+  if (error instanceof CommanderError) {
+    // Commander already wrote help or the version string.
+    if (error.code === "commander.helpDisplayed" || error.code === "commander.version") return 0;
+    if (error.code === "commander.help") return 0;
+    return error.exitCode === 0 ? 0 : 1;
+  }
+  if (error instanceof NavError) {
+    stderr.write(`nav: ${error.message}\n`);
+    for (const line of error.details) stderr.write(`${line}\n`);
+    return error.exitCode;
+  }
+  // The workspace and operation layers report failures without knowing what an
+  // exit code is. Every one of them is operational: a format violation reaches
+  // exit 2 only through `doctor`, which raises it here in the CLI.
+  if (error instanceof WorkspaceError) {
+    stderr.write(`nav: ${error.message}\n`);
+    for (const line of error.details) stderr.write(`${line}\n`);
+    return 1;
+  }
+  stderr.write(`nav: ${error instanceof Error ? error.message : String(error)}\n`);
+  return 1;
+}
+
+/**
+ * A closed pipe is a normal way for a command to end — `nav issue list | head`
+ * closes stdout as soon as it has enough. Without this, node turns that into an
+ * unhandled EPIPE and a stack trace.
+ */
+function exitQuietlyOnClosedPipe(stream: NodeJS.WriteStream): void {
+  stream.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code === "EPIPE") process.exit(0);
+    throw error;
+  });
+}
+
+/**
+ * True when this file is the program being run.
+ *
+ * The paths are resolved through symlinks first: npm installs the binary as a
+ * link in `node_modules/.bin`, so `process.argv[1]` is the link while
+ * `import.meta.filename` is its target. Comparing them raw makes the installed
+ * CLI silently do nothing.
+ */
+function invokedDirectly(): boolean {
+  const entry = process.argv[1];
+  if (entry === undefined) return false;
+  try {
+    return realpathSync(entry) === realpathSync(import.meta.filename);
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly()) {
+  exitQuietlyOnClosedPipe(process.stdout);
+  exitQuietlyOnClosedPipe(process.stderr);
+  process.exitCode = run();
+}

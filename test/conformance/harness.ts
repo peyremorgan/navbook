@@ -22,7 +22,11 @@ import {
 } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { FIXTURE_DATE, makeTempRepo, type TempRepo } from "../helpers/temprepo.ts";
+import {
+  FIXTURE_DATE,
+  makeTempRepo,
+  type TempRepo,
+} from "../../packages/cli/test/helpers/temprepo.ts";
 
 export interface HistoryStep {
   id?: string;

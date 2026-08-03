@@ -5,10 +5,10 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { PROJECT_ROOT } from "../helpers/temprepo.ts";
+import { REPO_ROOT } from "../../packages/cli/test/helpers/temprepo.ts";
 import { discoverCases, readManifest, runCase } from "./harness.ts";
 
-const FIXTURE_ROOT = join(PROJECT_ROOT, "doc", "spec", "fixtures");
+const FIXTURE_ROOT = join(REPO_ROOT, "doc", "spec", "fixtures");
 
 const cases = discoverCases(FIXTURE_ROOT);
 
