@@ -70,7 +70,7 @@ export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
     render: (body) =>
       newPrFile({
         title,
-        author: draft.author,
+        author: currentAuthor(ctx),
         created: draft.created,
         target: draft.target,
         source: draft.source,

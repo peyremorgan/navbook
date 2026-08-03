@@ -98,8 +98,6 @@ export function findEntity(ws: WsCtx, kind: EntityKind, ref: string): EntityReco
 export interface OpenDraft {
   /** Timestamp to stamp the new entity with. */
   created: string;
-  /** Author string for the acting identity. */
-  author: string;
 }
 
 /**
@@ -107,10 +105,15 @@ export interface OpenDraft {
  *
  * Called before the text is composed, so an author never fills in a buffer only
  * to be told afterwards that there is nowhere to put it.
+ *
+ * The author is deliberately not resolved here. Asking git who is acting can
+ * fail on its own account (an unconfigured `user.email`), and that is not a
+ * reason to reject text the caller has not even supplied yet; callers resolve
+ * it with {@link currentAuthor} at the point they build the file.
  */
 export function prepareOpen(ws: WsCtx): OpenDraft {
   requireNavbook(ws);
-  return { created: nowIso(ws), author: currentAuthor(ws) };
+  return { created: nowIso(ws) };
 }
 
 export interface OpenInput {

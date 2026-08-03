@@ -80,7 +80,6 @@ export interface PrOpenDraft {
   head: string;
   base: string;
   created: string;
-  author: string;
   /** Title to use when the caller supplies none. */
   defaultTitle: string;
   /** The first revision, ready to record. */
@@ -90,6 +89,10 @@ export interface PrOpenDraft {
 /**
  * Work out everything a new pull request needs from git, and check the branch
  * is in a state that can carry one.
+ *
+ * As with {@link prepareOpen}, the author is left to the caller: resolving it
+ * can fail for its own reasons, and that should not pre-empt a complaint about
+ * the text itself.
  */
 export function preparePrOpen(ws: WsCtx, opts: { target?: string } = {}): PrOpenDraft {
   requireNavbook(ws);
@@ -118,7 +121,6 @@ export function preparePrOpen(ws: WsCtx, opts: { target?: string } = {}): PrOpen
     head,
     base,
     created,
-    author: currentAuthor(ws),
     defaultTitle: lastCommitSubject(ws) ?? source,
     revision: { head, base, date: created },
   };

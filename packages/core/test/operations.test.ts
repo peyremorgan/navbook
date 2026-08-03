@@ -28,7 +28,7 @@ import {
   reopenEntity,
   runDoctor,
 } from "../src/ops/index.ts";
-import { makeWsCtx, WorkspaceError, type WsCtx } from "../src/workspace/index.ts";
+import { currentAuthor, makeWsCtx, WorkspaceError, type WsCtx } from "../src/workspace/index.ts";
 
 const IDENTITY = { name: "Nav Test", email: "nav@test.invalid" };
 const NOW = "2026-08-04T16:40:00Z";
@@ -53,8 +53,8 @@ function inWorkspace(use: (ws: WsCtx, dir: string) => void, ids?: string): void 
 
 /** The complete text of a new issue file, as a front end would compose it. */
 function issueText(ws: WsCtx, title: string, body: string): string {
-  const { created, author } = prepareOpen(ws);
-  return newIssueFile({ title, author, created, body });
+  const { created } = prepareOpen(ws);
+  return newIssueFile({ title, author: currentAuthor(ws), created, body });
 }
 
 describe("ops: opening and listing", () => {

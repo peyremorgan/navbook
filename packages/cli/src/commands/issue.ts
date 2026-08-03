@@ -4,6 +4,7 @@
 
 import {
   commitReport,
+  currentAuthor,
   NAVBOOK_ROOT,
   newIssueFile,
   openIssue,
@@ -24,7 +25,7 @@ export interface IssueOpenOptions extends GlobalFlags {
 
 export function cmdIssueOpen(ctx: Ctx, title: string, opts: IssueOpenOptions): void {
   if (title.trim() === "") fail("an issue needs a title");
-  const { created, author } = prepareOpen(ctx);
+  const { created } = prepareOpen(ctx);
 
   const composed = composeFile(ctx, {
     message: opts.message,
@@ -33,7 +34,7 @@ export function cmdIssueOpen(ctx: Ctx, title: string, opts: IssueOpenOptions): v
     render: (body) =>
       newIssueFile({
         title,
-        author,
+        author: currentAuthor(ctx),
         created,
         body,
         labels: opts.label,
