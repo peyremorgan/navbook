@@ -204,6 +204,36 @@ describe("ID minting", () => {
       repo.cleanup();
     }
   });
+
+  it("prints nothing when it cannot mint every ID that was asked for", () => {
+    const repo = makeNavRepo();
+    try {
+      // `nav id -n 3 > ids` is the point of the command, so a run that fails
+      // must not leave a short list behind for the caller to mistake for a
+      // whole one. The fixture for this case pins the exit code and the
+      // message but deliberately leaves stdout open (doc/spec/fixtures/
+      // operations/id/exhausted-scripted-ids); this is the CLI's choice.
+      const result = repo.nav(["id", "--count", "3"], { NAV_IDS: "aaa11111,bbb22222" });
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /NAV_IDS is exhausted after 2 id\(s\)/);
+      assert.equal(result.stdout, "", "no partial list");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("prints every ID when it can mint them all", () => {
+    const repo = makeNavRepo();
+    try {
+      const result = repo.nav(["id", "--count", "3"], {
+        NAV_IDS: "aaa11111,bbb22222,ccc33333",
+      });
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(result.stdout, "aaa11111\nbbb22222\nccc33333\n");
+    } finally {
+      repo.cleanup();
+    }
+  });
 });
 
 describe("nav install --completions", () => {
