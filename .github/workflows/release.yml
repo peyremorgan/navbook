@@ -43,13 +43,34 @@ jobs:
       - name: the built CLI must pass the conformance suite too
         run: NAV_BIN="node $PWD/packages/cli/dist/main.js" pnpm test:conformance
 
+      # Two tools, each doing what only it can. pnpm builds the tarballs
+      # because only it applies publishConfig.exports and rewrites the
+      # workspace: dependency to a real version; npm uploads them because only
+      # it signs a publish with provenance. Publishing a finished tarball needs
+      # neither rewrite, so nothing is lost in the handover.
+      - name: build the tarballs
+        run: |
+          pnpm --filter @navbook/core pack --pack-destination "$RUNNER_TEMP"
+          pnpm --filter @navbook/cli pack --pack-destination "$RUNNER_TEMP"
+
+      - name: install both tarballs and run the CLI, as a consumer would
+        run: |
+          mkdir -p /tmp/smoke && cd /tmp/smoke && npm init -y >/dev/null
+          npm install --silent "$RUNNER_TEMP"/navbook-core-*.tgz
+          npm install --silent "$RUNNER_TEMP"/navbook-cli-*.tgz
+          git init -q -b main smoke && cd smoke
+          test "$(../node_modules/.bin/nav --version)" = "${GITHUB_REF_NAME#v}"
+          ../node_modules/.bin/nav init
+          ../node_modules/.bin/nav issue open "Release smoke test" -m "It runs."
+          ../node_modules/.bin/nav doctor
+
       # Core first: the CLI depends on this exact version, so publishing it
       # second means the dependency is already resolvable on the registry.
-      - run: pnpm --filter @navbook/core publish --access public --no-git-checks
+      - name: publish @navbook/core
+        run: npm publish "$RUNNER_TEMP"/navbook-core-*.tgz --provenance --access public
         env:
-          NPM_CONFIG_PROVENANCE: true
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: pnpm --filter @navbook/cli publish --access public --no-git-checks
+      - name: publish @navbook/cli
+        run: npm publish "$RUNNER_TEMP"/navbook-cli-*.tgz --provenance --access public
         env:
-          NPM_CONFIG_PROVENANCE: true
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

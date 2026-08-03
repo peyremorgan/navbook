@@ -11,6 +11,13 @@
     "markdown"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peyremorgan/navbook.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/peyremorgan/navbook#readme",
+  "bugs": "https://github.com/peyremorgan/navbook/issues",
   "type": "module",
   "publishConfig": {
     "access": "public"
