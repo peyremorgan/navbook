@@ -181,7 +181,9 @@ function buildPrCommand(getCtx: () => Ctx): Command {
     );
 
   addSharedVerbs(pr, "pr", getCtx, {
-    extraColumns: [{ header: "target", value: (entity) => stringOf(entity, "target") }],
+    // No extra columns here: `cmdPrList` owns the PR listing's columns, because
+    // it appends a `refs` one when scanning across branches.
+    extraColumns: [],
     runClose: (ctx, id, options) => cmdPrClose(ctx, id, options),
     configureList: (command) => {
       command.option("--all-refs", "scan all local and fetched remote branches, not just this one");
@@ -189,11 +191,6 @@ function buildPrCommand(getCtx: () => Ctx): Command {
     runList: (ctx, terms, options) => cmdPrList(ctx, terms, options),
   });
   return pr;
-}
-
-function stringOf(entity: { fm: Record<string, unknown> }, key: string): string {
-  const value = entity.fm[key];
-  return typeof value === "string" ? value : "";
 }
 
 function buildIssueCommand(getCtx: () => Ctx): Command {
