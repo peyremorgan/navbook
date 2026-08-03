@@ -33,6 +33,7 @@ import {
   resolveEntityForEdit,
   revalidateEntityFile,
   toNdjson,
+  uncommittedUnder,
   validateComment,
 } from "@navbook/core";
 import type { Ctx } from "../context.ts";
@@ -230,7 +231,9 @@ export interface DeleteOptions extends GlobalFlags {
 export function cmdDelete(ctx: Ctx, kind: EntityKind, prefix: string, opts: DeleteOptions): void {
   const deletion = planEntityDelete(ctx, kind, prefix, { commit: opts.commit });
   const { entity } = deletion;
-  if (!opts.force) confirmLoss(ctx, entity, deletion.uncommitted);
+  // Only look for work git could not give back when there is a question to
+  // ask: the scan is a full `git status`, and --force says not to ask.
+  if (!opts.force) confirmLoss(ctx, entity, uncommittedUnder(ctx, entity));
 
   const result = executeEntityDelete(ctx, deletion, { commit: opts.commit });
   ctx.stdout.write(`Deleted #${entity.id}  ${NAVBOOK_ROOT}/${entity.dirPath}/\n`);

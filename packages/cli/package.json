@@ -36,7 +36,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/cli/**/*.test.ts\"",
     "bench": "node --test \"test/perf/**/*.test.ts\"",
-    "prepack": "pnpm build",
+    "prepack": "node ../../script/require-pnpm.js && pnpm build",
     "prepublishOnly": "node ../../script/require-pnpm.js"
   },
   "dependencies": {

@@ -37,7 +37,10 @@ export interface WsCtx {
 export interface MakeWsCtxOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
-  /** Skip repository discovery, for commands that work outside a repository. */
+  /**
+   * Set false to tolerate not being in a repository, for commands that work
+   * outside one. Discovery still runs; only its failure stops being fatal.
+   */
   requireRepo?: boolean;
   /**
    * Who is acting, when that is not the local git user.

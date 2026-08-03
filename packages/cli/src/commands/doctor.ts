@@ -9,7 +9,7 @@
 
 import { type Diagnostic, hasErrors, NAVBOOK_ROOT, runDoctor } from "@navbook/core";
 import type { Ctx } from "../context.ts";
-import { NavError } from "../errors.ts";
+import { failFormat } from "../errors.ts";
 
 export interface DoctorOptions {
   staged?: boolean;
@@ -29,7 +29,7 @@ export function cmdDoctor(ctx: Ctx, opts: DoctorOptions): void {
   }
 
   if (hasErrors(diagnostics)) {
-    throw new NavError(`${countErrors(diagnostics)} format violation(s) found`, { exitCode: 2 });
+    failFormat(`${countErrors(diagnostics)} format violation(s) found`);
   }
 }
 

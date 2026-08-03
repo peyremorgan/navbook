@@ -8,6 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { gitRun } from "../src/git/exec.ts";
 import {
   currentAuthor,
   makeWsCtx,
@@ -16,10 +17,21 @@ import {
   wsFail,
 } from "../src/workspace/index.ts";
 
-/** A directory outside any repository, so discovery has a known answer. */
+/**
+ * A directory outside any repository, so discovery has a known answer.
+ *
+ * The assumption that the temporary directory is not itself inside a checkout
+ * is checked rather than trusted: if it ever fails, the tests below would
+ * report a confusing discovery result instead of a broken environment.
+ */
 function outsideAnyRepo<T>(use: (dir: string) => T): T {
   const dir = mkdtempSync(join(tmpdir(), "navbook-wsctx-"));
   try {
+    assert.equal(
+      gitRun(["rev-parse", "--show-toplevel"], { cwd: dir }).code === 0,
+      false,
+      `${tmpdir()} is inside a git repository, so this suite cannot test discovery failure`,
+    );
     return use(dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });

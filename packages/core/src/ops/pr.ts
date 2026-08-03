@@ -80,8 +80,8 @@ export interface PrOpenDraft {
   head: string;
   base: string;
   created: string;
-  /** Title to use when the caller supplies none. */
-  defaultTitle: string;
+  /** The pull request's title: the caller's, or the last commit's subject. */
+  title: string;
   /** The first revision, ready to record. */
   revision: Revision;
 }
@@ -94,7 +94,10 @@ export interface PrOpenDraft {
  * can fail for its own reasons, and that should not pre-empt a complaint about
  * the text itself.
  */
-export function preparePrOpen(ws: WsCtx, opts: { target?: string } = {}): PrOpenDraft {
+export function preparePrOpen(
+  ws: WsCtx,
+  opts: { target?: string; title?: string } = {},
+): PrOpenDraft {
   requireNavbook(ws);
   const source = currentBranch(ws.repoRoot);
   if (!source) {
@@ -121,7 +124,8 @@ export function preparePrOpen(ws: WsCtx, opts: { target?: string } = {}): PrOpen
     head,
     base,
     created,
-    defaultTitle: lastCommitSubject(ws) ?? source,
+    // Only ask git for a subject when there is no title to use it for.
+    title: opts.title ?? lastCommitSubject(ws) ?? source,
     revision: { head, base, date: created },
   };
 }
@@ -192,10 +196,14 @@ export function updatePr(ws: WsCtx, ref: string, opts: CommitOptions): PrUpdateR
  *
  * A review is evidence about a specific state of the branch (spec 02 §2.7), so
  * a pull request with no recorded revision has nothing to bind to.
+ *
+ * An empty `wanted` counts as naming nothing, not as a prefix every revision
+ * starts with — otherwise `--revision ""` would report the pull request's own
+ * revisions back as an ambiguity.
  */
 export function bindReviewRevision(entity: EntityRecord, wanted?: string): string {
   const heads = readRevisions(entity.fm).map((revision) => revision.head);
-  if (wanted === undefined) {
+  if (!wanted) {
     const latest = heads[heads.length - 1];
     if (!latest) {
       wsFail("precondition", `#${entity.id} has no recorded revision to bind this review to`);

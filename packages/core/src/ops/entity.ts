@@ -316,23 +316,18 @@ function destination(entity: EntityRecord, status: string): string {
 export interface EntityDeletePlan {
   entity: EntityRecord;
   plan: Plan;
-  /**
-   * Paths under the entity holding work git could not give back. Deleting
-   * loses them; everything else is recoverable from history.
-   */
-  uncommitted: string[];
 }
 
 /**
- * Describe what removing an entity's directory would destroy — spec 04 §4.3.
+ * Describe removing an entity's directory — spec 04 §4.3.
  *
  * Closing records how work ended; deleting says it should never have been
  * filed, which is why it takes the directory rather than moving it, and why it
- * works whatever the status. The guard runs here, ahead of any question the
- * caller asks: --commit refuses outright while unrelated work is staged, and
- * confirming a deletion that then cannot happen is worse than being told why
- * up front. {@link executeEntityDelete} checks again, against an index nothing
- * has touched in between.
+ * works whatever the status. The staged-work guard runs here, ahead of any
+ * question the caller asks: --commit refuses outright while unrelated work is
+ * staged, and confirming a deletion that then cannot happen is worse than being
+ * told why up front. {@link executeEntityDelete} checks again, against an index
+ * nothing has touched in between.
  */
 export function planEntityDelete(
   ws: WsCtx,
@@ -343,7 +338,19 @@ export function planEntityDelete(
   const entity = findEntity(ws, kind, ref);
   const plan = planDelete(entity);
   if (opts.commit) assertNoUnrelatedStaged(ws, planPaths(plan).map(repoPath));
-  return { entity, plan, uncommitted: uncommittedPaths(ws.repoRoot, repoPath(entity.dirPath)) };
+  return { entity, plan };
+}
+
+/**
+ * Paths under an entity holding work git could not give back — what a delete
+ * would destroy irrecoverably, as opposed to merely removing from the tree.
+ *
+ * Separate from {@link planEntityDelete} because it is the expensive part: it
+ * is a full `git status` including untracked files, and a caller that will not
+ * stop to ask has no use for the answer.
+ */
+export function uncommittedUnder(ws: WsCtx, entity: EntityRecord): string[] {
+  return uncommittedPaths(ws.repoRoot, repoPath(entity.dirPath));
 }
 
 /** Carry out a delete the caller has decided to go ahead with. */

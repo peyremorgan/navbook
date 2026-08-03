@@ -41,7 +41,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/**/*.test.ts\"",
-    "prepack": "pnpm build",
+    "prepack": "node ../../script/require-pnpm.js && pnpm build",
     "prepublishOnly": "node ../../script/require-pnpm.js"
   },
   "dependencies": {

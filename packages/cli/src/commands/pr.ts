@@ -60,8 +60,7 @@ export interface PrOpenOptions extends GlobalFlags {
 }
 
 export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
-  const draft = preparePrOpen(ctx, { target: opts.target });
-  const title = opts.title ?? draft.defaultTitle;
+  const draft = preparePrOpen(ctx, { target: opts.target, title: opts.title });
 
   const composed = composeFile(ctx, {
     message: opts.message,
@@ -69,7 +68,7 @@ export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
     noun: "pull request",
     render: (body) =>
       newPrFile({
-        title,
+        title: draft.title,
         author: currentAuthor(ctx),
         created: draft.created,
         target: draft.target,
@@ -86,7 +85,7 @@ export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
 
   const { id, dirPath, run } = openPr(
     ctx,
-    { content: composed.content, fallbackTitle: title },
+    { content: composed.content, fallbackTitle: draft.title },
     { commit: opts.commit },
   );
 
