@@ -56,11 +56,21 @@ import {
   isTreeClean,
   resolveSha,
 } from "../../git/repo.ts";
-import { commitReport, runPlan } from "../commit-flow.ts";
-import { type Ctx, nowIso } from "../context.ts";
+import {
+  applyOps,
+  asId,
+  commitReport,
+  loadRepo,
+  nowIso,
+  repoPath,
+  requireNavbook,
+  resolveEntity,
+  runPlan,
+  scanAllIds,
+  stage,
+} from "../../workspace/index.ts";
+import type { Ctx } from "../context.ts";
 import { fail } from "../errors.ts";
-import { asId, resolveEntity } from "../resolve.ts";
-import { applyOps, loadRepo, repoPath, requireNavbook, scanAllIds, stage } from "../workspace.ts";
 import { composeFile } from "./compose.ts";
 import {
   type CloseOptions,

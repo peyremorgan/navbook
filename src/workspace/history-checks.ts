@@ -18,7 +18,7 @@ import {
 } from "../core/validate.ts";
 import { addedAt, blobAt, fileVersions, isAncestor, objectExists } from "../git/history.ts";
 import { currentBranch, resolveSha } from "../git/repo.ts";
-import type { Ctx } from "./context.ts";
+import type { WsCtx } from "./ctx.ts";
 import { repoPath } from "./workspace.ts";
 
 /**
@@ -31,25 +31,25 @@ import { repoPath } from "./workspace.ts";
  */
 export const TIMESTAMP_SKEW_HOURS = 48;
 
-export function runHistoryChecks(ctx: Ctx, repo: Repo): Diagnostic[] {
+export function runHistoryChecks(ws: WsCtx, repo: Repo): Diagnostic[] {
   return [
-    ...checkAppendOnly(ctx, repo),
-    ...checkMergedButOpen(ctx, repo),
-    ...checkTimestamps(ctx, repo),
+    ...checkAppendOnly(ws, repo),
+    ...checkMergedButOpen(ws, repo),
+    ...checkTimestamps(ws, repo),
   ];
 }
 
 /* ------------------------------------------- D7: revisions are append-only */
 
-function checkAppendOnly(ctx: Ctx, repo: Repo): Diagnostic[] {
+function checkAppendOnly(ws: WsCtx, repo: Repo): Diagnostic[] {
   const out: Diagnostic[] = [];
   for (const pr of repo.prs) {
-    const versions = fileVersions(ctx.repoRoot, repoPath(pr.filePath));
+    const versions = fileVersions(ws.repoRoot, repoPath(pr.filePath));
     if (versions.length < 2) continue;
 
     const lists = [];
     for (const version of versions) {
-      const text = blobAt(ctx.repoRoot, version.sha, version.path);
+      const text = blobAt(ws.repoRoot, version.sha, version.path);
       if (text === null) continue;
       try {
         lists.push(readRevisions(parseFile(text).fm));
@@ -72,13 +72,13 @@ function checkAppendOnly(ctx: Ctx, repo: Repo): Diagnostic[] {
 
 /* ------------------------------------ D9: merged but not archived (03 §3.5) */
 
-function checkMergedButOpen(ctx: Ctx, repo: Repo): Diagnostic[] {
-  const head = resolveSha(ctx.repoRoot, "HEAD");
+function checkMergedButOpen(ws: WsCtx, repo: Repo): Diagnostic[] {
+  const head = resolveSha(ws.repoRoot, "HEAD");
   if (!head) return [];
   // "Merged" only means anything on the branch the PR asked to merge into. On
   // its own source branch the head is trivially an ancestor of HEAD, and on an
   // unrelated branch containing it the fact is not actionable.
-  const branch = currentBranch(ctx.repoRoot);
+  const branch = currentBranch(ws.repoRoot);
   if (!branch) return [];
 
   const out: Diagnostic[] = [];
@@ -88,8 +88,8 @@ function checkMergedButOpen(ctx: Ctx, repo: Repo): Diagnostic[] {
     const revisions = readRevisions(pr.fm);
     const latest = revisions[revisions.length - 1];
     // An unfetched head is not evidence of anything.
-    if (!latest || !objectExists(ctx.repoRoot, latest.head)) continue;
-    if (!isAncestor(ctx.repoRoot, latest.head, head)) continue;
+    if (!latest || !objectExists(ws.repoRoot, latest.head)) continue;
+    if (!isAncestor(ws.repoRoot, latest.head, head)) continue;
 
     out.push({
       check: "D9",
@@ -104,7 +104,7 @@ function checkMergedButOpen(ctx: Ctx, repo: Repo): Diagnostic[] {
 
 /* --------------------------------- D10: timestamps versus the commit record */
 
-function checkTimestamps(ctx: Ctx, repo: Repo): Diagnostic[] {
+function checkTimestamps(ws: WsCtx, repo: Repo): Diagnostic[] {
   const out: Diagnostic[] = [];
   for (const entity of allEntities(repo)) {
     // An entity whose timestamps legitimately predate the commit that carries
@@ -114,7 +114,7 @@ function checkTimestamps(ctx: Ctx, repo: Repo): Diagnostic[] {
 
     const created = typeof entity.fm.created === "string" ? parseIso(entity.fm.created) : null;
     if (created) {
-      const added = addedAt(ctx.repoRoot, repoPath(entity.filePath));
+      const added = addedAt(ws.repoRoot, repoPath(entity.filePath));
       if (added && !checkTimestampSkew(created, added.authored, TIMESTAMP_SKEW_HOURS)) {
         out.push({
           check: "D10",
@@ -126,7 +126,7 @@ function checkTimestamps(ctx: Ctx, repo: Repo): Diagnostic[] {
     }
 
     for (const comment of entity.comments) {
-      const added = addedAt(ctx.repoRoot, repoPath(comment.path));
+      const added = addedAt(ws.repoRoot, repoPath(comment.path));
       if (!added) continue;
       if (checkTimestampSkew(comment.date, added.authored, TIMESTAMP_SKEW_HOURS)) continue;
       out.push({

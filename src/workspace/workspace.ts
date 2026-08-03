@@ -26,8 +26,8 @@ import { parseDirName } from "../core/slug.ts";
 import { type NavTree, parseTree, type Repo } from "../core/tree.ts";
 import { gitMaybe } from "../git/exec.ts";
 import { add } from "../git/index-ops.ts";
-import type { Ctx } from "./context.ts";
-import { fail } from "./errors.ts";
+import type { WsCtx } from "./ctx.ts";
+import { wsFail } from "./errors.ts";
 
 export interface ReadTreeOptions {
   /** Skip `comments/` directories when the command cannot need them. */
@@ -68,24 +68,26 @@ function walk(
 }
 
 /** Load the repository model from the working tree. */
-export function loadRepo(ctx: Ctx, opts: ReadTreeOptions = {}): Repo {
-  requireNavbook(ctx);
+export function loadRepo(ws: WsCtx, opts: ReadTreeOptions = {}): Repo {
+  requireNavbook(ws);
   const includeComments = opts.includeComments !== false;
-  const files = readNavTree(ctx.navRoot, { includeComments });
+  const files = readNavTree(ws.navRoot, { includeComments });
   return parseTree(files, { commentsLoaded: includeComments });
 }
 
 /** Load the repository, reading comment bodies only when the query needs them. */
-export function loadRepoForQuery(ctx: Ctx, query: Query): Repo {
-  return loadRepo(ctx, { includeComments: needsComments(query) });
+export function loadRepoForQuery(ws: WsCtx, query: Query): Repo {
+  return loadRepo(ws, { includeComments: needsComments(query) });
 }
 
 /** Fail with a helpful message when the repository has no `.navbook/` yet. */
-export function requireNavbook(ctx: Ctx): void {
-  if (!ctx.hasNavbook) {
-    fail(`not a Navbook repository: no ${NAVBOOK_ROOT}/ at the repository root`, [
-      "run 'nav init' to create it",
-    ]);
+export function requireNavbook(ws: WsCtx): void {
+  if (!ws.hasNavbook) {
+    wsFail(
+      "not-a-navbook-repo",
+      `not a Navbook repository: no ${NAVBOOK_ROOT}/ at the repository root`,
+      ["run 'nav init' to create it"],
+    );
   }
 }
 
@@ -95,8 +97,8 @@ export function repoPath(navRelative: string): string {
 }
 
 /** Absolute filesystem path for a path relative to `.navbook/`. */
-export function absPath(ctx: Ctx, navRelative: string): string {
-  return join(ctx.navRoot, ...navRelative.split("/"));
+export function absPath(ws: WsCtx, navRelative: string): string {
+  return join(ws.navRoot, ...navRelative.split("/"));
 }
 
 export interface ApplyResult {
@@ -111,35 +113,44 @@ export interface ApplyResult {
  * produces the same index state as `git mv` while also working on entities that
  * have not been committed yet.
  */
-export function applyOps(ctx: Ctx, ops: readonly FileOp[]): ApplyResult {
+export function applyOps(ws: WsCtx, ops: readonly FileOp[]): ApplyResult {
   const touched = new Set<string>();
   for (const op of ops) {
     if (op.op === "write") {
-      const target = absPath(ctx, op.path);
+      const target = absPath(ws, op.path);
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, op.content, "utf8");
       touched.add(repoPath(op.path));
       continue;
     }
     if (op.op === "remove") {
-      const target = absPath(ctx, op.path);
-      if (!existsSync(target)) fail(`cannot remove ${repoPath(op.path)}: it does not exist`);
+      const target = absPath(ws, op.path);
+      if (!existsSync(target)) {
+        wsFail("missing-path", `cannot remove ${repoPath(op.path)}: it does not exist`);
+      }
       rmSync(target, { recursive: true });
-      pruneEmptyParents(ctx, dirname(target));
+      pruneEmptyParents(ws, dirname(target));
       touched.add(repoPath(op.path));
       continue;
     }
-    const from = absPath(ctx, op.from);
-    const to = absPath(ctx, op.to);
-    if (!existsSync(from)) fail(`cannot move ${repoPath(op.from)}: it does not exist`);
-    if (existsSync(to)) fail(`cannot move ${repoPath(op.from)}: ${repoPath(op.to)} already exists`);
+    const from = absPath(ws, op.from);
+    const to = absPath(ws, op.to);
+    if (!existsSync(from)) {
+      wsFail("missing-path", `cannot move ${repoPath(op.from)}: it does not exist`);
+    }
+    if (existsSync(to)) {
+      wsFail(
+        "destination-exists",
+        `cannot move ${repoPath(op.from)}: ${repoPath(op.to)} already exists`,
+      );
+    }
     mkdirSync(dirname(to), { recursive: true });
     renameSync(from, to);
-    pruneEmptyParents(ctx, dirname(from));
+    pruneEmptyParents(ws, dirname(from));
     touched.add(repoPath(op.from));
     touched.add(repoPath(op.to));
   }
-  stage(ctx, [...touched]);
+  stage(ws, [...touched]);
   return { touched: [...touched].sort() };
 }
 
@@ -149,9 +160,9 @@ export function applyOps(ctx: Ctx, ops: readonly FileOp[]): ApplyResult {
  * leaving them behind would make the working tree disagree with a fresh clone.
  * The status directories survive because each holds a `.gitkeep`.
  */
-function pruneEmptyParents(ctx: Ctx, startDir: string): void {
+function pruneEmptyParents(ws: WsCtx, startDir: string): void {
   let current = startDir;
-  while (current.startsWith(ctx.navRoot) && current !== ctx.navRoot) {
+  while (current.startsWith(ws.navRoot) && current !== ws.navRoot) {
     try {
       if (readdirSync(current).length > 0) return;
       rmdirSync(current);
@@ -163,13 +174,13 @@ function pruneEmptyParents(ctx: Ctx, startDir: string): void {
 }
 
 /** Stage paths, tolerating those that no longer exist and were never tracked. */
-export function stage(ctx: Ctx, paths: readonly string[]): void {
+export function stage(ws: WsCtx, paths: readonly string[]): void {
   const stageable = paths.filter((path) => {
-    if (existsSync(join(ctx.repoRoot, ...path.split("/")))) return true;
-    const tracked = gitMaybe(["ls-files", "--", path], { cwd: ctx.repoRoot });
+    if (existsSync(join(ws.repoRoot, ...path.split("/")))) return true;
+    const tracked = gitMaybe(["ls-files", "--", path], { cwd: ws.repoRoot });
     return tracked !== null && tracked !== "";
   });
-  add(ctx.repoRoot, stageable);
+  add(ws.repoRoot, stageable);
 }
 
 /**
@@ -207,6 +218,6 @@ export function scanAllIds(navRoot: string): Set<string> {
 }
 
 /** Repository-relative path of an absolute path, in POSIX form. */
-export function toRepoRelative(ctx: Ctx, absolute: string): string {
-  return relative(ctx.repoRoot, absolute).split(sep).join("/");
+export function toRepoRelative(ws: WsCtx, absolute: string): string {
+  return relative(ws.repoRoot, absolute).split(sep).join("/");
 }

@@ -6,7 +6,7 @@
 
 import { MIN_PREFIX_LENGTH, resolvePrefix } from "../core/id.ts";
 import { allEntities, type EntityKind, type EntityRecord, type Repo } from "../core/tree.ts";
-import { fail } from "./errors.ts";
+import { wsFail } from "./errors.ts";
 
 const NOUN: Record<EntityKind, string> = { issue: "issue", pr: "pull request" };
 const COMMAND: Record<EntityKind, string> = { issue: "nav issue", pr: "nav pr" };
@@ -33,15 +33,17 @@ export function resolveEntity(repo: Repo, prefix: string, kind: EntityKind): Ent
   if (!resolution.ok) {
     switch (resolution.reason) {
       case "too-short":
-        fail(
+        wsFail(
+          "prefix-too-short",
           `'${prefix}' is too short; ID prefixes must be at least ${MIN_PREFIX_LENGTH} characters`,
         );
         break;
       case "not-found":
-        fail(`no ${NOUN[kind]} matches '${prefix}'`);
+        wsFail("not-found", `no ${NOUN[kind]} matches '${prefix}'`);
         break;
       default:
-        fail(
+        wsFail(
+          "ambiguous",
           `'${prefix}' is ambiguous; ${resolution.matches.length} entities match`,
           resolution.matches.map((id) => describe(entities.find((e) => e.id === id))),
         );
@@ -53,7 +55,8 @@ export function resolveEntity(repo: Repo, prefix: string, kind: EntityKind): Ent
   if (wanted) return wanted;
 
   const other = matches[0] as EntityRecord;
-  fail(
+  wsFail(
+    "wrong-kind",
     `#${other.id} is ${other.kind === "pr" ? "a pull request" : "an issue"} — use '${COMMAND[other.kind]} ${verbHint()}'`,
   );
 }
@@ -76,15 +79,17 @@ export function resolveComment(entity: EntityRecord, prefix: string): string {
   if (resolution.ok) return resolution.id;
   switch (resolution.reason) {
     case "too-short":
-      fail(
+      wsFail(
+        "prefix-too-short",
         `'${prefix}' is too short; ID prefixes must be at least ${MIN_PREFIX_LENGTH} characters`,
       );
       break;
     case "not-found":
-      fail(`no comment of #${entity.id} matches '${prefix}'`);
+      wsFail("not-found", `no comment of #${entity.id} matches '${prefix}'`);
       break;
     default:
-      fail(
+      wsFail(
+        "ambiguous",
         `'${prefix}' is ambiguous within #${entity.id}`,
         resolution.matches.map((id) => `#${id}`),
       );

@@ -10,8 +10,8 @@
 import type { Plan } from "../core/ops.ts";
 import { planPaths } from "../core/ops.ts";
 import { commit, composeMessage, stagedPaths } from "../git/index-ops.ts";
-import type { Ctx } from "./context.ts";
-import { fail } from "./errors.ts";
+import type { WsCtx } from "./ctx.ts";
+import { wsFail } from "./errors.ts";
 import { applyOps, repoPath } from "./workspace.ts";
 
 /** True when `path` is `allowed` or lives underneath it. */
@@ -23,13 +23,13 @@ function isWithin(path: string, allowed: string): boolean {
  * Refuse to commit when the index already holds changes this operation did not
  * make. Called before any file is written, so a refusal leaves nothing behind.
  */
-export function assertNoUnrelatedStaged(ctx: Ctx, allowedPaths: readonly string[]): void {
-  const staged = stagedPaths(ctx.repoRoot);
+export function assertNoUnrelatedStaged(ws: WsCtx, allowedPaths: readonly string[]): void {
+  const staged = stagedPaths(ws.repoRoot);
   const unrelated = staged.filter(
     (path) => !allowedPaths.some((allowed) => isWithin(path, allowed)),
   );
   if (unrelated.length === 0) return;
-  fail("--commit refuses to run with unrelated changes already staged", [
+  wsFail("unrelated-staged", "--commit refuses to run with unrelated changes already staged", [
     ...unrelated.slice(0, 10).map((path) => `  ${path}`),
     ...(unrelated.length > 10 ? [`  ... and ${unrelated.length - 10} more`] : []),
     "commit or unstage them first, or omit --commit",
@@ -50,18 +50,18 @@ export interface RunPlanResult {
 }
 
 /** Apply a plan and, with `--commit`, wrap it in its `docs` commit. */
-export function runPlan(ctx: Ctx, plan: Plan, opts: RunPlanOptions): RunPlanResult {
+export function runPlan(ws: WsCtx, plan: Plan, opts: RunPlanOptions): RunPlanResult {
   const allowed = planPaths(plan).map(repoPath);
-  if (opts.commit) assertNoUnrelatedStaged(ctx, allowed);
+  if (opts.commit) assertNoUnrelatedStaged(ws, allowed);
 
-  const { touched } = applyOps(ctx, plan.ops);
+  const { touched } = applyOps(ws, plan.ops);
   const message = composeMessage(plan.message, plan.trailers);
   // A plan can land as a no-op: an edit that changed nothing, or a delete of an
   // entity that was never committed in the first place. git refuses an empty
   // commit, and it is right to — there is nothing to record. Report that
   // plainly instead of surfacing git's failure for a command that succeeded.
-  const committed = opts.commit === true && stagedPaths(ctx.repoRoot).length > 0;
-  if (committed) commit(ctx.repoRoot, message);
+  const committed = opts.commit === true && stagedPaths(ws.repoRoot).length > 0;
+  if (committed) commit(ws.repoRoot, message);
   return { touched, committed, subject: plan.message, message };
 }
 

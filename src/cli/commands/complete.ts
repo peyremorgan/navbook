@@ -7,8 +7,8 @@
  */
 
 import { allEntities, type EntityKind } from "../../core/tree.ts";
+import { loadRepo } from "../../workspace/index.ts";
 import type { Ctx } from "../context.ts";
-import { loadRepo } from "../workspace.ts";
 
 const ROOT_COMMANDS = ["issue", "pr", "init", "id", "doctor", "install", "uninstall"];
 const SHARED_VERBS = ["open", "list", "show", "edit", "comment", "close", "reopen", "delete"];

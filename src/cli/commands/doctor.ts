@@ -12,10 +12,15 @@ import { parseTree, type Repo } from "../../core/tree.ts";
 import { type Diagnostic, hasErrors, sortDiagnostics, validateRepo } from "../../core/validate.ts";
 import { git, gitMaybe, splitNul } from "../../git/exec.ts";
 import { stagedContent, stagedPaths } from "../../git/index-ops.ts";
+import {
+  applyOps,
+  loadRepo,
+  repoPath,
+  requireNavbook,
+  runHistoryChecks,
+} from "../../workspace/index.ts";
 import type { Ctx } from "../context.ts";
 import { NavError } from "../errors.ts";
-import { runHistoryChecks } from "../history-checks.ts";
-import { applyOps, loadRepo, repoPath, requireNavbook } from "../workspace.ts";
 
 export interface DoctorOptions {
   staged?: boolean;

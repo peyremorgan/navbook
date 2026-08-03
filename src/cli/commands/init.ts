@@ -5,10 +5,9 @@
 import { existsSync } from "node:fs";
 import { NAVBOOK_ROOT } from "../../core/json.ts";
 import { planInit } from "../../core/ops.ts";
-import { commitReport, runPlan } from "../commit-flow.ts";
+import { commitReport, runPlan, scanAllIds } from "../../workspace/index.ts";
 import type { Ctx } from "../context.ts";
 import { fail } from "../errors.ts";
-import { scanAllIds } from "../workspace.ts";
 import type { GlobalFlags } from "./entity.ts";
 
 /** Create the `.navbook/` skeleton. */

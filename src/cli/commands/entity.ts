@@ -32,15 +32,24 @@ import {
 import { isQueryError, matchesQuery, parseQuery, type Query } from "../../core/query.ts";
 import type { EntityKind, EntityRecord, Repo } from "../../core/tree.ts";
 import { uncommittedPaths } from "../../git/index-ops.ts";
-import { assertNoUnrelatedStaged, commitReport, runPlan } from "../commit-flow.ts";
+import {
+  absPath,
+  assertNoUnrelatedStaged,
+  commitReport,
+  loadRepo,
+  loadRepoForQuery,
+  repoPath,
+  resolveComment,
+  resolveEntity,
+  runPlan,
+  scanAllIds,
+} from "../../workspace/index.ts";
 import type { Ctx } from "../context.ts";
 import { openInEditor } from "../editor.ts";
 import { fail } from "../errors.ts";
 import { askYesNo } from "../prompt.ts";
 import { renderDetail } from "../render/detail.ts";
 import { type Column, renderTable } from "../render/table.ts";
-import { resolveComment, resolveEntity } from "../resolve.ts";
-import { absPath, loadRepo, loadRepoForQuery, repoPath, scanAllIds } from "../workspace.ts";
 import { composeFile } from "./compose.ts";
 
 export interface GlobalFlags {

@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { scanAllIds } from "../../src/cli/workspace.ts";
+import { scanAllIds } from "../../src/workspace/index.ts";
 import { makeNavRepo, type TempRepo } from "../helpers/temprepo.ts";
 
 function withIssue(): TempRepo {

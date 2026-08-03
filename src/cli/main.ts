@@ -5,6 +5,7 @@
 
 import { realpathSync } from "node:fs";
 import { CommanderError } from "commander";
+import { WorkspaceError } from "../workspace/index.ts";
 import { type Ctx, makeContext } from "./context.ts";
 import { type ExitCode, NavError } from "./errors.ts";
 import { buildProgram } from "./program.ts";
@@ -55,6 +56,14 @@ function report(error: unknown, stderr: NodeJS.WriteStream): ExitCode {
     stderr.write(`nav: ${error.message}\n`);
     for (const line of error.details) stderr.write(`${line}\n`);
     return error.exitCode;
+  }
+  // The workspace and operation layers report failures without knowing what an
+  // exit code is. Every one of them is operational: a format violation reaches
+  // exit 2 only through `doctor`, which raises it here in the CLI.
+  if (error instanceof WorkspaceError) {
+    stderr.write(`nav: ${error.message}\n`);
+    for (const line of error.details) stderr.write(`${line}\n`);
+    return 1;
   }
   stderr.write(`nav: ${error instanceof Error ? error.message : String(error)}\n`);
   return 1;

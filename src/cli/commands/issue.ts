@@ -5,10 +5,15 @@
 import { newIssueFile, validateIssue } from "../../core/files.ts";
 import { NAVBOOK_ROOT } from "../../core/json.ts";
 import { planEntityOpen } from "../../core/ops.ts";
-import { commitReport, runPlan } from "../commit-flow.ts";
-import { type Ctx, nowIso } from "../context.ts";
+import {
+  commitReport,
+  nowIso,
+  requireNavbook,
+  runPlan,
+  scanAllIds,
+} from "../../workspace/index.ts";
+import type { Ctx } from "../context.ts";
 import { fail } from "../errors.ts";
-import { requireNavbook, scanAllIds } from "../workspace.ts";
 import { composeFile } from "./compose.ts";
 import { currentAuthor, type GlobalFlags } from "./entity.ts";
 
