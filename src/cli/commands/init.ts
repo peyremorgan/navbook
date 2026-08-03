@@ -2,21 +2,15 @@
  * `nav init` and `nav id` — the repository-level utilities of spec 04 §4.3.
  */
 
-import { existsSync } from "node:fs";
 import { NAVBOOK_ROOT } from "../../core/json.ts";
-import { planInit } from "../../core/ops.ts";
-import { commitReport, runPlan, scanAllIds } from "../../workspace/index.ts";
+import { initWorkspace, mintIds } from "../../ops/index.ts";
+import { commitReport } from "../../workspace/index.ts";
 import type { Ctx } from "../context.ts";
-import { fail } from "../errors.ts";
 import type { GlobalFlags } from "./entity.ts";
 
 /** Create the `.navbook/` skeleton. */
 export function cmdInit(ctx: Ctx, opts: GlobalFlags): void {
-  if (existsSync(ctx.navRoot)) {
-    fail(`${NAVBOOK_ROOT}/ already exists at the repository root`);
-  }
-  const plan = planInit();
-  const result = runPlan(ctx, plan, { commit: opts.commit });
+  const result = initWorkspace(ctx, { commit: opts.commit });
   ctx.stdout.write(`Created ${NAVBOOK_ROOT}/\n`);
   if (opts.commit) {
     ctx.stdout.write(`${commitReport(result)}\n`);
@@ -27,14 +21,7 @@ export function cmdInit(ctx: Ctx, opts: GlobalFlags): void {
   ctx.stdout.write(`Next: nav issue open "Something is broken"\n`);
 }
 
-/** Mint and print a fresh ID, for hand-editors and scripts. */
+/** Mint and print fresh IDs, for hand-editors and scripts. */
 export function cmdId(ctx: Ctx, opts: { count?: number }): void {
-  const taken = ctx.hasNavbook ? scanAllIds(ctx.navRoot) : new Set<string>();
-  const count = opts.count ?? 1;
-  if (!Number.isInteger(count) || count < 1) fail("--count must be a positive integer");
-  for (let i = 0; i < count; i++) {
-    const id = ctx.mintId(taken);
-    taken.add(id);
-    ctx.stdout.write(`${id}\n`);
-  }
+  for (const id of mintIds(ctx, opts.count ?? 1)) ctx.stdout.write(`${id}\n`);
 }

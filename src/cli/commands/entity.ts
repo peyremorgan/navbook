@@ -3,47 +3,34 @@
  *
  * One implementation serves both nouns; the entity kind only selects which
  * collection is searched, which file name is edited, and which words appear in
- * the report.
+ * the report. The work itself is in `ops/entity.ts` — what is left here is
+ * gathering what the user typed and phrasing what came back.
  */
 
-import { readFileSync } from "node:fs";
 import {
   type NewCommentInput,
   newCommentFile,
-  parseFile,
   readAssignees,
   readLabels,
   validateComment,
-  validateIssue,
-  validatePr,
 } from "../../core/files.ts";
-import { FrontmatterError } from "../../core/frontmatter.ts";
 import { commentJson, entityJson, NAVBOOK_ROOT, toNdjson } from "../../core/json.ts";
+import type { CloseInput } from "../../core/ops.ts";
+import type { EntityKind, EntityRecord } from "../../core/tree.ts";
 import {
-  type CloseInput,
-  docsSubject,
-  type Plan,
-  planClose,
-  planComment,
-  planDelete,
-  planPaths,
-  planReopen,
-} from "../../core/ops.ts";
-import { isQueryError, matchesQuery, parseQuery, type Query } from "../../core/query.ts";
-import type { EntityKind, EntityRecord, Repo } from "../../core/tree.ts";
-import { uncommittedPaths } from "../../git/index-ops.ts";
-import {
-  absPath,
-  assertNoUnrelatedStaged,
-  commitReport,
-  loadRepo,
-  loadRepoForQuery,
-  repoPath,
-  resolveComment,
-  resolveEntity,
-  runPlan,
-  scanAllIds,
-} from "../../workspace/index.ts";
+  applyComment,
+  applyEntityEdit,
+  closeEntity,
+  executeEntityDelete,
+  findEntity,
+  listEntities,
+  parseListQuery,
+  planEntityDelete,
+  reopenEntity,
+  resolveEntityForEdit,
+  revalidateEntityFile,
+} from "../../ops/index.ts";
+import { commitReport, currentAuthor, resolveComment } from "../../workspace/index.ts";
 import type { Ctx } from "../context.ts";
 import { openInEditor } from "../editor.ts";
 import { fail } from "../errors.ts";
@@ -58,27 +45,6 @@ export interface GlobalFlags {
 }
 
 const PLURAL: Record<EntityKind, string> = { issue: "issues", pr: "pull requests" };
-
-/** Author string for the current git identity. */
-export function currentAuthor(ctx: Ctx): string {
-  const identity = ctx.identity();
-  return identity.name ? `${identity.name} <${identity.email}>` : identity.email;
-}
-
-/** Entities of one kind from a parsed repository. */
-export function selectEntities(repo: Repo, kind: EntityKind): EntityRecord[] {
-  return kind === "issue" ? repo.issues : repo.prs;
-}
-
-/** Newest first, with a stable tie-break on ID. */
-export function sortEntities(entities: readonly EntityRecord[]): EntityRecord[] {
-  return [...entities].sort((a, b) => {
-    const aCreated = typeof a.fm.created === "string" ? a.fm.created : "";
-    const bCreated = typeof b.fm.created === "string" ? b.fm.created : "";
-    if (aCreated !== bCreated) return aCreated < bCreated ? 1 : -1;
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-  });
-}
 
 /* --------------------------------------------------------------------- list */
 
@@ -97,12 +63,20 @@ export interface ListOptions extends GlobalFlags {
 }
 
 export function cmdList(ctx: Ctx, kind: EntityKind, terms: string[], opts: ListOptions): void {
-  const query = parseQuery(terms, kind);
-  if (isQueryError(query)) fail(query.message);
+  const query = parseListQuery(terms, kind);
+  const matched = listEntities(ctx, kind, query, {
+    ...(opts.entities ? { entities: opts.entities } : {}),
+  });
+  reportList(ctx, kind, matched, opts);
+}
 
-  const source = opts.entities ?? selectEntities(loadRepoForQuery(ctx, query), kind);
-  const matched = sortEntities(source.filter((entity) => matchesQuery(query, entity)));
-
+/** Render a listing whose entities have already been collected. */
+export function reportList(
+  ctx: Ctx,
+  kind: EntityKind,
+  matched: readonly EntityRecord[],
+  opts: ListOptions,
+): void {
   if (opts.json) {
     if (matched.length === 0) return;
     const objects = matched.map((entity) => entityJson(entity, opts.jsonExtra?.(entity) ?? {}));
@@ -146,17 +120,10 @@ function terminalWidth(ctx: Ctx): number | undefined {
   return typeof columns === "number" && columns > 20 ? columns : undefined;
 }
 
-/** The query a listing will run, for callers that need it before loading. */
-export function parseListQuery(terms: string[], kind: EntityKind): Query {
-  const query = parseQuery(terms, kind);
-  if (isQueryError(query)) fail(query.message);
-  return query;
-}
-
 /* --------------------------------------------------------------------- show */
 
 export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: GlobalFlags): void {
-  const entity = resolveEntity(loadRepo(ctx), prefix, kind);
+  const entity = findEntity(ctx, kind, prefix);
   if (opts.json) {
     ctx.stdout.write(
       `${JSON.stringify(entityJson(entity, { comments: entity.comments.map(commentJson) }))}\n`,
@@ -169,34 +136,16 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: Global
 /* --------------------------------------------------------------------- edit */
 
 export function cmdEdit(ctx: Ctx, kind: EntityKind, prefix: string, opts: GlobalFlags): void {
-  const entity = resolveEntity(loadRepo(ctx), prefix, kind);
-  const target = absPath(ctx, entity.filePath);
-  openInEditor(ctx, target);
+  const { entity, path } = resolveEntityForEdit(ctx, kind, prefix);
+  openInEditor(ctx, path);
 
-  for (const problem of revalidate(target, kind)) {
+  for (const problem of revalidateEntityFile(path, kind)) {
     ctx.stderr.write(`${ctx.colors.yellow("warning:")} ${entity.filePath}: ${problem}\n`);
   }
 
-  // The edited file is the operation's own output, so it belongs in the plan:
-  // that is what tells the --commit guard which staged path is expected.
-  const plan: Plan = {
-    ops: [{ op: "write", path: entity.filePath, content: readFileSync(target, "utf8") }],
-    message: docsSubject(entity.kind, "edit", entity.id),
-    trailers: [{ key: "Refs", id: entity.id }],
-  };
-  const result = runPlan(ctx, plan, { commit: opts.commit });
+  const result = applyEntityEdit(ctx, entity, { commit: opts.commit });
   ctx.stdout.write(`Edited #${entity.id}  ${NAVBOOK_ROOT}/${entity.filePath}\n`);
   if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
-}
-
-function revalidate(path: string, kind: EntityKind): string[] {
-  try {
-    const parsed = parseFile(readFileSync(path, "utf8"));
-    const problems = kind === "issue" ? validateIssue(parsed) : validatePr(parsed);
-    return problems.map((problem) => problem.message);
-  } catch (error) {
-    return [error instanceof Error ? error.message : String(error)];
-  }
 }
 
 /* ------------------------------------------------------------------ comment */
@@ -209,8 +158,7 @@ export interface CommentOptions extends GlobalFlags {
 }
 
 export function cmdComment(ctx: Ctx, kind: EntityKind, prefix: string, opts: CommentOptions): void {
-  const repo = loadRepo(ctx);
-  const entity = resolveEntity(repo, prefix, kind);
+  const entity = findEntity(ctx, kind, prefix);
   const replyTo = opts.replyTo ? resolveComment(entity, opts.replyTo) : undefined;
   const isReview = opts.review?.verdict !== undefined;
   const noun = isReview ? "review" : "comment";
@@ -230,14 +178,17 @@ export function cmdComment(ctx: Ctx, kind: EntityKind, prefix: string, opts: Com
     validate: (parsed) => validateComment(parsed, { onPr: kind === "pr" }),
   });
 
-  const id = ctx.mintId(scanAllIds(ctx.navRoot));
-  const { plan, path } = planComment(entity, id, ctx.now(), composed.content, { review: isReview });
-  const result = runPlan(ctx, plan, { commit: opts.commit });
+  const { id, path, run } = applyComment(
+    ctx,
+    entity,
+    { content: composed.content, review: isReview },
+    { commit: opts.commit },
+  );
 
   ctx.stdout.write(
     `${isReview ? "Reviewed" : "Commented on"} #${entity.id}  ${NAVBOOK_ROOT}/${path}  (#${id})\n`,
   );
-  if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
+  if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
 
 /* ------------------------------------------------------------ close/reopen */
@@ -245,54 +196,17 @@ export function cmdComment(ctx: Ctx, kind: EntityKind, prefix: string, opts: Com
 export interface CloseOptions extends GlobalFlags, CloseInput {}
 
 export function cmdClose(ctx: Ctx, kind: EntityKind, prefix: string, opts: CloseOptions): void {
-  const repo = loadRepo(ctx);
-  const entity = resolveEntity(repo, prefix, kind);
-  if (entity.status === "closed") fail(`#${entity.id} is already closed`);
-  if (entity.status === "merged") fail(`#${entity.id} is merged and cannot be closed`);
-
-  const input: CloseInput = { ...opts };
-  if (input.duplicateOf) {
-    const target = resolveEntity(repo, input.duplicateOf, kind);
-    if (target.id === entity.id) fail(`#${entity.id} cannot be a duplicate of itself`);
-    input.duplicateOf = target.id;
-  }
-
-  const plan = rewritePlan(entity, () => planClose(entity, input));
-  const result = runPlan(ctx, plan, { commit: opts.commit });
-  ctx.stdout.write(`Closed #${entity.id}  ${NAVBOOK_ROOT}/${destination(entity, "closed")}/\n`);
-  if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
+  const { entity, destination, run } = closeEntity(ctx, kind, prefix, opts, {
+    commit: opts.commit,
+  });
+  ctx.stdout.write(`Closed #${entity.id}  ${NAVBOOK_ROOT}/${destination}/\n`);
+  if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
 
 export function cmdReopen(ctx: Ctx, kind: EntityKind, prefix: string, opts: GlobalFlags): void {
-  const entity = resolveEntity(loadRepo(ctx), prefix, kind);
-  if (entity.status === "open") fail(`#${entity.id} is already open`);
-  if (entity.status === "merged") {
-    fail(`#${entity.id} is merged; a merged pull request cannot be reopened`);
-  }
-
-  const plan = rewritePlan(entity, () => planReopen(entity));
-  const result = runPlan(ctx, plan, { commit: opts.commit });
-  ctx.stdout.write(`Reopened #${entity.id}  ${NAVBOOK_ROOT}/${destination(entity, "open")}/\n`);
-  if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
-}
-
-/**
- * Build a plan that rewrites an entity file, turning a malformed-frontmatter
- * failure into an operational error that names the file and the way out.
- */
-export function rewritePlan(entity: EntityRecord, build: () => Plan): Plan {
-  try {
-    return build();
-  } catch (error) {
-    if (!(error instanceof FrontmatterError)) throw error;
-    fail(`${NAVBOOK_ROOT}/${entity.filePath}: ${error.message}`, [
-      "fix the file by hand, or run 'nav doctor' to see what is wrong",
-    ]);
-  }
-}
-
-function destination(entity: EntityRecord, status: string): string {
-  return `${entity.kind === "issue" ? "issues" : "prs"}/${status}/${entity.dirName}`;
+  const { entity, destination, run } = reopenEntity(ctx, kind, prefix, { commit: opts.commit });
+  ctx.stdout.write(`Reopened #${entity.id}  ${NAVBOOK_ROOT}/${destination}/\n`);
+  if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
 
 /* ------------------------------------------------------------------- delete */
@@ -305,30 +219,22 @@ export interface DeleteOptions extends GlobalFlags {
  * Remove an entity's directory — spec 04 §4.3.
  *
  * Closing records how work ended; deleting says it should never have been
- * filed, which is why it takes the directory rather than moving it, and why it
- * works whatever the status. Whatever git already holds can be recovered from
- * history, so the command only stops to ask when it would destroy something
- * git could not give back.
+ * filed. Whatever git already holds can be recovered from history, so the
+ * command only stops to ask when it would destroy something git could not give
+ * back.
  */
 export function cmdDelete(ctx: Ctx, kind: EntityKind, prefix: string, opts: DeleteOptions): void {
-  const entity = resolveEntity(loadRepo(ctx), prefix, kind);
-  const plan = planDelete(entity);
+  const deletion = planEntityDelete(ctx, kind, prefix, { commit: opts.commit });
+  const { entity } = deletion;
+  if (!opts.force) confirmLoss(ctx, entity, deletion.uncommitted);
 
-  // Ahead of the question, not after it: --commit refuses outright while
-  // unrelated work is staged, and confirming a deletion that then cannot
-  // happen is a worse experience than being told why up front. runPlan checks
-  // again below, against an index nothing has touched in between.
-  if (opts.commit) assertNoUnrelatedStaged(ctx, planPaths(plan).map(repoPath));
-  if (!opts.force) confirmLoss(ctx, entity);
-
-  const result = runPlan(ctx, plan, { commit: opts.commit });
+  const result = executeEntityDelete(ctx, deletion, { commit: opts.commit });
   ctx.stdout.write(`Deleted #${entity.id}  ${NAVBOOK_ROOT}/${entity.dirPath}/\n`);
   if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
 }
 
 /** Ask before destroying content that is not in git yet. */
-function confirmLoss(ctx: Ctx, entity: EntityRecord): void {
-  const uncommitted = uncommittedPaths(ctx.repoRoot, repoPath(entity.dirPath));
+function confirmLoss(ctx: Ctx, entity: EntityRecord, uncommitted: readonly string[]): void {
   if (uncommitted.length === 0) return;
 
   ctx.stdout.write(`#${entity.id} has changes that are not committed:\n`);

@@ -4,18 +4,12 @@
 
 import { newIssueFile, validateIssue } from "../../core/files.ts";
 import { NAVBOOK_ROOT } from "../../core/json.ts";
-import { planEntityOpen } from "../../core/ops.ts";
-import {
-  commitReport,
-  nowIso,
-  requireNavbook,
-  runPlan,
-  scanAllIds,
-} from "../../workspace/index.ts";
+import { openIssue, prepareOpen } from "../../ops/index.ts";
+import { commitReport } from "../../workspace/index.ts";
 import type { Ctx } from "../context.ts";
 import { fail } from "../errors.ts";
 import { composeFile } from "./compose.ts";
-import { currentAuthor, type GlobalFlags } from "./entity.ts";
+import type { GlobalFlags } from "./entity.ts";
 
 export interface IssueOpenOptions extends GlobalFlags {
   message?: string;
@@ -26,8 +20,7 @@ export interface IssueOpenOptions extends GlobalFlags {
 
 export function cmdIssueOpen(ctx: Ctx, title: string, opts: IssueOpenOptions): void {
   if (title.trim() === "") fail("an issue needs a title");
-  requireNavbook(ctx);
-  const created = nowIso(ctx);
+  const { created, author } = prepareOpen(ctx);
 
   const composed = composeFile(ctx, {
     message: opts.message,
@@ -36,7 +29,7 @@ export function cmdIssueOpen(ctx: Ctx, title: string, opts: IssueOpenOptions): v
     render: (body) =>
       newIssueFile({
         title,
-        author: currentAuthor(ctx),
+        author,
         created,
         body,
         labels: opts.label,
@@ -46,13 +39,12 @@ export function cmdIssueOpen(ctx: Ctx, title: string, opts: IssueOpenOptions): v
     validate: validateIssue,
   });
 
-  // A title edited in the buffer decides the slug, so read it back.
-  const finalTitle =
-    typeof composed.parsed.fm.title === "string" ? composed.parsed.fm.title : title;
-  const id = ctx.mintId(scanAllIds(ctx.navRoot));
-  const { plan, dirPath } = planEntityOpen("issue", id, finalTitle, composed.content);
+  const { id, dirPath, run } = openIssue(
+    ctx,
+    { content: composed.content, fallbackTitle: title },
+    { commit: opts.commit },
+  );
 
-  const result = runPlan(ctx, plan, { commit: opts.commit });
   ctx.stdout.write(`Created ${NAVBOOK_ROOT}/${dirPath}/  (#${id})\n`);
-  if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
+  if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
