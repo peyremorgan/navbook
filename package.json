@@ -12,6 +12,7 @@
   ],
   "license": "MIT",
   "type": "module",
+  "packageManager": "pnpm@11.18.0",
   "publishConfig": {
     "access": "public"
   },
@@ -35,7 +36,7 @@
     "format": "biome check --write .",
     "check": "biome check . && tsc --noEmit",
     "test": "node --test \"test/{unit,cli,conformance}/**/*.test.ts\"",
-    "prepack": "npm run build",
+    "prepack": "pnpm build",
     "bench": "node --test \"test/perf/**/*.test.ts\""
   },
   "dependencies": {

@@ -151,10 +151,10 @@ Navbook tracks its own development in `.navbook/` — run `nav issue list` in a
 clone to see what is open.
 
 ```sh
-npm install
-npm test           # unit, CLI and conformance suites
-npm run check      # lint and type-check
-npm run bench      # the performance budget, on its own machine
+pnpm install
+pnpm test          # unit, CLI and conformance suites
+pnpm check         # lint and type-check
+pnpm bench         # the performance budget, on its own machine
 ```
 
 The [conformance fixtures](doc/spec/fixtures/README.md) are golden repositories

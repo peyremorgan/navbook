@@ -11,12 +11,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
 
   test:
     name: test (node ${{ matrix.node }}, ${{ matrix.os }})
@@ -28,27 +30,31 @@ jobs:
         node: [24, 26]
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - name: configure git identity
         run: |
           git config --global user.name "CI"
           git config --global user.email "ci@example.invalid"
           git config --global init.defaultBranch main
-      - run: npm test
+      - run: pnpm test
 
   build:
     name: build + pack smoke test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: npm ci
-      - run: npm run build
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
       - name: configure git identity
         run: |
           git config --global user.name "CI"
@@ -57,12 +63,12 @@ jobs:
       - name: conformance suite against the built package
         run: NAV_BIN="node $PWD/dist/cli/main.js" node --test "test/conformance/**/*.test.ts"
       - name: performance budget against the built package
-        run: NAV_BIN="node $PWD/dist/cli/main.js" npm run bench
+        run: NAV_BIN="node $PWD/dist/cli/main.js" pnpm bench
       - name: npx smoke test from a packed tarball
         run: |
-          npm pack --silent
+          pnpm pack --pack-destination "$RUNNER_TEMP"
           mkdir -p /tmp/smoke && cd /tmp/smoke && npm init -y >/dev/null
-          npm install --silent "$GITHUB_WORKSPACE"/navbook-cli-*.tgz
+          npm install --silent "$RUNNER_TEMP"/navbook-cli-*.tgz
           git init -q -b main smoke && cd smoke
           ../node_modules/.bin/nav init
           ../node_modules/.bin/nav issue open "Smoke test" -m "It runs."

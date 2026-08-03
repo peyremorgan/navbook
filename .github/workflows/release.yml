@@ -13,11 +13,13 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: pnpm
           registry-url: https://registry.npmjs.org
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
 
       - name: the tag must match the package version
         run: |
@@ -28,17 +30,18 @@ jobs:
             exit 1
           fi
 
-      - run: npm run check
+      - run: pnpm check
       - run: |
           git config --global user.name "CI"
           git config --global user.email "ci@example.invalid"
           git config --global init.defaultBranch main
-      - run: npm test
-      - run: npm run build
+      - run: pnpm test
+      - run: pnpm build
 
       - name: the built package must pass the conformance suite too
         run: NAV_BIN="node $PWD/dist/cli/main.js" node --test "test/conformance/**/*.test.ts"
 
-      - run: npm publish --provenance --access public
+      - run: pnpm publish --access public --no-git-checks
         env:
+          NPM_CONFIG_PROVENANCE: true
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
