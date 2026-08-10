@@ -42,7 +42,7 @@ describe("nav __complete", () => {
     }
   });
 
-  it("offers the shared verbs for issues and the PR-only ones for pull requests", () => {
+  it("offers each noun the shared verbs plus the ones only it has", () => {
     const repo = makeNavRepo();
     try {
       const issueVerbs = complete(repo, ["issue"]);
@@ -56,10 +56,15 @@ describe("nav __complete", () => {
         "close",
         "reopen",
         "delete",
+        "link",
+        "unlink",
       ]);
       for (const verb of ["update", "review", "merge"]) {
         assert.ok(prVerbs.includes(verb), `pr should offer ${verb}`);
         assert.equal(issueVerbs.includes(verb), false, `issues should not offer ${verb}`);
+      }
+      for (const verb of ["link", "unlink"]) {
+        assert.equal(prVerbs.includes(verb), false, `pull requests should not offer ${verb}`);
       }
     } finally {
       repo.cleanup();

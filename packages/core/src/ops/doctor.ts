@@ -15,6 +15,7 @@ import { git, gitMaybe, splitNul } from "../git/exec.ts";
 import { stagedContent, stagedPaths } from "../git/index-ops.ts";
 import {
   applyOps,
+  gitLinkConflictResolver,
   loadRepo,
   repoPath,
   requireNavbook,
@@ -40,7 +41,13 @@ export function runDoctor(ws: WsCtx, opts: DoctorOptions = {}): DoctorReport {
   requireNavbook(ws);
   const repo = opts.staged ? stagedRepo(ws) : loadRepo(ws);
   const diagnostics = sortDiagnostics([
-    ...validateRepo(repo, { commitMessages: recentCommitMessages(ws, opts) }),
+    ...validateRepo(repo, {
+      commitMessages: recentCommitMessages(ws, opts),
+      // Settling a disputed subtask means removing somebody's assertion, so it
+      // is offered only when there is history to justify it and a --fix run to
+      // apply it. --staged has neither: the commit under test does not exist.
+      ...(opts.fix && !opts.staged ? { decideLinkConflict: gitLinkConflictResolver(ws) } : {}),
+    }),
     // History-dependent checks are skipped for --staged: the commit being made
     // does not exist yet, so there is nothing for them to read.
     ...(opts.staged ? [] : runHistoryChecks(ws, repo)),
@@ -50,13 +57,25 @@ export function runDoctor(ws: WsCtx, opts: DoctorOptions = {}): DoctorReport {
   return { diagnostics: diagnostics.filter((d) => !d.fix), applied: applyFixes(ws, diagnostics) };
 }
 
-/** Apply every mechanical repair a diagnostic offers, reporting each one. */
+/**
+ * Apply every mechanical repair a diagnostic offers, reporting each one.
+ *
+ * Faults that share a file offer the same repair for it — the state every one
+ * of them wanted — so an operation already carried out is skipped rather than
+ * repeated, and the report says once what was done once.
+ */
 function applyFixes(ws: WsCtx, diagnostics: readonly Diagnostic[]): string[] {
   const applied: string[] = [];
+  const done = new Set<string>();
   for (const diagnostic of diagnostics) {
     if (!diagnostic.fix || diagnostic.fix.length === 0) continue;
-    applyOps(ws, diagnostic.fix);
-    for (const op of diagnostic.fix) applied.push(describeFix(op));
+    const fresh = diagnostic.fix.filter((op) => !done.has(JSON.stringify(op)));
+    if (fresh.length === 0) continue;
+    applyOps(ws, fresh);
+    for (const op of fresh) {
+      done.add(JSON.stringify(op));
+      applied.push(describeFix(op));
+    }
   }
   return applied;
 }

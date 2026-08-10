@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { extractDeletedId, extractProseRefs, extractTrailerRefs } from "../src/core/refs.ts";
+import { extractDeletedIds, extractProseRefs, extractTrailerRefs } from "../src/core/refs.ts";
 
 describe("extractProseRefs", () => {
   it("finds mid-line references", () => {
@@ -79,23 +79,37 @@ describe("extractTrailerRefs", () => {
   });
 });
 
-describe("extractDeletedId", () => {
+describe("extractDeletedIds", () => {
   it("reads the id out of a delete subject, for either kind", () => {
-    assert.equal(extractDeletedId("docs(issue): delete #bqlybac0\n"), "bqlybac0");
-    assert.equal(extractDeletedId("docs(pr): delete #dk3mp2x9\n"), "dk3mp2x9");
+    assert.deepEqual(extractDeletedIds("docs(issue): delete #bqlybac0\n"), ["bqlybac0"]);
+    assert.deepEqual(extractDeletedIds("docs(pr): delete #dk3mp2x9\n"), ["dk3mp2x9"]);
   });
 
   it("tolerates the leading newline git log leaves between messages", () => {
-    assert.equal(extractDeletedId("\ndocs(issue): delete #bqlybac0\n"), "bqlybac0");
+    assert.deepEqual(extractDeletedIds("\ndocs(issue): delete #bqlybac0\n"), ["bqlybac0"]);
   });
 
   it("ignores any other subject", () => {
-    assert.equal(extractDeletedId("docs(issue): close #bqlybac0\n"), null);
-    assert.equal(extractDeletedId("feat: delete #bqlybac0\n"), null);
-    assert.equal(extractDeletedId("docs(issue): delete #bqlybac0 by hand\n"), null);
+    assert.deepEqual(extractDeletedIds("docs(issue): close #bqlybac0\n"), []);
+    assert.deepEqual(extractDeletedIds("feat: delete #bqlybac0\n"), []);
+    assert.deepEqual(extractDeletedIds("docs(issue): delete #bqlybac0 by hand\n"), []);
   });
 
   it("reads only the subject, never the body", () => {
-    assert.equal(extractDeletedId("feat: cleanup\n\ndocs(issue): delete #bqlybac0\n"), null);
+    assert.deepEqual(extractDeletedIds("feat: cleanup\n\ndocs(issue): delete #bqlybac0\n"), []);
+  });
+
+  it("adds the subtasks a recursive delete removed with it", () => {
+    assert.deepEqual(
+      extractDeletedIds("docs(issue): delete #bqlybac0\n\nDeletes: mz4kq1rv\nDeletes: t5kr1gq6\n"),
+      ["bqlybac0", "mz4kq1rv", "t5kr1gq6"],
+    );
+  });
+
+  it("does not mistake 'Deletes:' for a reference", () => {
+    assert.deepEqual(extractTrailerRefs("docs(issue): delete #bqlybac0\n\nDeletes: mz4kq1rv\n"), {
+      refs: [],
+      closes: [],
+    });
   });
 });

@@ -25,11 +25,29 @@ export function extractProseRefs(markdown: string): string[] {
  */
 const DELETE_SUBJECT = /^docs\((?:issue|pr)\): delete #([a-z][a-z0-9]{7})$/;
 
-/** The entity ID a commit deleted, or null when it deleted none. */
-export function extractDeletedId(message: string): string | null {
+/**
+ * The extra entities a recursive delete removed alongside the one its subject
+ * names — a subtree comes out in one commit, and history has to say so.
+ *
+ * `Deletes:` is not a reference the way `Refs:` is. It names something the
+ * commit took away, so it dangles by construction and is exempt from D8 for
+ * the same reason the subject is.
+ */
+const DELETES_TRAILER = /^Deletes:[ \t]*(.+?)[ \t]*$/gim;
+
+/** Every entity ID a commit deleted; empty when it deleted none. */
+export function extractDeletedIds(message: string): string[] {
+  const out = new Set<string>();
   const subject = message.trimStart().split("\n", 1)[0] ?? "";
   const match = DELETE_SUBJECT.exec(subject);
-  return match ? (match[1] as string) : null;
+  if (match) out.add(match[1] as string);
+  for (const trailer of message.matchAll(DELETES_TRAILER)) {
+    for (const token of (trailer[1] as string).split(/[\s,]+/)) {
+      const id = token.replace(/^#/, "");
+      if (isId(id)) out.add(id);
+    }
+  }
+  return [...out];
 }
 
 export interface TrailerRefs {

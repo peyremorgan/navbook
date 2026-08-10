@@ -10,6 +10,7 @@ export * from "./files.ts";
 export * from "./frontmatter.ts";
 export * from "./id.ts";
 export * from "./json.ts";
+export * from "./links.ts";
 export * from "./ops.ts";
 export * from "./person.ts";
 export * from "./query.ts";

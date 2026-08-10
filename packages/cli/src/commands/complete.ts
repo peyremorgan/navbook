@@ -11,6 +11,7 @@ import type { Ctx } from "../context.ts";
 
 const ROOT_COMMANDS = ["issue", "pr", "init", "id", "doctor", "install", "uninstall"];
 const SHARED_VERBS = ["open", "list", "show", "edit", "comment", "close", "reopen", "delete"];
+const ISSUE_VERBS = [...SHARED_VERBS, "link", "unlink"];
 const PR_VERBS = [...SHARED_VERBS, "update", "review", "merge"];
 const QUERY_KEYS = ["status:", "label:", "assignee:", "author:", "milestone:"];
 
@@ -26,7 +27,7 @@ function completionsFor(ctx: Ctx, words: string[]): string[] {
   }
 
   const kind: EntityKind = noun === "issue" ? "issue" : "pr";
-  const verbs = kind === "issue" ? SHARED_VERBS : PR_VERBS;
+  const verbs = kind === "issue" ? ISSUE_VERBS : PR_VERBS;
   if (verb === undefined) return verbs;
   if (!verbs.includes(verb)) return [];
 

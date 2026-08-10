@@ -15,23 +15,28 @@ import {
   commentJson,
   commitReport,
   currentAuthor,
+  type EntityDeletePlan,
   type EntityKind,
   type EntityRecord,
   entityJson,
   executeEntityDelete,
   findEntity,
   listEntities,
+  loadRepo,
   NAVBOOK_ROOT,
   type NewCommentInput,
   newCommentFile,
+  parentOf,
   parseListQuery,
   planEntityDelete,
   readAssignees,
   readLabels,
   reopenEntity,
   resolveComment,
+  resolveEntity,
   resolveEntityForEdit,
   revalidateEntityFile,
+  subtaskTree,
   toNdjson,
   uncommittedUnder,
   validateComment,
@@ -127,15 +132,32 @@ function terminalWidth(ctx: Ctx): number | undefined {
 
 /* --------------------------------------------------------------------- show */
 
-export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: GlobalFlags): void {
-  const entity = findEntity(ctx, kind, prefix);
+export interface ShowOptions extends GlobalFlags {
+  /** Levels of subtasks to render; issue-only, one by default. */
+  depth?: number;
+}
+
+export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOptions): void {
+  const repo = loadRepo(ctx);
+  const entity = resolveEntity(repo, prefix, kind);
   if (opts.json) {
+    // `parent` and `subtasks` are frontmatter, so they are already in the
+    // object; resolving them would be a second, differently-shaped answer.
     ctx.stdout.write(
       `${JSON.stringify(entityJson(entity, { comments: entity.comments.map(commentJson) }))}\n`,
     );
     return;
   }
-  ctx.stdout.write(`${renderDetail(entity, { colors: ctx.colors })}\n`);
+  const depth = opts.depth ?? 1;
+  if (!Number.isInteger(depth) || depth < 0) fail("--depth takes a whole number of levels");
+  ctx.stdout.write(
+    `${renderDetail(entity, {
+      colors: ctx.colors,
+      ...(kind === "issue"
+        ? { links: { parent: parentOf(repo, entity), subtasks: subtaskTree(repo, entity, depth) } }
+        : {}),
+    })}\n`,
+  );
 }
 
 /* --------------------------------------------------------------------- edit */
@@ -216,8 +238,10 @@ export function cmdReopen(ctx: Ctx, kind: EntityKind, prefix: string, opts: Glob
 
 /* ------------------------------------------------------------------- delete */
 
-export interface DeleteOptions extends GlobalFlags {
+export interface DeleteCommandOptions extends GlobalFlags {
   force?: boolean;
+  /** Take the issue's subtasks with it, to any depth; issue-only. */
+  recursive?: boolean;
 }
 
 /**
@@ -228,26 +252,54 @@ export interface DeleteOptions extends GlobalFlags {
  * command only stops to ask when it would destroy something git could not give
  * back.
  */
-export function cmdDelete(ctx: Ctx, kind: EntityKind, prefix: string, opts: DeleteOptions): void {
-  const deletion = planEntityDelete(ctx, kind, prefix, { commit: opts.commit });
-  const { entity } = deletion;
+export function cmdDelete(
+  ctx: Ctx,
+  kind: EntityKind,
+  prefix: string,
+  opts: DeleteCommandOptions,
+): void {
+  const deletion = planEntityDelete(ctx, kind, prefix, {
+    commit: opts.commit,
+    recursive: opts.recursive,
+  });
+  const { entity, alsoRemoved, detached } = deletion;
   // Only look for work git could not give back when there is a question to
   // ask: the scan is a full `git status`, and --force says not to ask.
-  if (!opts.force) confirmLoss(ctx, entity, uncommittedUnder(ctx, entity));
+  if (!opts.force) confirmLoss(ctx, deletion, uncommittedUnder(ctx, deletion));
 
   const result = executeEntityDelete(ctx, deletion, { commit: opts.commit });
   ctx.stdout.write(`Deleted #${entity.id}  ${NAVBOOK_ROOT}/${entity.dirPath}/\n`);
+  for (const target of alsoRemoved) {
+    ctx.stdout.write(`Deleted #${target.id}  ${NAVBOOK_ROOT}/${target.dirPath}/\n`);
+  }
+  // Subtasks kept are now top-level, which is easy to miss and hard to undo
+  // from memory, so they are named rather than merely implied.
+  if (detached.length > 0) {
+    ctx.stdout.write(`${detached.length} subtask(s) are now top-level issues:\n`);
+    for (const child of detached) ctx.stdout.write(`  #${child.id}  ${child.title}\n`);
+  }
   if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
 }
 
 /** Ask before destroying content that is not in git yet. */
-function confirmLoss(ctx: Ctx, entity: EntityRecord, uncommitted: readonly string[]): void {
+function confirmLoss(ctx: Ctx, deletion: EntityDeletePlan, uncommitted: readonly string[]): void {
   if (uncommitted.length === 0) return;
+  const { entity, alsoRemoved } = deletion;
+  const what =
+    alsoRemoved.length === 0
+      ? `#${entity.id}`
+      : `#${entity.id} and its ${alsoRemoved.length} subtask(s)`;
 
-  ctx.stdout.write(`#${entity.id} has changes that are not committed:\n`);
+  ctx.stdout.write(
+    `${what} ${alsoRemoved.length === 0 ? "has" : "have"} changes that are not committed:\n`,
+  );
   for (const entry of uncommitted) ctx.stdout.write(`  ${entry}\n`);
   ctx.stdout.write("Deleting it loses them; everything else can be recovered from history.\n");
-  if (!askYesNo(ctx, `Delete ${NAVBOOK_ROOT}/${entity.dirPath}/ anyway? [y/N] `)) {
+  const target =
+    alsoRemoved.length === 0
+      ? `${NAVBOOK_ROOT}/${entity.dirPath}/`
+      : `${NAVBOOK_ROOT}/${entity.dirPath}/ and ${alsoRemoved.length} more`;
+  if (!askYesNo(ctx, `Delete ${target} anyway? [y/N] `)) {
     fail(`#${entity.id} was not deleted`);
   }
 }

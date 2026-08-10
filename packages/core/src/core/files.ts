@@ -64,6 +64,7 @@ const STRING_KEYS = [
   "resolution",
   "duplicate-of",
   "superseded-by",
+  "parent",
   "reply-to",
   "verdict",
   "revision",
@@ -102,7 +103,7 @@ function normalizeKey(nav: NavDoc, key: string, rawValue: unknown): unknown {
   if ((STRING_KEYS as readonly string[]).includes(key)) {
     return stringAt(nav, [key]) ?? rawValue;
   }
-  if (key === "labels") return normalizeStringList(nav, key, rawValue);
+  if (key === "labels" || key === "subtasks") return normalizeStringList(nav, key, rawValue);
   if (key === "assignee") {
     return Array.isArray(rawValue)
       ? normalizeStringList(nav, key, rawValue)
@@ -227,6 +228,14 @@ function checkIdReference(parsed: ParsedFile, key: string, problems: Problem[]):
   }
 }
 
+function checkIdList(parsed: ParsedFile, key: string, problems: Problem[]): void {
+  const value = parsed.fm[key];
+  if (value === undefined || value === null) return;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || !isId(entry))) {
+    problems.push({ key, message: `'${key}' must be a list of Navbook IDs` });
+  }
+}
+
 function checkNoStatusKey(parsed: ParsedFile, problems: Problem[]): void {
   if (hasKey(parsed.nav, "status")) {
     problems.push({
@@ -234,6 +243,34 @@ function checkNoStatusKey(parsed: ParsedFile, problems: Problem[]): void {
       message: "entity files must not carry a 'status' key; status is the path (§2.1)",
     });
   }
+}
+
+/**
+ * Decomposition links are issue-only (§2.5). A pull request is a proposed
+ * change, not a unit of work that can be broken down, so the keys are rejected
+ * on `pr.md` rather than silently carried as unknown keys.
+ */
+function checkNoLinkKeys(parsed: ParsedFile, problems: Problem[]): void {
+  for (const key of LINK_KEYS) {
+    if (!hasKey(parsed.nav, key)) continue;
+    problems.push({ key, message: `'${key}' is an issue-only key (§2.5)` });
+  }
+}
+
+/** The frontmatter keys that record issue decomposition (§2.5). */
+export const LINK_KEYS = ["parent", "subtasks"] as const;
+
+/** Read `parent` defensively; a malformed value reads as no parent. */
+export function readParent(fm: Record<string, unknown>): string | null {
+  const value = fm.parent;
+  return typeof value === "string" && isId(value) ? value : null;
+}
+
+/** Read `subtasks` defensively, ignoring malformed entries. */
+export function readSubtasks(fm: Record<string, unknown>): string[] {
+  const value = fm.subtasks;
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string" && isId(entry));
 }
 
 /** Read `labels` defensively, ignoring malformed entries. */
@@ -287,6 +324,8 @@ export function validateIssue(parsed: ParsedFile): Problem[] {
   checkOptionalString(parsed, "milestone", problems);
   checkOptionalString(parsed, "resolution", problems);
   checkIdReference(parsed, "duplicate-of", problems);
+  checkIdReference(parsed, "parent", problems);
+  checkIdList(parsed, "subtasks", problems);
   checkNoStatusKey(parsed, problems);
   if (parsed.body.trim() === "") {
     problems.push({ message: "issue description must not be empty (§2.5)" });
@@ -307,6 +346,7 @@ export function validatePr(parsed: ParsedFile): Problem[] {
   checkOptionalString(parsed, "milestone", problems);
   checkOptionalString(parsed, "resolution", problems);
   checkIdReference(parsed, "superseded-by", problems);
+  checkNoLinkKeys(parsed, problems);
   checkNoStatusKey(parsed, problems);
   if (parsed.fm.draft !== undefined && typeof parsed.fm.draft !== "boolean") {
     problems.push({ key: "draft", message: "'draft' must be a boolean" });
@@ -427,6 +467,8 @@ export interface NewIssueInput {
   labels?: string[];
   assignee?: string[];
   milestone?: string;
+  /** The issue this one is a subtask of; the reciprocal side is the caller's. */
+  parent?: string;
 }
 
 /** Render a new `issue.md`. */
@@ -434,6 +476,7 @@ export function newIssueFile(input: NewIssueInput): string {
   const nav = emptyDoc();
   patchDoc(nav, { title: input.title, author: input.author, created: input.created });
   applyOptionalMeta(nav, input);
+  if (input.parent) patchDoc(nav, { parent: input.parent });
   nav.body = `\n${normalizeBody(input.body)}`;
   return serializeDoc(nav);
 }

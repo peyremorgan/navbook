@@ -20,14 +20,15 @@ export function stagedContent(cwd: string, path: string): string | null {
 }
 
 /**
- * Everything under `pathspec` that differs from HEAD — staged, unstaged or
+ * Everything under `pathspecs` that differs from HEAD — staged, unstaged or
  * untracked — as the `XY path` lines `git status --short` would print.
  *
  * Used to tell content git could give back from content it could not, so a
  * destructive command only stops to ask when there is something to lose.
  */
-export function uncommittedPaths(cwd: string, pathspec: string): string[] {
-  const args = ["status", "--porcelain", "-z", "--untracked-files=all", "--", pathspec];
+export function uncommittedPaths(cwd: string, pathspecs: readonly string[]): string[] {
+  if (pathspecs.length === 0) return [];
+  const args = ["status", "--porcelain", "-z", "--untracked-files=all", "--", ...pathspecs];
   const fields = splitNul(git(args, { cwd }));
   const entries: string[] = [];
   for (let i = 0; i < fields.length; i++) {

@@ -8,8 +8,16 @@
  */
 
 import { commentFileName } from "./comments.ts";
-import { type Revision, readRevisions } from "./files.ts";
-import { appendListItem, parseDoc, patchDoc, serializeDoc } from "./frontmatter.ts";
+import { type Revision, readRevisions, readSubtasks } from "./files.ts";
+import {
+  appendListItem,
+  FrontmatterError,
+  parseDoc,
+  patchDoc,
+  serializeDoc,
+  setFlowList,
+} from "./frontmatter.ts";
+import { isId } from "./id.ts";
 import { dirName as makeDirName, slugify } from "./slug.ts";
 import { type EntityKind, type EntityRecord, type Status, statusDir } from "./tree.ts";
 
@@ -22,7 +30,7 @@ export type FileOp =
   | { op: "remove"; path: string };
 
 export interface Trailer {
-  key: "Refs" | "Closes";
+  key: "Refs" | "Closes" | "Deletes";
   id: string;
 }
 
@@ -219,6 +227,170 @@ export function rewriteFrontmatter(
   return serializeDoc(nav);
 }
 
+/* -------------------------------------------------------- decomposition */
+
+export interface LinkEdit {
+  /** Ids appended to `subtasks` when the list does not already hold them. */
+  addSubtasks?: readonly string[];
+  /** Ids removed from `subtasks`. */
+  removeSubtasks?: readonly string[];
+  /** A new `parent`; `null` removes the key, `undefined` leaves it alone. */
+  parent?: string | null;
+}
+
+/** An edit to one issue's link keys, as planned by a caller that saw the tree. */
+export interface LinkRepair {
+  entity: EntityRecord;
+  edit: LinkEdit;
+}
+
+/**
+ * Apply link-key changes to an issue file, or null when nothing changes.
+ *
+ * Separate from {@link rewriteFrontmatter} because `subtasks` is a list:
+ * comparing the value that was asked for against the one already there decides
+ * nothing when both are arrays, and writing an unchanged list would churn every
+ * file a repair walked past. The list is also deduplicated on every write —
+ * an entry cannot mean anything twice, and dropping the repeat loses nothing.
+ *
+ * Refuses a file whose link keys are malformed rather than quietly discarding
+ * what it could not read: that is a fault for `doctor` to report and a person
+ * to resolve.
+ */
+export function rewriteLinks(entity: EntityRecord, edit: LinkEdit): string | null {
+  requireReadableLinks(entity);
+
+  const before = readSubtasks(entity.fm);
+  const after: string[] = [];
+  for (const id of before) {
+    if (edit.removeSubtasks?.includes(id) || after.includes(id)) continue;
+    after.push(id);
+  }
+  for (const id of edit.addSubtasks ?? []) if (!after.includes(id)) after.push(id);
+
+  const parentBefore = typeof entity.fm.parent === "string" ? entity.fm.parent : undefined;
+  const parentAfter = edit.parent === undefined ? parentBefore : (edit.parent ?? undefined);
+
+  const listChanged = after.length !== before.length || after.some((id, i) => id !== before[i]);
+  if (!listChanged && parentAfter === parentBefore) return null;
+
+  const nav = parseDoc(serializeDoc(entity.parsed.nav));
+  if (parentAfter !== parentBefore) patchDoc(nav, { parent: parentAfter ?? undefined });
+  if (listChanged) {
+    if (after.length === 0) patchDoc(nav, { subtasks: undefined });
+    else setFlowList(nav, "subtasks", after);
+  }
+  return serializeDoc(nav);
+}
+
+function requireReadableLinks(entity: EntityRecord): void {
+  const parent = entity.fm.parent;
+  if (parent !== undefined && parent !== null && (typeof parent !== "string" || !isId(parent))) {
+    throw new FrontmatterError("'parent' is not a Navbook ID and cannot be rewritten");
+  }
+  const subtasks = entity.fm.subtasks;
+  if (subtasks === undefined || subtasks === null) return;
+  if (!Array.isArray(subtasks) || subtasks.some((id) => typeof id !== "string" || !isId(id))) {
+    throw new FrontmatterError("'subtasks' is not a list of Navbook IDs and cannot be rewritten");
+  }
+}
+
+/**
+ * A file whose link keys could not be read well enough to rewrite. Carries the
+ * path so the caller can name the file that actually needs attention, which is
+ * rarely the one the command was pointed at.
+ */
+export class LinkRewriteError extends FrontmatterError {
+  readonly path: string;
+
+  constructor(path: string, message: string) {
+    super(message);
+    this.name = "LinkRewriteError";
+    this.path = path;
+  }
+}
+
+/** Write ops for a set of link repairs, skipping the ones that change nothing. */
+export function linkRepairOps(repairs: readonly LinkRepair[]): FileOp[] {
+  const ops: FileOp[] = [];
+  for (const { entity, edit } of repairs) {
+    let content: string | null;
+    try {
+      content = rewriteLinks(entity, edit);
+    } catch (error) {
+      if (!(error instanceof FrontmatterError)) throw error;
+      throw new LinkRewriteError(entity.filePath, error.message);
+    }
+    if (content !== null) ops.push({ op: "write", path: entity.filePath, content });
+  }
+  return ops;
+}
+
+/**
+ * File an issue under a parent, writing both sides of the link (§2.5).
+ *
+ * `staleListers` are the issues that claimed the child before and no longer
+ * should. Passing them here rather than only the previous parent is what makes
+ * the postcondition exact: afterwards the child names one parent, and that
+ * parent is the only issue listing it.
+ */
+export function planLink(
+  child: EntityRecord,
+  parent: EntityRecord,
+  staleListers: readonly EntityRecord[] = [],
+): Plan {
+  const repairs: LinkRepair[] = [
+    { entity: child, edit: { parent: parent.id } },
+    { entity: parent, edit: { addSubtasks: [child.id] } },
+    ...staleListers
+      .filter((entity) => entity.id !== parent.id && entity.id !== child.id)
+      .map((entity) => ({ entity, edit: { removeSubtasks: [child.id] } })),
+  ];
+  return {
+    ops: linkRepairOps(repairs),
+    message: docsSubject("issue", "link", child.id),
+    trailers: refsTo([child, parent]),
+  };
+}
+
+/** Add one entry to an issue's `subtasks`, as a plan under construction may. */
+export function planAddSubtask(parent: EntityRecord, childId: string): FileOp[] {
+  return linkRepairOps([{ entity: parent, edit: { addSubtasks: [childId] } }]);
+}
+
+/**
+ * Detach an issue from its parent, clearing every claim on it.
+ *
+ * "Unlinked" has to mean that nothing claims the issue any more, or the command
+ * would leave exactly the half-link that check D11 exists to report — so a
+ * `subtasks` entry no one meant, including the issue's own, goes with it.
+ */
+export function planUnlink(child: EntityRecord, listers: readonly EntityRecord[] = []): Plan {
+  const repairs: LinkRepair[] = [
+    { entity: child, edit: { parent: null, removeSubtasks: [child.id] } },
+    ...listers
+      .filter((entity) => entity.id !== child.id)
+      .map((entity) => ({ entity, edit: { removeSubtasks: [child.id] } })),
+  ];
+  return {
+    ops: linkRepairOps(repairs),
+    message: docsSubject("issue", "unlink", child.id),
+    trailers: refsTo([child, ...listers]),
+  };
+}
+
+/** One `Refs:` trailer per entity the operation touched, in order, deduplicated. */
+function refsTo(entities: readonly EntityRecord[]): Trailer[] {
+  const seen = new Set<string>();
+  const trailers: Trailer[] = [];
+  for (const entity of entities) {
+    if (seen.has(entity.id)) continue;
+    seen.add(entity.id);
+    trailers.push({ key: "Refs", id: entity.id });
+  }
+  return trailers;
+}
+
 /* ----------------------------------------------------------------- deletion */
 
 /**
@@ -233,13 +405,36 @@ export function rewriteFrontmatter(
  * would be a dangling reference the moment it was written — exactly what
  * doctor check D8 exists to report. The subject still names the ID, which
  * keeps the deletion greppable without warning about itself.
+ *
+ * Links to the entity are severed in the same plan, and so in the same commit:
+ * a tree that never holds a broken link is worth more than a delete that only
+ * touches one directory.
+ *
+ * A recursive delete takes entities the subject does not name, so it records
+ * them as `Deletes:` trailers. That is not a reference — it names what the
+ * commit took away — and it is what lets doctor tell a subtask deliberately
+ * removed with its parent from one that went missing.
  */
-export function planDelete(entity: EntityRecord): Plan {
+export function planDelete(entity: EntityRecord, links: DeleteLinks = {}): Plan {
+  const alsoRemove = links.alsoRemove ?? [];
   return {
-    ops: [{ op: "remove", path: entity.dirPath }],
+    ops: [
+      ...linkRepairOps(links.repairs ?? []),
+      ...[entity, ...alsoRemove].map((target) => ({
+        op: "remove" as const,
+        path: target.dirPath,
+      })),
+    ],
     message: docsSubject(entity.kind, "delete", entity.id),
-    trailers: [],
+    trailers: alsoRemove.map((target) => ({ key: "Deletes" as const, id: target.id })),
   };
+}
+
+export interface DeleteLinks {
+  /** Further directories removed with it, as `--recursive` removes a subtree. */
+  alsoRemove?: readonly EntityRecord[];
+  /** Link keys mended on the issues that survive the deletion. */
+  repairs?: readonly LinkRepair[];
 }
 
 /* ------------------------------------------------------------ pull requests */

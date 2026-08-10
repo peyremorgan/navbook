@@ -10,13 +10,22 @@ import { parseCommentFileName } from "./comments.ts";
 import {
   type Revision,
   readRevisions,
+  readSubtasks,
   validateComment,
   validateIssue,
   validatePr,
 } from "./files.ts";
 import { isId } from "./id.ts";
-import type { FileOp } from "./ops.ts";
-import { extractDeletedId, extractProseRefs, extractTrailerRefs } from "./refs.ts";
+import {
+  faultPath,
+  findLinkFaults,
+  findLinkLoops,
+  type LinkConflict,
+  type LinkFault,
+  planFaultRepair,
+} from "./links.ts";
+import { type FileOp, type LinkRepair, linkRepairOps } from "./ops.ts";
+import { extractDeletedIds, extractProseRefs, extractTrailerRefs } from "./refs.ts";
 import { parseDirName } from "./slug.ts";
 import {
   allEntities,
@@ -27,7 +36,20 @@ import {
   statusDir,
 } from "./tree.ts";
 
-export const CHECKS = ["D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10"] as const;
+export const CHECKS = [
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8",
+  "D9",
+  "D10",
+  "D11",
+  "D12",
+] as const;
 export type Check = (typeof CHECKS)[number];
 
 export type Level = "error" | "warning";
@@ -53,11 +75,19 @@ export const CHECK_LEVEL: Record<Check, Level> = {
   D8: "warning",
   D9: "warning",
   D10: "warning",
+  D11: "error",
+  D12: "error",
 };
 
 export interface ValidateOptions {
   /** Commit messages to scan for `Refs:`/`Closes:` trailers (check D8). */
   commitMessages?: readonly string[];
+  /**
+   * Which claimant wins when several issues claim the same subtask (check
+   * D11). Only git history can answer that, so the tree-only caller leaves it
+   * out and those conflicts are reported without a repair.
+   */
+  decideLinkConflict?: (fault: LinkConflict) => string | null;
 }
 
 /** Run every tree-decidable check. */
@@ -76,6 +106,8 @@ export function validateRepo(repo: Repo, opts: ValidateOptions = {}): Diagnostic
   out.push(...checkReplyTargets(repo));
   out.push(...checkReviewRevisions(repo));
   out.push(...checkDanglingRefs(repo, uniqueIds, opts.commitMessages ?? []));
+  out.push(...checkLinks(repo, opts));
+  out.push(...checkLinkLoops(repo));
   return sortDiagnostics(out);
 }
 
@@ -286,7 +318,7 @@ function checkDanglingRefs(
 
   for (const entity of allEntities(repo)) {
     report(entity.filePath, extractProseRefs(entity.body), "prose");
-    for (const key of ["duplicate-of", "superseded-by"] as const) {
+    for (const key of ["duplicate-of", "superseded-by", "parent"] as const) {
       const value = entity.fm[key];
       if (typeof value === "string" && isId(value) && !knownIds.has(value)) {
         out.push({
@@ -296,6 +328,15 @@ function checkDanglingRefs(
           message: `'${key}: ${value}' matches no entity in this tree`,
         });
       }
+    }
+    for (const id of new Set(readSubtasks(entity.fm))) {
+      if (knownIds.has(id)) continue;
+      out.push({
+        check: "D8",
+        level: "warning",
+        path: entity.filePath,
+        message: `'subtasks' entry ${id} matches no entity in this tree`,
+      });
     }
     for (const comment of entity.comments)
       report(comment.path, extractProseRefs(comment.body), "prose");
@@ -307,8 +348,7 @@ function checkDanglingRefs(
   // frontmatter references to it are still reported: those live in files.
   const deleted = new Set<string>();
   for (const message of commitMessages) {
-    const id = extractDeletedId(message);
-    if (id !== null) deleted.add(id);
+    for (const id of extractDeletedIds(message)) deleted.add(id);
   }
 
   const seen = new Set<string>();
@@ -326,6 +366,123 @@ function checkDanglingRefs(
     }
   }
   return out;
+}
+
+/* --------------------------------------------- D11 : parent/subtask links */
+
+/**
+ * Both sides of every decomposition link must agree (§2.5).
+ *
+ * Repairs are planned for the whole tree before any diagnostic is given one, so
+ * a file two faults implicate is written once, with the state both of them
+ * wanted. Applying such a fix therefore settles its neighbour too — which is
+ * exactly right, since `doctor --fix` applies them all in one pass.
+ */
+function checkLinks(repo: Repo, opts: ValidateOptions): Diagnostic[] {
+  const decideConflict = opts.decideLinkConflict;
+  const faults = findLinkFaults(repo);
+  const merged = new Map<string, { entity: EntityRecord; edit: MutableLinkEdit }>();
+  const repairs = faults.map((fault) => {
+    const plan = planFaultRepair(repo, fault, decideConflict ?? (() => null));
+    if (plan) for (const repair of plan) mergeEdit(merged, repair);
+    return plan;
+  });
+
+  return faults.map((fault, index) => {
+    const plan = repairs[index];
+    const fix = plan ? renderLinkFix(plan, merged) : [];
+    return {
+      check: "D11" as const,
+      level: "error" as const,
+      path: faultPath(fault),
+      message: linkFaultMessage(fault, {
+        fixed: fix.length > 0,
+        historyConsulted: decideConflict !== undefined,
+      }),
+      ...(fix.length > 0 ? { fix } : {}),
+    };
+  });
+}
+
+type MutableLinkEdit = { addSubtasks: string[]; removeSubtasks: string[]; parent?: string | null };
+
+function mergeEdit(
+  merged: Map<string, { entity: EntityRecord; edit: MutableLinkEdit }>,
+  repair: LinkRepair,
+): void {
+  let entry = merged.get(repair.entity.id);
+  if (!entry) {
+    entry = { entity: repair.entity, edit: { addSubtasks: [], removeSubtasks: [] } };
+    merged.set(repair.entity.id, entry);
+  }
+  entry.edit.addSubtasks.push(...(repair.edit.addSubtasks ?? []));
+  entry.edit.removeSubtasks.push(...(repair.edit.removeSubtasks ?? []));
+  if (repair.edit.parent !== undefined) entry.edit.parent = repair.edit.parent;
+}
+
+/**
+ * The write ops one fault's repair needs, carrying each file's *final* content.
+ *
+ * A file cannot be written twice with different content by one `--fix` run, so
+ * every diagnostic that touches it offers the same bytes.
+ */
+function renderLinkFix(
+  plan: readonly LinkRepair[],
+  merged: ReadonlyMap<string, { entity: EntityRecord; edit: MutableLinkEdit }>,
+): FileOp[] {
+  try {
+    return linkRepairOps(plan.map(({ entity }) => merged.get(entity.id) ?? { entity, edit: {} }));
+  } catch {
+    // Link keys too malformed to rewrite: check D2 reports them, and a repair
+    // that had to guess what the author meant would be worse than none.
+    return [];
+  }
+}
+
+interface FaultContext {
+  /** A repair was planned, so the run has already said what it will do. */
+  fixed: boolean;
+  /** History was available to settle a conflict; without --fix it is not. */
+  historyConsulted: boolean;
+}
+
+function linkFaultMessage(fault: LinkFault, ctx: FaultContext): string {
+  switch (fault.kind) {
+    case "parent-missing-child":
+      return `#${fault.child.id} names this issue as its parent, but 'subtasks' does not list it`;
+    case "child-missing-parent":
+      return `#${fault.parent.id} lists this issue as a subtask, but 'parent' does not name it${
+        ctx.fixed ? "" : "; linking it back would close a loop, so resolve it by hand"
+      }`;
+    case "duplicate":
+      return `'subtasks' lists #${fault.childId} more than once`;
+    case "not-an-issue":
+      return `'${fault.key}' names #${fault.otherId}, which is a pull request; decomposition relates issues only (§2.5)`;
+    default:
+      return `${fault.claimants.map((id) => `#${id}`).join(" and ")} disagree about the parent of #${fault.child.id}${conflictAdvice(ctx)}`;
+  }
+}
+
+function conflictAdvice(ctx: FaultContext): string {
+  if (ctx.fixed) return "";
+  if (!ctx.historyConsulted) return "; 'nav doctor --fix' settles it from git history";
+  return "; git history does not say which claim came last, so settle it with 'nav issue link' or 'nav issue unlink'";
+}
+
+/* ------------------------------------------------ D12 : loops in the tree */
+
+function checkLinkLoops(repo: Repo): Diagnostic[] {
+  return findLinkLoops(repo).map((loop) => ({
+    check: "D12" as const,
+    level: "error" as const,
+    path: loop.path,
+    message:
+      loop.via === "subtasks"
+        ? `'subtasks' lists #${loop.ids[0]} itself; an issue cannot be its own subtask`
+        : loop.ids.length === 1
+          ? `'parent' names #${loop.ids[0]} itself; an issue cannot be its own parent`
+          : `the 'parent' chain loops: ${[...loop.ids, loop.ids[0]].map((id) => `#${id}`).join(" -> ")}`,
+  }));
 }
 
 /* ------------------------------------- D7 / D9 helpers (git-fed, pure core) */

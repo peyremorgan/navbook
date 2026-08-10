@@ -221,7 +221,7 @@ describe("ops: deleting", () => {
       const planned = planEntityDelete(ws, "issue", "aaa1", {});
       assert.equal(planned.entity.id, "aaa11111");
       assert.deepEqual(
-        uncommittedUnder(ws, planned.entity),
+        uncommittedUnder(ws, planned),
         [],
         "everything is in git, so nothing would be lost",
       );
@@ -239,7 +239,7 @@ describe("ops: deleting", () => {
     inWorkspace((ws) => {
       openIssue(ws, { content: issueText(ws, "Broken", "It broke."), fallbackTitle: "Broken" }, {});
       const planned = planEntityDelete(ws, "issue", "aaa1", {});
-      assert.ok(uncommittedUnder(ws, planned.entity).length > 0, "it was never committed");
+      assert.ok(uncommittedUnder(ws, planned).length > 0, "it was never committed");
     }, "aaa11111");
   });
 

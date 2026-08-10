@@ -5,6 +5,7 @@
 import {
   type CommentRecord,
   type EntityRecord,
+  type LinkNode,
   NAVBOOK_ROOT,
   readAssignees,
   readLabels,
@@ -15,8 +16,17 @@ import {
 } from "@navbook/core";
 import type { Colors } from "./colors.ts";
 
+export interface DetailLinks {
+  /** The issue this one is filed under, when it is in this tree. */
+  parent?: EntityRecord;
+  /** Its subtasks, already limited to the depth the caller asked for. */
+  subtasks: LinkNode[];
+}
+
 export interface DetailOptions {
   colors: Colors;
+  /** Resolved decomposition links; absent for pull requests (§2.5). */
+  links?: DetailLinks;
 }
 
 /** Render one entity with its full comment thread. */
@@ -26,7 +36,7 @@ export function renderDetail(entity: EntityRecord, opts: DetailOptions): string 
   lines.push(`${c.bold(`#${entity.id}`)} ${entity.title}`);
 
   const labelWidth = 11;
-  for (const [label, value] of metadataRows(entity)) {
+  for (const [label, value] of metadataRows(entity, opts.links, c)) {
     // A continuation row (empty label) is indented to line up under the value.
     const cell = label === "" ? " ".repeat(labelWidth) : c.dim(`${label}:`.padEnd(labelWidth));
     lines.push(`${cell}${value}`);
@@ -51,7 +61,11 @@ export function renderDetail(entity: EntityRecord, opts: DetailOptions): string 
   return lines.join("\n");
 }
 
-function metadataRows(entity: EntityRecord): [string, string][] {
+function metadataRows(
+  entity: EntityRecord,
+  links: DetailLinks | undefined,
+  c: Colors,
+): [string, string][] {
   const rows: [string, string][] = [];
   rows.push(["status", entity.archived ? `${entity.status} (archived)` : entity.status]);
   rows.push(["author", stringField(entity, "author")]);
@@ -85,8 +99,60 @@ function metadataRows(entity: EntityRecord): [string, string][] {
     const value = stringField(entity, key);
     if (value !== "") rows.push([key, value]);
   }
+  rows.push(...linkRows(entity, links, c));
   rows.push(["path", `${NAVBOOK_ROOT}/${entity.dirPath}/`]);
   return rows;
+}
+
+/**
+ * The decomposition links, as the file records them.
+ *
+ * A parent named but absent, and a subtask listed but claiming another parent,
+ * are shown as written rather than quietly dropped: what the file says is the
+ * thing a reader needs to see, and `nav doctor` is what explains it.
+ */
+function linkRows(
+  entity: EntityRecord,
+  links: DetailLinks | undefined,
+  c: Colors,
+): [string, string][] {
+  if (!links) return [];
+  const rows: [string, string][] = [];
+
+  const parentId = stringField(entity, "parent");
+  if (parentId !== "") {
+    rows.push(["parent", links.parent ? describeLink(links.parent, c) : missing(parentId, c)]);
+  }
+
+  const flat = flatten(links.subtasks, 0);
+  flat.forEach(([node, depth], index) => {
+    const indent = "  ".repeat(depth);
+    const text = node.entity
+      ? `${indent}${describeLink(node.entity, c)}${suffix(node, c)}`
+      : `${indent}${missing(node.id, c)}`;
+    rows.push([index === 0 ? "subtasks" : "", text]);
+  });
+  return rows;
+}
+
+function flatten(nodes: readonly LinkNode[], depth: number): [LinkNode, number][] {
+  return nodes.flatMap((node) => [
+    [node, depth] as [LinkNode, number],
+    ...flatten(node.children, depth + 1),
+  ]);
+}
+
+function describeLink(entity: EntityRecord, c: Colors): string {
+  return `${c.bold(`#${entity.id}`)} ${entity.title} ${c.dim(`(${entity.status})`)}`;
+}
+
+function missing(id: string, c: Colors): string {
+  return `${c.bold(`#${id}`)} ${c.dim("(not in this tree)")}`;
+}
+
+function suffix(node: LinkNode, c: Colors): string {
+  if (node.cycle) return ` ${c.yellow("(loops back)")}`;
+  return node.repeated ? ` ${c.dim("(shown above)")}` : "";
 }
 
 function stringField(entity: EntityRecord, key: string): string {

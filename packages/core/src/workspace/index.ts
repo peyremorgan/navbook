@@ -10,5 +10,6 @@ export * from "./commit-flow.ts";
 export * from "./ctx.ts";
 export * from "./errors.ts";
 export * from "./history-checks.ts";
+export * from "./link-conflicts.ts";
 export * from "./resolve.ts";
 export * from "./workspace.ts";

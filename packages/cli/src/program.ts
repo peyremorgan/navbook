@@ -22,7 +22,7 @@ import {
 } from "./commands/entity.ts";
 import { cmdId, cmdInit } from "./commands/init.ts";
 import { cmdInstall, cmdUninstall } from "./commands/install.ts";
-import { cmdIssueOpen } from "./commands/issue.ts";
+import { cmdIssueLink, cmdIssueOpen, cmdIssueUnlink } from "./commands/issue.ts";
 import {
   cmdPrClose,
   cmdPrList,
@@ -204,10 +204,38 @@ function buildIssueCommand(getCtx: () => Ctx): Command {
     .option("--label <label>", "add a label (repeatable)", collect, [])
     .option("--assignee <email>", "assign to a person (repeatable)", collect, [])
     .option("--milestone <name>", "milestone")
+    .option("--parent <id>", "file it as a subtask of an existing issue")
     .option("--commit", commitHelp("issue"))
     .action((title, opts) => cmdIssueOpen(getCtx(), title, opts));
 
-  addSharedVerbs(issue, "issue", getCtx, { extraColumns: [] });
+  issue
+    .command("link")
+    .argument("<id>", "ID or unambiguous prefix")
+    .description("file the issue as a subtask of another issue")
+    .requiredOption("--parent <id>", "the issue it belongs under")
+    .option("-f, --force", "move it without asking when it already has a parent")
+    .option("--commit", commitHelp("issue"))
+    .action((id: string, opts) => cmdIssueLink(getCtx(), id, opts));
+
+  issue
+    .command("unlink")
+    .argument("<id>", "ID or unambiguous prefix")
+    .description("detach the issue from its parent")
+    .option("--commit", commitHelp("issue"))
+    .action((id: string, opts) => cmdIssueUnlink(getCtx(), id, opts));
+
+  addSharedVerbs(issue, "issue", getCtx, {
+    extraColumns: [],
+    configureShow: (command) =>
+      command.option(
+        "--depth <n>",
+        "levels of subtasks to render",
+        (value) => Number.parseInt(value, 10),
+        1,
+      ),
+    configureDelete: (command) =>
+      command.option("-r, --recursive", "delete its subtasks too, to any depth"),
+  });
   return issue;
 }
 
@@ -215,6 +243,10 @@ export interface SharedVerbOptions {
   extraColumns: ExtraColumn[];
   /** Extra options the noun's `list` accepts, e.g. `--all-refs` for PRs. */
   configureList?: (command: Command) => void;
+  /** Extra options the noun's `show` accepts, e.g. `--depth` for issues. */
+  configureShow?: (command: Command) => void;
+  /** Extra options the noun's `delete` accepts, e.g. `--recursive` for issues. */
+  configureDelete?: (command: Command) => void;
   /** Listing implementation, when the noun needs more than the shared one. */
   runList?: (ctx: Ctx, terms: string[], options: Record<string, unknown>) => void;
   /** Close implementation, when the noun needs more than the shared one. */
@@ -244,12 +276,13 @@ export function addSharedVerbs(
       : cmdList(getCtx(), kind, terms, { ...opts, extraColumns }),
   );
 
-  parent
+  const show = parent
     .command("show")
     .argument("<id>", "ID or unambiguous prefix")
     .description(`render one ${noun} and its comments`)
-    .option("--json", "emit a single JSON object including comments")
-    .action((id: string, opts) => cmdShow(getCtx(), kind, id, opts));
+    .option("--json", "emit a single JSON object including comments");
+  shared.configureShow?.(show);
+  show.action((id: string, opts) => cmdShow(getCtx(), kind, id, opts));
 
   parent
     .command("edit")
@@ -287,13 +320,14 @@ export function addSharedVerbs(
     .option("--commit", commitHelp(kind))
     .action((id: string, opts) => cmdReopen(getCtx(), kind, id, opts));
 
-  parent
+  const remove = parent
     .command("delete")
     .argument("<id>", "ID or unambiguous prefix")
     .description(`remove the ${noun}'s directory, whatever its status`)
     .option("-f, --force", "do not ask, even when the directory holds uncommitted changes")
-    .option("--commit", commitHelp(kind))
-    .action((id: string, opts) => cmdDelete(getCtx(), kind, id, opts));
+    .option("--commit", commitHelp(kind));
+  shared.configureDelete?.(remove);
+  remove.action((id: string, opts) => cmdDelete(getCtx(), kind, id, opts));
 }
 
 export function collect(value: string, previous: string[]): string[] {

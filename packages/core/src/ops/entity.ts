@@ -12,12 +12,14 @@
  */
 
 import { readFileSync } from "node:fs";
-import { parseFile, validateIssue, validatePr } from "../core/files.ts";
+import { parseFile, readParent, readSubtasks, validateIssue, validatePr } from "../core/files.ts";
 import { FrontmatterError } from "../core/frontmatter.ts";
 import { NAVBOOK_ROOT } from "../core/json.ts";
+import { descendantsOf } from "../core/links.ts";
 import {
   type CloseInput,
   docsSubject,
+  LinkRewriteError,
   type Plan,
   planClose,
   planComment,
@@ -130,18 +132,26 @@ export interface OpenEntityResult {
   run: RunPlanResult;
 }
 
-/** Mint an ID and lay out a new entity's directory. */
+/**
+ * Mint an ID and lay out a new entity's directory.
+ *
+ * `amend` lets a caller extend the plan with work that needs the new ID —
+ * recording the new issue in its parent's `subtasks`, say — so that work lands
+ * in the same commit rather than a follow-up the tree is briefly wrong without.
+ */
 export function openEntity(
   ws: WsCtx,
   kind: EntityKind,
   input: OpenInput,
   opts: CommitOptions,
+  amend?: (plan: Plan, id: string) => Plan,
 ): OpenEntityResult {
   // A title edited in the buffer decides the slug, so read it back.
   const title = titleOf(input.content) ?? input.fallbackTitle;
   const id = ws.mintId(scanAllIds(ws.navRoot));
   const { plan, dirPath } = planEntityOpen(kind, id, title, input.content);
-  return { id, dirPath, run: runPlan(ws, plan, { commit: opts.commit }) };
+  const final = amend ? amend(plan, id) : plan;
+  return { id, dirPath, run: runPlan(ws, final, { commit: opts.commit }) };
 }
 
 function titleOf(content: string): string | null {
@@ -301,7 +311,10 @@ export function rewritePlan(entity: EntityRecord, build: () => Plan): Plan {
     return build();
   } catch (error) {
     if (!(error instanceof FrontmatterError)) throw error;
-    wsFail("frontmatter", `${NAVBOOK_ROOT}/${entity.filePath}: ${error.message}`, [
+    // A link operation rewrites its neighbours too, and it is that file the
+    // user has to fix — not necessarily the one they named.
+    const path = error instanceof LinkRewriteError ? error.path : entity.filePath;
+    wsFail("frontmatter", `${NAVBOOK_ROOT}/${path}: ${error.message}`, [
       "fix the file by hand, or run 'nav doctor' to see what is wrong",
     ]);
   }
@@ -315,7 +328,16 @@ function destination(entity: EntityRecord, status: string): string {
 
 export interface EntityDeletePlan {
   entity: EntityRecord;
+  /** Subtasks removed with it, deepest last; empty without `--recursive`. */
+  alsoRemoved: EntityRecord[];
+  /** Subtasks left behind as top-level issues, when the subtree is kept. */
+  detached: EntityRecord[];
   plan: Plan;
+}
+
+export interface DeleteOptions extends CommitOptions {
+  /** Remove the issue's subtasks with it, to any depth (spec 04 §4.3). */
+  recursive?: boolean;
 }
 
 /**
@@ -328,29 +350,60 @@ export interface EntityDeletePlan {
  * staged, and confirming a deletion that then cannot happen is worse than being
  * told why up front. {@link executeEntityDelete} checks again, against an index
  * nothing has touched in between.
+ *
+ * Links to whatever is removed are severed in the same plan. Without
+ * `--recursive` the subtasks survive as top-level issues, which is the reading
+ * that loses nothing: an issue filed under another is still work in its own
+ * right, and deleting the heading is not a judgement on what was under it.
  */
 export function planEntityDelete(
   ws: WsCtx,
   kind: EntityKind,
   ref: string,
-  opts: CommitOptions,
+  opts: DeleteOptions,
 ): EntityDeletePlan {
-  const entity = findEntity(ws, kind, ref);
-  const plan = planDelete(entity);
+  const repo = loadRepo(ws);
+  const entity = resolveEntity(repo, ref, kind);
+
+  const alsoRemoved = kind === "issue" && opts.recursive ? descendantsOf(repo, entity) : [];
+  const gone = new Set([entity.id, ...alsoRemoved.map((target) => target.id)]);
+  const surviving = repo.issues.filter((issue) => !gone.has(issue.id));
+
+  const detached = kind === "issue" ? surviving.filter((issue) => isChildOf(issue, gone)) : [];
+  const repairs = surviving
+    .map((issue) => ({
+      entity: issue,
+      edit: {
+        removeSubtasks: readSubtasks(issue.fm).filter((id) => gone.has(id)),
+        ...(isChildOf(issue, gone) ? { parent: null } : {}),
+      },
+    }))
+    .filter((repair) => repair.edit.removeSubtasks.length > 0 || repair.edit.parent === null);
+
+  const plan = rewritePlan(entity, () => planDelete(entity, { alsoRemove: alsoRemoved, repairs }));
   if (opts.commit) assertNoUnrelatedStaged(ws, planPaths(plan).map(repoPath));
-  return { entity, plan };
+  return { entity, alsoRemoved, detached, plan };
+}
+
+function isChildOf(issue: EntityRecord, gone: ReadonlySet<string>): boolean {
+  const parentId = readParent(issue.fm);
+  return parentId !== null && gone.has(parentId);
 }
 
 /**
- * Paths under an entity holding work git could not give back — what a delete
- * would destroy irrecoverably, as opposed to merely removing from the tree.
+ * Paths a deletion would destroy irrecoverably — work git could not give back,
+ * as opposed to content merely removed from the tree.
  *
  * Separate from {@link planEntityDelete} because it is the expensive part: it
  * is a full `git status` including untracked files, and a caller that will not
- * stop to ask has no use for the answer.
+ * stop to ask has no use for the answer. Every directory the plan removes is
+ * scanned, so a recursive delete asks about the whole subtree.
  */
-export function uncommittedUnder(ws: WsCtx, entity: EntityRecord): string[] {
-  return uncommittedPaths(ws.repoRoot, repoPath(entity.dirPath));
+export function uncommittedUnder(ws: WsCtx, deletion: EntityDeletePlan): string[] {
+  const roots = [deletion.entity, ...deletion.alsoRemoved].map((target) =>
+    repoPath(target.dirPath),
+  );
+  return uncommittedPaths(ws.repoRoot, roots);
 }
 
 /** Carry out a delete the caller has decided to go ahead with. */
