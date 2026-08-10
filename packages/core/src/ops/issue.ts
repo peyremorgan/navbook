@@ -147,8 +147,11 @@ export function planIssueLink(
     ...(previousParentId !== null && previousParentId !== parent.id ? { previousParentId } : {}),
     ...(previousParent && previousParent.id !== parent.id ? { previousParent } : {}),
     // Only the ones the user is unlikely to know about: a previous parent is
-    // already named in the question the caller asks before moving anything.
-    unexpectedListers: staleListers.filter((entity) => entity.id !== previousParentId),
+    // already named in the question the caller asks before moving anything,
+    // and an issue listing itself has no other file to report against.
+    unexpectedListers: staleListers.filter(
+      (entity) => entity.id !== previousParentId && entity.id !== child.id,
+    ),
     plan,
   };
 }

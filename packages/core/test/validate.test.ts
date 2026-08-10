@@ -456,6 +456,33 @@ describe("D11 broken links", () => {
     assert.match(fixContent(diagnostics[0]), /^subtasks: \[mz4kq1rv, t5kr1gq6\]$/m);
   });
 
+  it("withdraws repairs that would only close a loop between them", () => {
+    // Each issue lists the next and none records a parent, so every claim is
+    // individually answerable — but answering them all files each issue under
+    // the one before it, in a ring that check D12 would then never mend.
+    const ring = {
+      ...linked("bqlybac0", "subtasks: [mz4kq1rv]\n"),
+      ...linked("mz4kq1rv", "subtasks: [t5kr1gq6]\n"),
+      ...linked("t5kr1gq6", "subtasks: [bqlybac0]\n"),
+    };
+    const diagnostics = validateTree(tree(ring));
+    assert.deepEqual(
+      diagnostics.map((d) => d.check),
+      ["D11", "D11", "D11"],
+    );
+    for (const diagnostic of diagnostics) {
+      assert.equal(diagnostic.fix, undefined);
+      assert.match(diagnostic.message, /would close a loop/);
+    }
+  });
+
+  it("still mends a lone missing parent, which closes nothing", () => {
+    const diagnostics = validateTree(
+      tree({ ...linked("bqlybac0", "subtasks: [mz4kq1rv]\n"), ...linked("mz4kq1rv", "") }),
+    );
+    assert.match(fixContent(diagnostics[0]), /^parent: bqlybac0$/m);
+  });
+
   it("offers nothing at all when a file the repair needs cannot be rewritten", () => {
     // #bqlybac0 would gain the missing entry, but its list holds something
     // that is not an ID. Half a repair would delete #mz4kq1rv's claim without

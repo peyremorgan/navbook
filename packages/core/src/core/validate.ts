@@ -9,6 +9,7 @@
 import { parseCommentFileName } from "./comments.ts";
 import {
   type Revision,
+  readParent,
   readRevisions,
   readSubtasks,
   validateComment,
@@ -23,6 +24,7 @@ import {
   findLinkLoops,
   type LinkConflict,
   type LinkFault,
+  loopMembers,
   planFaultRepair,
   type RepairRefusal,
 } from "./links.ts";
@@ -398,6 +400,7 @@ function checkLinks(repo: Repo, opts: ValidateOptions): Diagnostic[] {
         : ("unreadable" as const)
       : repair.reason,
   );
+  refuseLoopMakers(repo, planned, refusals);
 
   const merged = new Map<string, { entity: EntityRecord; edit: MutableLinkEdit }>();
   planned.forEach((repair, index) => {
@@ -422,6 +425,42 @@ function checkLinks(repo: Repo, opts: ValidateOptions): Diagnostic[] {
       ...(fix.length > 0 ? { fix } : {}),
     };
   });
+}
+
+/**
+ * Withdraw the repairs that would close a loop between them.
+ *
+ * Each repair is judged against the tree as it stands, where its own new link
+ * is fine; `--fix` then applies them all at once. Two issues that each list the
+ * other, and neither of which records a parent, are the small case: answering
+ * both claims files each under the other. So the whole set is projected onto
+ * the parent graph it would produce, and every repair that put an issue on a
+ * loop there is taken back — leaving a fault to report rather than a tree that
+ * check D12 says must never be repaired.
+ */
+function refuseLoopMakers(
+  repo: Repo,
+  planned: readonly FaultRepair[],
+  refusals: (RepairRefusal | undefined)[],
+): void {
+  const projected = new Map<string, string | null>();
+  for (const issue of repo.issues) projected.set(issue.id, readParent(issue.fm));
+
+  const setBy = new Map<string, number>();
+  planned.forEach((repair, index) => {
+    if (!repair.ok || refusals[index]) return;
+    for (const { entity, edit } of repair.repairs) {
+      if (edit.parent === undefined) continue;
+      projected.set(entity.id, edit.parent);
+      setBy.set(entity.id, index);
+    }
+  });
+
+  // Dropping edges can only break loops, so one pass settles it.
+  for (const id of loopMembers(projected)) {
+    const index = setBy.get(id);
+    if (index !== undefined) refusals[index] = "would-loop";
+  }
 }
 
 type MutableLinkEdit = { addSubtasks: string[]; removeSubtasks: string[]; parent?: string | null };

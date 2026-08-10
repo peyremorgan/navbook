@@ -382,6 +382,38 @@ export function findLinkLoops(repo: Repo): LinkLoop[] {
   return loops;
 }
 
+/**
+ * Every id that lies on a loop in a `parent` assignment.
+ *
+ * Takes the assignment rather than the tree so a caller can ask the question
+ * of a tree that does not exist yet — which is how `doctor --fix` checks that
+ * the repairs it is about to apply *together* do not close a loop none of them
+ * would have closed alone.
+ */
+export function loopMembers(parents: ReadonlyMap<string, string | null>): Set<string> {
+  const onLoop = new Set<string>();
+  const settled = new Set<string>();
+  for (const start of parents.keys()) {
+    if (settled.has(start)) continue;
+    const walk: string[] = [];
+    const at = new Map<string, number>();
+    let current: string | undefined = start;
+    while (current !== undefined && !settled.has(current)) {
+      const seen = at.get(current);
+      if (seen !== undefined) {
+        for (const id of walk.slice(seen)) onLoop.add(id);
+        break;
+      }
+      at.set(current, walk.length);
+      walk.push(current);
+      const next = parents.get(current);
+      current = next === null || next === undefined || !parents.has(next) ? undefined : next;
+    }
+    for (const id of walk) settled.add(id);
+  }
+  return onLoop;
+}
+
 /** Rotate a loop so the smallest id leads, making the same loop one finding. */
 function canonicalLoop(ids: string[]): string[] {
   let smallest = 0;

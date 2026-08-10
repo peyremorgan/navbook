@@ -256,7 +256,9 @@ at. So MUST a dispute in which any claim names an issue this tree does not
 hold: that issue may be the right parent, on a branch nobody has fetched, and
 the repair would delete the only record here that it exists. D12 is never
 repaired: every link on a loop is equally suspect, and only its author knows
-which was the mistake.
+which was the mistake — and since `--fix` applies its repairs together, it MUST
+judge them together too, withdrawing any that would only close a loop between
+them.
 
 D7, D9 and D10 read git history and are therefore skipped by `--staged` (the
 commit being validated does not exist yet) and wherever the history is

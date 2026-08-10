@@ -715,6 +715,31 @@ describe("nav doctor, on broken links", () => {
     }
   });
 
+  it("never leaves behind a loop its own repairs would have made", () => {
+    const repo = seeded();
+    try {
+      // A ring of claims, none of which records a parent: each is answerable
+      // on its own, and answering them together files everything in a circle.
+      handEdit(repo, "aaa11111", /^subtasks: .*$/m, "subtasks: [bbb22222]");
+      handEdit(repo, "bbb22222", /^parent: .*$/m, "");
+      handEdit(repo, "bbb22222", /^subtasks: .*$/m, "subtasks: [ccc33333]");
+      handEdit(repo, "ccc33333", /^parent: .*$/m, "subtasks: [aaa11111]");
+      handEdit(repo, "ddd44444", /^parent: .*$/m, "");
+
+      const fixed = repo.nav(["doctor", "--fix"]);
+      assert.equal(fixed.code, 2, fixed.stdout);
+      assert.match(fixed.stdout, /would close a loop/);
+      assert.equal(fixed.stdout.includes("fixed"), false, fixed.stdout);
+      for (const id of ["aaa11111", "bbb22222", "ccc33333"]) {
+        assert.equal(read(repo, id).includes("parent:"), false, `#${id} gained a parent`);
+      }
+      // And the tree is no worse than it was: still D11, never D12.
+      assert.equal(repo.nav(["doctor"]).stdout.includes("D12"), false);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("errors on a loop and never offers to break it", () => {
     const repo = seeded();
     try {
