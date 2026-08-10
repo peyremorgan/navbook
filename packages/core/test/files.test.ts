@@ -8,7 +8,9 @@ import {
   parseFile,
   readAssignees,
   readLabels,
+  readParent,
   readRevisions,
+  readSubtasks,
   validateComment,
   validateIssue,
   validatePr,
@@ -71,6 +73,46 @@ Login POST aborts after 5 s.
     assert.match(messages(validateIssue(parseFile(text))), /'duplicate-of' must be a Navbook ID/);
   });
 
+  it("accepts decomposition links and reads them back", () => {
+    const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\nparent: bqlybac0\nsubtasks: [mz4kq1rv, t5kr1gq6]\n---\n\nbody\n`;
+    const parsed = parseFile(text);
+    assert.deepEqual(validateIssue(parsed), []);
+    assert.equal(readParent(parsed.fm), "bqlybac0");
+    assert.deepEqual(readSubtasks(parsed.fm), ["mz4kq1rv", "t5kr1gq6"]);
+  });
+
+  it("accepts a block-style subtasks list, which is the same YAML", () => {
+    const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\nsubtasks:\n  - mz4kq1rv\n  - t5kr1gq6\n---\n\nbody\n`;
+    const parsed = parseFile(text);
+    assert.deepEqual(validateIssue(parsed), []);
+    assert.deepEqual(readSubtasks(parsed.fm), ["mz4kq1rv", "t5kr1gq6"]);
+  });
+
+  it("rejects link keys that are not Navbook IDs", () => {
+    const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\nparent: [a]\nsubtasks: mz4kq1rv\n---\n\nbody\n`;
+    const problems = messages(validateIssue(parseFile(text)));
+    assert.match(problems, /'parent' must be a Navbook ID/);
+    assert.match(problems, /'subtasks' must be a list of Navbook IDs/);
+    assert.match(
+      messages(
+        validateIssue(
+          parseFile(
+            `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\nsubtasks: [mz4kq1rv, NOPE]\n---\n\nbody\n`,
+          ),
+        ),
+      ),
+      /'subtasks' must be a list of Navbook IDs/,
+    );
+  });
+
+  it("reads malformed link keys as no link at all, so a renderer never trips", () => {
+    const { fm } = parseFile(
+      `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\nparent: 12\nsubtasks: [mz4kq1rv, 7, x]\n---\n\nbody\n`,
+    );
+    assert.equal(readParent(fm), null);
+    assert.deepEqual(readSubtasks(fm), ["mz4kq1rv"]);
+  });
+
   it("accepts unknown keys and unusual but legal hand edits", () => {
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\nsome-tool-key: {a: 1}\nassignee: [a@b.co, c@d.co]\n---\n\nbody\n`;
     assert.deepEqual(validateIssue(parseFile(text)), []);
@@ -114,6 +156,13 @@ Replaces the ad-hoc token cache.
     const problems = messages(validatePr(parseFile(text)));
     assert.match(problems, /missing required key 'target'/);
     assert.match(problems, /'revisions' must be a list with at least one entry/);
+  });
+
+  it("rejects decomposition links, which relate issues only", () => {
+    const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\ntarget: main\nparent: bqlybac0\nsubtasks: [mz4kq1rv]\nrevisions:\n  - head: ${SHA_A}\n    base: ${SHA_B}\n    date: 2026-01-01\n---\n\nbody\n`;
+    const problems = messages(validatePr(parseFile(text)));
+    assert.match(problems, /'parent' is an issue-only key/);
+    assert.match(problems, /'subtasks' is an issue-only key/);
   });
 
   it("rejects an empty revisions list", () => {
@@ -251,6 +300,20 @@ describe("constructors", () => {
       assignee: ["a@b.co", "c@d.co"],
     });
     assert.match(text, /assignee: \[a@b\.co, c@d\.co\]/);
+  });
+
+  it("records the parent of an issue opened as a subtask", () => {
+    const text = newIssueFile({
+      title: "t",
+      author: "a@b.co",
+      created: "2026-01-01",
+      body: "b",
+      parent: "bqlybac0",
+    });
+    assert.match(text, /^parent: bqlybac0$/m);
+    assert.deepEqual(validateIssue(parseFile(text)), []);
+    // The parent's side of the link is the operation's business, not the file's.
+    assert.equal(text.includes("subtasks"), false);
   });
 
   it("renders a pull request that validates", () => {

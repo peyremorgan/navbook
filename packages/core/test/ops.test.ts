@@ -1,19 +1,26 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { newIssueFile, parseFile, readRevisions, validateIssue } from "../src/core/files.ts";
+import { FrontmatterError } from "../src/core/frontmatter.ts";
 import {
   docsSubject,
+  type FileOp,
+  LinkRewriteError,
+  linkRepairOps,
   planArchiveMerged,
   planClose,
   planComment,
   planDelete,
   planEntityOpen,
   planInit,
+  planLink,
   planMergedBlock,
   planPaths,
   planPrUpdate,
   planReopen,
+  planUnlink,
   RevisionUnchangedError,
+  rewriteLinks,
 } from "../src/core/ops.ts";
 import { type EntityRecord, type NavTree, parseTree } from "../src/core/tree.ts";
 
@@ -34,6 +41,19 @@ const issueEntity = (extra = "", status = "open"): EntityRecord =>
     `issues/${status}/bqlybac0-login-timeout/issue.md`,
     `---\ntitle: Login times out\nauthor: alice@example.com\ncreated: 2026-08-02T09:14:00Z\nlabels: [bug]\n${extra}---\n\nBody.\n`,
   );
+
+/** An issue named by id, for the link planners that relate several of them. */
+const linkIssue = (id: string, links = ""): EntityRecord =>
+  entityFrom(
+    `issues/open/${id}-x/issue.md`,
+    `---\ntitle: Issue ${id}\nauthor: alice@example.com\ncreated: 2026-08-02T09:14:00Z\n${links}---\n\nBody.\n`,
+  );
+
+/** The frontmatter a write op would produce, for matching keys against. */
+function frontmatterOf(op: FileOp | undefined): string {
+  assert.ok(op && op.op === "write", "expected a write op");
+  return op.content;
+}
 
 const prEntity = (revisions: string, extra = ""): EntityRecord =>
   entityFrom(
@@ -303,6 +323,153 @@ describe("planDelete", () => {
     assert.deepEqual(planDelete(entity).ops, [
       { op: "remove", path: "archive/2019/issues/closed/bqlybac0-login-timeout" },
     ]);
+  });
+
+  it("mends the survivors before removing anything, so the ops apply in order", () => {
+    const child = linkIssue("c1000000", "parent: bqlybac0\n");
+    const plan = planDelete(issueEntity(), {
+      repairs: [{ entity: child, edit: { parent: null } }],
+    });
+    assert.deepEqual(
+      plan.ops.map((op) => op.op),
+      ["write", "remove"],
+    );
+    assert.equal(frontmatterOf(plan.ops[0]).includes("parent"), false);
+  });
+
+  it("removes a whole subtree and records the extra ids it took", () => {
+    const grandchild = linkIssue("d1000000", "parent: c1000000\n");
+    const child = linkIssue("c1000000", "parent: bqlybac0\nsubtasks: [d1000000]\n");
+    const plan = planDelete(issueEntity(), { alsoRemove: [child, grandchild] });
+    assert.deepEqual(
+      plan.ops.map((op) => (op.op === "remove" ? op.path : "?")),
+      [
+        "issues/open/bqlybac0-login-timeout",
+        "issues/open/c1000000-x/",
+        "issues/open/d1000000-x/",
+      ].map((path) => path.replace(/\/$/, "")),
+    );
+    // A subtask the subject does not name would otherwise look like an entity
+    // that went missing rather than one deliberately removed (check D8).
+    assert.deepEqual(plan.trailers, [
+      { key: "Deletes", id: "c1000000" },
+      { key: "Deletes", id: "d1000000" },
+    ]);
+  });
+});
+
+describe("rewriteLinks", () => {
+  it("writes a new list in flow style, as the spec's own examples are", () => {
+    const content = rewriteLinks(linkIssue("a1000000"), { addSubtasks: ["c1000000"] });
+    assert.match(content ?? "", /^subtasks: \[c1000000\]$/m);
+  });
+
+  it("appends to an existing list, keeping the order already there", () => {
+    const entity = linkIssue("a1000000", "subtasks: [c1000000, b1000000]\n");
+    const content = rewriteLinks(entity, { addSubtasks: ["d1000000"] });
+    assert.match(content ?? "", /^subtasks: \[c1000000, b1000000, d1000000\]$/m);
+  });
+
+  it("removes the key rather than leaving an empty list behind", () => {
+    const entity = linkIssue("a1000000", "subtasks: [c1000000]\n");
+    const content = rewriteLinks(entity, { removeSubtasks: ["c1000000"] });
+    assert.equal(content?.includes("subtasks"), false);
+  });
+
+  it("drops a repeated entry on any write, since it cannot mean anything twice", () => {
+    const entity = linkIssue("a1000000", "subtasks: [c1000000, c1000000]\n");
+    assert.match(rewriteLinks(entity, {}) ?? "", /^subtasks: \[c1000000\]$/m);
+  });
+
+  it("reports no change rather than churning a file that already agrees", () => {
+    const entity = linkIssue("a1000000", "parent: b1000000\nsubtasks: [c1000000]\n");
+    assert.equal(rewriteLinks(entity, { addSubtasks: ["c1000000"], parent: "b1000000" }), null);
+    assert.equal(rewriteLinks(entity, { removeSubtasks: ["d1000000"] }), null);
+  });
+
+  it("clears the parent on null and leaves it alone on undefined", () => {
+    const entity = linkIssue("a1000000", "parent: b1000000\n");
+    assert.equal(rewriteLinks(entity, { parent: null })?.includes("parent"), false);
+    assert.equal(rewriteLinks(entity, {}), null);
+  });
+
+  it("preserves unknown keys and the body", () => {
+    const entity = linkIssue("a1000000", "unknown-key: {deep: [1, 2]}\n");
+    const content = rewriteLinks(entity, { addSubtasks: ["c1000000"] }) ?? "";
+    assert.match(content, /unknown-key: \{deep: \[1, 2\]\}/);
+    assert.match(content, /Body\./);
+  });
+
+  it("refuses a list it cannot read rather than silently dropping what is there", () => {
+    const entity = linkIssue("a1000000", "subtasks: [c1000000, 42]\n");
+    assert.throws(() => rewriteLinks(entity, { addSubtasks: ["d1000000"] }), FrontmatterError);
+  });
+
+  it("names the file whose links could not be read, not the one asked about", () => {
+    const bad = linkIssue("a1000000", "parent: not-an-id\n");
+    assert.throws(
+      () => linkRepairOps([{ entity: bad, edit: { parent: null } }]),
+      (error) => {
+        assert.ok(error instanceof LinkRewriteError);
+        assert.equal(error.path, "issues/open/a1000000-x/issue.md");
+        return true;
+      },
+    );
+  });
+});
+
+describe("planLink", () => {
+  it("writes both sides and refers to both entities", () => {
+    const child = linkIssue("c1000000");
+    const parent = linkIssue("a1000000");
+    const plan = planLink(child, parent);
+    assert.equal(plan.message, "docs(issue): link #c1000000");
+    assert.deepEqual(plan.trailers, [
+      { key: "Refs", id: "c1000000" },
+      { key: "Refs", id: "a1000000" },
+    ]);
+    assert.match(frontmatterOf(plan.ops[0]), /^parent: a1000000$/m);
+    assert.match(frontmatterOf(plan.ops[1]), /^subtasks: \[c1000000\]$/m);
+  });
+
+  it("takes the child off every list that still claims it", () => {
+    const child = linkIssue("c1000000", "parent: b1000000\n");
+    const parent = linkIssue("a1000000");
+    const stale = linkIssue("b1000000", "subtasks: [c1000000]\n");
+    const plan = planLink(child, parent, [stale]);
+    assert.equal(plan.ops.length, 3);
+    assert.equal(frontmatterOf(plan.ops[2]).includes("subtasks"), false);
+  });
+
+  it("mends a half-written link without touching the side that was right", () => {
+    const child = linkIssue("c1000000", "parent: a1000000\n");
+    const parent = linkIssue("a1000000");
+    const plan = planLink(child, parent);
+    assert.deepEqual(
+      plan.ops.map((op) => (op.op === "write" ? op.path : "?")),
+      ["issues/open/a1000000-x/issue.md"],
+    );
+  });
+});
+
+describe("planUnlink", () => {
+  it("clears the parent and every claim on it", () => {
+    const child = linkIssue("c1000000", "parent: a1000000\n");
+    const parent = linkIssue("a1000000", "subtasks: [c1000000]\n");
+    const plan = planUnlink(child, [parent]);
+    assert.equal(plan.message, "docs(issue): unlink #c1000000");
+    assert.deepEqual(plan.trailers, [
+      { key: "Refs", id: "c1000000" },
+      { key: "Refs", id: "a1000000" },
+    ]);
+    assert.equal(frontmatterOf(plan.ops[0]).includes("parent"), false);
+    assert.equal(frontmatterOf(plan.ops[1]).includes("subtasks"), false);
+  });
+
+  it("also drops an issue's claim on itself, which nothing else can undo", () => {
+    const child = linkIssue("c1000000", "subtasks: [c1000000]\n");
+    const plan = planUnlink(child, []);
+    assert.equal(frontmatterOf(plan.ops[0]).includes("subtasks"), false);
   });
 });
 
