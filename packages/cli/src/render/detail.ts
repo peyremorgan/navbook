@@ -99,7 +99,7 @@ function metadataRows(
     const value = stringField(entity, key);
     if (value !== "") rows.push([key, value]);
   }
-  rows.push(...linkRows(entity, links, c));
+  rows.push(...linkRows(links, c));
   rows.push(["path", `${NAVBOOK_ROOT}/${entity.dirPath}/`]);
   return rows;
 }
@@ -111,11 +111,7 @@ function metadataRows(
  * are shown as written rather than quietly dropped: what the file says is the
  * thing a reader needs to see, and `nav doctor` is what explains it.
  */
-function linkRows(
-  entity: EntityRecord,
-  links: DetailLinks | undefined,
-  c: Colors,
-): [string, string][] {
+function linkRows(links: DetailLinks | undefined, c: Colors): [string, string][] {
   if (!links) return [];
   const rows: [string, string][] = [];
   if (links.parent) rows.push(["parent", describeLink(links.parent, 0, c)]);

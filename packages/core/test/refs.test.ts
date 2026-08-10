@@ -106,6 +106,12 @@ describe("extractDeletedIds", () => {
     );
   });
 
+  it("reads the trailer only from a commit that says it deleted something", () => {
+    // Otherwise any commit could permanently silence a genuine D8 warning by
+    // writing one line.
+    assert.deepEqual(extractDeletedIds("feat: unrelated work\n\nDeletes: mz4kq1rv\n"), []);
+  });
+
   it("does not mistake 'Deletes:' for a reference", () => {
     assert.deepEqual(extractTrailerRefs("docs(issue): delete #bqlybac0\n\nDeletes: mz4kq1rv\n"), {
       refs: [],

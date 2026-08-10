@@ -35,12 +35,21 @@ const DELETE_SUBJECT = /^docs\((?:issue|pr)\): delete #([a-z][a-z0-9]{7})$/;
  */
 const DELETES_TRAILER = /^Deletes:[ \t]*(.+?)[ \t]*$/gim;
 
-/** Every entity ID a commit deleted; empty when it deleted none. */
+/**
+ * Every entity ID a commit deleted; empty when it deleted none.
+ *
+ * The trailer is read only from a commit whose subject says it deleted
+ * something. Suppressing a warning is not a power an arbitrary commit gets to
+ * claim by writing one line — a commit that removed an entity says so in its
+ * subject, and the trailer only extends that record to what the subject cannot
+ * name.
+ */
 export function extractDeletedIds(message: string): string[] {
-  const out = new Set<string>();
   const subject = message.trimStart().split("\n", 1)[0] ?? "";
   const match = DELETE_SUBJECT.exec(subject);
-  if (match) out.add(match[1] as string);
+  if (!match) return [];
+
+  const out = new Set<string>([match[1] as string]);
   for (const trailer of message.matchAll(DELETES_TRAILER)) {
     for (const token of (trailer[1] as string).split(/[\s,]+/)) {
       const id = token.replace(/^#/, "");

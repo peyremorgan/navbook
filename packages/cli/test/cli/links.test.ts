@@ -584,6 +584,23 @@ describe("nav issue delete, with links", () => {
     }
   });
 
+  it("is not blocked by a third issue whose own list cannot be read", () => {
+    const repo = seeded();
+    try {
+      // #ccc33333's list is malformed and happens to name the target. That is
+      // its own fault to answer for; it must not stand between the user and
+      // the issue they asked to delete.
+      handEdit(repo, "ccc33333", /^created: (.*)$/m, "created: $1\nsubtasks: [ddd44444, 42]");
+      const result = repo.nav(["issue", "delete", "ddd4", "--force"]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(existsSync(fileOf(repo, "ddd44444")), false);
+      assert.match(read(repo, "ccc33333"), /^subtasks: \[ddd44444, 42\]$/m, "left untouched");
+      assert.equal(read(repo, "bbb22222").includes("subtasks"), false, "the readable one mended");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("has no --recursive on pull requests, which do not decompose", () => {
     const repo = seeded();
     try {

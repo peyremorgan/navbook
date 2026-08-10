@@ -21,6 +21,7 @@ import {
   docsSubject,
   type LinkRepair,
   LinkRewriteError,
+  linksReadable,
   type Plan,
   planClose,
   planComment,
@@ -407,7 +408,11 @@ function planDeleteLinks(
         ...(isChild(issue) ? { parent: null } : {}),
       },
     }))
-    .filter((repair) => repair.edit.removeSubtasks.length > 0 || repair.edit.parent === null);
+    .filter((repair) => repair.edit.removeSubtasks.length > 0 || repair.edit.parent === null)
+    // A third issue whose link keys cannot be read must not stand between the
+    // user and the entity they asked to delete. Its stale reference becomes a
+    // D8 warning, alongside the D2 error it already had.
+    .filter((repair) => linksReadable(repair.entity));
 
   return { alsoRemoved, detached: surviving.filter(isChild), repairs };
 }

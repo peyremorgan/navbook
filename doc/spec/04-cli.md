@@ -140,7 +140,9 @@ other kind MUST fail with a pointer to the right noun (e.g.
   D8 below. A recursive delete removes entities the subject does not name, so
   it records each of them as a `Deletes: <id>` trailer. `Deletes:` is not a
   reference — it names what the commit took away — and D8 reads it back for the
-  same reason it reads the subject.
+  same reason it reads the subject, though only from a commit whose subject
+  already says it deleted something: silencing a warning is not a power any
+  commit may claim by writing one line.
 
 ### Pull requests — `nav pr <verb>`
 
