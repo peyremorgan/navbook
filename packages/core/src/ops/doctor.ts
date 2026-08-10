@@ -54,7 +54,20 @@ export function runDoctor(ws: WsCtx, opts: DoctorOptions = {}): DoctorReport {
   ]);
 
   if (!opts.fix) return { diagnostics, applied: [] };
-  return { diagnostics: diagnostics.filter((d) => !d.fix), applied: applyFixes(ws, diagnostics) };
+  // A link repair rewrites a whole file. Under --staged that file's content
+  // came from the index, so writing it into the working tree would silently
+  // discard whatever the author has not staged yet. Report, do not repair.
+  const repairable = opts.staged ? diagnostics.map(withoutLinkRepair) : diagnostics;
+  return {
+    diagnostics: repairable.filter((d) => !d.fix),
+    applied: applyFixes(ws, repairable),
+  };
+}
+
+function withoutLinkRepair(diagnostic: Diagnostic): Diagnostic {
+  if (diagnostic.check !== "D11" || !diagnostic.fix) return diagnostic;
+  const { fix: _dropped, ...rest } = diagnostic;
+  return rest;
 }
 
 /**

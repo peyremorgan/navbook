@@ -547,6 +547,24 @@ describe("nav doctor, on broken links", () => {
     }
   });
 
+  it("does not repair from the index, which would discard unstaged work", () => {
+    const repo = seeded();
+    try {
+      handEdit(repo, "aaa11111", /^subtasks: .*$/m, "subtasks: [ccc33333]");
+      repo.git(["add", "-A"]);
+      // Staged and working-tree content now differ; a repair built from the
+      // index would write the staged bytes over this line.
+      handEdit(repo, "aaa11111", /^Root\.$/m, "Root, with a thought not yet staged.");
+
+      const result = repo.nav(["doctor", "--staged", "--fix"]);
+      assert.equal(result.code, 2, result.stdout);
+      assert.equal(result.stdout.includes("fixed"), false, result.stdout);
+      assert.match(read(repo, "aaa11111"), /not yet staged/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("only warns about a link whose target may be on another branch", () => {
     const repo = seeded();
     try {

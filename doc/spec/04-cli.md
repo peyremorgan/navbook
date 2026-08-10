@@ -237,7 +237,10 @@ references to a deleted entity are still reported: those live in files the user
 can edit.
 
 D11 and D12 are decidable from the tree alone, so unlike D7, D9 and D10 they
-run under `--staged` and the pre-commit hook blocks a link broken by hand.
+run under `--staged` and the pre-commit hook blocks a link broken by hand. A
+D11 repair is not offered there, though: it rewrites a whole file, and under
+`--staged` that file's content came from the index, so writing it back into the
+working tree would discard whatever was not staged.
 
 `--fix` repairs a D11 that the tree can settle without discarding anything
 anyone asserted: adding the missing reciprocal entry, and dropping a repeated

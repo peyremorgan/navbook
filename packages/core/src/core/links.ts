@@ -90,6 +90,19 @@ export function listersOf(repo: Repo, id: string): EntityRecord[] {
   return repo.issues.filter((issue) => readSubtasks(issue.fm).includes(id));
 }
 
+/** {@link listersOf} for every id at once, in one pass over the tree. */
+function listerIndex(repo: Repo): Map<string, EntityRecord[]> {
+  const index = new Map<string, EntityRecord[]>();
+  for (const issue of repo.issues) {
+    for (const id of new Set(readSubtasks(issue.fm))) {
+      const bucket = index.get(id);
+      if (bucket) bucket.push(issue);
+      else index.set(id, [issue]);
+    }
+  }
+  return index;
+}
+
 /* ------------------------------------------------------------ link guards */
 
 export type LinkRefusal =
@@ -168,6 +181,9 @@ export function faultPath(fault: LinkFault): string {
  */
 export function findLinkFaults(repo: Repo): LinkFault[] {
   const faults: LinkFault[] = [];
+  // Indexed once: asking the tree per issue who claims it would make the check
+  // quadratic, and doctor runs over every issue there is.
+  const listers = listerIndex(repo);
 
   for (const parent of repo.issues) {
     const seen = new Set<string>();
@@ -199,26 +215,27 @@ export function findLinkFaults(repo: Repo): LinkFault[] {
       continue; // the claim is void; resolving the rest would be guesswork
     }
 
-    const listers = listersOf(repo, child.id).filter((entity) => entity.id !== child.id);
+    const claimants = (listers.get(child.id) ?? []).filter((e) => e.id !== child.id);
     const candidates = [
-      ...new Set([...(claimedId === null ? [] : [claimedId]), ...listers.map((e) => e.id)]),
+      ...new Set([...(claimedId === null ? [] : [claimedId]), ...claimants.map((e) => e.id)]),
     ];
     if (candidates.length === 0) continue;
 
     if (candidates.length > 1) {
-      faults.push({ kind: "conflict", child, claimants: candidates.sort(), listers });
+      faults.push({ kind: "conflict", child, claimants: candidates.sort(), listers: claimants });
       continue;
     }
     const only = candidates[0] as string;
     if (claimedId !== only) {
-      const parent = listers[0] as EntityRecord;
+      const parent = claimants[0] as EntityRecord;
       faults.push({ kind: "child-missing-parent", child, parent });
       continue;
     }
-    // The child's own claim stands alone. Only an in-tree parent can be asked
-    // to confirm it; one on an unfetched branch cannot, and is not a fault.
+    // The child's own claim stands alone — nothing lists it, or the index
+    // would have made the parent a claimant too. Only an in-tree parent can be
+    // asked to confirm it; one on an unfetched branch cannot, and is no fault.
     const parent = issueById(repo, only);
-    if (parent && !readSubtasks(parent.fm).includes(child.id)) {
+    if (parent && claimants.length === 0) {
       faults.push({ kind: "parent-missing-child", child, parent });
     }
   }

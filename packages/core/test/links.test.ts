@@ -237,6 +237,32 @@ describe("findLinkFaults", () => {
   });
 });
 
+describe("findLinkFaults, at scale", () => {
+  /** One parent with `count` subtasks, all agreeing. */
+  const fanOut = (count: number): Repo => {
+    const kids = Array.from({ length: count }, (_, i) => `k${String(i).padStart(7, "0")}`);
+    return repoOf(
+      issue("a1000000", `subtasks: [${kids.join(", ")}]\n`),
+      ...kids.map((id) => issue(id, "parent: a1000000\n")),
+    );
+  };
+
+  it("does not slow down quadratically as one list grows", () => {
+    const time = (count: number): number => {
+      const repo = fanOut(count);
+      findLinkFaults(repo); // warm the code paths before measuring
+      const started = process.hrtime.bigint();
+      assert.deepEqual(findLinkFaults(repo), []);
+      return Number(process.hrtime.bigint() - started);
+    };
+    // Doubling the tree may not quadruple the work. The margin is wide because
+    // this is a shape assertion, not a benchmark: a quadratic scan came in at
+    // a hundred times the linear one.
+    const small = Math.max(time(500), 1);
+    assert.ok(time(1000) < small * 8, "checking links must stay near-linear");
+  });
+});
+
 describe("planFaultRepair", () => {
   const never = (): null => null;
 
