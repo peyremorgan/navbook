@@ -165,6 +165,14 @@ describe("linkRefusal", () => {
     const repo = repoOf(issue("a1000000"), issue("b1000000", "parent: a1000000\n"));
     assert.equal(linkRefusal(repo, get(repo, "b1000000"), get(repo, "a1000000")), null);
   });
+
+  it("allows relinking when the child also claims its parent as a subtask", () => {
+    const repo = repoOf(
+      issue("a1000000", "subtasks: [b1000000]\n"),
+      issue("b1000000", "parent: a1000000\nsubtasks: [a1000000]\n"),
+    );
+    assert.equal(linkRefusal(repo, get(repo, "b1000000"), get(repo, "a1000000")), null);
+  });
 });
 
 describe("findLinkFaults", () => {
@@ -457,6 +465,25 @@ describe("subtaskTree", () => {
     assert.equal(tree[0]?.children[0]?.id, "a1000000");
     assert.equal(tree[0]?.children[0]?.cycle, true);
     assert.deepEqual(tree[0]?.children[0]?.children, []);
+  });
+
+  it("still expands an issue first met at the depth limit", () => {
+    // a1 lists b1 and d1; b1 also lists d1, which owns e1. At depth 2, the
+    // copy of d1 under b1 sits at the limit and shows nothing — which hides
+    // nothing, and must not stop a1's own copy of d1 from reaching e1.
+    const repo = repoOf(
+      issue("a1000000", "subtasks: [b1000000, d1000000]\n"),
+      issue("b1000000", "subtasks: [d1000000]\n"),
+      issue("d1000000", "subtasks: [e1000000]\n"),
+      issue("e1000000"),
+    );
+    const tree = subtaskTree(repo, get(repo, "a1000000"), 2);
+    assert.deepEqual(tree[0]?.children[0]?.children, [], "at the limit under b1");
+    assert.deepEqual(
+      tree[1]?.children.map((n) => n.id),
+      ["e1000000"],
+      "expanded under a1, where there is room",
+    );
   });
 
   it("expands an issue two lists share only once", () => {

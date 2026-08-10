@@ -130,7 +130,13 @@ export function linkRefusal(
     const upToChild = chain.slice(0, chain.findIndex((entity) => entity.id === child.id) + 1);
     return { kind: "cycle", chain: upToChild.map((entity) => entity.id) };
   }
-  if (readParent(child.fm) === parent.id && readSubtasks(parent.fm).includes(child.id)) {
+  // "Already linked" has to mean there is nothing left to mend, or the verb
+  // that exists to put a link right would refuse the one case it is needed for.
+  if (
+    readParent(child.fm) === parent.id &&
+    readSubtasks(parent.fm).includes(child.id) &&
+    !readSubtasks(child.fm).includes(parent.id)
+  ) {
     return { kind: "already-linked" };
   }
   return null;
@@ -249,6 +255,8 @@ export type RepairRefusal =
   | "not-an-issue"
   /** A claim names an issue this tree does not hold, so it cannot be weighed. */
   | "off-tree-claimant"
+  /** A file the repair would rewrite has link keys nothing can read (D2). */
+  | "unreadable"
   /** History did not say which of the competing claims was made last. */
   | "undecided"
   /** The repair would file an issue below itself. */
@@ -439,6 +447,10 @@ export function subtaskTree(repo: Repo, issue: EntityRecord, depth: number): Lin
       const entity = node.entity;
       if (!entity) return node;
       if (path.has(id)) return { ...node, cycle: true };
+      // At the limit nothing below is shown for anyone, so this occurrence
+      // hides nothing and must not claim the issue: a shallower one further
+      // along the list still has room to expand it.
+      if (remaining <= 1) return node;
       if (expanded.has(id)) return { ...node, repeated: true };
       expanded.add(id);
       return { ...node, children: build(entity, remaining - 1, new Set([...path, id])) };

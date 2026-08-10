@@ -26,7 +26,7 @@ import {
   planFaultRepair,
   type RepairRefusal,
 } from "./links.ts";
-import { type FileOp, type LinkRepair, linkRepairOps } from "./ops.ts";
+import { type FileOp, type LinkRepair, linkRepairOps, linksReadable } from "./ops.ts";
 import { extractDeletedIds, extractProseRefs, extractTrailerRefs } from "./refs.ts";
 import { parseDirName } from "./slug.ts";
 import {
@@ -383,24 +383,40 @@ function checkDanglingRefs(
 function checkLinks(repo: Repo, opts: ValidateOptions): Diagnostic[] {
   const decideConflict = opts.decideLinkConflict;
   const faults = findLinkFaults(repo);
+  const planned = faults.map((fault) =>
+    planFaultRepair(repo, fault, decideConflict ?? (() => null)),
+  );
+
+  // A repair is offered only when every file it would rewrite can be rewritten.
+  // Deciding that before anything is merged is what keeps the shared edits
+  // honest: an edit that reaches the map is one some diagnostic has promised,
+  // and no fault can carry a neighbour's unkeepable promise into its own fix.
+  const refusals = planned.map((repair) =>
+    repair.ok
+      ? repair.repairs.every(({ entity }) => linksReadable(entity))
+        ? undefined
+        : ("unreadable" as const)
+      : repair.reason,
+  );
+
   const merged = new Map<string, { entity: EntityRecord; edit: MutableLinkEdit }>();
-  const repairs = faults.map((fault) => {
-    const repair = planFaultRepair(repo, fault, decideConflict ?? (() => null));
-    if (repair.ok) for (const one of repair.repairs) mergeEdit(merged, one);
-    return repair;
+  planned.forEach((repair, index) => {
+    if (!repair.ok || refusals[index]) return;
+    for (const one of repair.repairs) mergeEdit(merged, one);
   });
 
   return faults.map((fault, index) => {
-    const repair = repairs[index] as FaultRepair;
-    const fix = repair.ok ? renderLinkFix(repair.repairs, merged) : [];
+    const repair = planned[index] as FaultRepair;
+    const refusal = refusals[index];
+    // A repair can be planned and still write nothing, when another fault on
+    // the same file already covers it.
+    const fix = repair.ok && !refusal ? renderLinkFix(repair.repairs, merged) : [];
     return {
       check: "D11" as const,
       level: "error" as const,
       path: faultPath(fault),
       message: linkFaultMessage(fault, {
-        // A repair can be planned and still write nothing, when another fault
-        // on the same file already covers it.
-        ...(repair.ok ? {} : { refusal: repair.reason }),
+        ...(refusal ? { refusal } : {}),
         historyConsulted: decideConflict !== undefined,
       }),
       ...(fix.length > 0 ? { fix } : {}),
@@ -428,19 +444,14 @@ function mergeEdit(
  * The write ops one fault's repair needs, carrying each file's *final* content.
  *
  * A file cannot be written twice with different content by one `--fix` run, so
- * every diagnostic that touches it offers the same bytes.
+ * every diagnostic that touches it offers the same bytes. Every file here has
+ * already been found rewritable, so this cannot throw.
  */
 function renderLinkFix(
   plan: readonly LinkRepair[],
   merged: ReadonlyMap<string, { entity: EntityRecord; edit: MutableLinkEdit }>,
 ): FileOp[] {
-  try {
-    return linkRepairOps(plan.map(({ entity }) => merged.get(entity.id) ?? { entity, edit: {} }));
-  } catch {
-    // Link keys too malformed to rewrite: check D2 reports them, and a repair
-    // that had to guess what the author meant would be worse than none.
-    return [];
-  }
+  return linkRepairOps(plan.map(({ entity }) => merged.get(entity.id) ?? { entity, edit: {} }));
 }
 
 interface FaultContext {
@@ -451,30 +462,37 @@ interface FaultContext {
 }
 
 function linkFaultMessage(fault: LinkFault, ctx: FaultContext): string {
+  return `${describeFault(fault)}${adviceFor(fault, ctx)}`;
+}
+
+function describeFault(fault: LinkFault): string {
   switch (fault.kind) {
     case "parent-missing-child":
       return `#${fault.child.id} names this issue as its parent, but 'subtasks' does not list it`;
     case "child-missing-parent":
-      return `#${fault.parent.id} lists this issue as a subtask, but 'parent' does not name it${
-        ctx.refusal === "would-loop"
-          ? "; linking it back would close a loop, so settle it by hand"
-          : ""
-      }`;
+      return `#${fault.parent.id} lists this issue as a subtask, but 'parent' does not name it`;
     case "duplicate":
       return `'subtasks' lists #${fault.childId} more than once`;
     case "not-an-issue":
       return `'${fault.key}' names #${fault.otherId}, which is a pull request; decomposition relates issues only (§2.5)`;
     default:
-      return `${fault.claimants.map((id) => `#${id}`).join(" and ")} disagree about the parent of #${fault.child.id}${conflictAdvice(ctx)}`;
+      return `${fault.claimants.map((id) => `#${id}`).join(" and ")} disagree about the parent of #${fault.child.id}`;
   }
 }
 
 const BY_HAND = "settle it with 'nav issue link' or 'nav issue unlink'";
 
-function conflictAdvice(ctx: FaultContext): string {
+/** Why the fault was left alone, when the reason is not already evident. */
+function adviceFor(fault: LinkFault, ctx: FaultContext): string {
+  if (ctx.refusal === undefined || ctx.refusal === "not-an-issue") return "";
+  if (ctx.refusal === "unreadable") {
+    return "; a file the repair would rewrite has link keys that cannot be read (check D2)";
+  }
+  if (fault.kind === "child-missing-parent") {
+    return "; linking it back would close a loop, so settle it by hand";
+  }
+  if (fault.kind !== "conflict") return "";
   switch (ctx.refusal) {
-    case undefined:
-      return "";
     case "off-tree-claimant":
       // Deleting the only record that an issue exists elsewhere is not a repair.
       return `; one claim names an issue this tree does not hold, so ${BY_HAND}`;

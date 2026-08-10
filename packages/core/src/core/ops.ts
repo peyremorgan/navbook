@@ -283,6 +283,16 @@ export function rewriteLinks(entity: EntityRecord, edit: LinkEdit): string | nul
   return serializeDoc(nav);
 }
 
+/** True when {@link rewriteLinks} could rewrite this file's link keys. */
+export function linksReadable(entity: EntityRecord): boolean {
+  try {
+    requireReadableLinks(entity);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function requireReadableLinks(entity: EntityRecord): void {
   const parent = entity.fm.parent;
   if (parent !== undefined && parent !== null && (typeof parent !== "string" || !isId(parent))) {
@@ -340,7 +350,10 @@ export function planLink(
   staleListers: readonly EntityRecord[] = [],
 ): Plan {
   const repairs: LinkRepair[] = [
-    { entity: child, edit: { parent: parent.id } },
+    // The child drops any claim on its new parent along the way: one issue
+    // cannot be both above and below another, and the caller has just said
+    // which way round it goes.
+    { entity: child, edit: { parent: parent.id, removeSubtasks: [parent.id] } },
     { entity: parent, edit: { addSubtasks: [child.id] } },
     ...staleListers
       .filter((entity) => entity.id !== parent.id && entity.id !== child.id)

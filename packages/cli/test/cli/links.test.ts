@@ -303,6 +303,22 @@ describe("nav issue link", () => {
     }
   });
 
+  it("drops the child's own claim on the issue it is being filed under", () => {
+    const repo = seeded();
+    try {
+      // #ddd44444 lists its prospective parent as a subtask of its own. One of
+      // the two has to go, and the command has just been told which way round.
+      handEdit(repo, "ddd44444", /^created: (.*)$/m, "created: $1\nsubtasks: [ccc33333]");
+      const result = repo.nav(["issue", "link", "ddd4", "--parent", "ccc3", "--force"]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(read(repo, "ddd44444"), /^parent: ccc33333$/m);
+      assert.equal(read(repo, "ddd44444").includes("subtasks"), false);
+      assert.equal(repo.nav(["doctor"]).code, 0, repo.nav(["doctor"]).stdout);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("takes the subtask off every list that still claims it", () => {
     const repo = seeded();
     try {
@@ -408,9 +424,13 @@ describe("nav issue show, with links", () => {
   it("rejects a depth that is not a whole number of levels", () => {
     const repo = seeded();
     try {
-      const result = repo.nav(["issue", "show", "aaa1", "--depth", "-1"]);
-      assert.equal(result.code, 1);
-      assert.match(result.stderr, /--depth takes a whole number/);
+      // Rounding '2.5' down to something valid would answer a question the
+      // user did not ask, so each of these is refused rather than coerced.
+      for (const depth of ["-1", "2.5", "many", ""]) {
+        const result = repo.nav(["issue", "show", "aaa1", "--depth", depth]);
+        assert.equal(result.code, 1, `--depth ${JSON.stringify(depth)}`);
+        assert.match(result.stderr, /--depth takes a whole number/);
+      }
     } finally {
       repo.cleanup();
     }

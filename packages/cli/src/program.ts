@@ -227,10 +227,12 @@ function buildIssueCommand(getCtx: () => Ctx): Command {
   addSharedVerbs(issue, "issue", getCtx, {
     extraColumns: [],
     configureShow: (command) =>
+      // Number, not parseInt: '2.5' has to reach the command as 2.5 so it can
+      // be refused, rather than being silently rounded to something valid.
       command.option(
         "--depth <n>",
         "levels of subtasks to render",
-        (value) => Number.parseInt(value, 10),
+        (value) => (value.trim() === "" ? Number.NaN : Number(value)),
         1,
       ),
     configureDelete: (command) =>

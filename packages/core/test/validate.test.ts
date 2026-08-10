@@ -456,6 +456,28 @@ describe("D11 broken links", () => {
     assert.match(fixContent(diagnostics[0]), /^subtasks: \[mz4kq1rv, t5kr1gq6\]$/m);
   });
 
+  it("offers nothing at all when a file the repair needs cannot be rewritten", () => {
+    // #bqlybac0 would gain the missing entry, but its list holds something
+    // that is not an ID. Half a repair would delete #mz4kq1rv's claim without
+    // recording it anywhere.
+    const broken = {
+      ...linked("bqlybac0", "subtasks: [t5kr1gq6, 42]\n"),
+      ...linked("mz4kq1rv", "parent: bqlybac0\n"),
+      ...linked("t5kr1gq6", "parent: bqlybac0\n"),
+    };
+    const diagnostics = validateTree(tree(broken));
+    const links = diagnostics.filter((d) => d.check === "D11");
+    assert.equal(links.length, 1);
+    assert.equal(links[0]?.fix, undefined);
+    assert.match(links[0]?.message ?? "", /cannot be read/);
+    // And nothing else in the run smuggles that file's edits out.
+    for (const diagnostic of diagnostics) {
+      for (const op of diagnostic.fix ?? []) {
+        assert.notEqual(op.op === "write" && op.path, "issues/open/bqlybac0-x/issue.md");
+      }
+    }
+  });
+
   it("errors on a repeated entry and offers to drop the repeat", () => {
     const diagnostics = validateTree(
       tree({
