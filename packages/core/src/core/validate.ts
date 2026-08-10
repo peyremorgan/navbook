@@ -17,12 +17,14 @@ import {
 } from "./files.ts";
 import { isId } from "./id.ts";
 import {
+  type FaultRepair,
   faultPath,
   findLinkFaults,
   findLinkLoops,
   type LinkConflict,
   type LinkFault,
   planFaultRepair,
+  type RepairRefusal,
 } from "./links.ts";
 import { type FileOp, type LinkRepair, linkRepairOps } from "./ops.ts";
 import { extractDeletedIds, extractProseRefs, extractTrailerRefs } from "./refs.ts";
@@ -383,20 +385,22 @@ function checkLinks(repo: Repo, opts: ValidateOptions): Diagnostic[] {
   const faults = findLinkFaults(repo);
   const merged = new Map<string, { entity: EntityRecord; edit: MutableLinkEdit }>();
   const repairs = faults.map((fault) => {
-    const plan = planFaultRepair(repo, fault, decideConflict ?? (() => null));
-    if (plan) for (const repair of plan) mergeEdit(merged, repair);
-    return plan;
+    const repair = planFaultRepair(repo, fault, decideConflict ?? (() => null));
+    if (repair.ok) for (const one of repair.repairs) mergeEdit(merged, one);
+    return repair;
   });
 
   return faults.map((fault, index) => {
-    const plan = repairs[index];
-    const fix = plan ? renderLinkFix(plan, merged) : [];
+    const repair = repairs[index] as FaultRepair;
+    const fix = repair.ok ? renderLinkFix(repair.repairs, merged) : [];
     return {
       check: "D11" as const,
       level: "error" as const,
       path: faultPath(fault),
       message: linkFaultMessage(fault, {
-        fixed: fix.length > 0,
+        // A repair can be planned and still write nothing, when another fault
+        // on the same file already covers it.
+        ...(repair.ok ? {} : { refusal: repair.reason }),
         historyConsulted: decideConflict !== undefined,
       }),
       ...(fix.length > 0 ? { fix } : {}),
@@ -440,8 +444,8 @@ function renderLinkFix(
 }
 
 interface FaultContext {
-  /** A repair was planned, so the run has already said what it will do. */
-  fixed: boolean;
+  /** Why no repair was planned; absent when one was. */
+  refusal?: RepairRefusal;
   /** History was available to settle a conflict; without --fix it is not. */
   historyConsulted: boolean;
 }
@@ -452,7 +456,9 @@ function linkFaultMessage(fault: LinkFault, ctx: FaultContext): string {
       return `#${fault.child.id} names this issue as its parent, but 'subtasks' does not list it`;
     case "child-missing-parent":
       return `#${fault.parent.id} lists this issue as a subtask, but 'parent' does not name it${
-        ctx.fixed ? "" : "; linking it back would close a loop, so resolve it by hand"
+        ctx.refusal === "would-loop"
+          ? "; linking it back would close a loop, so settle it by hand"
+          : ""
       }`;
     case "duplicate":
       return `'subtasks' lists #${fault.childId} more than once`;
@@ -463,10 +469,22 @@ function linkFaultMessage(fault: LinkFault, ctx: FaultContext): string {
   }
 }
 
+const BY_HAND = "settle it with 'nav issue link' or 'nav issue unlink'";
+
 function conflictAdvice(ctx: FaultContext): string {
-  if (ctx.fixed) return "";
-  if (!ctx.historyConsulted) return "; 'nav doctor --fix' settles it from git history";
-  return "; git history does not say which claim came last, so settle it with 'nav issue link' or 'nav issue unlink'";
+  switch (ctx.refusal) {
+    case undefined:
+      return "";
+    case "off-tree-claimant":
+      // Deleting the only record that an issue exists elsewhere is not a repair.
+      return `; one claim names an issue this tree does not hold, so ${BY_HAND}`;
+    case "would-loop":
+      return `; the claim made last would file it below itself, so ${BY_HAND}`;
+    default:
+      return ctx.historyConsulted
+        ? `; git history does not say which claim came last, so ${BY_HAND}`
+        : "; 'nav doctor --fix' settles it from git history";
+  }
 }
 
 /* ------------------------------------------------ D12 : loops in the tree */

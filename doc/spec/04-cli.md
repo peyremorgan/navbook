@@ -249,8 +249,11 @@ well-formed and both assertions were made on purpose — so it is settled from
 git history instead, by letting the claim made last stand and removing the
 others. Where history cannot say, because a claim is uncommitted or because two
 were made in the same commit, the fault MUST be reported rather than guessed
-at. D12 is never repaired: every link on a loop is equally suspect, and only
-its author knows which was the mistake.
+at. So MUST a dispute in which any claim names an issue this tree does not
+hold: that issue may be the right parent, on a branch nobody has fetched, and
+the repair would delete the only record here that it exists. D12 is never
+repaired: every link on a loop is equally suspect, and only its author knows
+which was the mistake.
 
 D7, D9 and D10 read git history and are therefore skipped by `--staged` (the
 commit being validated does not exist yet) and wherever the history is

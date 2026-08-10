@@ -7,13 +7,16 @@ import {
   findLinkFaults,
   findLinkLoops,
   inParentChain,
+  type LinkConflict,
   type LinkFault,
   linkRefusal,
   listersOf,
   parentOf,
   planFaultRepair,
+  type RepairRefusal,
   subtaskTree,
 } from "../src/core/links.ts";
+import type { LinkRepair } from "../src/core/ops.ts";
 import { type EntityRecord, type NavTree, parseTree, type Repo } from "../src/core/tree.ts";
 
 /** An issue file whose title doubles as a marker in rendered output. */
@@ -266,18 +269,30 @@ describe("findLinkFaults, at scale", () => {
 describe("planFaultRepair", () => {
   const never = (): null => null;
 
+  /** The repairs planned for a tree's first fault, or the refusal's reason. */
+  const repairFor = (
+    repo: Repo,
+    decide: (fault: LinkConflict) => string | null = never,
+    pick: (fault: LinkFault) => boolean = () => true,
+  ): LinkRepair[] | RepairRefusal => {
+    const fault = findLinkFaults(repo).find(pick);
+    assert.ok(fault, "expected a fault to repair");
+    const repair = planFaultRepair(repo, fault, decide);
+    return repair.ok ? repair.repairs : repair.reason;
+  };
+
   it("adds the missing entry to a parent's list", () => {
     const repo = repoOf(issue("a1000000"), issue("b1000000", "parent: a1000000\n"));
-    const plan = planFaultRepair(repo, findLinkFaults(repo)[0] as LinkFault, never);
-    assert.deepEqual(plan, [
+    assert.deepEqual(repairFor(repo), [
       { entity: get(repo, "a1000000"), edit: { addSubtasks: ["b1000000"] } },
     ]);
   });
 
   it("sets the missing parent on a child", () => {
     const repo = repoOf(issue("a1000000", "subtasks: [b1000000]\n"), issue("b1000000"));
-    const plan = planFaultRepair(repo, findLinkFaults(repo)[0] as LinkFault, never);
-    assert.deepEqual(plan, [{ entity: get(repo, "b1000000"), edit: { parent: "a1000000" } }]);
+    assert.deepEqual(repairFor(repo), [
+      { entity: get(repo, "b1000000"), edit: { parent: "a1000000" } },
+    ]);
   });
 
   it("declines to set a parent when doing so would close a loop", () => {
@@ -287,18 +302,19 @@ describe("planFaultRepair", () => {
       issue("a1000000"),
       issue("b1000000", "parent: a1000000\nsubtasks: [a1000000]\n"),
     );
-    const fault = findLinkFaults(repo).find((f) => f.kind === "child-missing-parent");
-    assert.ok(fault, "a1 is listed by b1 but names no parent");
-    assert.equal(planFaultRepair(repo, fault, never), null);
+    assert.equal(
+      repairFor(repo, never, (f) => f.kind === "child-missing-parent"),
+      "would-loop",
+    );
   });
 
-  it("declines a conflict the resolver will not settle", () => {
+  it("declines a conflict history will not settle", () => {
     const repo = repoOf(
       issue("a1000000", "subtasks: [c1000000]\n"),
       issue("a2000000", "subtasks: [c1000000]\n"),
       issue("c1000000", "parent: a1000000\n"),
     );
-    assert.equal(planFaultRepair(repo, findLinkFaults(repo)[0] as LinkFault, never), null);
+    assert.equal(repairFor(repo), "undecided");
   });
 
   it("reconciles every claimant once the resolver picks a winner", () => {
@@ -307,12 +323,14 @@ describe("planFaultRepair", () => {
       issue("a2000000", "subtasks: [c1000000]\n"),
       issue("c1000000", "parent: a1000000\n"),
     );
-    const plan = planFaultRepair(repo, findLinkFaults(repo)[0] as LinkFault, () => "a2000000");
-    assert.deepEqual(plan, [
-      { entity: get(repo, "c1000000"), edit: { parent: "a2000000" } },
-      { entity: get(repo, "a2000000"), edit: { addSubtasks: ["c1000000"] } },
-      { entity: get(repo, "a1000000"), edit: { removeSubtasks: ["c1000000"] } },
-    ]);
+    assert.deepEqual(
+      repairFor(repo, () => "a2000000"),
+      [
+        { entity: get(repo, "c1000000"), edit: { parent: "a2000000" } },
+        { entity: get(repo, "a2000000"), edit: { addSubtasks: ["c1000000"] } },
+        { entity: get(repo, "a1000000"), edit: { removeSubtasks: ["c1000000"] } },
+      ],
+    );
   });
 
   it("refuses a winner that would put the child under its own descendant", () => {
@@ -321,17 +339,34 @@ describe("planFaultRepair", () => {
       issue("c1000000", "subtasks: [d1000000]\n"),
       issue("d1000000", "parent: c1000000\nsubtasks: [c1000000]\n"),
     );
-    const conflict = findLinkFaults(repo).find((f) => f.kind === "conflict");
-    assert.ok(conflict, "a1 and d1 both claim c1");
     assert.equal(
-      planFaultRepair(repo, conflict, () => "d1000000"),
-      null,
+      repairFor(
+        repo,
+        () => "d1000000",
+        (f) => f.kind === "conflict",
+      ),
+      "would-loop",
+    );
+  });
+
+  it("will not overrule a claim naming an issue this tree does not hold", () => {
+    // The child belongs to an issue on a branch nobody has fetched; a1 says
+    // otherwise. Deleting the only record that the other issue exists is not
+    // a repair, however recent a1's claim is.
+    const repo = repoOf(
+      issue("a1000000", "subtasks: [c1000000]\n"),
+      issue("c1000000", "parent: zz999999\n"),
+    );
+    assert.equal(repairFor(repo), "off-tree-claimant");
+    assert.equal(
+      repairFor(repo, () => "a1000000"),
+      "off-tree-claimant",
     );
   });
 
   it("offers no repair for a link naming a pull request", () => {
     const repo = repoOf(issue("a1000000", "parent: dk3mp2x9\n"), pr("dk3mp2x9"));
-    assert.equal(planFaultRepair(repo, findLinkFaults(repo)[0] as LinkFault, never), null);
+    assert.equal(repairFor(repo), "not-an-issue");
   });
 });
 

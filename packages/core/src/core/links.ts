@@ -243,44 +243,74 @@ export function findLinkFaults(repo: Repo): LinkFault[] {
   return faults;
 }
 
+/** Why a fault was left alone, so a report can say which it was. */
+export type RepairRefusal =
+  /** A link names a pull request; nothing about it can be mended mechanically. */
+  | "not-an-issue"
+  /** A claim names an issue this tree does not hold, so it cannot be weighed. */
+  | "off-tree-claimant"
+  /** History did not say which of the competing claims was made last. */
+  | "undecided"
+  /** The repair would file an issue below itself. */
+  | "would-loop";
+
+export type FaultRepair =
+  | { ok: true; repairs: LinkRepair[] }
+  | { ok: false; reason: RepairRefusal };
+
 /**
- * A resolution for a fault, as file-by-file link edits, or null when the tree
- * alone cannot say what the author meant.
+ * How to mend one fault, or why it was left for a person.
  *
  * `decideConflict` is consulted only where the claims genuinely disagree; it
- * returns the id of the claimant whose word should stand, or null to leave the
- * fault for a person. Everything else is decidable from the tree: adding a
- * reciprocal entry and dropping a repeated one both preserve every assertion
- * the files make.
+ * returns the id of the claimant whose word should stand, or null when history
+ * cannot say. Everything else is decidable from the tree: adding a reciprocal
+ * entry and dropping a repeated one both preserve every assertion the files
+ * make, which is what makes them safe to apply unasked.
  */
 export function planFaultRepair(
   repo: Repo,
   fault: LinkFault,
   decideConflict: (fault: LinkConflict) => string | null,
-): LinkRepair[] | null {
+): FaultRepair {
   switch (fault.kind) {
     case "not-an-issue":
-      return null;
+      return { ok: false, reason: "not-an-issue" };
     case "duplicate":
-      return [{ entity: fault.parent, edit: {} }];
+      return { ok: true, repairs: [{ entity: fault.parent, edit: {} }] };
     case "parent-missing-child":
-      return [{ entity: fault.parent, edit: { addSubtasks: [fault.child.id] } }];
+      return {
+        ok: true,
+        repairs: [{ entity: fault.parent, edit: { addSubtasks: [fault.child.id] } }],
+      };
     case "child-missing-parent": {
-      if (inParentChain(repo, fault.parent, fault.child.id)) return null;
-      return [{ entity: fault.child, edit: { parent: fault.parent.id } }];
+      if (inParentChain(repo, fault.parent, fault.child.id)) {
+        return { ok: false, reason: "would-loop" };
+      }
+      return { ok: true, repairs: [{ entity: fault.child, edit: { parent: fault.parent.id } }] };
     }
     default: {
+      // A claim on an issue nobody here can see is not one this tree may
+      // overrule. The absent issue may well be the right parent, on a branch
+      // that has not been fetched — §2.5 exempts exactly that from D11 — and a
+      // repair would delete the only record that it exists.
+      if (fault.claimants.some((id) => issueById(repo, id) === undefined)) {
+        return { ok: false, reason: "off-tree-claimant" };
+      }
       const winner = decideConflict(fault);
-      if (winner === null) return null;
+      if (winner === null) return { ok: false, reason: "undecided" };
       const parent = issueById(repo, winner);
-      if (!parent || inParentChain(repo, parent, fault.child.id)) return null;
-      return [
-        { entity: fault.child, edit: { parent: parent.id } },
-        { entity: parent, edit: { addSubtasks: [fault.child.id] } },
-        ...fault.listers
-          .filter((entity) => entity.id !== parent.id)
-          .map((entity) => ({ entity, edit: { removeSubtasks: [fault.child.id] } })),
-      ];
+      if (!parent) return { ok: false, reason: "off-tree-claimant" };
+      if (inParentChain(repo, parent, fault.child.id)) return { ok: false, reason: "would-loop" };
+      return {
+        ok: true,
+        repairs: [
+          { entity: fault.child, edit: { parent: parent.id } },
+          { entity: parent, edit: { addSubtasks: [fault.child.id] } },
+          ...fault.listers
+            .filter((entity) => entity.id !== parent.id)
+            .map((entity) => ({ entity, edit: { removeSubtasks: [fault.child.id] } })),
+        ],
+      };
     }
   }
 }

@@ -42,11 +42,16 @@ export interface OpenIssueInput extends OpenInput {
 export function openIssue(ws: WsCtx, input: OpenIssueInput, opts: CommitOptions): OpenEntityResult {
   if (!input.parent) return openEntity(ws, "issue", input, opts);
   const parent = input.parent;
-  return openEntity(ws, "issue", input, opts, (plan, id) => ({
-    ...plan,
-    ops: [...plan.ops, ...planAddSubtask(parent, id)],
-    trailers: [...plan.trailers, { key: "Refs", id: parent.id }],
-  }));
+  return openEntity(ws, "issue", input, opts, (plan, id) =>
+    // Through rewritePlan, so a parent whose own link keys cannot be read is
+    // reported the way `nav issue link` reports it: naming the file, and what
+    // to do about it.
+    rewritePlan(parent, () => ({
+      ...plan,
+      ops: [...plan.ops, ...planAddSubtask(parent, id)],
+      trailers: [...plan.trailers, { key: "Refs", id: parent.id }],
+    })),
+  );
 }
 
 /** Resolve the issue named by `--parent`, failing before anything is composed. */

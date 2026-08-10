@@ -101,6 +101,21 @@ describe("nav issue open --parent", () => {
     }
   });
 
+  it("names the parent's own file when its links cannot be read", () => {
+    const repo = seeded();
+    try {
+      handEdit(repo, "aaa11111", /^subtasks: .*$/m, "subtasks: [bbb22222, 42]");
+      const result = repo.nav(["issue", "open", "Sub", "-m", "S.", "--parent", "aaa1"], {
+        NAV_IDS: "eee55555",
+      });
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /aaa11111-root\/issue\.md: 'subtasks' is not a list/);
+      assert.match(result.stderr, /nav doctor/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("refuses a pull request as a parent", () => {
     const repo = makeNavRepo();
     try {
@@ -499,6 +514,28 @@ describe("nav doctor, on broken links", () => {
       assert.equal(read(repo, "bbb22222").includes("subtasks"), false);
       assert.match(read(repo, "ccc33333"), /^subtasks: \[ddd44444\]$/m);
       assert.equal(repo.nav(["doctor"]).code, 0);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("will not settle a dispute against an issue that is not in this tree", () => {
+    const repo = seeded();
+    try {
+      // #ddd44444 belongs to an issue on a branch nobody here has fetched, and
+      // #ccc33333 claims it locally, later. Preferring the local claim would
+      // delete the only record that the other issue exists.
+      handEdit(repo, "ddd44444", /^parent: .*$/m, "parent: zzzz9999");
+      handEdit(repo, "bbb22222", /^subtasks: .*$/m, "");
+      repo.commitAll("docs(issue): file it under an issue from another branch");
+      handEdit(repo, "ccc33333", /^created: (.*)$/m, "created: $1\nsubtasks: [ddd44444]");
+      repo.commitAll("docs(issue): claim it locally", "2026-08-09T10:00:00Z");
+
+      const result = repo.nav(["doctor", "--fix"]);
+      assert.equal(result.code, 2);
+      assert.match(result.stdout, /one claim names an issue this tree does not hold/);
+      assert.match(read(repo, "ddd44444"), /^parent: zzzz9999$/m);
+      assert.equal(result.stdout.includes("fixed"), false, result.stdout);
     } finally {
       repo.cleanup();
     }
