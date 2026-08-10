@@ -7,8 +7,8 @@ import {
   findLinkFaults,
   findLinkLoops,
   inParentChain,
-  type LinkConflict,
   type LinkFault,
+  type LinkRepair,
   linkRefusal,
   listersOf,
   parentOf,
@@ -16,7 +16,7 @@ import {
   type RepairRefusal,
   subtaskTree,
 } from "../src/core/links.ts";
-import { type LinkRepair, planLink } from "../src/core/ops.ts";
+import { planLink } from "../src/core/ops.ts";
 import { type EntityRecord, type NavTree, parseTree, type Repo } from "../src/core/tree.ts";
 
 /** An issue file whose title doubles as a marker in rendered output. */
@@ -278,18 +278,18 @@ describe("findLinkFaults, at scale", () => {
 });
 
 describe("planFaultRepair", () => {
-  const never = (): null => null;
+  const never = new Map<string, string>();
 
   /** The repairs planned for a tree's first fault, or the refusal's reason. */
   const repairFor = (
     repo: Repo,
-    decide: (fault: LinkConflict) => string | null = never,
+    winners: ReadonlyMap<string, string> = never,
     pick: (fault: LinkFault) => boolean = () => true,
   ): LinkRepair[] | RepairRefusal => {
     const fault = findLinkFaults(repo).find(pick);
     assert.ok(fault, "expected a fault to repair");
-    const repair = planFaultRepair(repo, fault, decide);
-    return repair.ok ? repair.repairs : repair.reason;
+    const { repairs, refusal } = planFaultRepair(repo, fault, winners);
+    return refusal ?? repairs;
   };
 
   it("adds the missing entry to a parent's list", () => {
@@ -317,8 +317,7 @@ describe("planFaultRepair", () => {
     const faults = findLinkFaults(repo);
     assert.deepEqual(kinds(faults), ["parent-missing-child", "parent-missing-child"]);
     for (const fault of faults) {
-      const repair = planFaultRepair(repo, fault, never);
-      assert.equal(repair.ok ? "repaired" : repair.reason, "would-loop");
+      assert.equal(planFaultRepair(repo, fault, never).refusal, "would-loop");
     }
   });
 
@@ -350,14 +349,11 @@ describe("planFaultRepair", () => {
       issue("a2000000", "subtasks: [c1000000]\n"),
       issue("c1000000", "parent: a1000000\n"),
     );
-    assert.deepEqual(
-      repairFor(repo, () => "a2000000"),
-      [
-        { entity: get(repo, "c1000000"), edit: { parent: "a2000000" } },
-        { entity: get(repo, "a2000000"), edit: { addSubtasks: ["c1000000"] } },
-        { entity: get(repo, "a1000000"), edit: { removeSubtasks: ["c1000000"] } },
-      ],
-    );
+    assert.deepEqual(repairFor(repo, new Map([["c1000000", "a2000000"]])), [
+      { entity: get(repo, "c1000000"), edit: { parent: "a2000000" } },
+      { entity: get(repo, "a2000000"), edit: { addSubtasks: ["c1000000"] } },
+      { entity: get(repo, "a1000000"), edit: { removeSubtasks: ["c1000000"] } },
+    ]);
   });
 
   it("refuses a winner that would put the child under its own descendant", () => {
@@ -367,11 +363,7 @@ describe("planFaultRepair", () => {
       issue("d1000000", "parent: c1000000\nsubtasks: [c1000000]\n"),
     );
     assert.equal(
-      repairFor(
-        repo,
-        () => "d1000000",
-        (f) => f.kind === "conflict",
-      ),
+      repairFor(repo, new Map([["c1000000", "d1000000"]]), (f) => f.kind === "conflict"),
       "would-loop",
     );
   });
@@ -385,10 +377,7 @@ describe("planFaultRepair", () => {
       issue("c1000000", "parent: zz999999\n"),
     );
     assert.equal(repairFor(repo), "off-tree-claimant");
-    assert.equal(
-      repairFor(repo, () => "a1000000"),
-      "off-tree-claimant",
-    );
+    assert.equal(repairFor(repo, new Map([["c1000000", "a1000000"]])), "off-tree-claimant");
   });
 
   it("offers no repair for a link naming a pull request", () => {

@@ -30,6 +30,13 @@ const tree = (entries: Record<string, string>): NavTree => new Map(Object.entrie
 const codes = (entries: Record<string, string>, opts: ValidateOptions = {}): Check[] =>
   validateTree(tree(entries), opts).map((d) => d.check);
 
+/** Validate, asking for the repairs a `--fix` run would plan. */
+const withRepairs = (
+  entries: Record<string, string>,
+  conflictWinners?: ReadonlyMap<string, string>,
+): Diagnostic[] =>
+  validateTree(tree(entries), { linkRepairs: conflictWinners ? { conflictWinners } : {} });
+
 /** The single file a diagnostic's repair would write, for matching keys against. */
 function fixContent(diagnostic: Diagnostic | undefined): string {
   const write = diagnostic?.fix?.find((op) => op.op === "write");
@@ -396,10 +403,19 @@ describe("D11 broken links", () => {
     );
   });
 
+  it("plans no repair for a caller that only asked what is wrong", () => {
+    // Rendering one costs a parse and two serializations of a whole file, and
+    // a plain `nav doctor` prints only the diagnosis.
+    const broken = { ...linked("bqlybac0", ""), ...linked("mz4kq1rv", "parent: bqlybac0\n") };
+    assert.equal(validateTree(tree(broken))[0]?.fix, undefined);
+    assert.ok(withRepairs(broken)[0]?.fix, "and plans one for a caller that did");
+  });
+
   it("errors when only the child records the link, and offers to add the entry", () => {
-    const diagnostics = validateTree(
-      tree({ ...linked("bqlybac0", ""), ...linked("mz4kq1rv", "parent: bqlybac0\n") }),
-    );
+    const diagnostics = withRepairs({
+      ...linked("bqlybac0", ""),
+      ...linked("mz4kq1rv", "parent: bqlybac0\n"),
+    });
     assert.deepEqual(
       diagnostics.map((d) => [d.check, d.level, d.path]),
       [["D11", "error", "issues/open/bqlybac0-x/issue.md"]],
@@ -408,9 +424,10 @@ describe("D11 broken links", () => {
   });
 
   it("errors when only the parent records the link, and offers to set the parent", () => {
-    const diagnostics = validateTree(
-      tree({ ...linked("bqlybac0", "subtasks: [mz4kq1rv]\n"), ...linked("mz4kq1rv", "") }),
-    );
+    const diagnostics = withRepairs({
+      ...linked("bqlybac0", "subtasks: [mz4kq1rv]\n"),
+      ...linked("mz4kq1rv", ""),
+    });
     assert.deepEqual(
       diagnostics.map((d) => [d.check, d.path]),
       [["D11", "issues/open/mz4kq1rv-x/issue.md"]],
@@ -433,7 +450,7 @@ describe("D11 broken links", () => {
 
     // The winner already lists the subtask, so only the loser's entry and the
     // child's own key have to change.
-    const settled = validateTree(tree(disputed), { decideLinkConflict: () => "mz4kq1rv" });
+    const settled = withRepairs(disputed, new Map([["t5kr1gq6", "mz4kq1rv"]]));
     const written = (settled[0]?.fix ?? []).map((op) => (op.op === "write" ? op.path : "?"));
     assert.deepEqual(written.sort(), [
       "issues/open/bqlybac0-x/issue.md",
@@ -444,13 +461,11 @@ describe("D11 broken links", () => {
 
   it("gives every fault touching one file the same content for it", () => {
     // Both children name a parent that lists neither: two faults, one file.
-    const diagnostics = validateTree(
-      tree({
-        ...linked("bqlybac0", ""),
-        ...linked("mz4kq1rv", "parent: bqlybac0\n"),
-        ...linked("t5kr1gq6", "parent: bqlybac0\n"),
-      }),
-    );
+    const diagnostics = withRepairs({
+      ...linked("bqlybac0", ""),
+      ...linked("mz4kq1rv", "parent: bqlybac0\n"),
+      ...linked("t5kr1gq6", "parent: bqlybac0\n"),
+    });
     assert.equal(diagnostics.length, 2);
     assert.equal(fixContent(diagnostics[0]), fixContent(diagnostics[1]));
     assert.match(fixContent(diagnostics[0]), /^subtasks: \[mz4kq1rv, t5kr1gq6\]$/m);
@@ -477,9 +492,10 @@ describe("D11 broken links", () => {
   });
 
   it("still mends a lone missing parent, which closes nothing", () => {
-    const diagnostics = validateTree(
-      tree({ ...linked("bqlybac0", "subtasks: [mz4kq1rv]\n"), ...linked("mz4kq1rv", "") }),
-    );
+    const diagnostics = withRepairs({
+      ...linked("bqlybac0", "subtasks: [mz4kq1rv]\n"),
+      ...linked("mz4kq1rv", ""),
+    });
     assert.match(fixContent(diagnostics[0]), /^parent: bqlybac0$/m);
   });
 
@@ -492,7 +508,7 @@ describe("D11 broken links", () => {
       ...linked("mz4kq1rv", "parent: bqlybac0\n"),
       ...linked("t5kr1gq6", "parent: bqlybac0\n"),
     };
-    const diagnostics = validateTree(tree(broken));
+    const diagnostics = withRepairs(broken);
     const links = diagnostics.filter((d) => d.check === "D11");
     assert.equal(links.length, 1);
     assert.equal(links[0]?.fix, undefined);
@@ -506,12 +522,10 @@ describe("D11 broken links", () => {
   });
 
   it("errors on a repeated entry and offers to drop the repeat", () => {
-    const diagnostics = validateTree(
-      tree({
-        ...linked("bqlybac0", "subtasks: [mz4kq1rv, mz4kq1rv]\n"),
-        ...linked("mz4kq1rv", "parent: bqlybac0\n"),
-      }),
-    );
+    const diagnostics = withRepairs({
+      ...linked("bqlybac0", "subtasks: [mz4kq1rv, mz4kq1rv]\n"),
+      ...linked("mz4kq1rv", "parent: bqlybac0\n"),
+    });
     assert.deepEqual(
       diagnostics.map((d) => d.check),
       ["D11"],

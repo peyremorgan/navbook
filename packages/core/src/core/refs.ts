@@ -6,7 +6,13 @@
 import { isId } from "./id.ts";
 
 const PROSE_REF = /(^|[^\w#/`])#([a-z][a-z0-9]{7})\b/g;
-const TRAILER_LINE = /^(Refs|Closes):[ \t]*(.+?)[ \t]*$/gim;
+
+/**
+ * A git trailer Navbook writes. `Refs:` and `Closes:` name entities a commit
+ * relates to; `Deletes:` names ones it took away, which is the opposite of a
+ * reference and is why it is read separately (see {@link extractDeletedIds}).
+ */
+const TRAILER_LINE = /^(Refs|Closes|Deletes):[ \t]*(.+?)[ \t]*$/gim;
 
 /** Extract `#id` references from Markdown prose, ignoring English words. */
 export function extractProseRefs(markdown: string): string[] {
@@ -19,6 +25,25 @@ export function extractProseRefs(markdown: string): string[] {
 }
 
 /**
+ * The IDs one kind of trailer names, in order.
+ *
+ * One grammar for all of them: the key is matched case-insensitively, several
+ * IDs may share a line separated by spaces or commas, and a leading `#` is
+ * tolerated because that is how people write them in prose.
+ */
+function trailerIds(message: string, key: string): string[] {
+  const out: string[] = [];
+  for (const match of message.matchAll(TRAILER_LINE)) {
+    if ((match[1] as string).toLowerCase() !== key) continue;
+    for (const token of (match[2] as string).split(/[\s,]+/)) {
+      const id = token.replace(/^#/, "");
+      if (isId(id)) out.push(id);
+    }
+  }
+  return out;
+}
+
+/**
  * The subject `nav {issue|pr} delete --commit` writes, as built by
  * `docsSubject(kind, "delete", id)`. Reading it back is what lets doctor tell
  * an entity that was deliberately removed from one that went missing.
@@ -26,37 +51,18 @@ export function extractProseRefs(markdown: string): string[] {
 const DELETE_SUBJECT = /^docs\((?:issue|pr)\): delete #([a-z][a-z0-9]{7})$/;
 
 /**
- * The extra entities a recursive delete removed alongside the one its subject
- * names — a subtree comes out in one commit, and history has to say so.
- *
- * `Deletes:` is not a reference the way `Refs:` is. It names something the
- * commit took away, so it dangles by construction and is exempt from D8 for
- * the same reason the subject is.
- */
-const DELETES_TRAILER = /^Deletes:[ \t]*(.+?)[ \t]*$/gim;
-
-/**
  * Every entity ID a commit deleted; empty when it deleted none.
  *
- * The trailer is read only from a commit whose subject says it deleted
- * something. Suppressing a warning is not a power an arbitrary commit gets to
- * claim by writing one line — a commit that removed an entity says so in its
- * subject, and the trailer only extends that record to what the subject cannot
- * name.
+ * A recursive delete takes entities its subject cannot name, and records each
+ * of them as a `Deletes:` trailer. That trailer is read only from a commit
+ * whose subject already says it deleted something: suppressing a warning is not
+ * a power an arbitrary commit gets to claim by writing one line.
  */
 export function extractDeletedIds(message: string): string[] {
   const subject = message.trimStart().split("\n", 1)[0] ?? "";
   const match = DELETE_SUBJECT.exec(subject);
   if (!match) return [];
-
-  const out = new Set<string>([match[1] as string]);
-  for (const trailer of message.matchAll(DELETES_TRAILER)) {
-    for (const token of (trailer[1] as string).split(/[\s,]+/)) {
-      const id = token.replace(/^#/, "");
-      if (isId(id)) out.add(id);
-    }
-  }
-  return [...out];
+  return [...new Set([match[1] as string, ...trailerIds(message, "deletes")])];
 }
 
 export interface TrailerRefs {
@@ -66,16 +72,8 @@ export interface TrailerRefs {
 
 /** Extract `Refs:` and `Closes:` trailers from a commit message. */
 export function extractTrailerRefs(message: string): TrailerRefs {
-  const refs = new Set<string>();
-  const closes = new Set<string>();
-  for (const match of message.matchAll(TRAILER_LINE)) {
-    const kind = (match[1] as string).toLowerCase();
-    for (const token of (match[2] as string).split(/[\s,]+/)) {
-      const id = token.replace(/^#/, "");
-      if (!isId(id)) continue;
-      if (kind === "closes") closes.add(id);
-      else refs.add(id);
-    }
-  }
-  return { refs: [...refs], closes: [...closes] };
+  return {
+    refs: [...new Set(trailerIds(message, "refs"))],
+    closes: [...new Set(trailerIds(message, "closes"))],
+  };
 }

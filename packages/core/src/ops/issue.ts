@@ -6,9 +6,9 @@
  */
 
 import { parseFile, readParent, readSubtasks } from "../core/files.ts";
-import { linkRefusal, listersOf, parentOf } from "../core/links.ts";
-import { type Plan, planAddSubtask, planLink, planPaths, planUnlink } from "../core/ops.ts";
-import type { EntityRecord } from "../core/tree.ts";
+import { issueById, linkRefusal, listersOf, parentOf } from "../core/links.ts";
+import { linkRepairOps, type Plan, planLink, planPaths, planUnlink } from "../core/ops.ts";
+import type { EntityRecord, Repo } from "../core/tree.ts";
 import {
   assertNoUnrelatedStaged,
   loadRepo,
@@ -46,20 +46,19 @@ export interface OpenIssueResult extends OpenEntityResult {
  * before the editor opened.
  */
 export function openIssue(ws: WsCtx, input: OpenInput, opts: CommitOptions): OpenIssueResult {
-  let parent: EntityRecord | undefined;
-  const result = openEntity(ws, "issue", input, opts, (plan, id) => {
-    parent = composedParent(ws, input.content);
-    if (!parent) return plan;
-    const filedUnder = parent;
-    // Through rewritePlan, so a parent whose own link keys cannot be read is
-    // reported the way `nav issue link` reports it: naming the file, and what
-    // to do about it.
-    return rewritePlan(filedUnder, () => ({
-      ...plan,
-      ops: [...plan.ops, ...planAddSubtask(filedUnder, id)],
-      trailers: [...plan.trailers, { key: "Refs", id: filedUnder.id }],
-    }));
-  });
+  const parent = composedParent(ws, input.content);
+  const result = openEntity(ws, "issue", input, opts, (plan, id) =>
+    parent === undefined
+      ? plan
+      : // Through rewritePlan, so a parent whose own link keys cannot be read
+        // is reported the way `nav issue link` reports it: naming the file,
+        // and what to do about it.
+        rewritePlan(parent, () => ({
+          ...plan,
+          ops: [...plan.ops, ...linkRepairOps([{ entity: parent, edit: { addSubtasks: [id] } }])],
+          trailers: [...plan.trailers, { key: "Refs", id: parent.id }],
+        })),
+  );
   return { ...result, ...(parent ? { parent } : {}) };
 }
 
@@ -73,16 +72,25 @@ function composedParent(ws: WsCtx, content: string): EntityRecord | undefined {
     return undefined;
   }
   if (parentId === null) return undefined;
-  const found = loadRepo(ws).byId.get(parentId);
   // A parent that is not here, or is not an issue, leaves the link one-sided
   // for `doctor` to report rather than being quietly rewritten into something
   // the author did not ask for.
-  return found?.kind === "issue" ? found : undefined;
+  return issueById(linkRepo(ws), parentId);
+}
+
+/**
+ * The tree, without the comment files a link operation never looks at.
+ *
+ * Resolving ids and reading link keys needs only the entity files; loading the
+ * comments would be thousands of reads and parses that answer nothing.
+ */
+function linkRepo(ws: WsCtx): Repo {
+  return loadRepo(ws, { includeComments: false });
 }
 
 /** Resolve the issue named by `--parent`, failing before anything is composed. */
 export function findParentIssue(ws: WsCtx, ref: string): EntityRecord {
-  return resolveEntity(loadRepo(ws), ref, "issue");
+  return resolveEntity(linkRepo(ws), ref, "issue");
 }
 
 /* --------------------------------------------------------------- link */
@@ -113,7 +121,7 @@ export function planIssueLink(
   parentRef: string,
   opts: CommitOptions,
 ): IssueLinkPlan {
-  const repo = loadRepo(ws);
+  const repo = linkRepo(ws);
   const child = resolveEntity(repo, childRef, "issue");
   const parent = resolveEntity(repo, parentRef, "issue");
 
@@ -183,7 +191,7 @@ export interface IssueUnlinkResult {
  * broke by hand.
  */
 export function unlinkIssue(ws: WsCtx, ref: string, opts: CommitOptions): IssueUnlinkResult {
-  const repo = loadRepo(ws);
+  const repo = linkRepo(ws);
   const child = resolveEntity(repo, ref, "issue");
   const parentId = readParent(child.fm);
   const listers = listersOf(repo, child.id).filter((entity) => entity.id !== child.id);

@@ -15,10 +15,10 @@ import { git, gitMaybe, splitNul } from "../git/exec.ts";
 import { stagedContent, stagedPaths } from "../git/index-ops.ts";
 import {
   applyOps,
-  gitLinkConflictResolver,
   loadRepo,
   repoPath,
   requireNavbook,
+  resolveLinkConflicts,
   runHistoryChecks,
   type WsCtx,
 } from "../workspace/index.ts";
@@ -43,10 +43,13 @@ export function runDoctor(ws: WsCtx, opts: DoctorOptions = {}): DoctorReport {
   const diagnostics = sortDiagnostics([
     ...validateRepo(repo, {
       commitMessages: recentCommitMessages(ws, opts),
-      // Settling a disputed subtask means removing somebody's assertion, so it
-      // is offered only when there is history to justify it and a --fix run to
-      // apply it. --staged has neither: the commit under test does not exist.
-      ...(opts.fix && !opts.staged ? { decideLinkConflict: gitLinkConflictResolver(ws) } : {}),
+      // Repairs are planned only for a run that can apply them, and a disputed
+      // subtask is settled only where there is history to justify removing
+      // somebody's assertion. --staged has neither: the commit under test does
+      // not exist yet, and its tree came from the index (see below).
+      ...(opts.fix
+        ? { linkRepairs: opts.staged ? {} : { conflictWinners: resolveLinkConflicts(ws, repo) } }
+        : {}),
     }),
     // History-dependent checks are skipped for --staged: the commit being made
     // does not exist yet, so there is nothing for them to read.
@@ -54,19 +57,24 @@ export function runDoctor(ws: WsCtx, opts: DoctorOptions = {}): DoctorReport {
   ]);
 
   if (!opts.fix) return { diagnostics, applied: [] };
-  // A link repair rewrites a whole file. Under --staged that file's content
-  // came from the index, so writing it into the working tree would silently
-  // discard whatever the author has not staged yet. Report, do not repair.
-  const repairable = opts.staged ? diagnostics.map(withoutLinkRepair) : diagnostics;
+  const repairable = opts.staged ? diagnostics.map(withoutRewrites) : diagnostics;
   return {
     diagnostics: repairable.filter((d) => !d.fix),
     applied: applyFixes(ws, repairable),
   };
 }
 
-function withoutLinkRepair(diagnostic: Diagnostic): Diagnostic {
-  if (diagnostic.check !== "D11" || !diagnostic.fix) return diagnostic;
-  const { fix: _dropped, ...rest } = diagnostic;
+/**
+ * Withdraw a repair that would write file content, as `--staged` requires.
+ *
+ * Under `--staged` the tree being judged was read out of the index, so content
+ * derived from it does not describe what is on disk: writing it back would
+ * silently discard whatever the author has not staged yet. Moving a file is
+ * safe, since it carries whatever the working tree holds.
+ */
+function withoutRewrites(diagnostic: Diagnostic): Diagnostic {
+  if (!diagnostic.fix?.some((op) => op.op === "write")) return diagnostic;
+  const { fix: _withheld, ...rest } = diagnostic;
   return rest;
 }
 
@@ -80,13 +88,18 @@ function withoutLinkRepair(diagnostic: Diagnostic): Diagnostic {
 function applyFixes(ws: WsCtx, diagnostics: readonly Diagnostic[]): string[] {
   const applied: string[] = [];
   const done = new Set<string>();
+  // Keyed by what the operation acts on, not by its content: two diagnostics
+  // that name one path offer the same repair for it, which is what the merge
+  // in check D11 guarantees.
+  const target = (op: FileOp): string =>
+    op.op === "move" ? `move\0${op.from}\0${op.to}` : `${op.op}\0${op.path}`;
+
   for (const diagnostic of diagnostics) {
-    if (!diagnostic.fix || diagnostic.fix.length === 0) continue;
-    const fresh = diagnostic.fix.filter((op) => !done.has(JSON.stringify(op)));
+    const fresh = (diagnostic.fix ?? []).filter((op) => !done.has(target(op)));
     if (fresh.length === 0) continue;
     applyOps(ws, fresh);
     for (const op of fresh) {
-      done.add(JSON.stringify(op));
+      done.add(target(op));
       applied.push(describeFix(op));
     }
   }

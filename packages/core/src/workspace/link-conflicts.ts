@@ -14,8 +14,9 @@
  */
 
 import { parseFile, readParent, readSubtasks } from "../core/files.ts";
-import type { LinkConflict } from "../core/links.ts";
-import { blobAt, fileVersions } from "../git/history.ts";
+import { findLinkFaults, type LinkConflict } from "../core/links.ts";
+import type { Repo } from "../core/tree.ts";
+import { blobAt, type FileVersion, fileVersions } from "../git/history.ts";
 import type { WsCtx } from "./ctx.ts";
 import { repoPath } from "./workspace.ts";
 
@@ -23,13 +24,19 @@ import { repoPath } from "./workspace.ts";
 type FactTimer = (filePath: string, holds: (fm: Record<string, unknown>) => boolean) => Date | null;
 
 /**
- * A resolver for {@link LinkConflict}s backed by `git log` over the files that
- * make each claim. Returns the winning parent's id, or null to leave the fault
- * unrepaired.
+ * Settle every disputed subtask this tree holds, from the history of the files
+ * that make each claim: a map from the subtask's id to the winning parent's,
+ * with the disputes history cannot settle simply absent.
  */
-export function gitLinkConflictResolver(ws: WsCtx): (fault: LinkConflict) => string | null {
-  const timer = makeFactTimer(ws);
-  return (fault) => decideConflict(fault, timer);
+export function resolveLinkConflicts(ws: WsCtx, repo: Repo): Map<string, string> {
+  const when = makeFactTimer(ws);
+  const winners = new Map<string, string>();
+  for (const fault of findLinkFaults(repo)) {
+    if (fault.kind !== "conflict") continue;
+    const winner = decideConflict(fault, when);
+    if (winner !== null) winners.set(fault.child.id, winner);
+  }
+  return winners;
 }
 
 /** The resolution rule itself, with history supplied — the testable half. */
@@ -84,35 +91,49 @@ function claimedAt(fault: LinkConflict, claimant: string, when: FactTimer): Date
  * Facts are compared, not bytes: an uncommitted edit to the description does
  * not make the link claim undecidable, but an uncommitted edit to the claim
  * itself does — nothing in history stands behind it yet.
+ *
+ * Versions are read newest first and only as far back as the answer needs,
+ * which is usually one or two. Fetching a file's whole history would be one
+ * `git show` per commit that ever touched it, and these files are touched by
+ * every link command.
  */
 function makeFactTimer(ws: WsCtx): FactTimer {
-  const cache = new Map<string, { fm: Record<string, unknown>; at: Date }[]>();
+  const versions = new Map<string, FileVersion[]>();
+  const parsed = new Map<string, Record<string, unknown> | null>();
+
+  const frontmatterAt = (version: FileVersion): Record<string, unknown> | null => {
+    const key = `${version.sha}:${version.path}`;
+    let fm = parsed.get(key);
+    if (fm === undefined) {
+      const text = blobAt(ws.repoRoot, version.sha, version.path);
+      try {
+        // A malformed historical version is check D2's business, not this one.
+        fm = text === null ? null : parseFile(text).fm;
+      } catch {
+        fm = null;
+      }
+      parsed.set(key, fm);
+    }
+    return fm;
+  };
 
   return (filePath, holds) => {
-    let history = cache.get(filePath);
+    let history = versions.get(filePath);
     if (!history) {
-      history = [];
-      for (const version of fileVersions(ws.repoRoot, repoPath(filePath))) {
-        const text = blobAt(ws.repoRoot, version.sha, version.path);
-        if (text === null) continue;
-        try {
-          history.push({ fm: parseFile(text).fm, at: version.authored });
-        } catch {
-          // A malformed historical version is check D2's business, not this one.
-        }
-      }
-      cache.set(filePath, history);
+      history = fileVersions(ws.repoRoot, repoPath(filePath));
+      versions.set(filePath, history);
     }
 
-    const last = history[history.length - 1];
+    let since: Date | null = null;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const version = history[i] as FileVersion;
+      const fm = frontmatterAt(version);
+      // An unreadable version says nothing either way; keep walking back.
+      if (fm === null) continue;
+      if (!holds(fm)) break;
+      since = version.authored;
+    }
     // Never committed, or committed but since edited: history cannot vouch.
-    if (!last || !holds(last.fm)) return null;
-
-    let since = last.at;
-    for (let i = history.length - 1; i > 0; i--) {
-      if (!holds((history[i - 1] as { fm: Record<string, unknown> }).fm)) break;
-      since = (history[i - 1] as { at: Date }).at;
-    }
     return since;
   };
 }

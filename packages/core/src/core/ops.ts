@@ -8,7 +8,7 @@
  */
 
 import { commentFileName } from "./comments.ts";
-import { type Revision, readRevisions, readSubtasks } from "./files.ts";
+import { type Revision, readParent, readRevisions, readSubtasks } from "./files.ts";
 import {
   appendListItem,
   FrontmatterError,
@@ -18,6 +18,7 @@ import {
   setFlowList,
 } from "./frontmatter.ts";
 import { isId } from "./id.ts";
+import type { LinkEdit, LinkRepair } from "./links.ts";
 import { dirName as makeDirName, slugify } from "./slug.ts";
 import { type EntityKind, type EntityRecord, type Status, statusDir } from "./tree.ts";
 
@@ -229,21 +230,6 @@ export function rewriteFrontmatter(
 
 /* -------------------------------------------------------- decomposition */
 
-export interface LinkEdit {
-  /** Ids appended to `subtasks` when the list does not already hold them. */
-  addSubtasks?: readonly string[];
-  /** Ids removed from `subtasks`. */
-  removeSubtasks?: readonly string[];
-  /** A new `parent`; `null` removes the key, `undefined` leaves it alone. */
-  parent?: string | null;
-}
-
-/** An edit to one issue's link keys, as planned by a caller that saw the tree. */
-export interface LinkRepair {
-  entity: EntityRecord;
-  edit: LinkEdit;
-}
-
 /**
  * Apply link-key changes to an issue file, or null when nothing changes.
  *
@@ -258,7 +244,8 @@ export interface LinkRepair {
  * to resolve.
  */
 export function rewriteLinks(entity: EntityRecord, edit: LinkEdit): string | null {
-  requireReadableLinks(entity);
+  const unreadable = unreadableLinkKey(entity);
+  if (unreadable) throw new FrontmatterError(unreadable);
 
   const before = readSubtasks(entity.fm);
   const after: string[] = [];
@@ -268,7 +255,7 @@ export function rewriteLinks(entity: EntityRecord, edit: LinkEdit): string | nul
   }
   for (const id of edit.addSubtasks ?? []) if (!after.includes(id)) after.push(id);
 
-  const parentBefore = typeof entity.fm.parent === "string" ? entity.fm.parent : undefined;
+  const parentBefore = readParent(entity.fm) ?? undefined;
   const parentAfter = edit.parent === undefined ? parentBefore : (edit.parent ?? undefined);
 
   const listChanged = after.length !== before.length || after.some((id, i) => id !== before[i]);
@@ -285,24 +272,27 @@ export function rewriteLinks(entity: EntityRecord, edit: LinkEdit): string | nul
 
 /** True when {@link rewriteLinks} could rewrite this file's link keys. */
 export function linksReadable(entity: EntityRecord): boolean {
-  try {
-    requireReadableLinks(entity);
-    return true;
-  } catch {
-    return false;
-  }
+  return unreadableLinkKey(entity) === null;
 }
 
-function requireReadableLinks(entity: EntityRecord): void {
+/**
+ * Why this file's link keys cannot be rewritten, or null when they can.
+ *
+ * A rewrite has to give back everything it read, so a key holding something
+ * that is not an ID stops it: silently dropping what could not be understood
+ * would lose an assertion somebody made. Check D2 reports the same fault.
+ */
+function unreadableLinkKey(entity: EntityRecord): string | null {
   const parent = entity.fm.parent;
   if (parent !== undefined && parent !== null && (typeof parent !== "string" || !isId(parent))) {
-    throw new FrontmatterError("'parent' is not a Navbook ID and cannot be rewritten");
+    return "'parent' is not a Navbook ID and cannot be rewritten";
   }
   const subtasks = entity.fm.subtasks;
-  if (subtasks === undefined || subtasks === null) return;
+  if (subtasks === undefined || subtasks === null) return null;
   if (!Array.isArray(subtasks) || subtasks.some((id) => typeof id !== "string" || !isId(id))) {
-    throw new FrontmatterError("'subtasks' is not a list of Navbook IDs and cannot be rewritten");
+    return "'subtasks' is not a list of Navbook IDs and cannot be rewritten";
   }
+  return null;
 }
 
 /**
@@ -364,11 +354,6 @@ export function planLink(
     message: docsSubject("issue", "link", child.id),
     trailers: refsTo([child, parent, ...staleListers]),
   };
-}
-
-/** Add one entry to an issue's `subtasks`, as a plan under construction may. */
-export function planAddSubtask(parent: EntityRecord, childId: string): FileOp[] {
-  return linkRepairOps([{ entity: parent, edit: { addSubtasks: [childId] } }]);
 }
 
 /**

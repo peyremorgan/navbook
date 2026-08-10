@@ -132,10 +132,11 @@ of a link are written, deliberately: either file answers its own question
 without opening the other, which is what keeps a listing or a `show` one read
 rather than a graph traversal.
 
-- The two sides MUST agree. An issue named in a `subtasks` list MUST name that
-  issue in its `parent`, and vice versa; `doctor` check D11 reports a
-  disagreement. A link whose target is not in the tree is exempt: it may live
-  on a branch nobody has fetched, which is D8's business (§2.9).
+- The two sides MUST agree. An issue named in another's `subtasks` list MUST
+  name that other issue in its own `parent`, and an issue's `parent` MUST list
+  it back; `doctor` check D11 reports a disagreement. A link whose target is
+  not in the tree is exempt: it may live on a branch nobody has fetched, which
+  is D8's business (§2.9).
 - `parent` holds at most one ID. That is what makes decomposition a tree rather
   than an arbitrary graph, and it makes `parent` the authoritative side: an
   issue is a subtask of another when it says so.
@@ -143,7 +144,7 @@ rather than a graph traversal.
   name itself in either key (`doctor` check D12). Depth is otherwise unbounded:
   a subtask may have subtasks of its own.
 - A `subtasks` list MUST NOT name the same issue twice, and SHOULD be written
-  in flow style (`subtasks: [mz4kq1rv, w2rfk8na]`) as the examples above are. An
+  in flow style (`subtasks: [mz4kq1rv, w2rfk8na]`), as `labels` is above. An
   issue with no subtasks omits the key rather than writing an empty list.
 - Both keys are issue-only. A pull request is a proposed change, not a unit of
   work to break down, so carrying either key on `pr.md` is a schema fault, and

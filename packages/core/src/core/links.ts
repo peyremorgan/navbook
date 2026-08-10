@@ -14,13 +14,40 @@
  */
 
 import { readParent, readSubtasks } from "./files.ts";
-import type { LinkRepair } from "./ops.ts";
 import type { EntityRecord, Repo } from "./tree.ts";
 
+export interface LinkEdit {
+  /** Ids appended to `subtasks` when the list does not already hold them. */
+  addSubtasks?: readonly string[];
+  /** Ids removed from `subtasks`. */
+  removeSubtasks?: readonly string[];
+  /** A new `parent`; `null` removes the key, `undefined` leaves it alone. */
+  parent?: string | null;
+}
+
+/** An edit to one issue's link keys, as planned by a caller that saw the tree. */
+export interface LinkRepair {
+  entity: EntityRecord;
+  edit: LinkEdit;
+}
+
 /** Issues only: pull requests never take part in decomposition (§2.5). */
-function issueById(repo: Repo, id: string): EntityRecord | undefined {
+export function issueById(repo: Repo, id: string): EntityRecord | undefined {
   const entity = repo.byId.get(id);
   return entity?.kind === "issue" ? entity : undefined;
+}
+
+/**
+ * Who each issue names as its parent — the graph the tree is judged against.
+ *
+ * Only edges between issues that are both here appear: a parent on an unfetched
+ * branch, or one that turns out to be a pull request, is not an edge anything
+ * can follow.
+ */
+export function parentGraph(repo: Repo): Map<string, string | null> {
+  const parents = new Map<string, string | null>();
+  for (const issue of repo.issues) parents.set(issue.id, readParent(issue.fm));
+  return parents;
 }
 
 /** The issue an issue names as its parent, when that issue is in this tree. */
@@ -128,12 +155,10 @@ export function linkRefusal(
   parent: EntityRecord,
 ): LinkRefusal | null {
   if (child.id === parent.id) return { kind: "self" };
-  if (inParentChain(repo, parent, child.id)) {
-    const chain = [parent, ...ancestorsOf(repo, parent)];
-    const upToChild = chain.slice(0, chain.findIndex((entity) => entity.id === child.id) + 1);
-    return { kind: "cycle", chain: upToChild.map((entity) => entity.id) };
-  }
-  return null;
+  const chain = [parent, ...ancestorsOf(repo, parent)].map((entity) => entity.id);
+  const reachesChild = chain.indexOf(child.id);
+  if (reachesChild === -1) return null;
+  return { kind: "cycle", chain: chain.slice(0, reachesChild + 1) };
 }
 
 /* ------------------------------------------------------- broken links */
@@ -158,7 +183,6 @@ export type LinkFault =
 export function faultPath(fault: LinkFault): string {
   switch (fault.kind) {
     case "parent-missing-child":
-      return fault.parent.filePath;
     case "duplicate":
       return fault.parent.filePath;
     case "not-an-issue":
@@ -187,12 +211,13 @@ export function findLinkFaults(repo: Repo): LinkFault[] {
 
   for (const parent of repo.issues) {
     const seen = new Set<string>();
+    const reported = new Set<string>();
     for (const id of readSubtasks(parent.fm)) {
       if (id === parent.id) continue; // a loop of one: check D12 reports it
       if (seen.has(id)) {
-        if (
-          !faults.some((f) => f.kind === "duplicate" && f.parent === parent && f.childId === id)
-        ) {
+        // However many times an entry repeats, it is one thing to say.
+        if (!reported.has(id)) {
+          reported.add(id);
           faults.push({ kind: "duplicate", parent, childId: id });
         }
         continue;
@@ -256,62 +281,62 @@ export type RepairRefusal =
   /** The repair would file an issue below itself. */
   | "would-loop";
 
-export type FaultRepair =
-  | { ok: true; repairs: LinkRepair[] }
-  | { ok: false; reason: RepairRefusal };
+/** How to mend one fault: the edits it needs, or why there are none. */
+export interface FaultRepair {
+  repairs: LinkRepair[];
+  /** Set exactly when `repairs` is empty, saying what stood in the way. */
+  refusal?: RepairRefusal;
+}
+
+const refused = (refusal: RepairRefusal): FaultRepair => ({ repairs: [], refusal });
 
 /**
  * How to mend one fault, or why it was left for a person.
  *
- * `decideConflict` is consulted only where the claims genuinely disagree; it
- * returns the id of the claimant whose word should stand, or null when history
- * cannot say. Everything else is decidable from the tree: adding a reciprocal
- * entry and dropping a repeated one both preserve every assertion the files
- * make, which is what makes them safe to apply unasked.
+ * `conflictWinners` says, for a child several issues claim, whose word should
+ * stand; only git history can answer that, so a caller that has not asked it
+ * passes nothing and those faults go unrepaired. Everything else is decidable
+ * from the tree: adding a reciprocal entry and dropping a repeated one both
+ * preserve every assertion the files make, which is what makes them safe to
+ * apply unasked.
  */
 export function planFaultRepair(
   repo: Repo,
   fault: LinkFault,
-  decideConflict: (fault: LinkConflict) => string | null,
+  conflictWinners: ReadonlyMap<string, string> = new Map(),
 ): FaultRepair {
   switch (fault.kind) {
     case "not-an-issue":
-      return { ok: false, reason: "not-an-issue" };
+      return refused("not-an-issue");
+    // An edit that only removes the repeat: `rewriteLinks` deduplicates the
+    // list on every write, so asking it to write is the whole repair.
     case "duplicate":
-      return { ok: true, repairs: [{ entity: fault.parent, edit: {} }] };
+      return { repairs: [{ entity: fault.parent, edit: {} }] };
     // Both directions decline when the pair is already on a loop. Recording it
     // on the other side too would spread a structure check D12 exists to
     // report and deliberately never mends.
-    case "parent-missing-child": {
-      if (inParentChain(repo, fault.parent, fault.child.id)) {
-        return { ok: false, reason: "would-loop" };
-      }
-      return {
-        ok: true,
-        repairs: [{ entity: fault.parent, edit: { addSubtasks: [fault.child.id] } }],
-      };
-    }
-    case "child-missing-parent": {
-      if (inParentChain(repo, fault.parent, fault.child.id)) {
-        return { ok: false, reason: "would-loop" };
-      }
-      return { ok: true, repairs: [{ entity: fault.child, edit: { parent: fault.parent.id } }] };
-    }
+    case "parent-missing-child":
+      return inParentChain(repo, fault.parent, fault.child.id)
+        ? refused("would-loop")
+        : { repairs: [{ entity: fault.parent, edit: { addSubtasks: [fault.child.id] } }] };
+    case "child-missing-parent":
+      return inParentChain(repo, fault.parent, fault.child.id)
+        ? refused("would-loop")
+        : { repairs: [{ entity: fault.child, edit: { parent: fault.parent.id } }] };
     default: {
       // A claim on an issue nobody here can see is not one this tree may
       // overrule. The absent issue may well be the right parent, on a branch
       // that has not been fetched — §2.5 exempts exactly that from D11 — and a
       // repair would delete the only record that it exists.
       if (fault.claimants.some((id) => issueById(repo, id) === undefined)) {
-        return { ok: false, reason: "off-tree-claimant" };
+        return refused("off-tree-claimant");
       }
-      const winner = decideConflict(fault);
-      if (winner === null) return { ok: false, reason: "undecided" };
+      const winner = conflictWinners.get(fault.child.id);
+      if (winner === undefined) return refused("undecided");
       const parent = issueById(repo, winner);
-      if (!parent) return { ok: false, reason: "off-tree-claimant" };
-      if (inParentChain(repo, parent, fault.child.id)) return { ok: false, reason: "would-loop" };
+      if (!parent) return refused("off-tree-claimant");
+      if (inParentChain(repo, parent, fault.child.id)) return refused("would-loop");
       return {
-        ok: true,
         repairs: [
           { entity: fault.child, edit: { parent: parent.id } },
           { entity: parent, edit: { addSubtasks: [fault.child.id] } },
@@ -348,37 +373,16 @@ export function findLinkLoops(repo: Repo): LinkLoop[] {
   const loops: LinkLoop[] = [];
   const found = new Set<string>();
   const record = (ids: string[], via: LinkLoop["via"]): void => {
-    const canonical = canonicalLoop(ids);
-    const key = `${via}:${canonical.join(",")}`;
+    const key = `${via}:${ids.join(",")}`;
     if (found.has(key)) return;
     found.add(key);
-    const first = issueById(repo, canonical[0] as string);
-    loops.push({ ids: canonical, path: first?.filePath ?? "", via });
+    loops.push({ ids, path: issueById(repo, ids[0] as string)?.filePath ?? "", via });
   };
 
   for (const issue of repo.issues) {
     if (readSubtasks(issue.fm).includes(issue.id)) record([issue.id], "subtasks");
   }
-
-  const settled = new Set<string>();
-  for (const start of repo.issues) {
-    if (settled.has(start.id)) continue;
-    const walk: string[] = [];
-    const onWalk = new Map<string, number>();
-    let current: EntityRecord | undefined = start;
-    while (current && !settled.has(current.id)) {
-      const at = onWalk.get(current.id);
-      if (at !== undefined) {
-        record(walk.slice(at), "parent");
-        break;
-      }
-      onWalk.set(current.id, walk.length);
-      walk.push(current.id);
-      const nextId: string | null = readParent(current.fm);
-      current = nextId === null ? undefined : issueById(repo, nextId);
-    }
-    for (const id of walk) settled.add(id);
-  }
+  for (const loop of parentLoops(parentGraph(repo))) record(canonicalLoop(loop), "parent");
   return loops;
 }
 
@@ -391,7 +395,20 @@ export function findLinkLoops(repo: Repo): LinkLoop[] {
  * would have closed alone.
  */
 export function loopMembers(parents: ReadonlyMap<string, string | null>): Set<string> {
-  const onLoop = new Set<string>();
+  return new Set(parentLoops(parents).flat());
+}
+
+/**
+ * Each loop in a `parent` assignment, in walk order.
+ *
+ * The one traversal both loop questions are asked of, so what `doctor --fix`
+ * declines to create and what check D12 goes on to report can never disagree
+ * about what a loop is. Every id is visited once: a walk that reaches somewhere
+ * an earlier walk already settled stops, since whatever lies beyond was
+ * explored then.
+ */
+function parentLoops(parents: ReadonlyMap<string, string | null>): string[][] {
+  const loops: string[][] = [];
   const settled = new Set<string>();
   for (const start of parents.keys()) {
     if (settled.has(start)) continue;
@@ -401,7 +418,7 @@ export function loopMembers(parents: ReadonlyMap<string, string | null>): Set<st
     while (current !== undefined && !settled.has(current)) {
       const seen = at.get(current);
       if (seen !== undefined) {
-        for (const id of walk.slice(seen)) onLoop.add(id);
+        loops.push(walk.slice(seen));
         break;
       }
       at.set(current, walk.length);
@@ -411,7 +428,7 @@ export function loopMembers(parents: ReadonlyMap<string, string | null>): Set<st
     }
     for (const id of walk) settled.add(id);
   }
-  return onLoop;
+  return loops;
 }
 
 /** Rotate a loop so the smallest id leads, making the same loop one finding. */
@@ -472,12 +489,11 @@ export function subtaskTree(repo: Repo, issue: EntityRecord, depth: number): Lin
   // one could not; an occurrence with no more room is marked and left, which is
   // what keeps a diamond from growing without bound.
   const expandedWith = new Map<string, number>([[issue.id, depth]]);
+  // The ancestors of the node being built, carried as one set that is pushed
+  // and popped around the recursion rather than copied at every node.
+  const path = new Set<string>([issue.id]);
 
-  const build = (
-    parent: EntityRecord,
-    remaining: number,
-    path: ReadonlySet<string>,
-  ): LinkNode[] => {
+  const build = (parent: EntityRecord, remaining: number): LinkNode[] => {
     if (remaining <= 0) return [];
     return readSubtasks(parent.fm).map((id) => {
       const node = linkNode(repo, id);
@@ -490,9 +506,12 @@ export function subtaskTree(repo: Repo, issue: EntityRecord, depth: number): Lin
       const before = expandedWith.get(id);
       if (before !== undefined && before >= remaining) return { ...node, repeated: true };
       expandedWith.set(id, remaining);
-      return { ...node, children: build(entity, remaining - 1, new Set([...path, id])) };
+      path.add(id);
+      const children = build(entity, remaining - 1);
+      path.delete(id);
+      return { ...node, children };
     });
   };
 
-  return build(issue, depth, new Set([issue.id]));
+  return build(issue, depth);
 }

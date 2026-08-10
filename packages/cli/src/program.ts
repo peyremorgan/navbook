@@ -229,11 +229,9 @@ function buildIssueCommand(getCtx: () => Ctx): Command {
     configureShow: (command) =>
       // Number, not parseInt: '2.5' has to reach the command as 2.5 so it can
       // be refused, rather than being silently rounded to something valid.
-      command.option(
-        "--depth <n>",
-        "levels of subtasks to render",
-        (value) => (value.trim() === "" ? Number.NaN : Number(value)),
-        1,
+      // No default here — `cmdShow` owns it, so every caller gets the same one.
+      command.option("--depth <n>", "levels of subtasks to render (default 1)", (value) =>
+        value.trim() === "" ? Number.NaN : Number(value),
       ),
     configureDelete: (command) =>
       command.option("-r, --recursive", "delete its subtasks too, to any depth"),

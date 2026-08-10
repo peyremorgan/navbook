@@ -15,11 +15,10 @@ import { readFileSync } from "node:fs";
 import { parseFile, readParent, readSubtasks, validateIssue, validatePr } from "../core/files.ts";
 import { FrontmatterError } from "../core/frontmatter.ts";
 import { NAVBOOK_ROOT } from "../core/json.ts";
-import { descendantsOf } from "../core/links.ts";
+import { descendantsOf, type LinkRepair } from "../core/links.ts";
 import {
   type CloseInput,
   docsSubject,
-  type LinkRepair,
   LinkRewriteError,
   linksReadable,
   type Plan,
@@ -394,27 +393,28 @@ function planDeleteLinks(
 ): { alsoRemoved: EntityRecord[]; detached: EntityRecord[]; repairs: LinkRepair[] } {
   const alsoRemoved = recursive ? descendantsOf(repo, entity) : [];
   const gone = new Set([entity.id, ...alsoRemoved.map((target) => target.id)]);
-  const surviving = repo.issues.filter((issue) => !gone.has(issue.id));
-  const isChild = (issue: EntityRecord): boolean => {
-    const parentId = readParent(issue.fm);
-    return parentId !== null && gone.has(parentId);
-  };
 
-  const repairs = surviving
-    .map((issue) => ({
-      entity: issue,
-      edit: {
-        removeSubtasks: readSubtasks(issue.fm).filter((id) => gone.has(id)),
-        ...(isChild(issue) ? { parent: null } : {}),
-      },
-    }))
-    .filter((repair) => repair.edit.removeSubtasks.length > 0 || repair.edit.parent === null)
+  const detached: EntityRecord[] = [];
+  const repairs: LinkRepair[] = [];
+  for (const issue of repo.issues) {
+    if (gone.has(issue.id)) continue;
+    const parentId = readParent(issue.fm);
+    const orphaned = parentId !== null && gone.has(parentId);
+    if (orphaned) detached.push(issue);
+
+    const removeSubtasks = readSubtasks(issue.fm).filter((id) => gone.has(id));
+    if (removeSubtasks.length === 0 && !orphaned) continue;
     // A third issue whose link keys cannot be read must not stand between the
     // user and the entity they asked to delete. Its stale reference becomes a
     // D8 warning, alongside the D2 error it already had.
-    .filter((repair) => linksReadable(repair.entity));
+    if (!linksReadable(issue)) continue;
+    repairs.push({
+      entity: issue,
+      edit: { removeSubtasks, ...(orphaned ? { parent: null } : {}) },
+    });
+  }
 
-  return { alsoRemoved, detached: surviving.filter(isChild), repairs };
+  return { alsoRemoved, detached, repairs };
 }
 
 /**
