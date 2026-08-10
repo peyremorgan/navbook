@@ -350,10 +350,10 @@ export function planLink(
   staleListers: readonly EntityRecord[] = [],
 ): Plan {
   const repairs: LinkRepair[] = [
-    // The child drops any claim on its new parent along the way: one issue
-    // cannot be both above and below another, and the caller has just said
-    // which way round it goes.
-    { entity: child, edit: { parent: parent.id, removeSubtasks: [parent.id] } },
+    // The child drops any claim on its new parent, or on itself, along the
+    // way: one issue cannot be both above and below another, and the caller
+    // has just said which way round this pair goes.
+    { entity: child, edit: { parent: parent.id, removeSubtasks: [parent.id, child.id] } },
     { entity: parent, edit: { addSubtasks: [child.id] } },
     ...staleListers
       .filter((entity) => entity.id !== parent.id && entity.id !== child.id)
@@ -362,7 +362,7 @@ export function planLink(
   return {
     ops: linkRepairOps(repairs),
     message: docsSubject("issue", "link", child.id),
-    trailers: refsTo([child, parent]),
+    trailers: refsTo([child, parent, ...staleListers]),
   };
 }
 

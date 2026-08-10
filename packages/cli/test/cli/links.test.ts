@@ -277,12 +277,32 @@ describe("nav issue link", () => {
     }
   });
 
-  it("refuses a link both sides already record", () => {
+  it("refuses only when there is genuinely nothing left to do", () => {
     const repo = seeded();
     try {
       const result = repo.nav(["issue", "link", "bbb2", "--parent", "aaa1"]);
       assert.equal(result.code, 1);
       assert.match(result.stderr, /is already a subtask of #aaa11111/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("settles the dispute doctor sends the user here to settle", () => {
+    const repo = seeded();
+    try {
+      // #ccc33333 claims #bbb22222 as well, so doctor reports a conflict and
+      // names this verb. Refusing "already a subtask" would be a dead end.
+      handEdit(repo, "ccc33333", /^created: (.*)$/m, "created: $1\nsubtasks: [bbb22222]");
+      const found = repo.nav(["doctor", "--fix"]);
+      assert.equal(found.code, 2, found.stdout);
+      assert.match(found.stdout, /settle it with 'nav issue link'/);
+
+      const result = repo.nav(["issue", "link", "bbb2", "--parent", "aaa1"]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /^Removed #bbb22222 from the subtasks of #ccc33333 {2}Build$/m);
+      assert.equal(read(repo, "ccc33333").includes("subtasks"), false);
+      assert.equal(repo.nav(["doctor"]).code, 0, repo.nav(["doctor"]).stdout);
     } finally {
       repo.cleanup();
     }
@@ -328,6 +348,10 @@ describe("nav issue link", () => {
       assert.equal(read(repo, "ccc33333").includes("subtasks"), false);
       assert.equal(read(repo, "bbb22222").includes("subtasks"), false);
       assert.match(read(repo, "aaa11111"), /^subtasks: \[bbb22222, ccc33333, ddd44444\]$/m);
+      // The old parent is named by the question that precedes the move; a
+      // third issue nobody mentioned is not, so the command says so itself.
+      assert.match(result.stdout, /^Removed #ddd44444 from the subtasks of #ccc33333 {2}Build$/m);
+      assert.equal(result.stdout.includes("of #bbb22222"), false);
       assert.equal(repo.nav(["doctor"]).code, 0, repo.nav(["doctor"]).stdout);
     } finally {
       repo.cleanup();

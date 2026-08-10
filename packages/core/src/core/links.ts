@@ -108,8 +108,6 @@ function listerIndex(repo: Repo): Map<string, EntityRecord[]> {
 export type LinkRefusal =
   /** An issue cannot be its own parent. */
   | { kind: "self" }
-  /** The link already exists on both sides; there is nothing to do. */
-  | { kind: "already-linked" }
   /** The proposed parent is a descendant, so the link would close a loop. */
   | { kind: "cycle"; chain: string[] };
 
@@ -118,6 +116,11 @@ export type LinkRefusal =
  *
  * Shared by every entry point that creates a link, so `open --parent` and
  * `link` can never disagree about what is allowed.
+ *
+ * A link the files already record is not refused here. "Already linked" has to
+ * mean there is nothing left to do, and only the plan knows that — an issue can
+ * name the right parent while a third one still claims it, and mending that is
+ * exactly what the verb is for.
  */
 export function linkRefusal(
   repo: Repo,
@@ -129,15 +132,6 @@ export function linkRefusal(
     const chain = [parent, ...ancestorsOf(repo, parent)];
     const upToChild = chain.slice(0, chain.findIndex((entity) => entity.id === child.id) + 1);
     return { kind: "cycle", chain: upToChild.map((entity) => entity.id) };
-  }
-  // "Already linked" has to mean there is nothing left to mend, or the verb
-  // that exists to put a link right would refuse the one case it is needed for.
-  if (
-    readParent(child.fm) === parent.id &&
-    readSubtasks(parent.fm).includes(child.id) &&
-    !readSubtasks(child.fm).includes(parent.id)
-  ) {
-    return { kind: "already-linked" };
   }
   return null;
 }
@@ -285,11 +279,18 @@ export function planFaultRepair(
       return { ok: false, reason: "not-an-issue" };
     case "duplicate":
       return { ok: true, repairs: [{ entity: fault.parent, edit: {} }] };
-    case "parent-missing-child":
+    // Both directions decline when the pair is already on a loop. Recording it
+    // on the other side too would spread a structure check D12 exists to
+    // report and deliberately never mends.
+    case "parent-missing-child": {
+      if (inParentChain(repo, fault.parent, fault.child.id)) {
+        return { ok: false, reason: "would-loop" };
+      }
       return {
         ok: true,
         repairs: [{ entity: fault.parent, edit: { addSubtasks: [fault.child.id] } }],
       };
+    }
     case "child-missing-parent": {
       if (inParentChain(repo, fault.parent, fault.child.id)) {
         return { ok: false, reason: "would-loop" };
@@ -434,7 +435,11 @@ export function parentNode(repo: Repo, issue: EntityRecord): LinkNode | undefine
  * neither a loop nor a diamond can make the output grow without bound.
  */
 export function subtaskTree(repo: Repo, issue: EntityRecord, depth: number): LinkNode[] {
-  const expanded = new Set<string>([issue.id]);
+  // How much room each issue was expanded with. An occurrence with more room
+  // than the one before it is expanded again, since it can show something that
+  // one could not; an occurrence with no more room is marked and left, which is
+  // what keeps a diamond from growing without bound.
+  const expandedWith = new Map<string, number>([[issue.id, depth]]);
 
   const build = (
     parent: EntityRecord,
@@ -448,11 +453,11 @@ export function subtaskTree(repo: Repo, issue: EntityRecord, depth: number): Lin
       if (!entity) return node;
       if (path.has(id)) return { ...node, cycle: true };
       // At the limit nothing below is shown for anyone, so this occurrence
-      // hides nothing and must not claim the issue: a shallower one further
-      // along the list still has room to expand it.
+      // hides nothing and must not claim the issue.
       if (remaining <= 1) return node;
-      if (expanded.has(id)) return { ...node, repeated: true };
-      expanded.add(id);
+      const before = expandedWith.get(id);
+      if (before !== undefined && before >= remaining) return { ...node, repeated: true };
+      expandedWith.set(id, remaining);
       return { ...node, children: build(entity, remaining - 1, new Set([...path, id])) };
     });
   };

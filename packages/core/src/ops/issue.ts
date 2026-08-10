@@ -94,6 +94,8 @@ export interface IssueLinkPlan {
   previousParentId?: string;
   /** That issue, when it is in this tree; a dangling one has no record. */
   previousParent?: EntityRecord;
+  /** Other issues that claimed the subtask and will stop; worth reporting. */
+  unexpectedListers: EntityRecord[];
   plan: Plan;
 }
 
@@ -126,15 +128,17 @@ export function planIssueLink(
       [refusal.chain.map((id) => `#${id}`).join(" -> ")],
     );
   }
-  if (refusal?.kind === "already-linked") {
-    wsFail("precondition", `#${child.id} is already a subtask of #${parent.id}`);
-  }
-
   const previousParentId = readParent(child.fm);
   const previousParent = parentOf(repo, child);
   const staleListers = listersOf(repo, child.id).filter((entity) => entity.id !== parent.id);
 
   const plan = rewritePlan(child, () => planLink(child, parent, staleListers));
+  // Nothing to write is the only honest test of "already linked": every file
+  // involved says what it should, including any third issue that might have
+  // gone on claiming the subtask.
+  if (plan.ops.length === 0) {
+    wsFail("precondition", `#${child.id} is already a subtask of #${parent.id}`);
+  }
   if (opts.commit) assertNoUnrelatedStaged(ws, planPaths(plan).map(repoPath));
 
   return {
@@ -142,6 +146,9 @@ export function planIssueLink(
     parent,
     ...(previousParentId !== null && previousParentId !== parent.id ? { previousParentId } : {}),
     ...(previousParent && previousParent.id !== parent.id ? { previousParent } : {}),
+    // Only the ones the user is unlikely to know about: a previous parent is
+    // already named in the question the caller asks before moving anything.
+    unexpectedListers: staleListers.filter((entity) => entity.id !== previousParentId),
     plan,
   };
 }

@@ -99,6 +99,11 @@ export function cmdIssueLink(ctx: Ctx, prefix: string, opts: IssueLinkOptions): 
 
   const run = executeIssueLink(ctx, link, { commit: opts.commit });
   ctx.stdout.write(`Filed #${child.id} under #${parent.id}  ${parent.title}\n`);
+  // An issue that was claiming the subtask without its agreement stops here,
+  // and nothing else in the run would have told the user that happened.
+  for (const lister of link.unexpectedListers) {
+    ctx.stdout.write(`Removed #${child.id} from the subtasks of #${lister.id}  ${lister.title}\n`);
+  }
   if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
 

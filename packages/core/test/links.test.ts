@@ -16,7 +16,7 @@ import {
   type RepairRefusal,
   subtaskTree,
 } from "../src/core/links.ts";
-import type { LinkRepair } from "../src/core/ops.ts";
+import { type LinkRepair, planLink } from "../src/core/ops.ts";
 import { type EntityRecord, type NavTree, parseTree, type Repo } from "../src/core/tree.ts";
 
 /** An issue file whose title doubles as a marker in rendered output. */
@@ -154,16 +154,18 @@ describe("linkRefusal", () => {
     });
   });
 
-  it("refuses a link both sides already record", () => {
+  it("leaves a link the files already record to the plan, which knows if anything is left to do", () => {
+    // Whether there is work here depends on the rest of the tree — a third
+    // issue may still claim the subtask — so it is not a refusal.
     const repo = family();
-    assert.deepEqual(linkRefusal(repo, get(repo, "b1000000"), get(repo, "a1000000")), {
-      kind: "already-linked",
-    });
+    assert.equal(linkRefusal(repo, get(repo, "b1000000"), get(repo, "a1000000")), null);
+    assert.deepEqual(planLink(get(repo, "b1000000"), get(repo, "a1000000")).ops, []);
   });
 
   it("allows relinking when only one side records it, so the command can mend it", () => {
     const repo = repoOf(issue("a1000000"), issue("b1000000", "parent: a1000000\n"));
     assert.equal(linkRefusal(repo, get(repo, "b1000000"), get(repo, "a1000000")), null);
+    assert.equal(planLink(get(repo, "b1000000"), get(repo, "a1000000")).ops.length, 1);
   });
 
   it("allows relinking when the child also claims its parent as a subtask", () => {
@@ -172,6 +174,7 @@ describe("linkRefusal", () => {
       issue("b1000000", "parent: a1000000\nsubtasks: [a1000000]\n"),
     );
     assert.equal(linkRefusal(repo, get(repo, "b1000000"), get(repo, "a1000000")), null);
+    assert.equal(planLink(get(repo, "b1000000"), get(repo, "a1000000")).ops.length, 1);
   });
 });
 
@@ -301,6 +304,22 @@ describe("planFaultRepair", () => {
     assert.deepEqual(repairFor(repo), [
       { entity: get(repo, "b1000000"), edit: { parent: "a1000000" } },
     ]);
+  });
+
+  it("declines to complete a link between two issues already on a loop", () => {
+    // a1 and b1 each name the other as parent and neither lists the other.
+    // Recording it on the subtasks side too would spread a loop D12 reports
+    // and never mends.
+    const repo = repoOf(
+      issue("a1000000", "parent: b1000000\n"),
+      issue("b1000000", "parent: a1000000\n"),
+    );
+    const faults = findLinkFaults(repo);
+    assert.deepEqual(kinds(faults), ["parent-missing-child", "parent-missing-child"]);
+    for (const fault of faults) {
+      const repair = planFaultRepair(repo, fault, never);
+      assert.equal(repair.ok ? "repaired" : repair.reason, "would-loop");
+    }
   });
 
   it("declines to set a parent when doing so would close a loop", () => {
@@ -486,7 +505,7 @@ describe("subtaskTree", () => {
     );
   });
 
-  it("expands an issue two lists share only once", () => {
+  it("expands an issue two lists share only once, when neither has more room", () => {
     const repo = repoOf(
       issue("a1000000", "subtasks: [b1000000, b2000000]\n"),
       issue("b1000000", "subtasks: [c1000000]\n"),
@@ -501,5 +520,28 @@ describe("subtaskTree", () => {
     );
     assert.equal(tree[1]?.children[0]?.repeated, true);
     assert.deepEqual(tree[1]?.children[0]?.children, []);
+  });
+
+  it("expands it again where there is more room than the first time", () => {
+    // d1 is met under b1 with one level to spare, and again straight under a1
+    // with two. The second occurrence can show e1's own subtask, so it does.
+    const repo = repoOf(
+      issue("a1000000", "subtasks: [b1000000, d1000000]\n"),
+      issue("b1000000", "subtasks: [d1000000]\n"),
+      issue("d1000000", "subtasks: [e1000000]\n"),
+      issue("e1000000", "subtasks: [f1000000]\n"),
+      issue("f1000000"),
+    );
+    const tree = subtaskTree(repo, get(repo, "a1000000"), 3);
+    assert.deepEqual(
+      tree[0]?.children[0]?.children.map((n) => n.id),
+      ["e1000000"],
+      "under b1, e1 is as deep as it goes",
+    );
+    assert.deepEqual(
+      tree[1]?.children[0]?.children.map((n) => n.id),
+      ["f1000000"],
+      "under a1, there is room for f1",
+    );
   });
 });
