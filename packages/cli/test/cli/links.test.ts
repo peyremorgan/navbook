@@ -101,6 +101,68 @@ describe("nav issue open --parent", () => {
     }
   });
 
+  it("takes the parent from the composed file, so an editor has the last word", () => {
+    const repo = seeded();
+    try {
+      // The author is given `parent: aaa11111` to edit and rewrites it.
+      const editor = repo.script(
+        "editor-reparent.sh",
+        `sed -i 's/^parent: aaa11111$/parent: ccc33333/' "$1"; printf 'A body.\\n' >> "$1"`,
+      );
+      const result = repo.nav(["issue", "open", "Sub", "--parent", "aaa1"], {
+        NAV_IDS: "eee55555",
+        EDITOR: editor,
+      });
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /^Filed under #ccc33333 {2}Build$/m);
+      assert.match(read(repo, "ccc33333"), /^subtasks: \[eee55555\]$/m);
+      assert.equal(read(repo, "aaa11111").includes("eee55555"), false);
+      assert.equal(repo.nav(["doctor"]).code, 0, repo.nav(["doctor"]).stdout);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("leaves no half-link when the author deletes the parent key outright", () => {
+    const repo = seeded();
+    try {
+      const editor = repo.script(
+        "editor-unparent.sh",
+        `sed -i '/^parent: /d' "$1"; printf 'A body.\\n' >> "$1"`,
+      );
+      const result = repo.nav(["issue", "open", "Sub", "--parent", "aaa1"], {
+        NAV_IDS: "eee55555",
+        EDITOR: editor,
+      });
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(result.stdout.includes("Filed under"), false);
+      assert.equal(read(repo, "aaa11111").includes("eee55555"), false);
+      assert.equal(repo.nav(["doctor"]).code, 0, repo.nav(["doctor"]).stdout);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("reads the parent's file as it stands after the editor, not before", () => {
+    const repo = seeded();
+    try {
+      // Something else retitles the parent while the editor session is open.
+      const editor = repo.script(
+        "editor-meddle.sh",
+        `sed -i 's/^title: Root$/title: Root, retitled/' ${JSON.stringify(fileOf(repo, "aaa11111"))}; printf 'A body.\\n' >> "$1"`,
+      );
+      const result = repo.nav(["issue", "open", "Sub", "--parent", "aaa1"], {
+        NAV_IDS: "eee55555",
+        EDITOR: editor,
+      });
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(read(repo, "aaa11111"), /^title: Root, retitled$/m);
+      assert.match(read(repo, "aaa11111"), /^subtasks: \[bbb22222, ccc33333, eee55555\]$/m);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("names the parent's own file when its links cannot be read", () => {
     const repo = seeded();
     try {
@@ -365,6 +427,30 @@ describe("nav issue show, with links", () => {
     }
   });
 
+  it("tells a link naming a pull request apart from one naming nothing", () => {
+    const repo = seeded();
+    try {
+      repo.write("src/a.txt", "a\n");
+      repo.commitAll("feat: something to review");
+      repo.git(["checkout", "--quiet", "-b", "feat/x"]);
+      repo.write("src/b.txt", "b\n");
+      repo.commitAll("feat: more");
+      assert.equal(
+        repo.nav(["pr", "open", "--title", "Auth", "-m", "Body."], { NAV_IDS: "prr11111" }).code,
+        0,
+      );
+      handEdit(repo, "aaa11111", /^subtasks: .*$/m, "subtasks: [prr11111]");
+      handEdit(repo, "bbb22222", /^parent: .*$/m, "parent: prr11111");
+
+      const parent = repo.nav(["issue", "show", "aaa1"]);
+      assert.match(parent.stdout, /#prr11111 \(a pull request, not a subtask\)/);
+      const child = repo.nav(["issue", "show", "bbb2"]);
+      assert.match(child.stdout, /^parent: {4}#prr11111 \(a pull request, not a subtask\)$/m);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("carries the raw ids into --json, unresolved", () => {
     const repo = seeded();
     try {
@@ -458,6 +544,37 @@ describe("nav issue delete, with links", () => {
     const repo = seeded();
     try {
       assert.equal(repo.nav(["pr", "delete", "--help"]).stdout.includes("--recursive"), false);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("deleting a pull request never rewrites an issue file", () => {
+    const repo = seeded();
+    try {
+      repo.write("src/a.txt", "a\n");
+      repo.commitAll("feat: something to review");
+      repo.git(["checkout", "--quiet", "-b", "feat/x"]);
+      repo.write("src/b.txt", "b\n");
+      repo.commitAll("feat: more");
+      assert.equal(
+        repo.nav(["pr", "open", "--title", "Auth", "-m", "Body."], { NAV_IDS: "prr11111" }).code,
+        0,
+      );
+      repo.commitAll("docs(pr): open #prr11111");
+      // A hand-written link naming the pull request: already a fault, and not
+      // one that deleting the pull request gets to resolve by editing an issue.
+      handEdit(repo, "ddd44444", /^parent: .*$/m, "parent: prr11111");
+      repo.commitAll("docs(issue): a link that should not have been written");
+
+      const result = repo.nav(["pr", "delete", "prr1", "--commit"]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(read(repo, "ddd44444"), /^parent: prr11111$/m);
+      assert.equal(
+        repo.git(["show", "--name-only", "--format=", "HEAD"]).stdout.includes("ddd44444"),
+        false,
+        "the delete commit touched no issue file",
+      );
     } finally {
       repo.cleanup();
     }

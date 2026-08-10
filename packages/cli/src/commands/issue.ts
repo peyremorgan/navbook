@@ -54,14 +54,18 @@ export function cmdIssueOpen(ctx: Ctx, title: string, opts: IssueOpenOptions): v
     validate: validateIssue,
   });
 
-  const { id, dirPath, run } = openIssue(
+  const result = openIssue(
     ctx,
-    { content: composed.content, fallbackTitle: title, parent },
+    { content: composed.content, fallbackTitle: title },
     { commit: opts.commit },
   );
+  const { id, dirPath, run } = result;
 
   ctx.stdout.write(`Created ${NAVBOOK_ROOT}/${dirPath}/  (#${id})\n`);
-  if (parent) ctx.stdout.write(`Filed under #${parent.id}  ${parent.title}\n`);
+  // What the file ended up saying, which an editor session may have changed.
+  if (result.parent) {
+    ctx.stdout.write(`Filed under #${result.parent.id}  ${result.parent.title}\n`);
+  }
   if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
 

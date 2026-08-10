@@ -19,6 +19,7 @@ import { descendantsOf } from "../core/links.ts";
 import {
   type CloseInput,
   docsSubject,
+  type LinkRepair,
   LinkRewriteError,
   type Plan,
   planClose,
@@ -365,29 +366,50 @@ export function planEntityDelete(
   const repo = loadRepo(ws);
   const entity = resolveEntity(repo, ref, kind);
 
-  const alsoRemoved = kind === "issue" && opts.recursive ? descendantsOf(repo, entity) : [];
+  // Decomposition is issue-only, so deleting a pull request never rewrites an
+  // issue file. A link that named it was already a fault, and once the target
+  // is gone it is a D8 warning the delete subject itself accounts for.
+  const links = kind === "issue" ? planDeleteLinks(repo, entity, opts.recursive === true) : null;
+  const plan = rewritePlan(entity, () =>
+    planDelete(entity, {
+      alsoRemove: links?.alsoRemoved ?? [],
+      repairs: links?.repairs ?? [],
+    }),
+  );
+  if (opts.commit) assertNoUnrelatedStaged(ws, planPaths(plan).map(repoPath));
+  return {
+    entity,
+    alsoRemoved: links?.alsoRemoved ?? [],
+    detached: links?.detached ?? [],
+    plan,
+  };
+}
+
+/** What a delete takes with it, and what it has to mend on the way out. */
+function planDeleteLinks(
+  repo: Repo,
+  entity: EntityRecord,
+  recursive: boolean,
+): { alsoRemoved: EntityRecord[]; detached: EntityRecord[]; repairs: LinkRepair[] } {
+  const alsoRemoved = recursive ? descendantsOf(repo, entity) : [];
   const gone = new Set([entity.id, ...alsoRemoved.map((target) => target.id)]);
   const surviving = repo.issues.filter((issue) => !gone.has(issue.id));
+  const isChild = (issue: EntityRecord): boolean => {
+    const parentId = readParent(issue.fm);
+    return parentId !== null && gone.has(parentId);
+  };
 
-  const detached = kind === "issue" ? surviving.filter((issue) => isChildOf(issue, gone)) : [];
   const repairs = surviving
     .map((issue) => ({
       entity: issue,
       edit: {
         removeSubtasks: readSubtasks(issue.fm).filter((id) => gone.has(id)),
-        ...(isChildOf(issue, gone) ? { parent: null } : {}),
+        ...(isChild(issue) ? { parent: null } : {}),
       },
     }))
     .filter((repair) => repair.edit.removeSubtasks.length > 0 || repair.edit.parent === null);
 
-  const plan = rewritePlan(entity, () => planDelete(entity, { alsoRemove: alsoRemoved, repairs }));
-  if (opts.commit) assertNoUnrelatedStaged(ws, planPaths(plan).map(repoPath));
-  return { entity, alsoRemoved, detached, plan };
-}
-
-function isChildOf(issue: EntityRecord, gone: ReadonlySet<string>): boolean {
-  const parentId = readParent(issue.fm);
-  return parentId !== null && gone.has(parentId);
+  return { alsoRemoved, detached: surviving.filter(isChild), repairs };
 }
 
 /**

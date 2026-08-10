@@ -26,7 +26,7 @@ import {
   NAVBOOK_ROOT,
   type NewCommentInput,
   newCommentFile,
-  parentOf,
+  parentNode,
   parseListQuery,
   planEntityDelete,
   readAssignees,
@@ -154,7 +154,9 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
     `${renderDetail(entity, {
       colors: ctx.colors,
       ...(kind === "issue"
-        ? { links: { parent: parentOf(repo, entity), subtasks: subtaskTree(repo, entity, depth) } }
+        ? {
+            links: { parent: parentNode(repo, entity), subtasks: subtaskTree(repo, entity, depth) },
+          }
         : {}),
     })}\n`,
   );

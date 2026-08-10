@@ -5,7 +5,7 @@
  * verb from `entity.ts`.
  */
 
-import { readParent, readSubtasks } from "../core/files.ts";
+import { parseFile, readParent, readSubtasks } from "../core/files.ts";
 import { linkRefusal, listersOf, parentOf } from "../core/links.ts";
 import { type Plan, planAddSubtask, planLink, planPaths, planUnlink } from "../core/ops.ts";
 import type { EntityRecord } from "../core/tree.ts";
@@ -27,8 +27,8 @@ import {
   rewritePlan,
 } from "./entity.ts";
 
-export interface OpenIssueInput extends OpenInput {
-  /** The issue the new one is filed under, already resolved against the tree. */
+export interface OpenIssueResult extends OpenEntityResult {
+  /** The issue it was filed under, when the composed file names one. */
   parent?: EntityRecord;
 }
 
@@ -38,20 +38,46 @@ export interface OpenIssueInput extends OpenInput {
  * The parent's side of the link joins the same plan, so an issue opened as a
  * subtask is never momentarily orphaned: one commit, both files. No loop is
  * possible — the id was minted a moment ago and nothing can descend from it.
+ *
+ * Which parent is read back out of the composed file, exactly as the title is:
+ * `--parent` seeds the buffer, and an author who edited or removed the key in
+ * `$EDITOR` meant it. The tree is re-read at the same moment, so the parent's
+ * file is rewritten from what it says now rather than from a snapshot taken
+ * before the editor opened.
  */
-export function openIssue(ws: WsCtx, input: OpenIssueInput, opts: CommitOptions): OpenEntityResult {
-  if (!input.parent) return openEntity(ws, "issue", input, opts);
-  const parent = input.parent;
-  return openEntity(ws, "issue", input, opts, (plan, id) =>
+export function openIssue(ws: WsCtx, input: OpenInput, opts: CommitOptions): OpenIssueResult {
+  let parent: EntityRecord | undefined;
+  const result = openEntity(ws, "issue", input, opts, (plan, id) => {
+    parent = composedParent(ws, input.content);
+    if (!parent) return plan;
+    const filedUnder = parent;
     // Through rewritePlan, so a parent whose own link keys cannot be read is
     // reported the way `nav issue link` reports it: naming the file, and what
     // to do about it.
-    rewritePlan(parent, () => ({
+    return rewritePlan(filedUnder, () => ({
       ...plan,
-      ops: [...plan.ops, ...planAddSubtask(parent, id)],
-      trailers: [...plan.trailers, { key: "Refs", id: parent.id }],
-    })),
-  );
+      ops: [...plan.ops, ...planAddSubtask(filedUnder, id)],
+      trailers: [...plan.trailers, { key: "Refs", id: filedUnder.id }],
+    }));
+  });
+  return { ...result, ...(parent ? { parent } : {}) };
+}
+
+/** The issue a composed `issue.md` names as its parent, when it is in the tree. */
+function composedParent(ws: WsCtx, content: string): EntityRecord | undefined {
+  let parentId: string | null;
+  try {
+    parentId = readParent(parseFile(content).fm);
+  } catch {
+    // An unparseable buffer is the composer's business; it never gets this far.
+    return undefined;
+  }
+  if (parentId === null) return undefined;
+  const found = loadRepo(ws).byId.get(parentId);
+  // A parent that is not here, or is not an issue, leaves the link one-sided
+  // for `doctor` to report rather than being quietly rewritten into something
+  // the author did not ask for.
+  return found?.kind === "issue" ? found : undefined;
 }
 
 /** Resolve the issue named by `--parent`, failing before anything is composed. */

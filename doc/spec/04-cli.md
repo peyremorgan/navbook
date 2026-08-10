@@ -83,7 +83,10 @@ other kind MUST fail with a pointer to the right noun (e.g.
   `#id`. `--edit` (default when no `-m`) opens `$EDITOR` on the new file.
   `--parent` files it as a subtask, writing both sides of the link ([2.5](02-data-model.md))
   in the same commit; the parent MUST be resolved before the description is
-  composed, so an unknown one is reported before an editor is opened.
+  composed, so an unknown one is reported before an editor is opened. As with
+  the title, what the composed file says is what counts: `--parent` seeds the
+  buffer, and an author who edits or removes the `parent:` key in `$EDITOR`
+  MUST get the link that file describes, not the one the flag asked for.
 - `nav issue list [query]...` — issues matching all query terms (AND), as a
   table (`--json` for machines). Default query: `status:open`. Grammar below.
 - `nav issue show <id> [--depth N]` — render `issue.md` plus its comments

@@ -17,8 +17,8 @@ import {
 import type { Colors } from "./colors.ts";
 
 export interface DetailLinks {
-  /** The issue this one is filed under, when it is in this tree. */
-  parent?: EntityRecord;
+  /** The issue this one is filed under, when its file names one. */
+  parent?: LinkNode;
   /** Its subtasks, already limited to the depth the caller asked for. */
   subtasks: LinkNode[];
 }
@@ -118,19 +118,9 @@ function linkRows(
 ): [string, string][] {
   if (!links) return [];
   const rows: [string, string][] = [];
-
-  const parentId = stringField(entity, "parent");
-  if (parentId !== "") {
-    rows.push(["parent", links.parent ? describeLink(links.parent, c) : missing(parentId, c)]);
-  }
-
-  const flat = flatten(links.subtasks, 0);
-  flat.forEach(([node, depth], index) => {
-    const indent = "  ".repeat(depth);
-    const text = node.entity
-      ? `${indent}${describeLink(node.entity, c)}${suffix(node, c)}`
-      : `${indent}${missing(node.id, c)}`;
-    rows.push([index === 0 ? "subtasks" : "", text]);
+  if (links.parent) rows.push(["parent", describeLink(links.parent, 0, c)]);
+  flatten(links.subtasks, 0).forEach(([node, depth], index) => {
+    rows.push([index === 0 ? "subtasks" : "", describeLink(node, depth, c)]);
   });
   return rows;
 }
@@ -142,15 +132,14 @@ function flatten(nodes: readonly LinkNode[], depth: number): [LinkNode, number][
   ]);
 }
 
-function describeLink(entity: EntityRecord, c: Colors): string {
-  return `${c.bold(`#${entity.id}`)} ${entity.title} ${c.dim(`(${entity.status})`)}`;
+function describeLink(node: LinkNode, depth: number, c: Colors): string {
+  const head = `${"  ".repeat(depth)}${c.bold(`#${node.id}`)}`;
+  if (node.notAnIssue) return `${head} ${c.yellow("(a pull request, not a subtask)")}`;
+  if (!node.entity) return `${head} ${c.dim("(not in this tree)")}`;
+  return `${head} ${node.entity.title} ${c.dim(`(${node.entity.status})`)}${note(node, c)}`;
 }
 
-function missing(id: string, c: Colors): string {
-  return `${c.bold(`#${id}`)} ${c.dim("(not in this tree)")}`;
-}
-
-function suffix(node: LinkNode, c: Colors): string {
+function note(node: LinkNode, c: Colors): string {
   if (node.cycle) return ` ${c.yellow("(loops back)")}`;
   return node.repeated ? ` ${c.dim("(shown above)")}` : "";
 }

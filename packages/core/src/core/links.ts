@@ -388,11 +388,32 @@ export interface LinkNode {
   id: string;
   /** Absent when the id matches no issue in this tree. */
   entity?: EntityRecord;
+  /** The id names a pull request, which decomposition never relates (§2.5). */
+  notAnIssue?: boolean;
   /** The id is an ancestor of itself: the chain loops here. */
   cycle?: boolean;
   /** Already expanded elsewhere in this render; not expanded again. */
   repeated?: boolean;
   children: LinkNode[];
+}
+
+/**
+ * One end of a link as something a reader can be shown.
+ *
+ * "Not here" and "here but not an issue" are different things to be told, so
+ * they are different nodes rather than one absence.
+ */
+function linkNode(repo: Repo, id: string): LinkNode {
+  const entity = repo.byId.get(id);
+  if (!entity) return { id, children: [] };
+  if (entity.kind !== "issue") return { id, notAnIssue: true, children: [] };
+  return { id, entity, children: [] };
+}
+
+/** The issue's parent as a renderable node, or undefined when it names none. */
+export function parentNode(repo: Repo, issue: EntityRecord): LinkNode | undefined {
+  const id = readParent(issue.fm);
+  return id === null ? undefined : linkNode(repo, id);
 }
 
 /**
@@ -414,12 +435,13 @@ export function subtaskTree(repo: Repo, issue: EntityRecord, depth: number): Lin
   ): LinkNode[] => {
     if (remaining <= 0) return [];
     return readSubtasks(parent.fm).map((id) => {
-      const entity = issueById(repo, id);
-      if (!entity) return { id, children: [] };
-      if (path.has(id)) return { id, entity, cycle: true, children: [] };
-      if (expanded.has(id)) return { id, entity, repeated: true, children: [] };
+      const node = linkNode(repo, id);
+      const entity = node.entity;
+      if (!entity) return node;
+      if (path.has(id)) return { ...node, cycle: true };
+      if (expanded.has(id)) return { ...node, repeated: true };
       expanded.add(id);
-      return { id, entity, children: build(entity, remaining - 1, new Set([...path, id])) };
+      return { ...node, children: build(entity, remaining - 1, new Set([...path, id])) };
     });
   };
 
