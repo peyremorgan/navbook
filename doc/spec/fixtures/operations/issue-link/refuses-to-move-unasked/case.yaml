@@ -1,0 +1,10 @@
+spec-version: 1
+description: without --force, a move nobody confirmed leaves the tree exactly as it was
+init: {from: before}
+run: {command: [issue, link, q8zm, --parent, w2rf]}
+expect:
+  exit: 1
+  stdout: expected/stdout.txt
+  stderr-contains: ["was not moved"]
+  tree: expected/tree
+  commits: []

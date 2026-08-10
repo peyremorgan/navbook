@@ -1,0 +1,9 @@
+spec-version: 1
+description: deleting an issue leaves its subtasks as top-level issues and mends the links around it
+init: {from: before}
+run: {command: [issue, delete, mz4k, --commit]}
+expect:
+  exit: 0
+  stdout: expected/stdout.txt
+  tree: expected/tree
+  commits: ["docs(issue): delete #mz4kq1rv\n"]

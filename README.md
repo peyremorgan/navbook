@@ -92,7 +92,9 @@ usually enough. A full directory name works too.
 | `nav issue open <title>` | File an issue. `-m TEXT`, or `$EDITOR` opens on the new file. |
 | `nav issue list [query]` | Filtered table; `--json` for one JSON object per line. |
 | `nav issue close <id> [--resolution R]` | Move it to `closed/`. |
-| `nav issue delete <id>` | Remove its directory entirely — for the duplicate you filed twice. Asks first if it holds uncommitted changes; `--force` skips that. |
+| `nav issue open <title> --parent <id>` | File it as a subtask. `nav issue link`/`unlink` do the same for issues that already exist; trees nest as deep as you like. |
+| `nav issue show <id> [--depth N]` | Render it, with the title and status of its parent and of the subtasks beneath it. |
+| `nav issue delete <id>` | Remove its directory entirely — for the duplicate you filed twice. Its subtasks survive as top-level issues unless you pass `--recursive`. Asks first if it holds uncommitted changes; `--force` skips that. |
 | `nav pr open [--target BRANCH]` | Open a PR from the current branch, pinning the exact head and merge base under review. |
 | `nav pr review <id> --approve` | Record a verdict bound to a specific revision. |
 | `nav pr list --all-refs` | Find PRs on branches you have fetched but not checked out. |

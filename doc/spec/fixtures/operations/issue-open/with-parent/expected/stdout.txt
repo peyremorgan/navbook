@@ -1,0 +1,3 @@
+Created .navbook/issues/open/q8zm3vp1-measure-the-current-timeout/  (#q8zm3vp1)
+Filed under #bqlybac0  Login times out on slow connections
+Committed docs(issue): open #q8zm3vp1

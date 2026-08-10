@@ -1,0 +1,9 @@
+spec-version: 1
+description: --force moves a subtask that already has a parent, taking it off the old list
+init: {from: before}
+run: {command: [issue, link, q8zm, --parent, w2rf, --force, --commit]}
+expect:
+  exit: 0
+  stdout: expected/stdout.txt
+  tree: expected/tree
+  commits: ["docs(issue): link #q8zm3vp1\n\nRefs: q8zm3vp1\nRefs: w2rfk8na\n"]

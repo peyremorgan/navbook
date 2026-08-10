@@ -1,0 +1,3 @@
+Deleted #mz4kq1rv  .navbook/issues/open/mz4kq1rv-raise-the-lb-timeout/
+Deleted #q8zm3vp1  .navbook/issues/open/q8zm3vp1-measure-the-current-timeout/
+Committed docs(issue): delete #mz4kq1rv

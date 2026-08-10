@@ -1,0 +1,11 @@
+spec-version: 1
+description: opening with --parent records the link on both sides in one commit
+init: {from: before}
+run:
+  command: [issue, open, "Measure the current timeout", -m, "Read it off the balancer first.", --parent, bqly, --commit]
+  env: {NAV_NOW: "2026-08-10T12:00:00Z", NAV_IDS: "q8zm3vp1"}
+expect:
+  exit: 0
+  stdout: expected/stdout.txt
+  tree: expected/tree
+  commits: ["docs(issue): open #q8zm3vp1\n\nRefs: bqlybac0\n"]

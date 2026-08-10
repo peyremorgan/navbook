@@ -74,6 +74,23 @@ doing this concurrently on different branches can never conflict.
 $ nav issue comment bqlybac0 -m "Reproduced on staging; LB idle timeout."
 ```
 
+### Break an issue down
+
+Record `parent:` in the subtask's frontmatter and add its ID to the parent's
+`subtasks:` list. Commit. Both halves are written because either file should
+answer its own question; `nav doctor` reports it when they stop agreeing. A
+subtask can be broken down in turn, to any depth.
+
+```
+$ nav issue open "Raise the LB idle timeout" --parent bqlybac0
+Created .navbook/issues/open/mz4kq1rv-raise-the-lb-timeout/  (#mz4kq1rv)
+Filed under #bqlybac0  Login times out on slow connections
+
+$ nav issue show bqlybac0
+...
+subtasks:  #mz4kq1rv Raise the LB idle timeout (open)
+```
+
 ### Close / reopen
 
 Move the issue directory from `issues/open/` to `issues/closed/` (and

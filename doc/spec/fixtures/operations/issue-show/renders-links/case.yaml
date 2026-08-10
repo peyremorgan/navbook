@@ -1,0 +1,5 @@
+spec-version: 1
+description: show names the parent and the subtasks, as deep as --depth asks
+init: {from: before}
+run: {command: [issue, show, bqly, --depth, "2"]}
+expect: {exit: 0, stdout: expected/stdout.txt}

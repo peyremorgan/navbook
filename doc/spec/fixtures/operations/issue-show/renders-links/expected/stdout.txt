@@ -1,0 +1,13 @@
+#bqlybac0 Login times out on slow connections
+status:    open
+author:    Alice Smith <alice@example.com>
+created:   2026-08-02T09:14:00Z
+subtasks:  #mz4kq1rv Raise the load balancer idle timeout (open)
+             #q8zm3vp1 Measure the current timeout (open)
+           #w2rfk8na Retry the login POST on the client (open)
+path:      .navbook/issues/open/bqlybac0-login-timeout/
+
+Login POST aborts after 5 s on 3G-class connections.
+
+comments (0):
+  none

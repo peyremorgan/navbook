@@ -1,0 +1,9 @@
+spec-version: 1
+description: linking writes the child's parent and the parent's subtasks together
+init: {from: before}
+run: {command: [issue, link, mz4k, --parent, bqly, --commit]}
+expect:
+  exit: 0
+  stdout: expected/stdout.txt
+  tree: expected/tree
+  commits: ["docs(issue): link #mz4kq1rv\n\nRefs: mz4kq1rv\nRefs: bqlybac0\n"]

@@ -1,0 +1,9 @@
+spec-version: 1
+description: --recursive removes the whole subtree in one commit, recording the extra ids it took
+init: {from: before}
+run: {command: [issue, delete, mz4k, --recursive, --commit]}
+expect:
+  exit: 0
+  stdout: expected/stdout.txt
+  tree: expected/tree
+  commits: ["docs(issue): delete #mz4kq1rv\n\nDeletes: q8zm3vp1\n"]

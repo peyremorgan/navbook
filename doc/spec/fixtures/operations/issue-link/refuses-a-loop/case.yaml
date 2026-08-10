@@ -1,0 +1,10 @@
+spec-version: 1
+description: a link that would put an issue below itself is refused, naming the chain
+init: {from: before}
+run: {command: [issue, link, bqly, --parent, q8zm]}
+expect:
+  exit: 1
+  stdout: ""
+  stderr-contains: ["would form a loop"]
+  tree: expected/tree
+  commits: []

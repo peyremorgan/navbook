@@ -78,20 +78,41 @@ other kind MUST fail with a pointer to the right noun (e.g.
 
 ### Issues — `nav issue <verb>`
 
-- `nav issue open <title> [--label L]... [--assignee EMAIL] [--milestone M] [-m DESC | --edit]`
+- `nav issue open <title> [--label L]... [--assignee EMAIL] [--milestone M] [--parent <id>] [-m DESC | --edit]`
   — mint an ID, create `issues/open/<id>-<slug>/issue.md`. Prints path and
   `#id`. `--edit` (default when no `-m`) opens `$EDITOR` on the new file.
+  `--parent` files it as a subtask, writing both sides of the link ([2.5](02-data-model.md))
+  in the same commit; the parent MUST be resolved before the description is
+  composed, so an unknown one is reported before an editor is opened.
 - `nav issue list [query]...` — issues matching all query terms (AND), as a
   table (`--json` for machines). Default query: `status:open`. Grammar below.
-- `nav issue show <id>` — render `issue.md` plus its comments (sorted by
-  filename, `reply-to` chains indented) to the terminal.
+- `nav issue show <id> [--depth N]` — render `issue.md` plus its comments
+  (sorted by filename, `reply-to` chains indented) to the terminal. The parent
+  and the subtasks are shown with their titles and statuses; `--depth`
+  (default 1) says how many levels of subtasks to render. `--json` reports the
+  IDs as the file records them and ignores `--depth`.
 - `nav issue edit <id>` — open `issue.md` in `$EDITOR` (pure convenience).
 - `nav issue comment <id> [-m TEXT | --edit] [--reply-to <comment-id>]` —
   create a comment file with a fresh comment ID and the current UTC time.
 - `nav issue close <id> [--resolution R] [--duplicate-of <id>]` — move the
   directory to `closed/`, optionally set `resolution:`.
 - `nav issue reopen <id>` — move back to `open/`; remove `resolution:`.
-- `nav issue delete <id> [-f|--force]` — remove the entity's directory and
+- `nav issue link <id> --parent <id> [-f|--force]` — file one issue under
+  another, writing both sides of the link in one commit and taking the subtask
+  off any other list that still claims it. The postcondition is exact:
+  afterwards the issue names one parent and that parent is the only issue
+  listing it, which is what makes this verb the way to mend a link edited by
+  hand. It MUST refuse a link an issue's own file already records on both
+  sides, one that would make an issue its own parent, and one that would put an
+  issue below itself; the loop refusal SHOULD name the chain. Moving a subtask
+  that already has a parent changes a structure other people read, so it MUST
+  be confirmed first; `--force` skips the question, and an unanswerable one
+  (stdin is not a terminal) counts as "no", leaves the tree untouched, and
+  exits 1.
+- `nav issue unlink <id>` — detach the issue from its parent, clearing the
+  `parent` key and every `subtasks` entry naming it. It exits 1 when nothing
+  claims the issue.
+- `nav issue delete <id> [-f|--force] [-r|--recursive]` — remove the entity's directory and
   everything in it. Closing records how work ended; deleting says it should
   never have been filed — a duplicate opened twice, an issue meant for another
   repository — so it removes rather than moves, and it accepts an entity in any
@@ -102,10 +123,21 @@ other kind MUST fail with a pointer to the right noun (e.g.
   a declined prompt, and an unanswerable one where stdin is not a terminal) MUST
   leave the tree untouched and exit 1.
 
+  Deleting an issue severs the links to it in the same commit, so the tree is
+  never left holding one. Its subtasks survive as top-level issues and MUST be
+  named in the output, since that is easy to miss and tedious to undo from
+  memory. `--recursive` instead removes the whole subtree — every issue whose
+  `parent` chain reaches the named one, to any depth — in a single commit; an
+  issue that a `subtasks` list names but that does not name it back is not a
+  subtask, so it is unlisted rather than removed.
+
   With `--commit`, the subject is `docs(<kind>): delete #<id>` and the commit
   MUST carry no `Refs:`/`Closes:` trailer: it would name the entity the commit
   removes and so dangle by construction. Doctor reads that subject back — see
-  D8 below.
+  D8 below. A recursive delete removes entities the subject does not name, so
+  it records each of them as a `Deletes: <id>` trailer. `Deletes:` is not a
+  reference — it names what the commit took away — and D8 reads it back for the
+  same reason it reads the subject.
 
 ### Pull requests — `nav pr <verb>`
 
@@ -194,12 +226,28 @@ Doctor checks (E = error → exit 2, W = warning → exit 0 with report):
 | D8 | Dangling `#id` / trailer references | W |
 | D9 | `prs/open/` entry whose head is an ancestor of the current branch, when that branch is the PR's own `target` ("merged but not archived", [03 §3.5](03-merge-and-branches.md)) | W |
 | D10 | Frontmatter timestamps wildly inconsistent with git history | W |
+| D11 | `parent` and `subtasks` disagree, or a link names a pull request ([2.5](02-data-model.md)) | E |
+| D12 | The `parent` chain loops, an issue naming itself included | E |
 
 D8 MUST NOT report a trailer naming an entity that a `docs(<kind>): delete
-#<id>` commit later removed. The entity is absent on purpose and history cannot
-be rewritten to agree, so the warning would name nothing anyone can act on.
-Prose and frontmatter references to a deleted entity are still reported: those
-live in files the user can edit.
+#<id>` commit later removed, or that such a commit's `Deletes:` trailers name.
+The entity is absent on purpose and history cannot be rewritten to agree, so
+the warning would name nothing anyone can act on. Prose and frontmatter
+references to a deleted entity are still reported: those live in files the user
+can edit.
+
+D11 and D12 are decidable from the tree alone, so unlike D7, D9 and D10 they
+run under `--staged` and the pre-commit hook blocks a link broken by hand.
+
+`--fix` repairs a D11 that the tree can settle without discarding anything
+anyone asserted: adding the missing reciprocal entry, and dropping a repeated
+one. Two issues claiming the same subtask is not such a case — both files are
+well-formed and both assertions were made on purpose — so it is settled from
+git history instead, by letting the claim made last stand and removing the
+others. Where history cannot say, because a claim is uncommitted or because two
+were made in the same commit, the fault MUST be reported rather than guessed
+at. D12 is never repaired: every link on a loop is equally suspect, and only
+its author knows which was the mistake.
 
 D7, D9 and D10 read git history and are therefore skipped by `--staged` (the
 commit being validated does not exist yet) and wherever the history is

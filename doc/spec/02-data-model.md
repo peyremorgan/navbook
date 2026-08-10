@@ -118,10 +118,38 @@ The server never sees the request.
 | `milestone` | MAY | string | Free-form grouping |
 | `resolution` | MAY | string | Meaningful for closed issues: `fixed`, `wontfix`, `duplicate`, `invalid` RECOMMENDED; free-form allowed |
 | `duplicate-of` | MAY | ID | With `resolution: duplicate` |
+| `parent` | MAY | ID | The issue this one is a subtask of |
+| `subtasks` | MAY | list of IDs | The issues filed under this one, in the order they should be read |
 
 The Markdown body after the frontmatter is the description. It MUST NOT be
 empty. There is no `id` key (the directory name is authoritative — a copied
 file cannot carry a stale ID) and no status key (the path is authoritative).
+
+### Decomposition
+
+`parent` and `subtasks` record that one issue breaks another down. Both sides
+of a link are written, deliberately: either file answers its own question
+without opening the other, which is what keeps a listing or a `show` one read
+rather than a graph traversal.
+
+- The two sides MUST agree. An issue named in a `subtasks` list MUST name that
+  issue in its `parent`, and vice versa; `doctor` check D11 reports a
+  disagreement. A link whose target is not in the tree is exempt: it may live
+  on a branch nobody has fetched, which is D8's business (§2.9).
+- `parent` holds at most one ID. That is what makes decomposition a tree rather
+  than an arbitrary graph, and it makes `parent` the authoritative side: an
+  issue is a subtask of another when it says so.
+- The chain of `parent` links MUST NOT loop, in particular an issue MUST NOT
+  name itself in either key (`doctor` check D12). Depth is otherwise unbounded:
+  a subtask may have subtasks of its own.
+- A `subtasks` list MUST NOT name the same issue twice, and SHOULD be written
+  in flow style (`subtasks: [mz4kq1rv, w2rfk8na]`) as the examples above are. An
+  issue with no subtasks omits the key rather than writing an empty list.
+- Both keys are issue-only. A pull request is a proposed change, not a unit of
+  work to break down, so carrying either key on `pr.md` is a schema fault, and
+  so is an issue whose link names a pull request.
+- Deleting an issue does not delete what was filed under it: unless the
+  deletion is explicitly recursive, its subtasks survive as top-level issues.
 
 ## 2.6 Comments
 
@@ -254,6 +282,8 @@ branch name in `source` is intent; the SHAs are truth.
   Trailers document intent and power tooling (e.g. the CLI offering to perform
   the corresponding close), but they MUST NOT be treated as state changes:
   state changes only by files moving in the tree.
+- **In frontmatter**: `duplicate-of`, `superseded-by`, `parent` and each entry
+  of `subtasks` hold a bare ID.
 - References resolve by searching entity directory names and comment filenames
   for the ID across all status directories. A reference whose ID matches no
   file is *dangling*; `doctor` warns but dangling references are not an error
