@@ -73,7 +73,11 @@ export function translate(error: unknown): unknown {
     });
   }
   if (error instanceof GitError) {
-    return apiError(error.message, "GIT_ERROR");
+    // git's stderr is for the operator, not the client: it can carry the
+    // remote's URL — credentials included, depending on how it is configured —
+    // server-side paths, and whatever a pre-receive hook chose to print.
+    process.stderr.write(`nav-server: ${error.message}\n`);
+    return apiError("a git command failed on the server", "GIT_ERROR");
   }
   return error;
 }

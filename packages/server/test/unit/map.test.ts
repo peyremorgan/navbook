@@ -43,6 +43,15 @@ describe("enum translation", () => {
     assert.equal(toGqlVerdict(42), null);
   });
 
+  it("does not mistake an inherited property for a verdict", () => {
+    // Anyone who can push a comment file chooses this string, so the lookup
+    // must not walk the prototype chain and hand back a function the schema
+    // cannot serialize.
+    for (const planted of ["constructor", "toString", "valueOf", "__proto__", "hasOwnProperty"]) {
+      assert.equal(toGqlVerdict(planted), null, planted);
+    }
+  });
+
   it("maps diagnostic levels", () => {
     assert.equal(toGqlLevel("error"), "ERROR");
     assert.equal(toGqlLevel("warning"), "WARNING");

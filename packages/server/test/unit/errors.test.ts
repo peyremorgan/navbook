@@ -62,12 +62,23 @@ describe("error translation", () => {
     assert.equal(translate(original), original);
   });
 
-  it("names a git failure as one", () => {
+  it("names a git failure without repeating what git said", () => {
+    // git's stderr carries the remote's URL — credentials and all, depending
+    // on how it is configured — server paths, and hook output. The operator
+    // needs it; a client must not be handed it.
+    const secret = "https://x-token:s3cr3t@git.example/repo.git";
     const error = translate(
-      new GitError(["push", "origin", "main"], { code: 128, stdout: "", stderr: "nope" }),
+      new GitError(["push", "origin", "main"], {
+        code: 128,
+        stdout: "",
+        stderr: `fatal: could not read from ${secret}`,
+      }),
     );
     assert.ok(error instanceof GraphQLError);
     assert.equal(error.extensions.code, "GIT_ERROR");
+    assert.doesNotMatch(error.message, /s3cr3t/);
+    assert.doesNotMatch(error.message, /git\.example/);
+    assert.equal(JSON.stringify(error.extensions).includes("s3cr3t"), false);
   });
 
   it("leaves anything unrecognised alone, for Yoga to mask", () => {

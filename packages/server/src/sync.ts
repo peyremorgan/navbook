@@ -106,6 +106,21 @@ export function syncConflict(paths: readonly string[], keptLocalCommit: boolean)
   );
 }
 
+/**
+ * A merge git would not even attempt.
+ *
+ * Distinct from a conflict, because the operator's move is different: nothing
+ * in the tree needs resolving, something about the clone or the histories does.
+ */
+export function mergeRefused(upstream: string): Error {
+  return apiError(`git refused to merge '${upstream}' into the server's clone`, "SYNC_FAILED", {
+    details: [
+      "no files conflicted, so the clone itself needs attention",
+      "the server's log carries what git said",
+    ],
+  });
+}
+
 /** A push the remote kept refusing, with no conflict to explain it. */
 export function syncPushRejected(): Error {
   return apiError(
@@ -212,13 +227,25 @@ export class RepoSync {
       return;
     }
     if (this.git.mergeNoCommit(root, upstream) === "conflict") {
+      // "conflict" is every non-zero exit, not only a content conflict: git
+      // also refuses outright over unrelated histories, a busy index, or a
+      // working tree the merge would overwrite. Which it was decides what the
+      // operator has to do, and only the conflicted paths tell them apart.
       const paths = this.git.conflictedPaths(root);
       // Abort before reporting: leaving a half-merged tree behind would fail
       // every later operation for a reason unrelated to what it asked for.
       this.git.abortMerge(root);
+      if (paths.length === 0) throw mergeRefused(upstream);
       throw new MergeConflict(paths);
     }
-    this.git.commitMerge(root, `Merge remote-tracking branch '${upstream}'`);
+    try {
+      this.git.commitMerge(root, `Merge remote-tracking branch '${upstream}'`);
+    } catch (error) {
+      // The merge is staged but uncommitted, which is the one state this
+      // module must never leave behind — every later request would fail in it.
+      this.git.abortMerge(root);
+      throw error;
+    }
   }
 
   /**

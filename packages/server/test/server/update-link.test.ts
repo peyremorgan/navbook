@@ -152,6 +152,34 @@ describe("updateIssue", () => {
     assert.match(fileOf(`${issue.path}/issue.md`), /^title: Guarded$/m);
   });
 
+  it("puts the file back when the edit cannot be committed", async () => {
+    const issue = await open({ title: "Rolled back", body: "Original." });
+    const path = `${issue.path}/issue.md`;
+    const before = fileOf(path);
+
+    // Something unrelated is staged in the clone, which --commit refuses to
+    // run alongside (spec 04 §4.2). Unlike every other operation, this one has
+    // already written the file by the time that guard runs.
+    h.fixture.server.write("unrelated.txt", "not ours\n");
+    h.fixture.server.git(["add", "unrelated.txt"]);
+    try {
+      const refused = await h.gql(UPDATE, { input: { ref: issue.id, title: "Never landed" } });
+      assert.equal(errorCode(refused), "UNRELATED_STAGED");
+
+      // The patched file must not survive the failure: it would become the
+      // base of the next edit, and be committed under somebody else's request.
+      assert.equal(fileOf(path), before);
+    } finally {
+      h.fixture.server.git(["reset", "--quiet", "HEAD", "--", "unrelated.txt"]);
+      h.fixture.server.git(["clean", "-qf", "unrelated.txt"]);
+    }
+
+    // And the next edit sees the original, not a leftover.
+    const after = await update({ ref: issue.id, title: "Landed" });
+    assert.equal(after.issue.title, "Landed");
+    assert.equal(after.issue.body, "Original.");
+  });
+
   it("reports nothing to commit when the patch changes nothing", async () => {
     const issue = await open({ title: "Idempotent", body: "x" });
     const result = await update({ ref: issue.id, title: "Idempotent" });

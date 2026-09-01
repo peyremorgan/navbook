@@ -54,9 +54,15 @@ export const toCoreVerdict = (verdict: Verdict): CoreVerdict => VERDICT_IN[verdi
 export const toGqlLevel = (level: "error" | "warning"): DiagnosticLevel =>
   level === "error" ? "ERROR" : "WARNING";
 
-/** A stored `verdict`, when it is one the format defines. */
+/**
+ * A stored `verdict`, when it is one the format defines.
+ *
+ * `Object.hasOwn` rather than `in`: frontmatter is hand-editable, and `in`
+ * would answer yes to `verdict: constructor` and hand back a function the
+ * schema cannot serialize.
+ */
 export function toGqlVerdict(value: unknown): Verdict | null {
-  return typeof value === "string" && value in VERDICT_OUT
+  return typeof value === "string" && Object.hasOwn(VERDICT_OUT, value)
     ? VERDICT_OUT[value as CoreVerdict]
     : null;
 }

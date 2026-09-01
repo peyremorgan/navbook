@@ -51,6 +51,13 @@ describe("authentication", () => {
     assert.equal(errorCode(await h.gql(VIEWER, undefined, stale)), "UNAUTHENTICATED");
   });
 
+  it("refuses a token with no expiry at all", async () => {
+    // An expiry is only checked when present, so a token issued once without
+    // one would otherwise be accepted for as long as the signing key lived.
+    const forever = await h.token({ noExpiry: true });
+    assert.equal(errorCode(await h.gql(VIEWER, undefined, forever)), "UNAUTHENTICATED");
+  });
+
   it("refuses a token minted for another audience", async () => {
     const elsewhere = await h.token({ audience: "some-other-service" });
     assert.equal(errorCode(await h.gql(VIEWER, undefined, elsewhere)), "UNAUTHENTICATED");

@@ -24,6 +24,8 @@ export interface SignOptions {
   issuer?: string;
   /** Issue a token that expired an hour ago. */
   expired?: boolean;
+  /** Issue a token with no expiry at all, which would never go stale. */
+  noExpiry?: boolean;
   /** Sign with a key the issuer does not publish. */
   wrongKey?: boolean;
 }
@@ -68,13 +70,13 @@ export async function startStubIssuer(): Promise<StubIssuer> {
       if (!opts.noEmail) claims.email = opts.email ?? "person@example.invalid";
       if (opts.name !== undefined) claims.name = opts.name;
 
-      return await new SignJWT(claims)
+      const jwt = new SignJWT(claims)
         .setProtectedHeader({ alg: "RS256", kid: "test-key" })
         .setIssuer(opts.issuer ?? issuer)
         .setAudience(opts.audience ?? AUDIENCE)
-        .setIssuedAt(opts.expired ? now - 7200 : now)
-        .setExpirationTime(opts.expired ? now - 3600 : now + 3600)
-        .sign((opts.wrongKey ? stranger : pair).privateKey);
+        .setIssuedAt(opts.expired ? now - 7200 : now);
+      if (!opts.noExpiry) jwt.setExpirationTime(opts.expired ? now - 3600 : now + 3600);
+      return await jwt.sign((opts.wrongKey ? stranger : pair).privateKey);
     },
     close() {
       return new Promise<void>((resolve) => server.close(() => resolve()));

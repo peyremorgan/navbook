@@ -26,6 +26,10 @@ interface Scripted {
   merges?: ("staged" | "conflict")[];
   /** Whether the remote holds something HEAD does not, per pull. */
   behind?: boolean[];
+  /** Paths git reports as conflicted; empty means it refused the merge outright. */
+  conflicted?: string[];
+  /** Throw from commitMerge, as a rejecting hook would. */
+  commitMergeFails?: boolean;
   /** True when the merge would only move the branch pointer. */
   fastForwardable?: boolean;
   /** No such branch on the remote yet. */
@@ -66,12 +70,13 @@ function recorder(script: Scripted = {}): Recorder {
     },
     commitMerge: () => {
       calls.push("commit-merge");
+      if (script.commitMergeFails) throw new Error("hook refused the merge commit");
       return "b".repeat(40);
     },
     abortMerge: () => {
       calls.push("abort-merge");
     },
-    conflictedPaths: () => [".navbook/issues/open/aa111111-x/issue.md"],
+    conflictedPaths: () => script.conflicted ?? [".navbook/issues/open/aa111111-x/issue.md"],
     currentBranch: () => "main",
   };
   return { git, calls };
@@ -142,6 +147,38 @@ describe("RepoSync.read", () => {
     assert.equal(ran, false);
     // Aborted, so the next operation does not inherit a half-merged tree.
     assert.deepEqual(calls, ["fetch origin", "merge -> conflict", "abort-merge"]);
+  });
+
+  it("tells a merge git refused apart from one that conflicted", async () => {
+    // `git merge` exits non-zero for unrelated histories, a busy index, or a
+    // working tree it would overwrite — none of which is a conflict, and none
+    // of which an operator fixes by resolving files.
+    const { sync, calls } = makeSync({ behind: [true], merges: ["conflict"], conflicted: [] });
+
+    await assert.rejects(
+      sync.read(() => undefined),
+      (error: unknown) => {
+        assert.equal(extensionsOf(error).code, "SYNC_FAILED");
+        return true;
+      },
+    );
+    assert.deepEqual(calls, ["fetch origin", "merge -> conflict", "abort-merge"]);
+  });
+
+  it("abandons a merge it staged but could not commit", async () => {
+    // Staged-but-uncommitted is the one state that would fail every later
+    // request, so it must not survive the failure that produced it.
+    const { sync, calls } = makeSync({
+      behind: [true],
+      merges: ["staged"],
+      commitMergeFails: true,
+    });
+
+    await assert.rejects(
+      sync.read(() => undefined),
+      /hook refused the merge commit/,
+    );
+    assert.deepEqual(calls, ["fetch origin", "merge -> staged", "commit-merge", "abort-merge"]);
   });
 
   it("reuses a recent fetch, and fetches again once it is stale", async () => {

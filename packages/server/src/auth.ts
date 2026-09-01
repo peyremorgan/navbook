@@ -62,6 +62,10 @@ export async function makeAuthenticator(opts: AuthOptions): Promise<Authenticato
         ({ payload } = await jwtVerify(token, keys, {
           issuer: opts.issuer,
           audience: opts.audience,
+          // An expiry is required rather than merely honoured when present:
+          // jose checks `exp` only if the token carries one, so without this a
+          // token issued once would be accepted for as long as the key lives.
+          requiredClaims: ["exp"],
         }));
       } catch {
         // Signature, expiry, issuer, audience: all one answer. Which check

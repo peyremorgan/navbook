@@ -146,15 +146,27 @@ export const Mutation: MutationResolvers = {
       const { result, pushed } = await ctx.sync.write(
         () => {
           const { entity, path } = resolveEntityForEdit(ctx.ws, "issue", input.ref);
-          const patched = applyIssuePatch(readFileSync(path, "utf8"), input, entity.filePath);
+          const before = readFileSync(path, "utf8");
+          const patched = applyIssuePatch(before, input, entity.filePath);
           // Validated before the file is touched, so a rejected patch leaves
           // the tree exactly as it was.
           checkComposed(patched, validateIssue, "issue");
 
+          // Editing in place is what `applyEntityEdit` records — it reads the
+          // file back, which is what puts the edit in the plan and so under the
+          // --commit guard. Every other operation writes nothing until it is
+          // sure it can commit (core's guard runs first, by design); this one
+          // cannot, so it undoes its own write instead. A patched file left
+          // behind by a failure would become the base of the next edit, and be
+          // committed under somebody else's request.
           writeFileSync(path, patched, "utf8");
-          // `applyEntityEdit` reads the file back, which is what puts the edit
-          // in the plan and so under the --commit guard.
-          const edit = applyEntityEdit(ctx.ws, entity, COMMIT);
+          let edit: RunPlanResult;
+          try {
+            edit = applyEntityEdit(ctx.ws, entity, COMMIT);
+          } catch (error) {
+            writeFileSync(path, before, "utf8");
+            throw error;
+          }
           return { run: edit, issue: from(afterWrite(ctx), "issue", entity.id) };
         },
         (edit) => edit.run.committed,

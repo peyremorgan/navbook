@@ -70,6 +70,9 @@ authentication off: every operation, read or write, needs a valid token.
   surface as a puzzling failure on somebody's first mutation.
 - **Authorization is out of scope.** Any token the issuer signs for this
   audience may write. Put the policy you need in front.
+- **Identity is the `email` claim.** It is what `author:` records, so an issuer
+  that lets somebody set an unverified email lets them author as that person.
+  Tokens must carry an expiry; ones without are refused.
 
 ## The API
 
@@ -98,7 +101,10 @@ mutation {
 Failures carry a machine-readable `extensions.code`: every
 `WorkspaceErrorCode` from the core library (`NOT_FOUND`, `AMBIGUOUS`,
 `PRECONDITION`, …), plus `UNAUTHENTICATED`, `SYNC_CONFLICT`,
-`SYNC_PUSH_REJECTED`, and `REPARENT_REQUIRED`.
+`SYNC_FAILED`, `SYNC_PUSH_REJECTED`, `REPARENT_REQUIRED`, and
+`GIT_ERROR`. A `GIT_ERROR` says only that a git command failed; what git
+actually said goes to the server's log, because its stderr can carry the
+remote's URL, server-side paths, and hook output.
 
 Two mutations have a shape worth knowing:
 
