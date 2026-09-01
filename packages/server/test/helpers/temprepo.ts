@@ -15,7 +15,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { currentAuthor, makeWsCtx, newIssueFile, openIssue } from "@navbook/core";
+import {
+  currentAuthor,
+  makeWsCtx,
+  newIssueFile,
+  newPrFile,
+  openIssue,
+  openPr,
+  preparePrOpen,
+} from "@navbook/core";
 
 export const FIXTURE_IDENTITY = { name: "Nav Server", email: "server@test.invalid" };
 export const FIXTURE_DATE = "2026-08-01T10:00:00Z";
@@ -48,8 +56,10 @@ export function deterministicEnv(home: string, date = FIXTURE_DATE): NodeJS.Proc
 export interface Clone {
   dir: string;
   git(args: string[], env?: NodeJS.ProcessEnv): { code: number; stdout: string; stderr: string };
-  /** Open an issue in this clone and push it, as another user would. */
+  /** Open an issue in this clone, as somebody working from a terminal would. */
   fileIssue(title: string, body: string, ids: string): void;
+  /** Open a pull request on a new branch, and go back to main. */
+  filePr(title: string, body: string, ids: string, branch: string): void;
   write(relativePath: string, content: string): void;
   commitAll(message: string): void;
 }
@@ -127,6 +137,27 @@ export function makeFixture(opts: FixtureOptions = {}): Fixture {
           body,
         });
         openIssue(ws, { content, fallbackTitle: title }, { commit: true });
+      },
+      filePr(title, body, ids, branch) {
+        // A pull request rides on the branch it proposes to merge (spec 03
+        // §3.5), so it is opened from there and left there.
+        run(dir, ["checkout", "--quiet", "-b", branch]);
+        clone.write(`${branch}.txt`, `work on ${branch}\n`);
+        clone.commitAll(`feat: ${title}`);
+
+        const ws = makeWsCtx({ cwd: dir, env: { ...env, NAV_IDS: ids } });
+        const draft = preparePrOpen(ws, { title });
+        const content = newPrFile({
+          title,
+          author: currentAuthor(ws),
+          created: FIXTURE_DATE,
+          body,
+          target: draft.target,
+          source: draft.source,
+          revisions: [draft.revision],
+        });
+        openPr(ws, { content, fallbackTitle: title }, { commit: true });
+        run(dir, ["checkout", "--quiet", "main"]);
       },
     };
     return clone;

@@ -44,11 +44,14 @@ export interface HarnessOptions extends FixtureOptions {
   pullIntervalMs?: number;
   /** Discover the JWKS through the issuer rather than being told where it is. */
   discover?: boolean;
+  /** Set the clone up before the server is started, e.g. onto another branch. */
+  prepare?: (fixture: Fixture) => void;
 }
 
 /** Start a server, or report why it would not start. */
 export async function startHarness(opts: HarnessOptions = {}): Promise<Harness> {
   const fixture = makeFixture(opts);
+  opts.prepare?.(fixture);
   const issuer = await startStubIssuer();
 
   const child = spawn(

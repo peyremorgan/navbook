@@ -281,10 +281,14 @@ type ReopenIssuePayload {
 }
 
 """
-A comment, or a review when any review field is set.
+A comment, or a review when a verdict is given.
 
 Review fields are meaningful only on pull requests (§2.6), and `revision` binds
 the review to one recorded state of the branch — the latest, unless named.
+
+A comment is written beside the entity it belongs to, so a pull request the
+server's checkout does not hold cannot be commented on from here even though
+`prs(allRefs: true)` can see it: serve a checkout of its branch to review it.
 """
 input AddCommentInput {
   kind: Kind!

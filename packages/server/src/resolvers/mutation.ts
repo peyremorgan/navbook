@@ -25,6 +25,7 @@ import {
   executeIssueLink,
   findEntity,
   findParentIssue,
+  locatePr,
   type NewCommentInput,
   newCommentFile,
   newIssueFile,
@@ -38,6 +39,7 @@ import {
   unlinkIssue,
   validateComment,
   validateIssue,
+  WorkspaceError,
 } from "@navbook/core";
 import { checkComposed, requireText } from "../compose.ts";
 import type { GraphQLCtx } from "../context.ts";
@@ -193,7 +195,7 @@ export const Mutation: MutationResolvers = {
 
       const { result, pushed } = await ctx.sync.write(
         () => {
-          const entity = findEntity(ctx.ws, kind, input.ref);
+          const entity = commentTarget(ctx, kind, input.ref);
           const replyTo =
             input.replyTo === undefined || input.replyTo === null
               ? undefined
@@ -282,6 +284,38 @@ export const Mutation: MutationResolvers = {
       };
     }),
 };
+
+/**
+ * The entity a comment is to be added to, in the branch the server serves.
+ *
+ * A pull request's files live on the branch it proposes to merge (spec 03
+ * §3.5), so one this checkout does not hold cannot be commented on here: the
+ * comment would land in a directory with no `pr.md` beside it, which is the
+ * stranded-comment fault of spec 03 §3.3.1 rather than a review. The cross-ref
+ * scan can still see it, so the refusal says where it actually lives instead of
+ * repeating that it was not found.
+ */
+function commentTarget(ctx: GraphQLCtx, kind: EntityKind, ref: string): EntityRecord {
+  try {
+    return findEntity(ctx.ws, kind, ref);
+  } catch (error) {
+    if (kind !== "pr" || !(error instanceof WorkspaceError) || error.code !== "not-found")
+      throw error;
+
+    const located = locatePr(ctx.ws, ref);
+    throw apiError(
+      `#${located.entity.id} is on '${located.sourceRef}', which this server does not have checked out`,
+      "PRECONDITION",
+      {
+        sourceRef: located.sourceRef,
+        details: [
+          "a comment must be written beside the pull request it belongs to",
+          `serve a checkout of '${located.sourceRef}' to review it`,
+        ],
+      },
+    );
+  }
+}
 
 type ReviewFields = Pick<NewCommentInput, "verdict" | "revision" | "file" | "line">;
 
