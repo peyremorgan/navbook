@@ -1,0 +1,56 @@
+{
+  "name": "@navbook/server",
+  "version": "0.2.0",
+  "description": "GraphQL API server over @navbook/core, for the Navbook web client",
+  "keywords": [
+    "issues",
+    "tracker",
+    "git",
+    "pull-request",
+    "graphql",
+    "api"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peyremorgan/navbook.git",
+    "directory": "packages/server"
+  },
+  "homepage": "https://github.com/peyremorgan/navbook#readme",
+  "bugs": "https://github.com/peyremorgan/navbook/issues",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "nav-server": "dist/main.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "files": [
+    "dist",
+    "schema.graphql"
+  ],
+  "scripts": {
+    "start": "node src/main.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "codegen": "graphql-codegen --config codegen.ts",
+    "codegen:check": "graphql-codegen --config codegen.ts && git diff --exit-code -- src/generated",
+    "prepack": "node ../../script/require-pnpm.js && pnpm build",
+    "prepublishOnly": "node ../../script/require-pnpm.js"
+  },
+  "dependencies": {
+    "@navbook/core": "workspace:*",
+    "graphql": "^16.14.2",
+    "graphql-yoga": "^5.22.0",
+    "jose": "^6.2.10"
+  },
+  "devDependencies": {
+    "@graphql-codegen/cli": "^7.3.1",
+    "@graphql-codegen/typescript": "^6.1.0",
+    "@graphql-codegen/typescript-resolvers": "^6.1.0"
+  }
+}
