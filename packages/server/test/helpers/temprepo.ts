@@ -32,6 +32,19 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const PACKAGE_ROOT = join(HERE, "..", "..");
 export const SERVER_ENTRY = join(PACKAGE_ROOT, "src", "main.ts");
 
+/**
+ * The server under test: `node src/main.ts`, or `$NAV_SERVER_BIN` when set.
+ *
+ * The same suite then runs against the sources and against `dist/`, which is
+ * how the CLI's is arranged and for the same reason: what is published has to
+ * be what was tested.
+ */
+export function serverCommand(): string[] {
+  const override = process.env.NAV_SERVER_BIN;
+  if (override && override.trim() !== "") return override.trim().split(/\s+/);
+  return [process.execPath, SERVER_ENTRY];
+}
+
 /** Environment that makes git and the server byte-for-byte reproducible. */
 export function deterministicEnv(home: string, date = FIXTURE_DATE): NodeJS.ProcessEnv {
   return {

@@ -24,7 +24,7 @@ jobs:
       - name: the tag must match both package versions
         run: |
           tagged="${GITHUB_REF_NAME#v}"
-          for pkg in core cli; do
+          for pkg in core cli server; do
             packaged="$(node -p "require('./packages/$pkg/package.json').version")"
             if [ "$tagged" != "$packaged" ]; then
               echo "tag $GITHUB_REF_NAME does not match @navbook/$pkg version $packaged" >&2
@@ -33,6 +33,7 @@ jobs:
           done
 
       - run: pnpm check
+      - run: pnpm --filter @navbook/server codegen:check
       - run: |
           git config --global user.name "CI"
           git config --global user.email "ci@example.invalid"
@@ -52,17 +53,22 @@ jobs:
         run: |
           pnpm --filter @navbook/core pack --pack-destination "$RUNNER_TEMP"
           pnpm --filter @navbook/cli pack --pack-destination "$RUNNER_TEMP"
+          pnpm --filter @navbook/server pack --pack-destination "$RUNNER_TEMP"
 
       - name: install both tarballs and run the CLI, as a consumer would
         run: |
           mkdir -p /tmp/smoke && cd /tmp/smoke && npm init -y >/dev/null
           npm install --silent "$RUNNER_TEMP"/navbook-core-*.tgz
           npm install --silent "$RUNNER_TEMP"/navbook-cli-*.tgz
+          npm install --silent "$RUNNER_TEMP"/navbook-server-*.tgz
           git init -q -b main smoke && cd smoke
           test "$(../node_modules/.bin/nav --version)" = "${GITHUB_REF_NAME#v}"
           ../node_modules/.bin/nav init
           ../node_modules/.bin/nav issue open "Release smoke test" -m "It runs."
           ../node_modules/.bin/nav doctor
+          # The server ships schema.graphql beside dist/; --help proves the
+          # binary resolves, and the suite below proves the schema does.
+          ../node_modules/.bin/nav-server --help >/dev/null
 
       # Core first: the CLI depends on this exact version, so publishing it
       # second means the dependency is already resolvable on the registry.
@@ -72,5 +78,9 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: publish @navbook/cli
         run: npm publish "$RUNNER_TEMP"/navbook-cli-*.tgz --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: publish @navbook/server
+        run: npm publish "$RUNNER_TEMP"/navbook-server-*.tgz --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -19,6 +19,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      # The resolver types are generated from schema.graphql and committed, so
+      # that development needs no build step. This is what keeps them honest.
+      - name: the generated resolver types must match the schema
+        run: pnpm --filter @navbook/server codegen:check
 
   test:
     name: test (node ${{ matrix.node }}, ${{ matrix.os }})
@@ -64,6 +68,10 @@ jobs:
         run: NAV_BIN="node $PWD/packages/cli/dist/main.js" pnpm test:conformance
       - name: performance budget against the built CLI
         run: NAV_BIN="node $PWD/packages/cli/dist/main.js" pnpm bench
+      - name: server suite against the built server
+        run: |
+          NAV_SERVER_BIN="node $PWD/packages/server/dist/main.js" \
+            pnpm --filter @navbook/server test
 
       # The steps above still resolve @navbook/core through the workspace link,
       # so they exercise dist over sources. Installing both tarballs into a

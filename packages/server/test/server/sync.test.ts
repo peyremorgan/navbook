@@ -7,9 +7,13 @@
  */
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { type Harness, ok, startHarness } from "../helpers/harness.ts";
-import { originSubjects } from "../helpers/temprepo.ts";
+import { makeFixture, originSubjects, serverCommand } from "../helpers/temprepo.ts";
 
 const OPEN = `mutation Open($title: String!) {
   openIssue(input: { title: $title, body: "x" }) {
@@ -120,33 +124,37 @@ describe("without a remote", () => {
 });
 
 describe("a clone that cannot be served", () => {
-  it("refuses to start on a repository with no .navbook/", async () => {
-    const { spawnSync } = await import("node:child_process");
-    const { mkdtempSync, rmSync } = await import("node:fs");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-    const { SERVER_ENTRY } = await import("../helpers/temprepo.ts");
+  /** Start the server against `dir` and return how it refused. */
+  const attempt = (
+    dir: string,
+    env: NodeJS.ProcessEnv = {},
+  ): { status: number; stderr: string } => {
+    const [command, ...leading] = serverCommand();
+    const result = spawnSync(
+      command as string,
+      [
+        ...leading,
+        "--repo",
+        dir,
+        "--port",
+        "0",
+        "--oidc-issuer",
+        "https://issuer.invalid",
+        "--oidc-audience",
+        "test",
+        "--oidc-jwks-url",
+        "https://issuer.invalid/jwks",
+      ],
+      { encoding: "utf8", env: { PATH: process.env.PATH, ...env } },
+    );
+    return { status: result.status ?? 1, stderr: result.stderr ?? "" };
+  };
 
+  it("refuses a repository with no .navbook/", () => {
     const dir = mkdtempSync(join(tmpdir(), "navbook-bare-"));
     try {
       spawnSync("git", ["init", "--quiet", "-b", "main", dir]);
-      const result = spawnSync(
-        process.execPath,
-        [
-          SERVER_ENTRY,
-          "--repo",
-          dir,
-          "--port",
-          "0",
-          "--oidc-issuer",
-          "https://issuer.invalid",
-          "--oidc-audience",
-          "test",
-          "--oidc-jwks-url",
-          "https://issuer.invalid/jwks",
-        ],
-        { encoding: "utf8" },
-      );
+      const result = attempt(dir);
       assert.equal(result.status, 1);
       assert.match(result.stderr, /is not a Navbook repository/);
     } finally {
@@ -154,17 +162,52 @@ describe("a clone that cannot be served", () => {
     }
   });
 
-  it("refuses to start without the options it cannot invent", async () => {
-    const { spawnSync } = await import("node:child_process");
-    const { SERVER_ENTRY } = await import("../helpers/temprepo.ts");
+  it("refuses a directory that is not a repository at all", () => {
+    const dir = mkdtempSync(join(tmpdir(), "navbook-nogit-"));
+    try {
+      assert.equal(attempt(dir).status, 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
-    const result = spawnSync(process.execPath, [SERVER_ENTRY, "--port", "0"], {
+  it("refuses a clone with uncommitted changes", () => {
+    // Every mutation commits, and --commit refuses while unrelated work is
+    // staged (spec 04 §4.2), so a dirty clone would fail every write. Better
+    // to say so at startup than on somebody's first issue.
+    const fixture = makeFixture();
+    try {
+      fixture.server.write("stray.txt", "not committed\n");
+      const result = attempt(fixture.server.dir, fixture.env);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /uncommitted changes/);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("refuses a detached HEAD", () => {
+    const fixture = makeFixture();
+    try {
+      const head = fixture.server.git(["rev-parse", "HEAD"]).stdout.trim();
+      fixture.server.git(["checkout", "--quiet", "--detach", head]);
+      const result = attempt(fixture.server.dir, fixture.env);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /HEAD is detached/);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("refuses to start without the options it cannot invent", () => {
+    const [command, ...leading] = serverCommand();
+    const result = spawnSync(command as string, [...leading, "--port", "0"], {
       encoding: "utf8",
       env: { PATH: process.env.PATH },
     });
     assert.equal(result.status, 2);
-    assert.match(result.stderr, /missing required option --oidc-issuer/);
+    assert.match(result.stderr ?? "", /missing required option --oidc-issuer/);
     // And says how, rather than only that it will not.
-    assert.match(result.stderr, /Usage: nav-server/);
+    assert.match(result.stderr ?? "", /Usage: nav-server/);
   });
 });

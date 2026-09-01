@@ -14,7 +14,7 @@
 import { type ChildProcessByStdio, spawn } from "node:child_process";
 import type { Readable } from "node:stream";
 import { AUDIENCE, type SignOptions, type StubIssuer, startStubIssuer } from "./oidc.ts";
-import { type Fixture, type FixtureOptions, makeFixture, SERVER_ENTRY } from "./temprepo.ts";
+import { type Fixture, type FixtureOptions, makeFixture, serverCommand } from "./temprepo.ts";
 
 export interface GraphQLResponse<T = Record<string, unknown>> {
   status: number;
@@ -54,10 +54,11 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<Harness> 
   opts.prepare?.(fixture);
   const issuer = await startStubIssuer();
 
+  const [command, ...leading] = serverCommand();
   const child = spawn(
-    process.execPath,
+    command as string,
     [
-      SERVER_ENTRY,
+      ...leading,
       "--repo",
       fixture.server.dir,
       "--port",
@@ -140,43 +141,6 @@ function readyPort(child: ServerProcess, errors: () => string): Promise<number> 
       reject(new Error(`nav-server exited with ${code} before listening:\n${errors()}`));
     });
   });
-}
-
-/** Start a server that is expected to refuse, and return what it said. */
-export async function startAndExpectFailure(opts: HarnessOptions = {}): Promise<{
-  fixture: Fixture;
-  message: string;
-}> {
-  const fixture = makeFixture(opts);
-  const issuer = await startStubIssuer();
-  try {
-    const child = spawn(
-      process.execPath,
-      [
-        SERVER_ENTRY,
-        "--repo",
-        fixture.server.dir,
-        "--port",
-        "0",
-        "--oidc-issuer",
-        issuer.issuer,
-        "--oidc-audience",
-        AUDIENCE,
-        "--oidc-jwks-url",
-        issuer.jwksUrl,
-      ],
-      { env: fixture.env, stdio: ["ignore", "pipe", "pipe"] },
-    );
-    let errors = "";
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => {
-      errors += chunk;
-    });
-    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
-    return { fixture, message: errors };
-  } finally {
-    await issuer.close();
-  }
 }
 
 /** The first error's `extensions.code`, or null when the operation succeeded. */
