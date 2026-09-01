@@ -25,6 +25,21 @@ function seeded(): TempRepo {
   return repo;
 }
 
+/**
+ * A shell line that applies a sed script to a file in place.
+ *
+ * Not `sed -i`: GNU takes the suffix as an optional attached argument and BSD
+ * (so macOS) takes it as a separate required one, which makes the bare form
+ * mean different things on the two platforms Navbook supports. Writing to a
+ * temporary file and moving it over is what both agree on.
+ */
+function editInPlace(script: string, file: string): string {
+  // Staged through $HOME, which the fixture pins: a scratch file inside the
+  // repository would be a stray path in the very tree under test.
+  const scratch = '"$HOME/sed-edit.$$"';
+  return `sed ${JSON.stringify(script)} ${file} > ${scratch} && mv ${scratch} ${file}`;
+}
+
 function open(repo: TempRepo, id: string, title: string, parent?: string): void {
   const args = ["issue", "open", title, "-m", `${title}.`, "--commit"];
   if (parent) args.push("--parent", parent);
@@ -107,7 +122,8 @@ describe("nav issue open --parent", () => {
       // The author is given `parent: aaa11111` to edit and rewrites it.
       const editor = repo.script(
         "editor-reparent.sh",
-        `sed -i 's/^parent: aaa11111$/parent: ccc33333/' "$1"; printf 'A body.\\n' >> "$1"`,
+        `${editInPlace("s/^parent: aaa11111$/parent: ccc33333/", '"$1"')}\n` +
+          `printf 'A body.\\n' >> "$1"`,
       );
       const result = repo.nav(["issue", "open", "Sub", "--parent", "aaa1"], {
         NAV_IDS: "eee55555",
@@ -128,7 +144,7 @@ describe("nav issue open --parent", () => {
     try {
       const editor = repo.script(
         "editor-unparent.sh",
-        `sed -i '/^parent: /d' "$1"; printf 'A body.\\n' >> "$1"`,
+        `${editInPlace("/^parent: /d", '"$1"')}\n` + `printf 'A body.\\n' >> "$1"`,
       );
       const result = repo.nav(["issue", "open", "Sub", "--parent", "aaa1"], {
         NAV_IDS: "eee55555",
@@ -149,7 +165,10 @@ describe("nav issue open --parent", () => {
       // Something else retitles the parent while the editor session is open.
       const editor = repo.script(
         "editor-meddle.sh",
-        `sed -i 's/^title: Root$/title: Root, retitled/' ${JSON.stringify(fileOf(repo, "aaa11111"))}; printf 'A body.\\n' >> "$1"`,
+        `${editInPlace(
+          "s/^title: Root$/title: Root, retitled/",
+          JSON.stringify(fileOf(repo, "aaa11111")),
+        )}\n` + `printf 'A body.\\n' >> "$1"`,
       );
       const result = repo.nav(["issue", "open", "Sub", "--parent", "aaa1"], {
         NAV_IDS: "eee55555",
