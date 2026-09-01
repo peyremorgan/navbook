@@ -25,6 +25,7 @@ import {
   executeIssueLink,
   findEntity,
   findParentIssue,
+  loadRepo,
   locatePr,
   type NewCommentInput,
   newCommentFile,
@@ -32,9 +33,11 @@ import {
   openIssue,
   planIssueLink,
   prepareOpen,
+  type Repo,
   type RunPlanResult,
   reopenEntity,
   resolveComment,
+  resolveEntity,
   resolveEntityForEdit,
   unlinkIssue,
   validateComment,
@@ -61,15 +64,22 @@ function commitInfo(result: RunPlanResult, pushed: boolean): CommitInfo {
 }
 
 /**
- * Re-read an entity after writing it.
+ * The tree as the operation has just left it.
  *
- * The record the operation returned describes the tree before its own plan was
+ * The record an operation returns describes the tree before its own plan was
  * applied — a closed issue's record still says `open`, and its path still names
- * the directory it has left. Reading it back is what makes the payload true.
+ * the directory it has left — so a payload has to read it back. That read
+ * happens inside the write transaction, because once the lock is released the
+ * next mutation is free to move the very files being reported on.
  */
-function reread(ctx: GraphQLCtx, kind: EntityKind, id: string): EntityRecord {
+function afterWrite(ctx: GraphQLCtx): Repo {
   ctx.invalidateRepo();
-  return findEntity(ctx.ws, kind, id);
+  return loadRepo(ctx.ws);
+}
+
+/** One entity from an already-loaded tree. */
+function from(repo: Repo, kind: EntityKind, id: string): EntityRecord {
+  return resolveEntity(repo, id, kind);
 }
 
 /** The comment a write just added, found by the id the operation minted. */
@@ -111,14 +121,20 @@ export const Mutation: MutationResolvers = {
           });
           checkComposed(content, validateIssue, "issue");
 
-          return openIssue(ctx.ws, { content, fallbackTitle: input.title }, COMMIT);
+          const opened = openIssue(ctx.ws, { content, fallbackTitle: input.title }, COMMIT);
+          const repo = afterWrite(ctx);
+          return {
+            run: opened.run,
+            issue: from(repo, "issue", opened.id),
+            parent: opened.parent ? from(repo, "issue", opened.parent.id) : null,
+          };
         },
         (opened) => opened.run.committed,
       );
 
       return {
-        issue: reread(ctx, "issue", result.id),
-        parent: result.parent ? reread(ctx, "issue", result.parent.id) : null,
+        issue: result.issue,
+        parent: result.parent,
         commit: commitInfo(result.run, pushed),
       };
     }),
@@ -138,22 +154,20 @@ export const Mutation: MutationResolvers = {
           writeFileSync(path, patched, "utf8");
           // `applyEntityEdit` reads the file back, which is what puts the edit
           // in the plan and so under the --commit guard.
-          return { entity, run: applyEntityEdit(ctx.ws, entity, COMMIT) };
+          const edit = applyEntityEdit(ctx.ws, entity, COMMIT);
+          return { run: edit, issue: from(afterWrite(ctx), "issue", entity.id) };
         },
         (edit) => edit.run.committed,
       );
 
-      return {
-        issue: reread(ctx, "issue", result.entity.id),
-        commit: commitInfo(result.run, pushed),
-      };
+      return { issue: result.issue, commit: commitInfo(result.run, pushed) };
     }),
 
   closeIssue: (_parent, { input }, ctx) =>
     run(async () => {
       const { result, pushed } = await ctx.sync.write(
-        () =>
-          closeEntity(
+        () => {
+          const closed = closeEntity(
             ctx.ws,
             "issue",
             input.ref,
@@ -162,12 +176,18 @@ export const Mutation: MutationResolvers = {
               ...(input.duplicateOf ? { duplicateOf: input.duplicateOf } : {}),
             },
             COMMIT,
-          ),
+          );
+          return {
+            run: closed.run,
+            destination: closed.destination,
+            issue: from(afterWrite(ctx), "issue", closed.entity.id),
+          };
+        },
         (closed) => closed.run.committed,
       );
 
       return {
-        issue: reread(ctx, "issue", result.entity.id),
+        issue: result.issue,
         destination: result.destination,
         commit: commitInfo(result.run, pushed),
       };
@@ -176,12 +196,19 @@ export const Mutation: MutationResolvers = {
   reopenIssue: (_parent, { ref }, ctx) =>
     run(async () => {
       const { result, pushed } = await ctx.sync.write(
-        () => reopenEntity(ctx.ws, "issue", ref, COMMIT),
+        () => {
+          const reopened = reopenEntity(ctx.ws, "issue", ref, COMMIT);
+          return {
+            run: reopened.run,
+            destination: reopened.destination,
+            issue: from(afterWrite(ctx), "issue", reopened.entity.id),
+          };
+        },
         (reopened) => reopened.run.committed,
       );
 
       return {
-        issue: reread(ctx, "issue", result.entity.id),
+        issue: result.issue,
         destination: result.destination,
         commit: commitInfo(result.run, pushed),
       };
@@ -223,16 +250,17 @@ export const Mutation: MutationResolvers = {
             { content, review: review?.verdict !== undefined },
             COMMIT,
           );
-          return { entity, added };
+          const written = from(afterWrite(ctx), kind, entity.id);
+          return { run: added.run, entity: written, comment: addedComment(written, added.id) };
         },
-        (commented) => commented.added.run.committed,
+        (commented) => commented.run.committed,
       );
 
-      const entity = reread(ctx, kind, result.entity.id);
       return {
-        comment: addedComment(entity, result.added.id),
-        entity: entity.kind === "issue" ? entity : { entity, refs: [] },
-        commit: commitInfo(result.added.run, pushed),
+        comment: result.comment,
+        entity:
+          result.entity.kind === "issue" ? result.entity : { entity: result.entity, refs: [] },
+        commit: commitInfo(result.run, pushed),
       };
     }),
 
@@ -257,15 +285,22 @@ export const Mutation: MutationResolvers = {
               },
             );
           }
-          return { link, run: executeIssueLink(ctx.ws, link, COMMIT) };
+          const linked = executeIssueLink(ctx.ws, link, COMMIT);
+          const repo = afterWrite(ctx);
+          return {
+            run: linked,
+            child: from(repo, "issue", link.child.id),
+            parent: from(repo, "issue", link.parent.id),
+            previousParentId: link.previousParentId ?? null,
+          };
         },
         (linked) => linked.run.committed,
       );
 
       return {
-        child: reread(ctx, "issue", result.link.child.id),
-        parent: findEntity(ctx.ws, "issue", result.link.parent.id),
-        previousParentId: result.link.previousParentId ?? null,
+        child: result.child,
+        parent: result.parent,
+        previousParentId: result.previousParentId,
         commit: commitInfo(result.run, pushed),
       };
     }),
@@ -273,13 +308,20 @@ export const Mutation: MutationResolvers = {
   unlinkIssue: (_parent, { ref }, ctx) =>
     run(async () => {
       const { result, pushed } = await ctx.sync.write(
-        () => unlinkIssue(ctx.ws, ref, COMMIT),
+        () => {
+          const unlinked = unlinkIssue(ctx.ws, ref, COMMIT);
+          return {
+            run: unlinked.run,
+            child: from(afterWrite(ctx), "issue", unlinked.child.id),
+            previousParentId: unlinked.parentId ?? null,
+          };
+        },
         (unlinked) => unlinked.run.committed,
       );
 
       return {
-        child: reread(ctx, "issue", result.child.id),
-        previousParentId: result.parentId ?? null,
+        child: result.child,
+        previousParentId: result.previousParentId,
         commit: commitInfo(result.run, pushed),
       };
     }),

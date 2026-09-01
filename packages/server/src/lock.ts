@@ -2,12 +2,17 @@
  * One operation at a time.
  *
  * The server has a single working tree, and an operation that pulls, writes and
- * commits cannot interleave with another doing the same. Reads take the lock
- * too: a read's pull moves the tree under any operation that did not.
+ * commits cannot interleave with another doing the same. Reads take it too: a
+ * read's pull moves the tree under any operation that did not.
  *
- * Every core operation is synchronous (git is run through `spawnSync`), so the
- * lock exists to order the awaits *around* them — the fetch, the push, and the
- * request boundary — rather than to guard against a preempted operation.
+ * As things stand it guards less than it looks. Every core operation is
+ * synchronous — git runs through `spawnSync` — so an operation already runs to
+ * completion in one turn of the event loop and could not be interleaved anyway.
+ * What the lock does today is order the awaits *around* those turns (a field
+ * resolver reading the tree after its parent's transaction has returned) and
+ * make {@link Mutex.drain} meaningful at shutdown. What it is really for is the
+ * day the git layer stops being synchronous, which is the fix for it blocking
+ * the event loop: on that day this is what keeps the guarantee.
  */
 export class Mutex {
   /** Resolves when everything queued so far has finished, one way or another. */
