@@ -96,6 +96,38 @@ describe("authentication", () => {
   });
 });
 
+describe("the GraphiQL explorer", () => {
+  let h: Harness;
+
+  before(async () => {
+    h = await startHarness({ graphiql: true });
+  });
+
+  after(async () => {
+    await h.stop();
+  });
+
+  it("serves the explorer page without a token", async () => {
+    // The page itself is static HTML, so it is reachable unauthenticated; a
+    // person pastes their own Authorization header into it to run anything.
+    const response = await fetch(`http://127.0.0.1:${h.port}/graphql`, {
+      headers: { accept: "text/html" },
+    });
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /graphiql/i);
+  });
+
+  it("still refuses an operation sent without one", async () => {
+    // Reaching the explorer is not reaching the data.
+    assert.equal(errorCode(await h.gql(VIEWER, undefined, null)), "UNAUTHENTICATED");
+  });
+
+  it("does not answer introspection without a token either", async () => {
+    const response = await h.gql(`query { __schema { types { name } } }`, undefined, null);
+    assert.equal(errorCode(response), "UNAUTHENTICATED");
+  });
+});
+
 describe("authentication with a discovered JWKS", () => {
   let h: Harness;
 

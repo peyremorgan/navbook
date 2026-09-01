@@ -55,6 +55,12 @@ Every option has a flag and an environment variable. Flags win.
 become; a mutation always fetches first. There is no way to turn
 authentication off: every operation, read or write, needs a valid token.
 
+The GraphiQL explorer is served by default, and its page is static HTML that
+anyone who can reach the port can load — a person pastes their own
+`Authorization` header into it to run anything. No operation is answered
+without a token, introspection included, but `--no-graphiql` turns the page
+off if reaching it at all is more than you want to offer.
+
 ## Deploying it
 
 - **Give the clone a committer identity.** `git config user.name` and

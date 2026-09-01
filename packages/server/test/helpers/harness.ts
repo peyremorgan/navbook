@@ -46,6 +46,8 @@ export interface HarnessOptions extends FixtureOptions {
   discover?: boolean;
   /** Set the clone up before the server is started, e.g. onto another branch. */
   prepare?: (fixture: Fixture) => void;
+  /** Serve the GraphiQL explorer, as a default deployment does. */
+  graphiql?: boolean;
 }
 
 /** Start a server, or report why it would not start. */
@@ -70,7 +72,7 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<Harness> 
       ...(opts.discover ? [] : ["--oidc-jwks-url", issuer.jwksUrl]),
       "--pull-interval-ms",
       String(opts.pullIntervalMs ?? 0),
-      "--no-graphiql",
+      ...(opts.graphiql ? [] : ["--no-graphiql"]),
     ],
     { env: fixture.env, stdio: ["ignore", "pipe", "pipe"] },
   );
