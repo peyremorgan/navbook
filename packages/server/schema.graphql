@@ -1,0 +1,349 @@
+# The Navbook API — spec 06 §6.3.
+#
+# Every field is projected from `@navbook/core`, and nothing here reimplements
+# the format: identity, status and frontmatter are named the way the canonical
+# JSON projection names them (spec 04 §4.2), so a client of this schema and a
+# reader of `nav --json` are looking at the same thing.
+#
+# Timestamps are ISO 8601 strings with second precision, as they are on disk.
+
+"What issues and pull requests have in common (spec 02 §2.5, §2.7)."
+interface Entity {
+  id: ID!
+  slug: String!
+  kind: Kind!
+  status: Status!
+  "Path from the repository root, e.g. `.navbook/issues/open/ab12cd34-slug`."
+  path: String!
+  "True when the entity lives under `.navbook/archive/` (spec 03 §3.6)."
+  archived: Boolean!
+  title: String!
+  "RFC 5322 address as stored in frontmatter: `Name <email>`."
+  author: String!
+  created: String!
+  labels: [String!]!
+  "The `assignee` key, which the format allows to be a scalar or a list."
+  assignees: [String!]!
+  milestone: String
+  "Markdown body, trimmed."
+  body: String!
+  comments: [Comment!]!
+}
+
+enum Kind {
+  ISSUE
+  PR
+}
+
+"Issues are open or closed; pull requests may also be merged (spec 02 §2.1)."
+enum Status {
+  OPEN
+  CLOSED
+  MERGED
+}
+
+enum Verdict {
+  APPROVE
+  REQUEST_CHANGES
+}
+
+enum DiagnosticLevel {
+  ERROR
+  WARNING
+}
+
+type Issue implements Entity {
+  id: ID!
+  slug: String!
+  kind: Kind!
+  status: Status!
+  path: String!
+  archived: Boolean!
+  title: String!
+  author: String!
+  created: String!
+  labels: [String!]!
+  assignees: [String!]!
+  milestone: String
+  body: String!
+  comments: [Comment!]!
+
+  "Why the issue was closed, when it is closed and recorded one."
+  resolution: String
+  "The issue this one duplicates."
+  duplicateOf: ID
+  "The issue this one is filed under, when its frontmatter names one."
+  parent: LinkNode
+  "The subtask forest, `depth` levels deep (spec 02 §2.5)."
+  subtasks(depth: Int! = 1): [LinkNode!]!
+}
+
+"One state of a pull request's branch (spec 02 §2.7)."
+type Revision {
+  head: String!
+  base: String!
+  date: String!
+}
+
+"How a pull request was merged (spec 02 §2.7)."
+type MergedInfo {
+  date: String
+  by: String
+  commit: String
+}
+
+type Pr implements Entity {
+  id: ID!
+  slug: String!
+  kind: Kind!
+  status: Status!
+  path: String!
+  archived: Boolean!
+  title: String!
+  author: String!
+  created: String!
+  labels: [String!]!
+  assignees: [String!]!
+  milestone: String
+  body: String!
+  comments: [Comment!]!
+
+  "Branch the pull request proposes to merge into."
+  target: String!
+  "Branch carrying its commits, when the file records one."
+  source: String
+  draft: Boolean!
+  revisions: [Revision!]!
+  merged: MergedInfo
+  "Branches the cross-ref scan found it on; empty for a working-tree read."
+  refs: [String!]!
+}
+
+"A comment or a review (spec 02 §2.6)."
+type Comment {
+  id: ID!
+  path: String!
+  created: String!
+  author: String!
+  replyTo: ID
+  "Set on reviews; a plain comment has none of the four fields below."
+  verdict: Verdict
+  "The revision the review binds to, as a 40-hex SHA."
+  revision: String
+  file: String
+  "A line number or a `start-end` range, as the format allows."
+  line: String
+  body: String!
+}
+
+"""
+One end of a decomposition link.
+
+A link can name something this tree cannot show — an issue on an unfetched
+branch, a pull request, a loop — and each of those is a different thing to be
+told, so the node is always returned and says which case it is.
+"""
+type LinkNode {
+  id: ID!
+  "Absent when the id matches no issue in this tree."
+  issue: Issue
+  "The id names a pull request, which decomposition never relates (§2.5)."
+  notAnIssue: Boolean!
+  "The id is an ancestor of itself: the chain loops here."
+  cycle: Boolean!
+  "Already expanded elsewhere in this response; not expanded again."
+  repeated: Boolean!
+  children: [LinkNode!]!
+}
+
+"One finding of the `doctor` check (spec 04 §4.3)."
+type Diagnostic {
+  "The check that produced it, D1 through D12."
+  check: String!
+  level: DiagnosticLevel!
+  "Path relative to `.navbook/`, or empty for a repository-wide finding."
+  path: String!
+  message: String!
+  "Whether `nav doctor --fix` could mend it. The server never applies fixes."
+  fixable: Boolean!
+}
+
+type DoctorReport {
+  diagnostics: [Diagnostic!]!
+}
+
+"Who the presented token says is acting; what mutations record as `author`."
+type Viewer {
+  name: String
+  email: String!
+}
+
+"""
+Which entities to list.
+
+Terms are ANDed across keys. Within a key the semantics follow the field:
+single-valued fields OR their terms, multi-valued fields AND theirs (spec 04).
+"""
+input EntityFilter {
+  "Defaults to [OPEN], as every listing does."
+  status: [Status!]
+  labels: [String!]
+  assignees: [String!]
+  authors: [String!]
+  milestones: [String!]
+  "Free text, matched against title, body and comments."
+  text: [String!]
+}
+
+type Query {
+  issues(filter: EntityFilter): [Issue!]!
+  "`ref` is a full ID or an unambiguous prefix of at least four characters."
+  issue(ref: ID!): Issue!
+  """
+  Open pull requests.
+
+  A pull request's files live on the branch it proposes to merge, so the
+  working tree usually does not hold them: `allRefs` scans every fetched
+  branch instead (spec 03 §3.5).
+  """
+  prs(filter: EntityFilter, allRefs: Boolean! = false): [Pr!]!
+  pr(ref: ID!): Pr!
+  doctor: DoctorReport!
+  viewer: Viewer!
+}
+
+"What a mutation committed, and whether it reached the remote."
+type CommitInfo {
+  "False when the operation turned out to change nothing."
+  committed: Boolean!
+  subject: String!
+  "False when the server runs without a remote, or committed nothing."
+  pushed: Boolean!
+}
+
+input OpenIssueInput {
+  title: String!
+  body: String!
+  labels: [String!]
+  assignees: [String!]
+  milestone: String
+  "ID or prefix of the issue to file this one under."
+  parent: ID
+}
+
+type OpenIssuePayload {
+  issue: Issue!
+  "The issue it was filed under, when one was named."
+  parent: Issue
+  commit: CommitInfo!
+}
+
+"""
+Fields to change on an issue.
+
+An omitted field is left alone. An explicit null clears the key, as does an
+empty list for `labels` and `assignees`; `title` and `body` can be replaced but
+not cleared. Frontmatter keys this schema does not name are always preserved.
+"""
+input UpdateIssueInput {
+  ref: ID!
+  title: String
+  body: String
+  labels: [String!]
+  assignees: [String!]
+  milestone: String
+}
+
+type UpdateIssuePayload {
+  issue: Issue!
+  commit: CommitInfo!
+}
+
+input CloseIssueInput {
+  ref: ID!
+  "Why it ended, e.g. `fixed` or `wontfix`."
+  resolution: String
+  "ID or prefix of the issue this one duplicates."
+  duplicateOf: ID
+}
+
+type CloseIssuePayload {
+  issue: Issue!
+  "Where it now lives, relative to `.navbook/`."
+  destination: String!
+  commit: CommitInfo!
+}
+
+type ReopenIssuePayload {
+  issue: Issue!
+  destination: String!
+  commit: CommitInfo!
+}
+
+"""
+A comment, or a review when a verdict is given.
+
+Review fields are meaningful only on pull requests (§2.6), and `revision` binds
+the review to one recorded state of the branch — the latest, unless named.
+
+A comment is written beside the entity it belongs to, so a pull request the
+server's checkout does not hold cannot be commented on from here even though
+`prs(allRefs: true)` can see it: serve a checkout of its branch to review it.
+"""
+input AddCommentInput {
+  kind: Kind!
+  ref: ID!
+  body: String!
+  "ID or prefix of the comment being replied to."
+  replyTo: ID
+  verdict: Verdict
+  "Prefix of a recorded revision head; defaults to the latest."
+  revision: String
+  file: String
+  "A line number or a `start-end` range."
+  line: String
+}
+
+type AddCommentPayload {
+  comment: Comment!
+  entity: Entity!
+  commit: CommitInfo!
+}
+
+input LinkIssueInput {
+  "ID or prefix of the issue to file under another."
+  child: ID!
+  "ID or prefix of the issue it goes under."
+  parent: ID!
+  """
+  Consent to move a subtask that already has a parent.
+
+  Without it such a link fails with REPARENT_REQUIRED, naming the parent the
+  issue has now — moving one changes a structure somebody else may be reading.
+  """
+  allowReparent: Boolean! = false
+}
+
+type LinkIssuePayload {
+  child: Issue!
+  parent: Issue!
+  "The parent it was moved away from, when it had one."
+  previousParentId: ID
+  commit: CommitInfo!
+}
+
+type UnlinkIssuePayload {
+  child: Issue!
+  previousParentId: ID
+  commit: CommitInfo!
+}
+
+type Mutation {
+  openIssue(input: OpenIssueInput!): OpenIssuePayload!
+  updateIssue(input: UpdateIssueInput!): UpdateIssuePayload!
+  closeIssue(input: CloseIssueInput!): CloseIssuePayload!
+  reopenIssue(ref: ID!): ReopenIssuePayload!
+  addComment(input: AddCommentInput!): AddCommentPayload!
+  linkIssue(input: LinkIssueInput!): LinkIssuePayload!
+  unlinkIssue(ref: ID!): UnlinkIssuePayload!
+}

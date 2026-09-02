@@ -20,15 +20,17 @@ is mature and widely installed.
 ## 5.2 TypeScript reference implementation
 
 - **Runtime:** Node ≥ 24 (runs TypeScript natively — no build step in
-  development). Two packages are published to npm under the `navbook` org
-  scope, in lockstep at one version: `@navbook/core`, the implementation, and
-  `@navbook/cli`, which depends on it and installs the `nav` binary. Both ship
-  a compiled JS `dist/` so installed code does not depend on type-stripping
-  behavior; `npx @navbook/cli` is the zero-install trial path.
+  development). Three packages are published to npm under the `navbook` org
+  scope, in lockstep at one version: `@navbook/core`, the implementation;
+  `@navbook/cli`, which depends on it and installs the `nav` binary; and
+  `@navbook/server`, the GraphQL API of [06 §6.3](06-future.md), which installs
+  `nav-server`. All ship a compiled JS `dist/` so installed code does not depend
+  on type-stripping behavior; `npx @navbook/cli` is the zero-install trial path.
 - **Dependencies:** deliberately minimal. A YAML parser (`yaml`) in the core
   and an argument parser in the CLI; no framework. Every dependency added to
   the core is a liability for the Rust rewrite (behavior to reproduce) and MUST
-  be justified.
+  be justified. The server is a leaf: its GraphQL and token-verification
+  dependencies are reproduced by nothing and constrain no other package.
 - **Structure:** `@navbook/core` is four layers in dependency order — `core/`
   (pure functions: parse/serialize/validate/query/plan — no I/O, no git),
   `git/` (subprocess calls to the `git` binary; no libgit bindings, so
@@ -44,6 +46,8 @@ is mature and widely installed.
   does. Two rules keep that true: no layer below `cli/` writes to a stream or
   knows what an exit code is, and an operation that must stop and ask is split
   into a plan half and an execute half rather than calling back into its caller.
+  A front end that cannot stop and ask answers the question in its request
+  instead: the server takes an explicit flag where the CLI prompts.
 - **Performance budget:** cold `nav issue list` on a 1 000-issue repo MUST
   complete in under 500 ms on commodity hardware. (Measured floor: ~40 ms
   Node startup + ~110 ms with one heavy import — import cost is the budget's
