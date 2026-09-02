@@ -49,7 +49,7 @@ export interface StartOptions {
 function checkRepo(
   config: Config,
   env: NodeJS.ProcessEnv,
-): { repoRoot: string; remote: string | null } {
+): { repoRoot: string; navDir: string; remote: string | null } {
   let ws: ReturnType<typeof makeWsCtx>;
   try {
     ws = makeWsCtx({ cwd: config.repoPath, env });
@@ -76,6 +76,7 @@ function checkRepo(
   }
   return {
     repoRoot: ws.repoRoot,
+    navDir: ws.navDir,
     remote: hasRemote(ws.repoRoot, config.remote) ? config.remote : null,
   };
 }
@@ -85,7 +86,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
   const env = opts.env ?? process.env;
   const report = opts.report ?? (() => undefined);
 
-  const { repoRoot, remote } = checkRepo(config, env);
+  const { repoRoot, navDir, remote } = checkRepo(config, env);
   if (remote === null) {
     report(`warning: no '${config.remote}' remote; running local-only, nothing will be pushed`);
   }
@@ -112,7 +113,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     // covered, including ones added later.
     context: async ({ request }) => {
       const viewer = await auth.verify(request.headers.get("authorization"));
-      return makeGraphQLCtx({ viewer, config, sync, env });
+      return makeGraphQLCtx({ viewer, config, sync, env, navDir });
     },
   });
 

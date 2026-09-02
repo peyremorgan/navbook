@@ -99,6 +99,12 @@ export interface FixtureOptions {
    * the spawned server agree about where the tree is.
    */
   navRoot?: string;
+  /**
+   * Seed under `navRoot` but leave `NAV_ROOT` unset, so everything has to
+   * locate the directory by its marker — the situation of anyone who clones a
+   * repository that renamed it.
+   */
+  withoutNavRootEnv?: boolean;
 }
 
 export function makeFixture(opts: FixtureOptions = {}): Fixture {
@@ -108,7 +114,7 @@ export function makeFixture(opts: FixtureOptions = {}): Fixture {
   const navDir = opts.navRoot ?? ".navbook";
   const env: NodeJS.ProcessEnv = {
     ...deterministicEnv(home),
-    ...(opts.navRoot === undefined ? {} : { NAV_ROOT: opts.navRoot }),
+    ...(opts.navRoot === undefined || opts.withoutNavRootEnv ? {} : { NAV_ROOT: opts.navRoot }),
   };
 
   const run = (

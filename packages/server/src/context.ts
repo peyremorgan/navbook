@@ -41,6 +41,15 @@ export interface MakeContextOptions {
   config: Config;
   sync: RepoSync;
   env?: NodeJS.ProcessEnv;
+  /**
+   * The Navbook directory, already resolved at startup.
+   *
+   * Passed in rather than rediscovered: a context is built per request, and a
+   * directory found by searching would otherwise repeat that search — a
+   * `git ls-files` per request for a root nested too deep to scan for. It also
+   * guarantees every request agrees with the tree startup actually validated.
+   */
+  navDir?: string;
 }
 
 export function makeGraphQLCtx(opts: MakeContextOptions): GraphQLCtx {
@@ -48,6 +57,7 @@ export function makeGraphQLCtx(opts: MakeContextOptions): GraphQLCtx {
     cwd: opts.config.repoPath,
     env: opts.env ?? process.env,
     identity: opts.viewer,
+    ...(opts.navDir === undefined ? {} : { navDir: opts.navDir }),
   });
 
   // The promise is what is memoized, so several field resolvers asking at once

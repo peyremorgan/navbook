@@ -96,6 +96,38 @@ describe("a renamed Navbook directory, over HTTP", () => {
   });
 });
 
+describe("a renamed directory located by its marker alone", () => {
+  /**
+   * No `NAV_ROOT` anywhere: the server has to find the directory the way a
+   * fresh clone would. This is also the path where the name is resolved once
+   * at startup and handed to every request, rather than rediscovered per
+   * request.
+   */
+  let h: Harness;
+
+  before(async () => {
+    h = await startHarness({ navRoot: NAV_ROOT, withoutNavRootEnv: true });
+  });
+
+  after(async () => {
+    await h.stop();
+  });
+
+  it("starts, and serves paths under the discovered name", async () => {
+    assert.equal(h.fixture.env.NAV_ROOT, undefined, "the variable must not be set");
+    const opened = ok<{ openIssue: { issue: { path: string } } }>(
+      await h.gql(OPEN, { input: { title: "Found by marker", body: "Body." } }),
+    );
+    assert.match(opened.openIssue.issue.path, /^\.issues\/issues\/open\//);
+  });
+
+  it("agrees across requests, which is what resolving once buys", async () => {
+    const listed = ok<{ issues: { path: string }[] }>(await h.gql(`query { issues { id path } }`));
+    assert.ok(listed.issues.length > 0);
+    for (const issue of listed.issues) assert.match(issue.path, /^\.issues\//);
+  });
+});
+
 describe("a server that cannot read the configured directory", () => {
   /**
    * Startup failure is tested with a plain synchronous spawn rather than the
