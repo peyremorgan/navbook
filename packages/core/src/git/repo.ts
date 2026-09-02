@@ -115,12 +115,14 @@ function markersInChildren(repoRoot: string): string[] {
 
 /** Directories at any depth whose marker git has staged or committed. */
 function markersInIndex(repoRoot: string): string[] {
-  const listed = gitMaybe(["ls-files", "--cached", "-z", "--", `*/${NAV_MARKER}`], {
+  // Raw stdout, not `gitMaybe`: that trims, and `-z` output is NUL-delimited,
+  // so trimming would eat a leading space belonging to the first path's name.
+  const listed = gitRun(["ls-files", "--cached", "-z", "--", `*/${NAV_MARKER}`], {
     cwd: repoRoot,
   });
-  if (listed === null) return [];
+  if (listed.code !== 0) return [];
   const dirs = new Set<string>();
-  for (const path of splitNul(listed)) {
+  for (const path of splitNul(listed.stdout)) {
     const cut = path.lastIndexOf("/");
     if (cut <= 0) continue;
     const dir = path.slice(0, cut);

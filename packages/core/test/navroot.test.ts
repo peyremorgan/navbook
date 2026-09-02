@@ -107,6 +107,16 @@ describe("discoverNavDir", () => {
     });
   });
 
+  it("keeps a leading space in a directory name intact", () => {
+    // `git ls-files -z` is NUL-delimited, so trimming its output would eat the
+    // space that genuinely belongs to this path. Nested, so only the index
+    // pass can find it — which is the pass that reads that output.
+    inRepo((dir) => {
+      plantMarker(dir, " outer/nav", { stage: true });
+      assert.equal(discoverNavDir(dir), " outer/nav");
+    });
+  });
+
   it("refuses to guess between two markers", () => {
     inRepo((dir) => {
       plantMarker(dir, ".issues");
