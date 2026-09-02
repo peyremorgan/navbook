@@ -92,13 +92,24 @@ export interface Fixture {
 export interface FixtureOptions {
   /** Leave the clone with no remote, to exercise local-only mode. */
   noRemote?: boolean;
+  /**
+   * Seed the tree under this directory instead of `.navbook/`.
+   *
+   * `NAV_ROOT` is set in the fixture environment too, so the clone helpers and
+   * the spawned server agree about where the tree is.
+   */
+  navRoot?: string;
 }
 
 export function makeFixture(opts: FixtureOptions = {}): Fixture {
   const root = mkdtempSync(join(tmpdir(), "navbook-server-"));
   const home = join(root, "home");
   mkdirSync(home, { recursive: true });
-  const env = deterministicEnv(home);
+  const navDir = opts.navRoot ?? ".navbook";
+  const env: NodeJS.ProcessEnv = {
+    ...deterministicEnv(home),
+    ...(opts.navRoot === undefined ? {} : { NAV_ROOT: opts.navRoot }),
+  };
 
   const run = (
     dir: string,
@@ -176,14 +187,17 @@ export function makeFixture(opts: FixtureOptions = {}): Fixture {
     return clone;
   };
 
-  // The `.navbook/` skeleton is made once and pushed, so both clones start from
-  // the same history — which is what makes their later pushes fast-forwards.
+  // The skeleton is made once and pushed, so both clones start from the same
+  // history — which is what makes their later pushes fast-forwards. The marker
+  // goes in too, exactly as `nav init` writes it, so a fixture with a renamed
+  // root is findable without `NAV_ROOT` just as a real repository would be.
   const seed = makeClone("seed");
-  seed.write(".navbook/issues/open/.gitkeep", "");
-  seed.write(".navbook/issues/closed/.gitkeep", "");
-  seed.write(".navbook/prs/open/.gitkeep", "");
-  seed.write(".navbook/prs/merged/.gitkeep", "");
-  seed.write(".navbook/prs/closed/.gitkeep", "");
+  seed.write(`${navDir}/navbook.json`, '{\n  "version": 1\n}\n');
+  seed.write(`${navDir}/issues/open/.gitkeep`, "");
+  seed.write(`${navDir}/issues/closed/.gitkeep`, "");
+  seed.write(`${navDir}/prs/open/.gitkeep`, "");
+  seed.write(`${navDir}/prs/merged/.gitkeep`, "");
+  seed.write(`${navDir}/prs/closed/.gitkeep`, "");
   seed.commitAll("docs(navbook): initialise");
   if (!opts.noRemote) {
     const pushed = seed.git(["push", "--quiet", "origin", "main:main"]);

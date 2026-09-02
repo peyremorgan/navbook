@@ -247,6 +247,103 @@ describe("a renamed Navbook directory", () => {
   });
 });
 
+describe("pull requests under a renamed root", () => {
+  /**
+   * Pull requests are the paths that reach git with the directory's name in a
+   * *pathspec* rather than in a message: `pr list --all-refs` runs `ls-tree`
+   * against every branch, and `pr merge` checks the directory out of the
+   * branch that carries it. Both were built from the old constant.
+   */
+  function withOpenPr(): TempRepo {
+    const repo = makeTempRepo();
+    repo.nav(["init", "--commit"], RENAMED);
+    repo.write("app.txt", "original\n");
+    repo.commitAll("feat: initial code");
+
+    repo.git(["checkout", "--quiet", "-b", "feat/auth"]);
+    repo.write("auth.txt", "token handling\n");
+    repo.commitAll("feat: rework auth tokens");
+
+    const opened = repo.nav(["pr", "open", "--title", "Auth", "-m", "Body.", "--commit"], {
+      ...RENAMED,
+      NAV_IDS: "dk3mp2x9",
+    });
+    assert.equal(opened.code, 0, opened.stderr);
+    repo.git(["checkout", "--quiet", "main"]);
+    return repo;
+  }
+
+  it("scans other branches for open pull requests", () => {
+    // The pull request is not in this working tree at all: it is found by
+    // reading the branch, which needs the right path inside `git ls-tree`.
+    const repo = withOpenPr();
+    try {
+      const result = repo.nav(["pr", "list", "--all-refs", "--json"], RENAMED);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /"path":"\.issues\/prs\/open\/dk3mp2x9-auth"/);
+      assert.ok(!result.stdout.includes(".navbook"));
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("declines from the default branch, checking the directory out first", () => {
+    // `pr close` on a branch that does not hold the pull request has to
+    // materialize it first — a `git checkout <ref> -- <path>` whose path is
+    // built from the directory's name.
+    const repo = withOpenPr();
+    try {
+      const result = repo.nav(["pr", "close", "dk3m", "--commit"], RENAMED);
+      assert.equal(result.code, 0, result.stderr);
+      assert.ok(!output(result).includes(".navbook"), output(result));
+      assert.ok(existsSync(join(repo.dir, ".issues", "prs", "closed", "dk3mp2x9-auth")));
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("merges, checking the directory out of the branch that carries it", () => {
+    const repo = withOpenPr();
+    try {
+      const result = repo.nav(["pr", "merge", "dk3m"], RENAMED);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /\.issues\/prs\/merged\/dk3mp2x9-auth\//);
+      assert.ok(!output(result).includes(".navbook"));
+      assert.ok(existsSync(join(repo.dir, ".issues", "prs", "merged", "dk3mp2x9-auth")));
+      assert.equal(repo.nav(["doctor"], RENAMED).code, 0);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+describe("a nested root", () => {
+  it("is created, used, and then found through the git index", () => {
+    // Too deep for the one-level scan, so only the `git ls-files` pass can
+    // find it — and only once the marker has been staged.
+    const repo = makeTempRepo();
+    const nested = { NAV_ROOT: ".github/navbook" };
+    try {
+      assert.equal(repo.nav(["init", "--commit"], nested).code, 0);
+      assert.ok(existsSync(join(repo.dir, ".github", "navbook", "navbook.json")));
+
+      const opened = repo.nav(["issue", "open", "Nested", "-m", "Body.", "--commit"], {
+        ...nested,
+        NAV_IDS: "nst11111",
+      });
+      assert.equal(opened.code, 0, opened.stderr);
+
+      // No environment at all from here on.
+      const listed = repo.nav(["issue", "list", "--json"]);
+      assert.equal(listed.code, 0, listed.stderr);
+      assert.match(listed.stdout, /"path":"\.github\/navbook\/issues\/open\/nst11111-nested"/);
+      assert.equal(repo.nav(["doctor"]).code, 0);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
 describe("the default root", () => {
   it("still works with no marker present, as every existing repository is", () => {
     const repo = makeTempRepo();

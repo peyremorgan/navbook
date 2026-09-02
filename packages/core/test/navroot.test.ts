@@ -13,7 +13,9 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { NAV_MARKER } from "../src/core/tree.ts";
+import { FrontmatterError } from "../src/core/frontmatter.ts";
+import { LinkRewriteError } from "../src/core/ops.ts";
+import { type EntityRecord, NAV_MARKER, type NavTree, parseTree } from "../src/core/tree.ts";
 import { git } from "../src/git/exec.ts";
 import {
   AmbiguousNavRootError,
@@ -21,6 +23,7 @@ import {
   discoverNavDir,
   findRepo,
 } from "../src/git/repo.ts";
+import { rewritePlan } from "../src/ops/entity.ts";
 import { makeWsCtx, WorkspaceError } from "../src/workspace/index.ts";
 
 /** A fresh repository with one commit, so the index and HEAD both exist. */
@@ -274,5 +277,65 @@ describe("makeWsCtx and the Navbook directory", () => {
         (error: unknown) => error instanceof WorkspaceError && error.code === "bad-env",
       );
     });
+  });
+});
+
+/**
+ * `rewritePlan` turns a file that cannot be re-serialized into an operational
+ * error naming the file. The name it prefixes is the configured one, which no
+ * end-to-end test reaches: the failure needs YAML that parses and then refuses
+ * to come back out, which no ordinary edit produces.
+ */
+describe("rewritePlan", () => {
+  const entity = (): EntityRecord => {
+    const tree = new Map([
+      [
+        "issues/open/bqlybac0-login-timeout/issue.md",
+        "---\ntitle: T\nauthor: a@example.com\ncreated: 2026-08-02T09:14:00Z\n---\n\nBody.\n",
+      ],
+    ]) as NavTree;
+    const record = parseTree(tree).issues[0];
+    assert.ok(record);
+    return record;
+  };
+
+  it("names the failing file under the configured directory", () => {
+    assert.throws(
+      () =>
+        rewritePlan(".issues", entity(), () => {
+          throw new FrontmatterError("could not be re-emitted");
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof WorkspaceError);
+        assert.equal(error.code, "frontmatter");
+        assert.match(error.message, /^\.issues\/issues\/open\/bqlybac0-login-timeout\/issue\.md: /);
+        return true;
+      },
+    );
+  });
+
+  it("names the neighbour a link rewrite actually broke, not the entity asked for", () => {
+    assert.throws(
+      () =>
+        rewritePlan(".issues", entity(), () => {
+          throw new LinkRewriteError("issues/open/other-x/issue.md", "bad list");
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof WorkspaceError);
+        assert.match(error.message, /^\.issues\/issues\/open\/other-x\/issue\.md: bad list$/);
+        return true;
+      },
+    );
+  });
+
+  it("lets anything that is not a frontmatter failure through untouched", () => {
+    const boom = new TypeError("unrelated");
+    assert.throws(
+      () =>
+        rewritePlan(".issues", entity(), () => {
+          throw boom;
+        }),
+      (error: unknown) => error === boom,
+    );
   });
 });
