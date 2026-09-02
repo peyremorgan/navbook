@@ -7,7 +7,6 @@ import {
   currentAuthor,
   executeIssueLink,
   findParentIssue,
-  NAVBOOK_ROOT,
   newIssueFile,
   openIssue,
   planIssueLink,
@@ -61,7 +60,7 @@ export function cmdIssueOpen(ctx: Ctx, title: string, opts: IssueOpenOptions): v
   );
   const { id, dirPath, run } = result;
 
-  ctx.stdout.write(`Created ${NAVBOOK_ROOT}/${dirPath}/  (#${id})\n`);
+  ctx.stdout.write(`Created ${ctx.navDir}/${dirPath}/  (#${id})\n`);
   // What the file ended up saying, which an editor session may have changed.
   if (result.parent) {
     ctx.stdout.write(`Filed under #${result.parent.id}  ${result.parent.title}\n`);

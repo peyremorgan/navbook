@@ -21,7 +21,6 @@ import {
   listPrsAcrossRefs,
   type MergeResult,
   materializePrIfAbsent,
-  NAVBOOK_ROOT,
   type NewCommentInput,
   newCommentFile,
   newPrFile,
@@ -89,7 +88,7 @@ export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
     { commit: opts.commit },
   );
 
-  ctx.stdout.write(`Created ${NAVBOOK_ROOT}/${dirPath}/  (#${id})\n`);
+  ctx.stdout.write(`Created ${ctx.navDir}/${dirPath}/  (#${id})\n`);
   ctx.stdout.write(`Targets ${draft.target}, from ${draft.source} at ${draft.head.slice(0, 12)}\n`);
   if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
@@ -156,7 +155,7 @@ export function cmdPrReview(ctx: Ctx, prefix: string, opts: ReviewOptions): void
   );
 
   const label = verdict ? `Reviewed (${verdict})` : "Commented on";
-  ctx.stdout.write(`${label} #${entity.id}  ${NAVBOOK_ROOT}/${path}  (#${id})\n`);
+  ctx.stdout.write(`${label} #${entity.id}  ${ctx.navDir}/${path}  (#${id})\n`);
   if (isReview) ctx.stdout.write(`Bound to revision ${revision.slice(0, 12)}\n`);
   if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
@@ -184,7 +183,7 @@ export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void 
     ctx.stdout.write(
       `${toNdjson(
         matched.map((entry) =>
-          entityJson(entry.entity, { refs: entry.refs.map((ref) => ref.short) }),
+          entityJson(ctx.navDir, entry.entity, { refs: entry.refs.map((ref) => ref.short) }),
         ),
       )}\n`,
     );
@@ -234,7 +233,7 @@ export function cmdPrMerge(ctx: Ctx, prefix: string | undefined, opts: MergeOpti
 }
 
 function reportMerge(ctx: Ctx, result: MergeResult): void {
-  ctx.stdout.write(`Merged #${result.entity.id}  ${NAVBOOK_ROOT}/${result.dirPath}/\n`);
+  ctx.stdout.write(`Merged #${result.entity.id}  ${ctx.navDir}/${result.dirPath}/\n`);
   if (result.mergeSha) ctx.stdout.write(`Merge commit ${result.mergeSha.slice(0, 12)}\n`);
 }
 

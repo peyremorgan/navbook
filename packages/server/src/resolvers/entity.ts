@@ -10,7 +10,6 @@
 import {
   type CommentRecord,
   type EntityRecord,
-  NAVBOOK_ROOT,
   parentNode,
   readAssignees,
   readLabels,
@@ -18,6 +17,7 @@ import {
   readRevisions,
   subtaskTree,
 } from "@navbook/core";
+import type { GraphQLCtx } from "../context.ts";
 import { invalidInput } from "../errors.ts";
 import type {
   CommentResolvers,
@@ -48,7 +48,8 @@ function sharedFields<P>(record: (parent: P) => EntityRecord) {
     slug: (parent: P) => record(parent).slug,
     kind: (parent: P) => toGqlKind(record(parent).kind),
     status: (parent: P) => toGqlStatus(record(parent).status),
-    path: (parent: P) => `${NAVBOOK_ROOT}/${record(parent).dirPath}`,
+    path: (parent: P, _args: unknown, ctx: GraphQLCtx) =>
+      `${ctx.ws.navDir}/${record(parent).dirPath}`,
     archived: (parent: P) => record(parent).archived,
     title: (parent: P) => record(parent).title,
     author: (parent: P) => text(record(parent).fm, "author") ?? "",
@@ -94,7 +95,7 @@ export const Entity: EntityResolvers = {
 
 export const Comment: CommentResolvers = {
   id: (comment: CommentRecord) => comment.id,
-  path: (comment) => `${NAVBOOK_ROOT}/${comment.path}`,
+  path: (comment, _args, ctx) => `${ctx.ws.navDir}/${comment.path}`,
   created: (comment) => comment.stamp,
   author: (comment) => comment.author,
   replyTo: (comment) => comment.replyTo ?? null,

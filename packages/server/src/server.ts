@@ -57,7 +57,7 @@ function checkRepo(
     throw new StartupError(error instanceof WorkspaceError ? error.message : String(error));
   }
   if (!ws.hasNavbook) {
-    throw new StartupError(`${config.repoPath} is not a Navbook repository (no .navbook/)`);
+    throw new StartupError(`${config.repoPath} is not a Navbook repository (no ${ws.navDir}/)`);
   }
   if (currentBranch(ws.repoRoot) === null) {
     throw new StartupError("HEAD is detached; check out the branch the server should serve");

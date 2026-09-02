@@ -11,7 +11,9 @@ import { describe, it } from "node:test";
 import { parseFile } from "@navbook/core";
 import { applyIssuePatch, isEmptyPatch } from "../../src/patch.ts";
 
-const PATH = "issues/open/aa111111-x/issue.md";
+// Repository-relative: `applyIssuePatch` reports the path it is given rather
+// than prefixing one, so the Navbook directory's name stays the caller's business.
+const PATH = ".navbook/issues/open/aa111111-x/issue.md";
 
 const ORIGINAL = `---
 title: Original

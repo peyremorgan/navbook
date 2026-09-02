@@ -23,7 +23,6 @@ import {
   findEntity,
   listEntities,
   loadRepo,
-  NAVBOOK_ROOT,
   type NewCommentInput,
   newCommentFile,
   parentNode,
@@ -89,7 +88,9 @@ export function reportList(
 ): void {
   if (opts.json) {
     if (matched.length === 0) return;
-    const objects = matched.map((entity) => entityJson(entity, opts.jsonExtra?.(entity) ?? {}));
+    const objects = matched.map((entity) =>
+      entityJson(ctx.navDir, entity, opts.jsonExtra?.(entity) ?? {}),
+    );
     ctx.stdout.write(`${toNdjson(objects)}\n`);
     return;
   }
@@ -144,7 +145,11 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
     // `parent` and `subtasks` are frontmatter, so they are already in the
     // object; resolving them would be a second, differently-shaped answer.
     ctx.stdout.write(
-      `${JSON.stringify(entityJson(entity, { comments: entity.comments.map(commentJson) }))}\n`,
+      `${JSON.stringify(
+        entityJson(ctx.navDir, entity, {
+          comments: entity.comments.map((comment) => commentJson(ctx.navDir, comment)),
+        }),
+      )}\n`,
     );
     return;
   }
@@ -153,6 +158,7 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
   ctx.stdout.write(
     `${renderDetail(entity, {
       colors: ctx.colors,
+      navDir: ctx.navDir,
       ...(kind === "issue"
         ? {
             links: { parent: parentNode(repo, entity), subtasks: subtaskTree(repo, entity, depth) },
@@ -173,7 +179,7 @@ export function cmdEdit(ctx: Ctx, kind: EntityKind, prefix: string, opts: Global
   }
 
   const result = applyEntityEdit(ctx, entity, { commit: opts.commit });
-  ctx.stdout.write(`Edited #${entity.id}  ${NAVBOOK_ROOT}/${entity.filePath}\n`);
+  ctx.stdout.write(`Edited #${entity.id}  ${ctx.navDir}/${entity.filePath}\n`);
   if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
 }
 
@@ -215,7 +221,7 @@ export function cmdComment(ctx: Ctx, kind: EntityKind, prefix: string, opts: Com
   );
 
   ctx.stdout.write(
-    `${isReview ? "Reviewed" : "Commented on"} #${entity.id}  ${NAVBOOK_ROOT}/${path}  (#${id})\n`,
+    `${isReview ? "Reviewed" : "Commented on"} #${entity.id}  ${ctx.navDir}/${path}  (#${id})\n`,
   );
   if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
@@ -228,13 +234,13 @@ export function cmdClose(ctx: Ctx, kind: EntityKind, prefix: string, opts: Close
   const { entity, destination, run } = closeEntity(ctx, kind, prefix, opts, {
     commit: opts.commit,
   });
-  ctx.stdout.write(`Closed #${entity.id}  ${NAVBOOK_ROOT}/${destination}/\n`);
+  ctx.stdout.write(`Closed #${entity.id}  ${ctx.navDir}/${destination}/\n`);
   if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
 
 export function cmdReopen(ctx: Ctx, kind: EntityKind, prefix: string, opts: GlobalFlags): void {
   const { entity, destination, run } = reopenEntity(ctx, kind, prefix, { commit: opts.commit });
-  ctx.stdout.write(`Reopened #${entity.id}  ${NAVBOOK_ROOT}/${destination}/\n`);
+  ctx.stdout.write(`Reopened #${entity.id}  ${ctx.navDir}/${destination}/\n`);
   if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
 
@@ -270,9 +276,9 @@ export function cmdDelete(
   if (!opts.force) confirmLoss(ctx, deletion, uncommittedUnder(ctx, deletion));
 
   const result = executeEntityDelete(ctx, deletion, { commit: opts.commit });
-  ctx.stdout.write(`Deleted #${entity.id}  ${NAVBOOK_ROOT}/${entity.dirPath}/\n`);
+  ctx.stdout.write(`Deleted #${entity.id}  ${ctx.navDir}/${entity.dirPath}/\n`);
   for (const target of alsoRemoved) {
-    ctx.stdout.write(`Deleted #${target.id}  ${NAVBOOK_ROOT}/${target.dirPath}/\n`);
+    ctx.stdout.write(`Deleted #${target.id}  ${ctx.navDir}/${target.dirPath}/\n`);
   }
   // Subtasks kept are now top-level, which is easy to miss and hard to undo
   // from memory, so they are named rather than merely implied.
@@ -299,8 +305,8 @@ function confirmLoss(ctx: Ctx, deletion: EntityDeletePlan, uncommitted: readonly
   ctx.stdout.write("Deleting it loses them; everything else can be recovered from history.\n");
   const target =
     alsoRemoved.length === 0
-      ? `${NAVBOOK_ROOT}/${entity.dirPath}/`
-      : `${NAVBOOK_ROOT}/${entity.dirPath}/ and ${alsoRemoved.length} more`;
+      ? `${ctx.navDir}/${entity.dirPath}/`
+      : `${ctx.navDir}/${entity.dirPath}/ and ${alsoRemoved.length} more`;
   if (!askYesNo(ctx, `Delete ${target} anyway? [y/N] `)) {
     fail(`#${entity.id} was not deleted`);
   }

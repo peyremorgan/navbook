@@ -1,33 +1,120 @@
 /**
  * Repository discovery and identity.
  *
- * `.navbook/` always sits at the repository root (spec 02 §2.1), so "walk up
+ * The Navbook directory sits at the repository root (spec 02 §2.1), so "walk up
  * like git does" and "ask git for the top level" are the same answer.
+ *
+ * Its *name* defaults to `.navbook` but is not fixed: a repository may use
+ * another one, and says so by the {@link NAV_MARKER} file the directory
+ * carries. Locating the directory by a file inside it is what lets a rename
+ * survive a clone — an environment variable would have to be set again by every
+ * contributor, whereas the marker is committed with the tree it describes.
  */
 
-import { existsSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { git, gitMaybe, gitRun, splitLines } from "./exec.ts";
+import { NAV_MARKER } from "../core/tree.ts";
+import { git, gitMaybe, gitRun, splitLines, splitNul } from "./exec.ts";
 
-export const NAVBOOK_DIR = ".navbook";
+/** The directory name used unless a repository says otherwise. */
+export const DEFAULT_NAV_DIR = ".navbook";
+
+/** Never searched for a marker: neither can hold a Navbook directory. */
+const UNSEARCHABLE = new Set([".git", "node_modules"]);
 
 export interface RepoPaths {
   repoRoot: string;
+  /** The directory's name relative to the repository root, in POSIX form. */
+  navDir: string;
   navRoot: string;
   hasNavbook: boolean;
 }
 
 export class NotARepositoryError extends Error {}
 
-/** Locate the repository root containing `cwd`, and its `.navbook/` directory. */
-export function findRepo(cwd: string): RepoPaths {
+/** More than one directory claims to be the Navbook root. */
+export class AmbiguousNavRootError extends Error {
+  readonly candidates: string[];
+
+  constructor(candidates: string[]) {
+    super(`more than one Navbook directory found: ${candidates.join(", ")}`);
+    this.name = "AmbiguousNavRootError";
+    this.candidates = candidates;
+  }
+}
+
+/**
+ * Locate the repository root containing `cwd`, and its Navbook directory.
+ *
+ * `navDir` overrides discovery entirely; it is the caller's job to have
+ * validated it. The directory it names need not exist — `hasNavbook` reports
+ * that, so `nav init` can be told where to create one.
+ */
+export function findRepo(cwd: string, navDir?: string): RepoPaths {
   const top = gitMaybe(["rev-parse", "--show-toplevel"], { cwd });
   if (top === null) {
     throw new NotARepositoryError(`not inside a git repository: ${cwd}`);
   }
   const repoRoot = top;
-  const navRoot = join(repoRoot, NAVBOOK_DIR);
-  return { repoRoot, navRoot, hasNavbook: existsSync(navRoot) };
+  const dir = navDir ?? discoverNavDir(repoRoot);
+  const navRoot = join(repoRoot, ...dir.split("/"));
+  return { repoRoot, navDir: dir, navRoot, hasNavbook: existsSync(navRoot) };
+}
+
+/**
+ * The Navbook directory of `repoRoot`, by name.
+ *
+ * The default is checked first, so the overwhelmingly common repository costs
+ * one `stat` and never scans anything. Only when it is absent does the marker
+ * search run: first over the root's own children, then — for a directory
+ * nested deeper, like `.github/navbook/` — over what git has staged. The git
+ * pass is second because it cannot see a marker that was never added, which is
+ * every marker between `nav init` writing it and the commit landing.
+ *
+ * Finding nothing is not an error: it yields the default name with
+ * `hasNavbook` false, which is how "run `nav init`" gets reported.
+ */
+export function discoverNavDir(repoRoot: string): string {
+  if (existsSync(join(repoRoot, DEFAULT_NAV_DIR))) return DEFAULT_NAV_DIR;
+  let candidates = markersInChildren(repoRoot);
+  if (candidates.length === 0) candidates = markersInIndex(repoRoot);
+  if (candidates.length > 1) throw new AmbiguousNavRootError(candidates);
+  return candidates[0] ?? DEFAULT_NAV_DIR;
+}
+
+/** Directories one level below the root that carry a marker. */
+function markersInChildren(repoRoot: string): string[] {
+  let entries: Dirent<string>[];
+  try {
+    entries = readdirSync(repoRoot, { withFileTypes: true, encoding: "utf8" });
+  } catch {
+    return [];
+  }
+  const found: string[] = [];
+  for (const entry of entries) {
+    // A symlinked directory is followed deliberately: `existsSync` resolves it,
+    // and a repository that arranges its tree that way still has one root.
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    if (UNSEARCHABLE.has(entry.name)) continue;
+    if (existsSync(join(repoRoot, entry.name, NAV_MARKER))) found.push(entry.name);
+  }
+  return found.sort();
+}
+
+/** Directories at any depth whose marker git has staged or committed. */
+function markersInIndex(repoRoot: string): string[] {
+  const listed = gitMaybe(["ls-files", "--cached", "-z", "--", `*/${NAV_MARKER}`], {
+    cwd: repoRoot,
+  });
+  if (listed === null) return [];
+  const dirs = new Set<string>();
+  for (const path of splitNul(listed)) {
+    const cut = path.lastIndexOf("/");
+    if (cut <= 0) continue;
+    const dir = path.slice(0, cut);
+    if (!UNSEARCHABLE.has(dir.split("/")[0] ?? "")) dirs.add(dir);
+  }
+  return [...dirs].sort();
 }
 
 /** Current branch name, or null when HEAD is detached. */

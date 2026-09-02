@@ -11,6 +11,7 @@ export type WorkspaceErrorCode =
   /* discovery */
   | "not-a-git-repo"
   | "not-a-navbook-repo"
+  | "ambiguous-root"
   | "already-exists"
   /* resolution */
   | "prefix-too-short"

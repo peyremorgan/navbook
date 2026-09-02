@@ -44,7 +44,7 @@ export function runHistoryChecks(ws: WsCtx, repo: Repo): Diagnostic[] {
 function checkAppendOnly(ws: WsCtx, repo: Repo): Diagnostic[] {
   const out: Diagnostic[] = [];
   for (const pr of repo.prs) {
-    const versions = fileVersions(ws.repoRoot, repoPath(pr.filePath));
+    const versions = fileVersions(ws.repoRoot, repoPath(ws.navDir, pr.filePath));
     if (versions.length < 2) continue;
 
     const lists = [];
@@ -114,7 +114,7 @@ function checkTimestamps(ws: WsCtx, repo: Repo): Diagnostic[] {
 
     const created = typeof entity.fm.created === "string" ? parseIso(entity.fm.created) : null;
     if (created) {
-      const added = addedAt(ws.repoRoot, repoPath(entity.filePath));
+      const added = addedAt(ws.repoRoot, repoPath(ws.navDir, entity.filePath));
       if (added && !checkTimestampSkew(created, added.authored, TIMESTAMP_SKEW_HOURS)) {
         out.push({
           check: "D10",
@@ -126,7 +126,7 @@ function checkTimestamps(ws: WsCtx, repo: Repo): Diagnostic[] {
     }
 
     for (const comment of entity.comments) {
-      const added = addedAt(ws.repoRoot, repoPath(comment.path));
+      const added = addedAt(ws.repoRoot, repoPath(ws.navDir, comment.path));
       if (!added) continue;
       if (checkTimestampSkew(comment.date, added.authored, TIMESTAMP_SKEW_HOURS)) continue;
       out.push({

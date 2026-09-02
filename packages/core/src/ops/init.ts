@@ -3,7 +3,6 @@
  */
 
 import { existsSync } from "node:fs";
-import { NAVBOOK_ROOT } from "../core/json.ts";
 import { planInit } from "../core/ops.ts";
 import { type RunPlanResult, runPlan, scanAllIds, type WsCtx, wsFail } from "../workspace/index.ts";
 import type { CommitOptions } from "./entity.ts";
@@ -11,7 +10,7 @@ import type { CommitOptions } from "./entity.ts";
 /** Create the `.navbook/` skeleton. */
 export function initWorkspace(ws: WsCtx, opts: CommitOptions): RunPlanResult {
   if (existsSync(ws.navRoot)) {
-    wsFail("already-exists", `${NAVBOOK_ROOT}/ already exists at the repository root`);
+    wsFail("already-exists", `${ws.navDir}/ already exists at the repository root`);
   }
   return runPlan(ws, planInit(), { commit: opts.commit });
 }

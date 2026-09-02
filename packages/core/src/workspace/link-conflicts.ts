@@ -120,7 +120,7 @@ function makeFactTimer(ws: WsCtx): FactTimer {
   return (filePath, holds) => {
     let history = versions.get(filePath);
     if (!history) {
-      history = fileVersions(ws.repoRoot, repoPath(filePath));
+      history = fileVersions(ws.repoRoot, repoPath(ws.navDir, filePath));
       versions.set(filePath, history);
     }
 

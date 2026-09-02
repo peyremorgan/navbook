@@ -15,6 +15,16 @@ export type NavTree = ReadonlyMap<string, string>;
 export type EntityKind = "issue" | "pr";
 export type Status = "open" | "closed" | "merged";
 
+/**
+ * The file that marks a directory as the Navbook root (spec 02 §2.10).
+ *
+ * It lives at the top of the Navbook directory and is what makes the directory
+ * findable when it is not called `.navbook`. `parseTree` does not interpret it:
+ * like any other reserved name it is preserved untouched, and it is the *file
+ * system* layer that reads meaning into its location.
+ */
+export const NAV_MARKER = "navbook.json";
+
 export const ISSUE_STATUSES: readonly Status[] = ["open", "closed"];
 export const PR_STATUSES: readonly Status[] = ["open", "merged", "closed"];
 

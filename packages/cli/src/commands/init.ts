@@ -2,14 +2,14 @@
  * `nav init` and `nav id` — the repository-level utilities of spec 04 §4.3.
  */
 
-import { commitReport, initWorkspace, mintIds, NAVBOOK_ROOT } from "@navbook/core";
+import { commitReport, initWorkspace, mintIds } from "@navbook/core";
 import type { Ctx } from "../context.ts";
 import type { GlobalFlags } from "./entity.ts";
 
 /** Create the `.navbook/` skeleton. */
 export function cmdInit(ctx: Ctx, opts: GlobalFlags): void {
   const result = initWorkspace(ctx, { commit: opts.commit });
-  ctx.stdout.write(`Created ${NAVBOOK_ROOT}/\n`);
+  ctx.stdout.write(`Created ${ctx.navDir}/\n`);
   if (opts.commit) {
     ctx.stdout.write(`${commitReport(result)}\n`);
   } else {

@@ -14,16 +14,26 @@
 import { webcrypto } from "node:crypto";
 import { mintId as coreMintId, isId, type RandomBytes } from "../core/id.ts";
 import { toIsoSeconds } from "../core/time.ts";
-import { findRepo, type Identity, type RepoPaths, userIdentity } from "../git/repo.ts";
+import {
+  AmbiguousNavRootError,
+  DEFAULT_NAV_DIR,
+  findRepo,
+  type Identity,
+  type RepoPaths,
+  userIdentity,
+} from "../git/repo.ts";
 import { wsFail } from "./errors.ts";
 
 export const NAV_NOW_ENV = "NAV_NOW";
 export const NAV_IDS_ENV = "NAV_IDS";
+export const NAV_ROOT_ENV = "NAV_ROOT";
 
 export interface WsCtx {
   cwd: string;
   env: NodeJS.ProcessEnv;
   repoRoot: string;
+  /** The Navbook directory's name relative to `repoRoot`, in POSIX form. */
+  navDir: string;
   navRoot: string;
   hasNavbook: boolean;
   /** Current instant; fixed by `NAV_NOW` under the conformance suite. */
@@ -43,6 +53,14 @@ export interface MakeWsCtxOptions {
    */
   requireRepo?: boolean;
   /**
+   * The Navbook directory to use, overriding both `NAV_ROOT` and discovery.
+   *
+   * For a caller that already knows the name — an embedder, or a test. It is
+   * validated exactly as the environment variable is, so no caller can smuggle
+   * in a name that later reaches git as a pathspec.
+   */
+  navDir?: string;
+  /**
    * Who is acting, when that is not the local git user.
    *
    * The CLI never sets this — the committer is the author (spec 04 §4.2). A
@@ -58,12 +76,27 @@ export function makeWsCtx(opts: MakeWsCtxOptions = {}): WsCtx {
   const cwd = opts.cwd ?? process.cwd();
   const env = opts.env ?? process.env;
 
+  const navDir = parseNavDir(opts.navDir ?? env[NAV_ROOT_ENV]);
+
   let paths: RepoPaths;
   try {
-    paths = findRepo(cwd);
+    paths = findRepo(cwd, navDir);
   } catch (error) {
+    // An ambiguous root is fatal even for commands that tolerate not being in a
+    // repository: guessing which directory was meant is exactly what must not
+    // happen, and the fix is to name one.
+    if (error instanceof AmbiguousNavRootError) {
+      wsFail("ambiguous-root", error.message, [
+        `set ${NAV_ROOT_ENV} to the one you mean, e.g. ${NAV_ROOT_ENV}=${error.candidates[0]}`,
+      ]);
+    }
     if (opts.requireRepo === false) {
-      paths = { repoRoot: cwd, navRoot: "", hasNavbook: false };
+      paths = {
+        repoRoot: cwd,
+        navDir: navDir ?? DEFAULT_NAV_DIR,
+        navRoot: "",
+        hasNavbook: false,
+      };
     } else {
       wsFail("not-a-git-repo", error instanceof Error ? error.message : String(error));
     }
@@ -78,6 +111,7 @@ export function makeWsCtx(opts: MakeWsCtxOptions = {}): WsCtx {
     cwd,
     env,
     repoRoot: paths.repoRoot,
+    navDir: paths.navDir,
     navRoot: paths.navRoot,
     hasNavbook: paths.hasNavbook,
     now: () => (fixedNow ? new Date(fixedNow) : new Date()),
@@ -98,6 +132,46 @@ export function makeWsCtx(opts: MakeWsCtxOptions = {}): WsCtx {
     },
     identity: () => given ?? userIdentity(paths.repoRoot),
   };
+}
+
+/**
+ * Validate a Navbook directory name.
+ *
+ * The value is not just a string: it is joined to the repository root as a
+ * path, and it reaches git as a *pathspec* — `git ls-files -- <dir>` in doctor
+ * and `git checkout <ref> -- <dir>/…` in the merge path. So anything git would
+ * read as a wildcard, or the filesystem as an escape upwards, is refused here
+ * rather than silently matching the wrong files later. Unset and empty mean the
+ * same thing: fall back to discovery.
+ */
+function parseNavDir(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const dir = value.trim();
+  if (dir === "") return undefined;
+
+  const bad = (reason: string): never => wsFail("bad-env", `${NAV_ROOT_ENV} ${reason}: ${value}`);
+
+  if (hasControlChar(dir)) bad("contains a control character");
+  if (dir.includes("\\")) bad("must separate segments with '/'");
+  if (dir.startsWith("/") || /^[A-Za-z]:/.test(dir)) {
+    bad("must be relative to the repository root");
+  }
+  if (/[*?[\]]/.test(dir) || dir.startsWith(":")) bad("must not contain pathspec magic");
+  for (const segment of dir.split("/")) {
+    if (segment === "") bad("must not have an empty path segment");
+    if (segment === "." || segment === "..") bad("must not contain '.' or '..'");
+    if (segment === ".git") bad("must not name the git directory");
+  }
+  return dir;
+}
+
+/** True when any character would be illegible in a path or a git argument. */
+function hasControlChar(value: string): boolean {
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
 }
 
 function parseFixedNow(value: string | undefined): Date | null {

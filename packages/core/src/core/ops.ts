@@ -20,7 +20,7 @@ import {
 import { isId } from "./id.ts";
 import type { LinkEdit, LinkRepair } from "./links.ts";
 import { dirName as makeDirName, slugify } from "./slug.ts";
-import { type EntityKind, type EntityRecord, type Status, statusDir } from "./tree.ts";
+import { type EntityKind, type EntityRecord, NAV_MARKER, type Status, statusDir } from "./tree.ts";
 
 export type FileOp =
   /** Create or overwrite a file, creating parent directories as needed. */
@@ -73,11 +73,24 @@ export function docsSubject(kind: EntityKind, action: string, id: string): strin
 
 /* --------------------------------------------------------------------- init */
 
-/** The `.navbook/` skeleton, with `.gitkeep` files so empty status dirs commit. */
+/**
+ * The Navbook skeleton: the marker that makes the directory findable, and
+ * `.gitkeep` files so empty status directories commit.
+ *
+ * Paths are relative to the Navbook directory, so the plan is identical
+ * whatever that directory is named — `repoPath` applies the name.
+ */
 export function planInit(): Plan {
   const dirs = ["issues/open", "issues/closed", "prs/open", "prs/merged", "prs/closed"];
   return {
-    ops: dirs.map((dir) => ({ op: "write" as const, path: `${dir}/.gitkeep`, content: "" })),
+    ops: [
+      {
+        op: "write" as const,
+        path: NAV_MARKER,
+        content: `${JSON.stringify({ version: 1 }, null, 2)}\n`,
+      },
+      ...dirs.map((dir) => ({ op: "write" as const, path: `${dir}/.gitkeep`, content: "" })),
+    ],
     // No entity to scope to: init creates the whole skeleton.
     message: "docs: initialize navbook",
     trailers: [],

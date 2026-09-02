@@ -6,7 +6,6 @@ import {
   type CommentRecord,
   type EntityRecord,
   type LinkNode,
-  NAVBOOK_ROOT,
   readAssignees,
   readLabels,
   readMerged,
@@ -25,6 +24,8 @@ export interface DetailLinks {
 
 export interface DetailOptions {
   colors: Colors;
+  /** The Navbook directory's name, for the repository-relative `path` row. */
+  navDir: string;
   /** Resolved decomposition links; absent for pull requests (§2.5). */
   links?: DetailLinks;
 }
@@ -36,7 +37,7 @@ export function renderDetail(entity: EntityRecord, opts: DetailOptions): string 
   lines.push(`${c.bold(`#${entity.id}`)} ${entity.title}`);
 
   const labelWidth = 11;
-  for (const [label, value] of metadataRows(entity, opts.links, c)) {
+  for (const [label, value] of metadataRows(entity, opts.navDir, opts.links, c)) {
     // A continuation row (empty label) is indented to line up under the value.
     const cell = label === "" ? " ".repeat(labelWidth) : c.dim(`${label}:`.padEnd(labelWidth));
     lines.push(`${cell}${value}`);
@@ -63,6 +64,7 @@ export function renderDetail(entity: EntityRecord, opts: DetailOptions): string 
 
 function metadataRows(
   entity: EntityRecord,
+  navDir: string,
   links: DetailLinks | undefined,
   c: Colors,
 ): [string, string][] {
@@ -100,7 +102,7 @@ function metadataRows(
     if (value !== "") rows.push([key, value]);
   }
   rows.push(...linkRows(links, c));
-  rows.push(["path", `${NAVBOOK_ROOT}/${entity.dirPath}/`]);
+  rows.push(["path", `${navDir}/${entity.dirPath}/`]);
   return rows;
 }
 

@@ -19,7 +19,6 @@ import {
 } from "node:fs";
 import { dirname, join, posix, relative, sep } from "node:path";
 import { parseCommentFileName } from "../core/comments.ts";
-import { NAVBOOK_ROOT } from "../core/json.ts";
 import type { FileOp } from "../core/ops.ts";
 import { needsComments, type Query } from "../core/query.ts";
 import { parseDirName } from "../core/slug.ts";
@@ -85,20 +84,25 @@ export function requireNavbook(ws: WsCtx): void {
   if (!ws.hasNavbook) {
     wsFail(
       "not-a-navbook-repo",
-      `not a Navbook repository: no ${NAVBOOK_ROOT}/ at the repository root`,
+      `not a Navbook repository: no ${ws.navDir}/ at the repository root`,
       ["run 'nav init' to create it"],
     );
   }
 }
 
-/** Convert a path relative to `.navbook/` into a repository-relative path. */
-export function repoPath(navRelative: string): string {
-  return posix.join(NAVBOOK_ROOT, navRelative);
+/** Convert a path relative to the Navbook directory into a repository-relative one. */
+export function repoPath(navDir: string, navRelative: string): string {
+  return posix.join(navDir, navRelative);
 }
 
 /** Absolute filesystem path for a path relative to `.navbook/`. */
 export function absPath(ws: WsCtx, navRelative: string): string {
   return join(ws.navRoot, ...navRelative.split("/"));
+}
+
+/** Repository-relative forms of several Navbook-relative paths. */
+export function repoPaths(navDir: string, navRelatives: readonly string[]): string[] {
+  return navRelatives.map((navRelative) => repoPath(navDir, navRelative));
 }
 
 export interface ApplyResult {
@@ -120,35 +124,35 @@ export function applyOps(ws: WsCtx, ops: readonly FileOp[]): ApplyResult {
       const target = absPath(ws, op.path);
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, op.content, "utf8");
-      touched.add(repoPath(op.path));
+      touched.add(repoPath(ws.navDir, op.path));
       continue;
     }
     if (op.op === "remove") {
       const target = absPath(ws, op.path);
       if (!existsSync(target)) {
-        wsFail("missing-path", `cannot remove ${repoPath(op.path)}: it does not exist`);
+        wsFail("missing-path", `cannot remove ${repoPath(ws.navDir, op.path)}: it does not exist`);
       }
       rmSync(target, { recursive: true });
       pruneEmptyParents(ws, dirname(target));
-      touched.add(repoPath(op.path));
+      touched.add(repoPath(ws.navDir, op.path));
       continue;
     }
     const from = absPath(ws, op.from);
     const to = absPath(ws, op.to);
     if (!existsSync(from)) {
-      wsFail("missing-path", `cannot move ${repoPath(op.from)}: it does not exist`);
+      wsFail("missing-path", `cannot move ${repoPath(ws.navDir, op.from)}: it does not exist`);
     }
     if (existsSync(to)) {
       wsFail(
         "destination-exists",
-        `cannot move ${repoPath(op.from)}: ${repoPath(op.to)} already exists`,
+        `cannot move ${repoPath(ws.navDir, op.from)}: ${repoPath(ws.navDir, op.to)} already exists`,
       );
     }
     mkdirSync(dirname(to), { recursive: true });
     renameSync(from, to);
     pruneEmptyParents(ws, dirname(from));
-    touched.add(repoPath(op.from));
-    touched.add(repoPath(op.to));
+    touched.add(repoPath(ws.navDir, op.from));
+    touched.add(repoPath(ws.navDir, op.to));
   }
   stage(ws, [...touched]);
   return { touched: [...touched].sort() };

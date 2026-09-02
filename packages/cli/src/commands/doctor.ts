@@ -7,7 +7,7 @@
  * which is which is `core`'s job; deciding what an exit code is, is this file's.
  */
 
-import { type Diagnostic, hasErrors, NAVBOOK_ROOT, runDoctor } from "@navbook/core";
+import { type Diagnostic, hasErrors, runDoctor } from "@navbook/core";
 import type { Ctx } from "../context.ts";
 import { failFormat } from "../errors.ts";
 
@@ -22,7 +22,7 @@ export function cmdDoctor(ctx: Ctx, opts: DoctorOptions): void {
 
   if (opts.json) {
     for (const diagnostic of diagnostics) {
-      ctx.stdout.write(`${JSON.stringify(toJson(diagnostic))}\n`);
+      ctx.stdout.write(`${JSON.stringify(toJson(ctx.navDir, diagnostic))}\n`);
     }
   } else {
     report(ctx, diagnostics, applied);
@@ -33,11 +33,11 @@ export function cmdDoctor(ctx: Ctx, opts: DoctorOptions): void {
   }
 }
 
-function toJson(diagnostic: Diagnostic): Record<string, unknown> {
+function toJson(navDir: string, diagnostic: Diagnostic): Record<string, unknown> {
   return {
     check: diagnostic.check,
     level: diagnostic.level,
-    path: diagnostic.path === "" ? "" : `${NAVBOOK_ROOT}/${diagnostic.path}`,
+    path: diagnostic.path === "" ? "" : `${navDir}/${diagnostic.path}`,
     message: diagnostic.message,
   };
 }
@@ -48,7 +48,7 @@ function report(ctx: Ctx, diagnostics: readonly Diagnostic[], applied: readonly 
 
   for (const diagnostic of diagnostics) {
     const level = diagnostic.level === "error" ? c.red("error") : c.yellow("warning");
-    const where = diagnostic.path === "" ? "" : `${NAVBOOK_ROOT}/${diagnostic.path}: `;
+    const where = diagnostic.path === "" ? "" : `${ctx.navDir}/${diagnostic.path}: `;
     ctx.stdout.write(`${level}  ${c.dim(diagnostic.check)}  ${where}${diagnostic.message}\n`);
   }
 
