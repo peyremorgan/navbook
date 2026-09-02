@@ -11,7 +11,7 @@
  * contributor, whereas the marker is committed with the tree it describes.
  */
 
-import { type Dirent, existsSync, readdirSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { NAV_MARKER } from "../core/tree.ts";
 import { git, gitMaybe, gitRun, splitLines, splitNul } from "./exec.ts";
@@ -58,7 +58,19 @@ export function findRepo(cwd: string, navDir?: string): RepoPaths {
   const repoRoot = top;
   const dir = navDir ?? discoverNavDir(repoRoot);
   const navRoot = join(repoRoot, ...dir.split("/"));
-  return { repoRoot, navDir: dir, navRoot, hasNavbook: existsSync(navRoot) };
+  // A *directory*, not merely something at that path: a plain file there is
+  // not a tree to read, and treating it as one reports an empty tracker and
+  // then fails with a raw ENOTDIR on the first write.
+  return { repoRoot, navDir: dir, navRoot, hasNavbook: isDirectory(navRoot) };
+}
+
+/** True when `path` is a directory, or a symlink to one. */
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -75,7 +87,7 @@ export function findRepo(cwd: string, navDir?: string): RepoPaths {
  * `hasNavbook` false, which is how "run `nav init`" gets reported.
  */
 export function discoverNavDir(repoRoot: string): string {
-  if (existsSync(join(repoRoot, DEFAULT_NAV_DIR))) return DEFAULT_NAV_DIR;
+  if (isDirectory(join(repoRoot, DEFAULT_NAV_DIR))) return DEFAULT_NAV_DIR;
   let candidates = markersInChildren(repoRoot);
   if (candidates.length === 0) candidates = markersInIndex(repoRoot);
   if (candidates.length > 1) throw new AmbiguousNavRootError(candidates);

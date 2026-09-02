@@ -161,6 +161,16 @@ describe("discoverNavDir", () => {
     });
   });
 
+  it("is not shadowed by a plain file named .navbook", () => {
+    // `.navbook` is checked first, but a file of that name is not a tree, so
+    // it must not stop the marker search from running.
+    inRepo((dir) => {
+      writeFileSync(join(dir, ".navbook"), "not a directory\n", "utf8");
+      plantMarker(dir, ".issues");
+      assert.equal(discoverNavDir(dir), ".issues");
+    });
+  });
+
   it("follows a symlinked directory", () => {
     inRepo((dir) => {
       mkdirSync(join(dir, "real"), { recursive: true });
@@ -188,6 +198,15 @@ describe("findRepo", () => {
       plantMarker(dir, ".github/navbook", { stage: true });
       const paths = findRepo(dir);
       assert.equal(paths.navRoot, join(dir, ".github", "navbook"));
+    });
+  });
+
+  it("reports no Navbook when the path names a plain file", () => {
+    // Merely existing is not enough. Treating a file as a tree reports an
+    // empty tracker and then fails with a raw ENOTDIR on the first write.
+    inRepo((dir) => {
+      writeFileSync(join(dir, "notadir"), "x\n", "utf8");
+      assert.equal(findRepo(dir, "notadir").hasNavbook, false);
     });
   });
 

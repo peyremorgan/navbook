@@ -220,6 +220,23 @@ describe("a renamed Navbook directory", () => {
     }
   });
 
+  it("refuses a NAV_ROOT that names a plain file, rather than reading it as empty", () => {
+    const repo = makeTempRepo();
+    try {
+      repo.write("notadir", "x\n");
+      const listed = repo.nav(["issue", "list"], { NAV_ROOT: "notadir" });
+      assert.equal(listed.code, 1, listed.stdout);
+      assert.match(listed.stderr, /not a Navbook repository: no notadir\//);
+
+      // And init says what is actually in the way, rather than creating it.
+      const init = repo.nav(["init"], { NAV_ROOT: "notadir" });
+      assert.equal(init.code, 1);
+      assert.match(init.stderr, /notadir\/ already exists/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("discovers the root from a subdirectory, not from the working directory", () => {
     // Discovery scans the *repository root*, which is not where the command was
     // run. The shared harness always spawns at the top, so this one runs the
