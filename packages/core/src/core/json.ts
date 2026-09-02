@@ -12,10 +12,15 @@
 import { keysInOrder } from "./frontmatter.ts";
 import type { CommentRecord, EntityRecord } from "./tree.ts";
 
-export const NAVBOOK_ROOT = ".navbook";
-
-/** One entity: identity first, then its frontmatter in file order, then body. */
+/**
+ * One entity: identity first, then its frontmatter in file order, then body.
+ *
+ * `navDir` prefixes the emitted `path`, which is repository-relative: the
+ * consumer of `--json` wants a path it can open, not one relative to a root it
+ * would have to locate itself.
+ */
 export function entityJson(
+  navDir: string,
   entity: EntityRecord,
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
@@ -24,7 +29,7 @@ export function entityJson(
     slug: entity.slug,
     kind: entity.kind,
     status: entity.status,
-    path: `${NAVBOOK_ROOT}/${entity.dirPath}`,
+    path: `${navDir}/${entity.dirPath}`,
   };
   if (entity.archived) out.archived = true;
   for (const key of keysInOrder(entity.parsed.nav)) {
@@ -36,10 +41,10 @@ export function entityJson(
 }
 
 /** One comment, including any review fields it carries. */
-export function commentJson(comment: CommentRecord): Record<string, unknown> {
+export function commentJson(navDir: string, comment: CommentRecord): Record<string, unknown> {
   const out: Record<string, unknown> = {
     id: comment.id,
-    path: `${NAVBOOK_ROOT}/${comment.path}`,
+    path: `${navDir}/${comment.path}`,
     created: comment.stamp,
   };
   for (const key of keysInOrder(comment.parsed.nav)) {

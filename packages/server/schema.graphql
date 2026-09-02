@@ -13,9 +13,14 @@ interface Entity {
   slug: String!
   kind: Kind!
   status: Status!
-  "Path from the repository root, e.g. `.navbook/issues/open/ab12cd34-slug`."
+  """
+  Path from the repository root, e.g. `.navbook/issues/open/ab12cd34-slug`.
+
+  The first segment is the repository's Navbook directory, which defaults to
+  `.navbook` but is not always named that (spec 02 §2.1).
+  """
   path: String!
-  "True when the entity lives under `.navbook/archive/` (spec 03 §3.6)."
+  "True when the entity lives under the Navbook directory's `archive/` (spec 03 §3.6)."
   archived: Boolean!
   title: String!
   "RFC 5322 address as stored in frontmatter: `Name <email>`."
@@ -161,7 +166,7 @@ type Diagnostic {
   "The check that produced it, D1 through D12."
   check: String!
   level: DiagnosticLevel!
-  "Path relative to `.navbook/`, or empty for a repository-wide finding."
+  "Path relative to the Navbook directory, or empty for a repository-wide finding."
   path: String!
   message: String!
   "Whether `nav doctor --fix` could mend it. The server never applies fixes."
@@ -269,7 +274,7 @@ input CloseIssueInput {
 
 type CloseIssuePayload {
   issue: Issue!
-  "Where it now lives, relative to `.navbook/`."
+  "Where it now lives, relative to the Navbook directory."
   destination: String!
   commit: CommitInfo!
 }

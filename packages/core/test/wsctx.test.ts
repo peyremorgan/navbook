@@ -123,6 +123,96 @@ describe("makeWsCtx", () => {
     });
   });
 
+  /**
+   * `NAV_ROOT` is joined to the repository root as a path and handed to git as
+   * a *pathspec*, so a value that is merely odd is not merely odd: a wildcard
+   * would match files the user never named, and `..` would walk out of the
+   * repository. Each rejection below is one of those, not a style preference.
+   */
+  describe("NAV_ROOT", () => {
+    const rejected: [string, string][] = [
+      ["an absolute path", "/etc/navbook"],
+      ["a Windows-style absolute path", "C:/navbook"],
+      ["a parent-directory escape", "../outside"],
+      ["a parent-directory escape in the middle", "a/../../outside"],
+      ["a bare '.'", "."],
+      ["a segment that is just '.'", "a/./b"],
+      ["a trailing slash", ".navbook/"],
+      ["a leading slash", "/navbook"],
+      ["a doubled slash", "a//b"],
+      ["a backslash separator", ".navbook\\issues"],
+      ["a '*' wildcard", ".nav*"],
+      ["a '?' wildcard", ".nav?ook"],
+      ["a character class", ".nav[bo]ok"],
+      ["leading pathspec magic", ":(glob).navbook"],
+      ["the git directory", ".git"],
+      ["the git directory nested", "a/.git"],
+      ["a control character", ".nav\u0001book"],
+      ["an embedded newline", ".nav\nbook"],
+      ["a tab", ".nav\tbook"],
+    ];
+
+    for (const [what, value] of rejected) {
+      it(`rejects ${what}`, () => {
+        outsideAnyRepo((dir) => {
+          assert.throws(
+            () => ctx({ NAV_ROOT: value }, dir),
+            (error: unknown) => {
+              assert.ok(error instanceof WorkspaceError, `${value} was accepted`);
+              assert.equal(error.code, "bad-env");
+              assert.match(error.message, /NAV_ROOT/);
+              return true;
+            },
+            `NAV_ROOT=${JSON.stringify(value)} should have been refused`,
+          );
+        });
+      });
+    }
+
+    const accepted: [string, string, string][] = [
+      ["a dotted name", ".issues", ".issues"],
+      ["a plain name", "tracker", "tracker"],
+      ["a nested name", ".github/navbook", ".github/navbook"],
+      ["a name with a dot inside it", "nav.book", "nav.book"],
+      ["a name with a dash and an underscore", "my_nav-book", "my_nav-book"],
+      ["a non-ASCII name", "carnet", "carnet"],
+      ["surrounding whitespace, which is trimmed", "  .issues  ", ".issues"],
+    ];
+
+    for (const [what, value, expected] of accepted) {
+      it(`accepts ${what}`, () => {
+        outsideAnyRepo((dir) => {
+          assert.equal(ctx({ NAV_ROOT: value }, dir).navDir, expected);
+        });
+      });
+    }
+
+    it("treats an empty value as unset, matching how the server reads its own", () => {
+      outsideAnyRepo((dir) => {
+        assert.equal(ctx({ NAV_ROOT: "" }, dir).navDir, ".navbook");
+        assert.equal(ctx({ NAV_ROOT: "   " }, dir).navDir, ".navbook");
+      });
+    });
+
+    it("trims a trailing newline rather than refusing it", () => {
+      // `NAV_ROOT=$(cat somefile)` is a plausible way to set this, and the
+      // newline it carries is surrounding whitespace like any other. Only a
+      // newline *inside* the name is a real problem, and that is refused above.
+      outsideAnyRepo((dir) => {
+        assert.equal(ctx({ NAV_ROOT: ".issues\n" }, dir).navDir, ".issues");
+      });
+    });
+
+    it("still reports a name when discovery could not run at all", () => {
+      // `requireRepo: false` outside a repository: nothing was discovered, but
+      // every message that formats a path still needs a name to use.
+      outsideAnyRepo((dir) => {
+        assert.equal(ctx({}, dir).navDir, ".navbook");
+        assert.equal(ctx({ NAV_ROOT: ".issues" }, dir).navDir, ".issues");
+      });
+    });
+  });
+
   it("mints an id that avoids the ones already taken", () => {
     outsideAnyRepo((dir) => {
       const ws = ctx({}, dir);

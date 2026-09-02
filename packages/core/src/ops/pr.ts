@@ -9,7 +9,6 @@
 
 import { type Revision, readRevisions } from "../core/files.ts";
 import { MIN_PREFIX_LENGTH, resolvePrefix } from "../core/id.ts";
-import { NAVBOOK_ROOT } from "../core/json.ts";
 import {
   type MergedBlock,
   type Plan,
@@ -176,7 +175,7 @@ export function updatePr(ws: WsCtx, ref: string, opts: CommitOptions): PrUpdateR
     plan = planPrUpdate(entity, { head, base, date: nowIso(ws) });
   } catch (error) {
     if (error instanceof RevisionUnchangedError) wsFail("precondition", error.message);
-    plan = rewritePlan(entity, () => {
+    plan = rewritePlan(ws.navDir, entity, () => {
       throw error;
     });
   }
@@ -249,13 +248,13 @@ export function scanRefsForOpenPrs(ws: WsCtx): FoundPr[] {
   const byId = new Map<string, FoundPr>();
 
   for (const ref of refs) {
-    const dirs = lsTreeNames(cwd, ref.full, `${NAVBOOK_ROOT}/${PR_OPEN_DIR}`).filter(
+    const dirs = lsTreeNames(cwd, ref.full, `${ws.navDir}/${PR_OPEN_DIR}`).filter(
       (name) => name !== ".gitkeep",
     );
     if (dirs.length === 0) continue;
 
     for (const dirName of dirs) {
-      const dirPath = `${NAVBOOK_ROOT}/${PR_OPEN_DIR}/${dirName}`;
+      const dirPath = `${ws.navDir}/${PR_OPEN_DIR}/${dirName}`;
       const paths = lsTreeRecursive(cwd, ref.full, dirPath);
       if (paths.length === 0) continue;
 
@@ -309,7 +308,7 @@ export interface MergeResult {
   entity: EntityRecord;
   /** The merge commit, or null when the branch fast-forwarded. */
   mergeSha: string | null;
-  /** Where the pull request now lives, relative to `.navbook/`. */
+  /** Where the pull request now lives, relative to the Navbook directory. */
   dirPath: string;
 }
 
@@ -438,7 +437,7 @@ function archiveIntoIndex(ws: WsCtx, id: string): EntityRecord {
 
   const targetDir = `prs/merged/${entity.dirName}`;
   applyOps(ws, [{ op: "move", from: entity.dirPath, to: targetDir }]);
-  stage(ws, [repoPath(entity.dirPath), repoPath(targetDir)]);
+  stage(ws, [repoPath(ws.navDir, entity.dirPath), repoPath(ws.navDir, targetDir)]);
   return { ...entity, status: "merged", dirPath: targetDir, filePath: `${targetDir}/pr.md` };
 }
 
@@ -460,7 +459,7 @@ function recordMergedBlock(ws: WsCtx, entity: EntityRecord, mergeSha: string | n
     // The branch is already merged at this point, so say plainly what is left.
     wsFail(
       "precondition",
-      `#${entity.id} merged, but ${NAVBOOK_ROOT}/${entity.filePath} could not be updated`,
+      `#${entity.id} merged, but ${ws.navDir}/${entity.filePath} could not be updated`,
       [
         `  ${error instanceof Error ? error.message : String(error)}`,
         "the merge itself is committed; fix the file and commit the 'merged:' block by hand",
@@ -562,7 +561,7 @@ export function materializePrIfAbsent(ws: WsCtx, ref: string): Materialized | nu
 /** Check a pull request's directory out of the branch that carries it. */
 function materializeFromRef(ws: WsCtx, ref: string): Materialized {
   const { entity, sourceRef } = locatePr(ws, ref);
-  const path = `${NAVBOOK_ROOT}/${entity.dirPath}`;
+  const path = `${ws.navDir}/${entity.dirPath}`;
   if (gitMaybe(["checkout", sourceRef, "--", path], { cwd: ws.repoRoot }) === null) {
     wsFail("not-found", `could not read ${path} from '${sourceRef}'`);
   }

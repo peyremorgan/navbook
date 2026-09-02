@@ -14,7 +14,6 @@
 
 import {
   FrontmatterError,
-  NAVBOOK_ROOT,
   type NavDoc,
   normalizeBody,
   parseDoc,
@@ -45,7 +44,8 @@ function applyList(nav: NavDoc, key: string, value: readonly string[] | null | u
 /**
  * Apply a patch to an issue file's text, returning the new text.
  *
- * `path` names the file only so a failure can say which one it was.
+ * `path` is repository-relative and names the file only so a failure can say
+ * which one it was.
  */
 export function applyIssuePatch(content: string, input: UpdateIssueInput, path: string): string {
   const nav = parseDoc(content);
@@ -86,7 +86,7 @@ export function applyIssuePatch(content: string, input: UpdateIssueInput, path: 
     if (!(error instanceof FrontmatterError)) throw error;
     // The file's YAML cannot be re-emitted, so this edit cannot be made at all.
     // Same fault the CLI reports, named the same way.
-    throw apiError(`${NAVBOOK_ROOT}/${path}: ${error.message}`, "FRONTMATTER", {
+    throw apiError(`${path}: ${error.message}`, "FRONTMATTER", {
       details: ["fix the file by hand, or run 'nav doctor' to see what is wrong"],
     });
   }

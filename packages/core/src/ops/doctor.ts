@@ -7,7 +7,6 @@
  * checks judge, and applies the repairs they offer.
  */
 
-import { NAVBOOK_ROOT } from "../core/json.ts";
 import type { FileOp } from "../core/ops.ts";
 import { parseTree, type Repo } from "../core/tree.ts";
 import { type Diagnostic, sortDiagnostics, validateRepo } from "../core/validate.ts";
@@ -100,26 +99,26 @@ function applyFixes(ws: WsCtx, diagnostics: readonly Diagnostic[]): string[] {
     applyOps(ws, fresh);
     for (const op of fresh) {
       done.add(target(op));
-      applied.push(describeFix(op));
+      applied.push(describeFix(ws.navDir, op));
     }
   }
   return applied;
 }
 
-function describeFix(op: FileOp): string {
+function describeFix(navDir: string, op: FileOp): string {
   switch (op.op) {
     case "move":
-      return `moved ${repoPath(op.from)} to ${repoPath(op.to)}`;
+      return `moved ${repoPath(navDir, op.from)} to ${repoPath(navDir, op.to)}`;
     case "remove":
-      return `removed ${repoPath(op.path)}`;
+      return `removed ${repoPath(navDir, op.path)}`;
     default:
-      return `wrote ${repoPath(op.path)}`;
+      return `wrote ${repoPath(navDir, op.path)}`;
   }
 }
 
 /** Build the repository model from what is staged rather than the working tree. */
 function stagedRepo(ws: WsCtx): Repo {
-  const prefix = `${NAVBOOK_ROOT}/`;
+  const prefix = `${ws.navDir}/`;
   const paths = allIndexedNavPaths(ws).filter((path) => path.startsWith(prefix));
   const files = new Map<string, string>();
   for (const path of paths) {
@@ -130,13 +129,13 @@ function stagedRepo(ws: WsCtx): Repo {
 }
 
 /**
- * Every `.navbook/` path in the index. The pre-commit hook needs the whole
+ * Every Navbook path in the index. The pre-commit hook needs the whole
  * indexed tree, not only the changed paths: checks like ID uniqueness and
  * reply-to resolution are properties of the tree the commit will create.
  */
 function allIndexedNavPaths(ws: WsCtx): string[] {
   const listed = splitNul(
-    git(["ls-files", "--cached", "-z", "--", NAVBOOK_ROOT], { cwd: ws.repoRoot }),
+    git(["ls-files", "--cached", "-z", "--", ws.navDir], { cwd: ws.repoRoot }),
   );
   return listed.length > 0 ? listed : stagedPaths(ws.repoRoot);
 }

@@ -1,0 +1,7 @@
+spec-version: 1
+description: >-
+  a Navbook directory that is not named .navbook is located by the navbook.json
+  marker it carries, with nothing set in the environment
+init: {from: before}
+run: {command: [issue, list, --json]}
+expect: {exit: 0, stdout: expected/stdout.txt}

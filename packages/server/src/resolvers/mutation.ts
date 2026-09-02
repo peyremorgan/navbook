@@ -36,6 +36,7 @@ import {
   type Repo,
   type RunPlanResult,
   reopenEntity,
+  repoPath,
   resolveComment,
   resolveEntity,
   resolveEntityForEdit,
@@ -147,7 +148,7 @@ export const Mutation: MutationResolvers = {
         () => {
           const { entity, path } = resolveEntityForEdit(ctx.ws, "issue", input.ref);
           const before = readFileSync(path, "utf8");
-          const patched = applyIssuePatch(before, input, entity.filePath);
+          const patched = applyIssuePatch(before, input, repoPath(ctx.ws.navDir, entity.filePath));
           // Validated before the file is touched, so a rejected patch leaves
           // the tree exactly as it was.
           checkComposed(patched, validateIssue, "issue");

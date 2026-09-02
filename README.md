@@ -51,6 +51,7 @@ conflict to confirm. With it, that merge is clean.
 
 ```
 .navbook/
+├── navbook.json
 ├── issues/
 │   ├── open/
 │   │   └── bqlybac0-login-timeout/
@@ -73,6 +74,34 @@ complete Navbook clients for reading.
 validates the tree, but nothing requires it: creating, commenting on, closing
 and reviewing with a text editor and `git` is a first-class, supported workflow.
 No operation exists that only the tool can perform correctly.
+
+### Naming the directory something else
+
+`.navbook/` is a default, not a requirement. To use another name, set
+`NAV_ROOT` when you create the tree:
+
+```console
+$ NAV_ROOT=.issues nav init --commit
+Created .issues/
+Committed docs: initialize navbook
+Next: nav issue open "Something is broken"
+```
+
+You only need the variable that once. `nav init` writes a `navbook.json` marker
+into the directory it creates, and that marker is how the directory is found
+afterwards — so everyone who clones the repository gets a working `nav` with
+nothing to configure, which an environment variable alone could never give
+them. The name is resolved per command, in this order:
+
+1. `NAV_ROOT`, when it is set to a relative path inside the repository.
+2. `.navbook/`, when it exists.
+3. The directory carrying `navbook.json` — searched for among the repository
+   root's own subdirectories, then among the paths git has staged, which is
+   what finds a nested root such as `.github/navbook/`.
+
+If two directories both carry a marker, `nav` says so and stops rather than
+picking one; set `NAV_ROOT` to say which you mean. A repository created before
+markers existed has none, and keeps working through step 2.
 
 ## Commands
 

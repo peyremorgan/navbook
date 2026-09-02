@@ -14,7 +14,6 @@
 import { readFileSync } from "node:fs";
 import { parseFile, readParent, readSubtasks, validateIssue, validatePr } from "../core/files.ts";
 import { FrontmatterError } from "../core/frontmatter.ts";
-import { NAVBOOK_ROOT } from "../core/json.ts";
 import { descendantsOf, type LinkRepair } from "../core/links.ts";
 import {
   type CloseInput,
@@ -41,6 +40,7 @@ import {
   nowIso,
   type RunPlanResult,
   repoPath,
+  repoPaths,
   requireNavbook,
   resolveEntity,
   runPlan,
@@ -128,7 +128,7 @@ export interface OpenInput {
 
 export interface OpenEntityResult {
   id: string;
-  /** The new directory, relative to `.navbook/`. */
+  /** The new directory, relative to the Navbook directory. */
   dirPath: string;
   run: RunPlanResult;
 }
@@ -222,7 +222,7 @@ export interface CommentInput {
 
 export interface AddCommentResult {
   id: string;
-  /** Path of the new file, relative to `.navbook/`. */
+  /** Path of the new file, relative to the Navbook directory. */
   path: string;
   run: RunPlanResult;
 }
@@ -245,7 +245,7 @@ export function applyComment(
 
 export interface StatusChangeResult {
   entity: EntityRecord;
-  /** Where the entity now lives, relative to `.navbook/`. */
+  /** Where the entity now lives, relative to the Navbook directory. */
   destination: string;
   run: RunPlanResult;
 }
@@ -274,7 +274,7 @@ export function closeEntity(
     resolved.duplicateOf = target.id;
   }
 
-  const plan = rewritePlan(entity, () => planClose(entity, resolved));
+  const plan = rewritePlan(ws.navDir, entity, () => planClose(entity, resolved));
   return {
     entity,
     destination: destination(entity, "closed"),
@@ -295,7 +295,7 @@ export function reopenEntity(
     wsFail("precondition", `#${entity.id} is merged; a merged pull request cannot be reopened`);
   }
 
-  const plan = rewritePlan(entity, () => planReopen(entity));
+  const plan = rewritePlan(ws.navDir, entity, () => planReopen(entity));
   return {
     entity,
     destination: destination(entity, "open"),
@@ -307,7 +307,7 @@ export function reopenEntity(
  * Build a plan that rewrites an entity file, turning a malformed-frontmatter
  * failure into an operational error that names the file and the way out.
  */
-export function rewritePlan(entity: EntityRecord, build: () => Plan): Plan {
+export function rewritePlan(navDir: string, entity: EntityRecord, build: () => Plan): Plan {
   try {
     return build();
   } catch (error) {
@@ -315,7 +315,7 @@ export function rewritePlan(entity: EntityRecord, build: () => Plan): Plan {
     // A link operation rewrites its neighbours too, and it is that file the
     // user has to fix — not necessarily the one they named.
     const path = error instanceof LinkRewriteError ? error.path : entity.filePath;
-    wsFail("frontmatter", `${NAVBOOK_ROOT}/${path}: ${error.message}`, [
+    wsFail("frontmatter", `${navDir}/${path}: ${error.message}`, [
       "fix the file by hand, or run 'nav doctor' to see what is wrong",
     ]);
   }
@@ -370,13 +370,13 @@ export function planEntityDelete(
   // issue file. A link that named it was already a fault, and once the target
   // is gone it is a D8 warning the delete subject itself accounts for.
   const links = kind === "issue" ? planDeleteLinks(repo, entity, opts.recursive === true) : null;
-  const plan = rewritePlan(entity, () =>
+  const plan = rewritePlan(ws.navDir, entity, () =>
     planDelete(entity, {
       alsoRemove: links?.alsoRemoved ?? [],
       repairs: links?.repairs ?? [],
     }),
   );
-  if (opts.commit) assertNoUnrelatedStaged(ws, planPaths(plan).map(repoPath));
+  if (opts.commit) assertNoUnrelatedStaged(ws, repoPaths(ws.navDir, planPaths(plan)));
   return {
     entity,
     alsoRemoved: links?.alsoRemoved ?? [],
@@ -428,7 +428,7 @@ function planDeleteLinks(
  */
 export function uncommittedUnder(ws: WsCtx, deletion: EntityDeletePlan): string[] {
   const roots = [deletion.entity, ...deletion.alsoRemoved].map((target) =>
-    repoPath(target.dirPath),
+    repoPath(ws.navDir, target.dirPath),
   );
   return uncommittedPaths(ws.repoRoot, roots);
 }

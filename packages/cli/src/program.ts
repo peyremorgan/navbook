@@ -88,7 +88,7 @@ export function buildProgram(getCtx: () => Ctx): Command {
 
   program
     .command("init")
-    .description("create the .navbook/ skeleton at the repository root")
+    .description("create the Navbook skeleton at the repository root")
     .option("--commit", commitHelp())
     .action((opts) => cmdInit(getCtx(), opts));
 

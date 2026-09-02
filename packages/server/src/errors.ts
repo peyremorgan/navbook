@@ -14,6 +14,7 @@ import { GraphQLError } from "graphql";
 const CODES: Record<WorkspaceErrorCode, string> = {
   "not-a-git-repo": "NOT_A_GIT_REPO",
   "not-a-navbook-repo": "NOT_A_NAVBOOK_REPO",
+  "ambiguous-root": "AMBIGUOUS_ROOT",
   "already-exists": "ALREADY_EXISTS",
   "prefix-too-short": "PREFIX_TOO_SHORT",
   "not-found": "NOT_FOUND",

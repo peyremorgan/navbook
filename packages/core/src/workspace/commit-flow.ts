@@ -12,7 +12,7 @@ import { planPaths } from "../core/ops.ts";
 import { commit, composeMessage, stagedPaths } from "../git/index-ops.ts";
 import type { WsCtx } from "./ctx.ts";
 import { wsFail } from "./errors.ts";
-import { applyOps, repoPath } from "./workspace.ts";
+import { applyOps, repoPaths } from "./workspace.ts";
 
 /** True when `path` is `allowed` or lives underneath it. */
 function isWithin(path: string, allowed: string): boolean {
@@ -51,7 +51,7 @@ export interface RunPlanResult {
 
 /** Apply a plan and, with `--commit`, wrap it in its `docs` commit. */
 export function runPlan(ws: WsCtx, plan: Plan, opts: RunPlanOptions): RunPlanResult {
-  const allowed = planPaths(plan).map(repoPath);
+  const allowed = repoPaths(ws.navDir, planPaths(plan));
   if (opts.commit) assertNoUnrelatedStaged(ws, allowed);
 
   const { touched } = applyOps(ws, plan.ops);

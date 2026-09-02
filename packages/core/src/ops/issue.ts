@@ -13,7 +13,7 @@ import {
   assertNoUnrelatedStaged,
   loadRepo,
   type RunPlanResult,
-  repoPath,
+  repoPaths,
   resolveEntity,
   runPlan,
   type WsCtx,
@@ -53,7 +53,7 @@ export function openIssue(ws: WsCtx, input: OpenInput, opts: CommitOptions): Ope
       : // Through rewritePlan, so a parent whose own link keys cannot be read
         // is reported the way `nav issue link` reports it: naming the file,
         // and what to do about it.
-        rewritePlan(parent, () => ({
+        rewritePlan(ws.navDir, parent, () => ({
           ...plan,
           ops: [...plan.ops, ...linkRepairOps([{ entity: parent, edit: { addSubtasks: [id] } }])],
           trailers: [...plan.trailers, { key: "Refs", id: parent.id }],
@@ -140,14 +140,14 @@ export function planIssueLink(
   const previousParent = parentOf(repo, child);
   const staleListers = listersOf(repo, child.id).filter((entity) => entity.id !== parent.id);
 
-  const plan = rewritePlan(child, () => planLink(child, parent, staleListers));
+  const plan = rewritePlan(ws.navDir, child, () => planLink(child, parent, staleListers));
   // Nothing to write is the only honest test of "already linked": every file
   // involved says what it should, including any third issue that might have
   // gone on claiming the subtask.
   if (plan.ops.length === 0) {
     wsFail("precondition", `#${child.id} is already a subtask of #${parent.id}`);
   }
-  if (opts.commit) assertNoUnrelatedStaged(ws, planPaths(plan).map(repoPath));
+  if (opts.commit) assertNoUnrelatedStaged(ws, repoPaths(ws.navDir, planPaths(plan)));
 
   return {
     child,
@@ -201,7 +201,7 @@ export function unlinkIssue(ws: WsCtx, ref: string, opts: CommitOptions): IssueU
     wsFail("precondition", `#${child.id} is not a subtask of any issue`);
   }
 
-  const plan = rewritePlan(child, () => planUnlink(child, listers));
+  const plan = rewritePlan(ws.navDir, child, () => planUnlink(child, listers));
   return {
     child,
     ...(parentId !== null ? { parentId } : {}),

@@ -55,6 +55,13 @@ Every option has a flag and an environment variable. Flags win.
 become; a mutation always fetches first. There is no way to turn
 authentication off: every operation, read or write, needs a valid token.
 
+The server also honors `NAV_ROOT`, the variable that names the Navbook
+directory when a repository does not use `.navbook/` (see the
+[main README](../../README.md#naming-the-directory-something-else)). It has no
+flag, because it is not a property of the server: it describes the repository,
+and the same value applies to `nav` run in the same clone. A clone whose
+directory carries a `navbook.json` marker needs nothing set at all.
+
 The GraphiQL explorer is served by default, and its page is static HTML that
 anyone who can reach the port can load — a person pastes their own
 `Authorization` header into it to run anything. No operation is answered

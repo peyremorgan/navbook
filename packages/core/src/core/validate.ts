@@ -60,7 +60,7 @@ export type Level = "error" | "warning";
 export interface Diagnostic {
   check: Check;
   level: Level;
-  /** Path relative to `.navbook/`, or "" for repository-wide findings. */
+  /** Path relative to the Navbook directory, or "" for repository-wide findings. */
   path: string;
   message: string;
   /** Mechanical repair offered by `doctor --fix`. */

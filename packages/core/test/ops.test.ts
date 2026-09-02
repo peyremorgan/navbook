@@ -22,7 +22,7 @@ import {
   RevisionUnchangedError,
   rewriteLinks,
 } from "../src/core/ops.ts";
-import { type EntityRecord, type NavTree, parseTree } from "../src/core/tree.ts";
+import { type EntityRecord, NAV_MARKER, type NavTree, parseTree } from "../src/core/tree.ts";
 
 const SHA_A = "4f2c9d1e8a7b3c5d9e0f1a2b3c4d5e6f7a8b9c0d";
 const SHA_B = "91d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0";
@@ -69,17 +69,34 @@ describe("docsSubject", () => {
 });
 
 describe("planInit", () => {
-  it("creates every status directory with a .gitkeep", () => {
+  it("creates the marker and every status directory with a .gitkeep", () => {
     const plan = planInit();
     assert.deepEqual(plan.ops.map((op) => (op.op === "write" ? op.path : "")).sort(), [
       "issues/closed/.gitkeep",
       "issues/open/.gitkeep",
+      "navbook.json",
       "prs/closed/.gitkeep",
       "prs/merged/.gitkeep",
       "prs/open/.gitkeep",
     ]);
     assert.equal(plan.message, "docs: initialize navbook");
     assert.deepEqual(plan.trailers, []);
+  });
+
+  it("writes a marker that is valid, versioned JSON", () => {
+    const marker = planInit().ops.find((op) => op.op === "write" && op.path === NAV_MARKER);
+    assert.ok(marker && marker.op === "write");
+    assert.deepEqual(JSON.parse(marker.content), { version: 1 });
+    // Trailing newline: the file is committed, and a hand edit should not show
+    // up as a "\ No newline at end of file" diff.
+    assert.ok(marker.content.endsWith("\n"));
+  });
+
+  it("plans paths relative to the Navbook directory, never naming it", () => {
+    // This is what lets one plan serve a repository whatever its root is called.
+    for (const op of planInit().ops) {
+      if (op.op === "write") assert.ok(!op.path.includes(".navbook"), op.path);
+    }
   });
 });
 
