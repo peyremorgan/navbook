@@ -51,8 +51,9 @@ other kind MUST fail with a pointer to the right noun (e.g.
 
 ### Setup
 
-- `nav init` — create the `.navbook/` skeleton (`issues/{open,closed}`,
-  `prs/{open,merged,closed}`, with `.gitkeep` files so the empty tree commits).
+- `nav init` — create the Navbook skeleton (`issues/{open,closed}`,
+  `prs/{open,merged,closed}`, with `.gitkeep` files so the empty tree commits),
+  and the `navbook.json` marker that identifies the directory (02 §2.10).
 - `nav install [--alias[=NAME]] [--hooks] [--completions[=SHELL]] [-y]` — set
   up environment integrations:
   - `--alias[=NAME]` — run `git config --global alias.<NAME> '!nav'`

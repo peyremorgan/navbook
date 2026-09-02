@@ -9,6 +9,7 @@ tolerate (preserve, never delete or reorder) anything they do not understand.
 
 ```
 .navbook/
+├── navbook.json
 ├── issues/
 │   ├── open/
 │   │   └── bqlybac0-login-timeout/
@@ -29,7 +30,17 @@ tolerate (preserve, never delete or reorder) anything they do not understand.
     └── closed/
 ```
 
-- The root directory MUST be named `.navbook` and sit at the repository root.
+- The root directory MUST sit at the repository root. Its name defaults to
+  `.navbook`; a repository MAY use another name, and one that does MUST carry a
+  `navbook.json` **marker** (§2.10) at the top of the directory so the directory
+  can be located.
+- Tools MUST locate the root directory by looking for `.navbook/` first, and,
+  failing that, for a directory carrying the marker. Finding more than one
+  candidate MUST be reported as an error rather than resolved by guessing; a
+  tool MAY offer its own way to name the directory explicitly, and such a
+  mechanism MUST take precedence over this search.
+- All paths a tool reports are relative to the repository root, and therefore
+  begin with the directory's actual name rather than with `.navbook/`.
 - `issues/` MUST contain only the subdirectories `open/` and `closed/`.
 - `prs/` MUST contain only the subdirectories `open/`, `merged/`, and `closed/`.
 - Status subdirectories contain zero or more **entity directories** and nothing
@@ -291,6 +302,18 @@ branch name in `source` is intent; the SHAs are truth.
   (the target may live on an unfetched branch).
 
 ## 2.10 Reserved names
+
+`navbook.json`, at the top of the root directory, is the **marker**: its
+presence is what identifies the directory that contains it as a Navbook root
+(§2.1). It MUST be a JSON object. This revision defines one key, `version`,
+whose value MUST be the integer `1`; tools MUST ignore keys they do not
+recognize, and MUST NOT reject a marker for carrying them.
+
+A tool MUST NOT require the marker in order to read a `.navbook/` directory: a
+repository using the default name and predating this revision has none, and
+remains conforming. A tool that creates a root directory MUST write a marker
+into it, so that a repository which later renames the directory stays
+locatable.
 
 Future revisions of this spec may define: `.navbook/config.*` (repository-level
 configuration), `.navbook/sync/` (forge-sync state), and additional files
