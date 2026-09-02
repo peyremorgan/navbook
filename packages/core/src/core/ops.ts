@@ -42,7 +42,7 @@ export interface Plan {
 }
 
 /**
- * Paths (relative to `.navbook/`) an operation may legitimately touch.
+ * Paths (relative to the Navbook directory) an operation may legitimately touch.
  *
  * A directory stands for everything beneath it: the `--commit` guard treats a
  * staged path as related when it is one of these or lives under one.

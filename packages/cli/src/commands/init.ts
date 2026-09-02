@@ -6,7 +6,7 @@ import { commitReport, initWorkspace, mintIds } from "@navbook/core";
 import type { Ctx } from "../context.ts";
 import type { GlobalFlags } from "./entity.ts";
 
-/** Create the `.navbook/` skeleton. */
+/** Create the Navbook skeleton. */
 export function cmdInit(ctx: Ctx, opts: GlobalFlags): void {
   const result = initWorkspace(ctx, { commit: opts.commit });
   ctx.stdout.write(`Created ${ctx.navDir}/\n`);

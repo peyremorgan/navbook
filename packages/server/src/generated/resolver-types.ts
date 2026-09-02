@@ -56,7 +56,7 @@ export type CloseIssueInput = {
 export type CloseIssuePayload = {
   __typename?: 'CloseIssuePayload';
   commit: CommitInfo;
-  /** Where it now lives, relative to `.navbook/`. */
+  /** Where it now lives, relative to the Navbook directory. */
   destination: Scalars['String']['output'];
   issue: Issue;
 };
@@ -98,7 +98,7 @@ export type Diagnostic = {
   fixable: Scalars['Boolean']['output'];
   level: DiagnosticLevel;
   message: Scalars['String']['output'];
-  /** Path relative to `.navbook/`, or empty for a repository-wide finding. */
+  /** Path relative to the Navbook directory, or empty for a repository-wide finding. */
   path: Scalars['String']['output'];
 };
 
@@ -113,7 +113,7 @@ export type DoctorReport = {
 
 /** What issues and pull requests have in common (spec 02 §2.5, §2.7). */
 export type Entity = {
-  /** True when the entity lives under `.navbook/archive/` (spec 03 §3.6). */
+  /** True when the entity lives under the Navbook directory's `archive/` (spec 03 §3.6). */
   archived: Scalars['Boolean']['output'];
   /** The `assignee` key, which the format allows to be a scalar or a list. */
   assignees: Array<Scalars['String']['output']>;
@@ -127,7 +127,12 @@ export type Entity = {
   kind: Kind;
   labels: Array<Scalars['String']['output']>;
   milestone?: Maybe<Scalars['String']['output']>;
-  /** Path from the repository root, e.g. `.navbook/issues/open/ab12cd34-slug`. */
+  /**
+   * Path from the repository root, e.g. `.navbook/issues/open/ab12cd34-slug`.
+   *
+   * The first segment is the repository's Navbook directory, which defaults to
+   * `.navbook` but is not always named that (spec 02 §2.1).
+   */
   path: Scalars['String']['output'];
   slug: Scalars['String']['output'];
   status: Status;

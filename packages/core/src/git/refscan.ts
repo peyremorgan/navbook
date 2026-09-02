@@ -1,5 +1,5 @@
 /**
- * Reading `.navbook/` out of branches that are not checked out.
+ * Reading the Navbook directory out of branches that are not checked out.
  *
  * A pull request's files live on the branch it proposes to merge (spec 03
  * §3.5), so listing open PRs means enumerating refs, not walking the working
@@ -63,7 +63,7 @@ export interface BlobRequest {
  * Read many blobs in one `git cat-file --batch` process.
  *
  * Results are keyed `<ref>:<path>`; missing objects are simply absent, which is
- * the normal case for a branch that has no `.navbook/` at all.
+ * the normal case for a branch that has no Navbook directory at all.
  */
 export function catBlobs(cwd: string, requests: readonly BlobRequest[]): Map<string, string> {
   const out = new Map<string, string>();

@@ -7,7 +7,7 @@ import { planInit } from "../core/ops.ts";
 import { type RunPlanResult, runPlan, scanAllIds, type WsCtx, wsFail } from "../workspace/index.ts";
 import type { CommitOptions } from "./entity.ts";
 
-/** Create the `.navbook/` skeleton. */
+/** Create the Navbook skeleton. */
 export function initWorkspace(ws: WsCtx, opts: CommitOptions): RunPlanResult {
   if (existsSync(ws.navRoot)) {
     wsFail("already-exists", `${ws.navDir}/ already exists at the repository root`);

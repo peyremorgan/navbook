@@ -33,7 +33,7 @@ export interface ReadTreeOptions {
   includeComments?: boolean;
 }
 
-/** Read `.navbook/` into a flat path→content map. */
+/** Read the Navbook directory into a flat path→content map. */
 export function readNavTree(navRoot: string, opts: ReadTreeOptions = {}): NavTree {
   const includeComments = opts.includeComments !== false;
   const files = new Map<string, string>();
@@ -79,7 +79,7 @@ export function loadRepoForQuery(ws: WsCtx, query: Query): Repo {
   return loadRepo(ws, { includeComments: needsComments(query) });
 }
 
-/** Fail with a helpful message when the repository has no `.navbook/` yet. */
+/** Fail with a helpful message when the repository has no Navbook directory yet. */
 export function requireNavbook(ws: WsCtx): void {
   if (!ws.hasNavbook) {
     wsFail(
@@ -95,7 +95,7 @@ export function repoPath(navDir: string, navRelative: string): string {
   return posix.join(navDir, navRelative);
 }
 
-/** Absolute filesystem path for a path relative to `.navbook/`. */
+/** Absolute filesystem path for a path relative to the Navbook directory. */
 export function absPath(ws: WsCtx, navRelative: string): string {
   return join(ws.navRoot, ...navRelative.split("/"));
 }
@@ -160,7 +160,7 @@ export function applyOps(ws: WsCtx, ops: readonly FileOp[]): ApplyResult {
 
 /**
  * Remove directories left empty by a move or a removal, up to (but never
- * including) the `.navbook/` root. Git does not track empty directories, so
+ * including) the Navbook root. Git does not track empty directories, so
  * leaving them behind would make the working tree disagree with a fresh clone.
  * The status directories survive because each holds a `.gitkeep`.
  */

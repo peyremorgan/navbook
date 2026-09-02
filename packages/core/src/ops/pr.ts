@@ -308,7 +308,7 @@ export interface MergeResult {
   entity: EntityRecord;
   /** The merge commit, or null when the branch fast-forwarded. */
   mergeSha: string | null;
-  /** Where the pull request now lives, relative to `.navbook/`. */
+  /** Where the pull request now lives, relative to the Navbook directory. */
   dirPath: string;
 }
 

@@ -128,7 +128,7 @@ export interface OpenInput {
 
 export interface OpenEntityResult {
   id: string;
-  /** The new directory, relative to `.navbook/`. */
+  /** The new directory, relative to the Navbook directory. */
   dirPath: string;
   run: RunPlanResult;
 }
@@ -222,7 +222,7 @@ export interface CommentInput {
 
 export interface AddCommentResult {
   id: string;
-  /** Path of the new file, relative to `.navbook/`. */
+  /** Path of the new file, relative to the Navbook directory. */
   path: string;
   run: RunPlanResult;
 }
@@ -245,7 +245,7 @@ export function applyComment(
 
 export interface StatusChangeResult {
   entity: EntityRecord;
-  /** Where the entity now lives, relative to `.navbook/`. */
+  /** Where the entity now lives, relative to the Navbook directory. */
   destination: string;
   run: RunPlanResult;
 }

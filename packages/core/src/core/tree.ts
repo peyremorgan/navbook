@@ -31,7 +31,7 @@ export const PR_STATUSES: readonly Status[] = ["open", "merged", "closed"];
 export interface CommentRecord {
   id: string;
   fileName: string;
-  /** Path relative to `.navbook/`. */
+  /** Path relative to the Navbook directory. */
   path: string;
   stamp: string;
   date: Date;
@@ -47,12 +47,12 @@ export interface EntityRecord {
   slug: string;
   dirName: string;
   status: Status;
-  /** True when the entity lives under `.navbook/archive/` (spec 03 §3.6). */
+  /** True when the entity lives under the Navbook directory's `archive/` (spec 03 §3.6). */
   archived: boolean;
   archiveYear?: string;
-  /** Directory path relative to `.navbook/`. */
+  /** Directory path relative to the Navbook directory. */
   dirPath: string;
-  /** Path of `issue.md` or `pr.md`, relative to `.navbook/`. */
+  /** Path of `issue.md` or `pr.md`, relative to the Navbook directory. */
   filePath: string;
   parsed: ParsedFile;
   fm: Record<string, unknown>;
