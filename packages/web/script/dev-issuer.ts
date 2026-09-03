@@ -237,7 +237,10 @@ export async function startDevIssuer(options: DevIssuerOptions = {}): Promise<De
       return;
     }
     if (pkceOf(form.get("code_verifier") ?? "") !== record.codeChallenge) {
-      json(response, 400, { error: "invalid_grant", error_description: "PKCE verification failed" });
+      json(response, 400, {
+        error: "invalid_grant",
+        error_description: "PKCE verification failed",
+      });
       return;
     }
     json(
@@ -255,7 +258,9 @@ export async function startDevIssuer(options: DevIssuerOptions = {}): Promise<De
     );
   }
 
-  await new Promise<void>((resolve) => server.listen(options.port ?? DEFAULT_PORT, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) =>
+    server.listen(options.port ?? DEFAULT_PORT, "127.0.0.1", resolve),
+  );
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : (options.port ?? 0);
   issuer = `http://127.0.0.1:${port}`;
@@ -390,7 +395,10 @@ function loginPage(fields: LoginFields): string {
 }
 
 /** Run as a command: `node script/dev-issuer.ts [--port N] [--audience A]`. */
-if (process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1].split("/").pop() ?? "")) {
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url.endsWith(process.argv[1].split("/").pop() ?? "")
+) {
   const argument = (name: string): string | undefined => {
     const index = process.argv.indexOf(`--${name}`);
     return index === -1 ? undefined : process.argv[index + 1];
