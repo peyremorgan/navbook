@@ -56,6 +56,33 @@ test("puts what is typed into the search box into the address bar", async ({ sig
   await expect(signedIn.getByTestId("issue-row-aaaa0002")).toBeVisible();
 });
 
+test("narrows on every word, as the server does", async ({ signedIn, stack }) => {
+  // Terms AND together. "deadline" alone matches two issues; with "thirty"
+  // only the one whose title carries both.
+  await signedIn.goto(`${stack.appUrl}/issues?q=deadline`);
+  await expect(signedIn.getByTestId("issue-row-aaaa0002")).toBeVisible();
+  await expect(signedIn.getByTestId("issue-row-aaaa0003")).toBeVisible();
+
+  await signedIn.goto(`${stack.appUrl}/issues?q=deadline+thirty`);
+  await expect(signedIn.getByTestId("issue-row-aaaa0002")).toBeVisible();
+  await expect(signedIn.getByTestId("issue-row-aaaa0003")).toHaveCount(0);
+});
+
+test("keeps a quoted phrase whole", async ({ signedIn, stack }) => {
+  // A term may contain spaces, and quoting is the only way to ask for one.
+  await signedIn.goto(`${stack.appUrl}/issues?q=%22slow+connections%22`);
+  await expect(signedIn.getByTestId("issue-row-aaaa0001")).toBeVisible();
+
+  // The same words, not adjacent, match nothing as a phrase.
+  await signedIn.goto(`${stack.appUrl}/issues?q=%22connections+slow%22`);
+  await expect(signedIn.getByText("No issues match this filter")).toBeVisible();
+
+  // And the box shows it back with its quotes, so the filter survives a
+  // round trip through the address bar unchanged.
+  await signedIn.goto(`${stack.appUrl}/issues?q=%22slow+connections%22`);
+  await expect(signedIn.getByTestId("filter-text")).toHaveValue('"slow connections"');
+});
+
 test("toggles a status chip into and out of the URL", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/issues`);
   await signedIn.getByTestId("filter-status-closed").click();

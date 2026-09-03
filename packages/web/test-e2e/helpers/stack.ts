@@ -41,7 +41,19 @@ export interface Stack {
 
 const AUDIENCE = "navbook";
 
-export async function startStack(): Promise<Stack> {
+export interface StackOptions {
+  /**
+   * How long an access token lasts.
+   *
+   * The default is an hour, as a provider's would be. A spec that wants to
+   * watch the client renew one asks for a few seconds instead — otherwise
+   * renewal is a path no test ever takes, and the first anybody would hear of
+   * it being broken is an hour into somebody's afternoon.
+   */
+  tokenLifetimeSeconds?: number;
+}
+
+export async function startStack(options: StackOptions = {}): Promise<Stack> {
   if (!existsSync(join(BUNDLE, "index.html"))) {
     throw new Error(
       `no bundle at ${BUNDLE}. Run \`pnpm --filter @navbook/web build\` before the end-to-end suite.`,
@@ -51,7 +63,14 @@ export async function startStack(): Promise<Stack> {
   const repo = createFixtureRepo();
   // localhost throughout: a token's `iss` claim is compared as a string, so
   // the issuer has to call itself what the browser and the server call it.
-  const issuer = await startDevIssuer({ port: 0, audience: AUDIENCE, hostname: "localhost" });
+  const issuer = await startDevIssuer({
+    port: 0,
+    audience: AUDIENCE,
+    hostname: "localhost",
+    ...(options.tokenLifetimeSeconds === undefined
+      ? {}
+      : { lifetimeSeconds: options.tokenLifetimeSeconds }),
+  });
 
   const server = spawn(
     process.execPath,

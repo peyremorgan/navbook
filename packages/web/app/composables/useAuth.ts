@@ -9,6 +9,7 @@
  */
 
 import type { User } from "oidc-client-ts";
+import { HOME, safeReturnPath } from "~/utils/navigation";
 
 /** Renew this many seconds before the token actually expires. */
 const SKEW_SECONDS = 30;
@@ -92,8 +93,10 @@ export function useAuth(): Auth {
 
     async completeLogin() {
       const signedIn = await manager.signinCallback();
-      const target = signedIn?.state;
-      return typeof target === "string" && target.startsWith("/") ? target : "/";
+      // `state` is the one value in this client that comes back from outside
+      // and is then used to navigate, so it is checked rather than trusted: a
+      // leading slash alone would let `//example.invalid` through.
+      return safeReturnPath(signedIn?.state, HOME);
     },
 
     async getAccessToken() {

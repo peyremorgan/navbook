@@ -14,7 +14,7 @@
  */
 
 import { test as base, type Page } from "@playwright/test";
-import { type Stack, startStack } from "./stack.ts";
+import { type Stack, type StackOptions, startStack } from "./stack.ts";
 
 export interface Fixtures {
   stack: Stack;
@@ -35,6 +35,16 @@ export async function stopStack(): Promise<void> {
   const running = await shared;
   shared = null;
   await running.stop();
+}
+
+/**
+ * A stack of one spec's own, for the things the shared one cannot show.
+ *
+ * The caller stops it. Only worth the start-up cost when a spec needs the
+ * stack configured differently — a short token lifetime, so far.
+ */
+export function ownStack(options: StackOptions): Promise<Stack> {
+  return startStack(options);
 }
 
 export const test = base.extend<Fixtures>({
