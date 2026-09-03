@@ -75,25 +75,13 @@ async function submit(): Promise<void> {
 
     <div class="grid gap-4 sm:grid-cols-2">
       <UFormField label="Labels">
-        <USelectMenu
-          v-model="labels"
-          :items="known.labels"
-          multiple
-          create-item
-          searchable
-          class="w-full"
-          data-testid="new-labels"
-        />
+        <CreatableSelect v-model="labels" :suggestions="known.labels" testid="new-labels" />
       </UFormField>
       <UFormField label="Assignees">
-        <USelectMenu
+        <CreatableSelect
           v-model="assignees"
-          :items="known.assignees"
-          multiple
-          create-item
-          searchable
-          class="w-full"
-          data-testid="new-assignees"
+          :suggestions="known.assignees"
+          testid="new-assignees"
         />
       </UFormField>
       <UFormField label="Milestone">

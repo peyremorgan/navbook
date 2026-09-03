@@ -188,16 +188,29 @@ pnpm check         # lint and type-check
 pnpm bench         # the performance budget, on its own machine
 ```
 
-The repository is a pnpm workspace of three packages. `packages/core`
+The web client has an end-to-end suite of its own, kept out of `pnpm test`
+because it needs a browser and a built bundle; its
+[README](packages/web/README.md#development) says how to run it. One command
+starts everything it takes to develop against — an identity provider, a server,
+and a throwaway repository to serve:
+
+```sh
+pnpm --filter @navbook/web dev:stack
+```
+
+The repository is a pnpm workspace of four packages. `packages/core`
 (`@navbook/core`) is the whole implementation — format logic, git plumbing,
 workspace I/O, and the operations behind each verb — and knows nothing about
 terminals. `packages/cli` (`@navbook/cli`) adds argument parsing, `$EDITOR`,
 prompts and rendering, and installs the `nav` binary. `packages/server`
-([`@navbook/server`](packages/server/README.md)) is the GraphQL API behind the
-planned web client, and runs the same operations the CLI runs
+([`@navbook/server`](packages/server/README.md)) is the GraphQL API, and runs
+the same operations the CLI runs. `packages/web`
+([`@navbook/web`](packages/web/README.md)) is the browser interface on top of
+it: a static single-page app that sends fields and lets the server compose the
+files, so nothing about the format ships to a browser
 ([spec 05 §5.2](doc/spec/05-implementation.md), [06 §6.3](doc/spec/06-future.md)).
-Development needs no build step: the library's entry point is its TypeScript
-source, and Node runs it directly.
+Development needs no build step outside the web client: a library's entry point
+is its TypeScript source, and Node runs it directly.
 
 The [conformance fixtures](doc/spec/fixtures/README.md) are golden repositories
 that any implementation must pass; they run against `$NAV_BIN`, so the same

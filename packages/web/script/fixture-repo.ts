@@ -78,7 +78,10 @@ export const IDS = {
   child: "aaaa0002",
   grandchild: "aaaa0003",
   loop: "aaaa0004",
-  plain: "aaaa0005",
+  // Deliberately unlike the others: every reference accepts an unambiguous
+  // prefix of four characters or more, and with ids that all begin `aaaa`
+  // there would be no way to exercise that.
+  plain: "cafe0005",
   closed: "aaaa0006",
   edgeCases: "aaaa0007",
   servedPr: "bbbb0001",

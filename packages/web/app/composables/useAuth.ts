@@ -38,8 +38,9 @@ function usable(user: User | null): boolean {
 }
 
 export function useAuth(): Auth {
-  const { $oidc: manager, $oidcUser: user } = useNuxtApp();
   const nuxtApp = useNuxtApp();
+  const manager = nuxtApp.$oidc;
+  const user = nuxtApp.$oidcUser;
 
   // One renewal at a time, per app instance. The refresh token is rotated on
   // use, so two renewals racing would leave one of them holding a spent one.
@@ -68,17 +69,25 @@ export function useAuth(): Auth {
     signedIn: computed(() => usable(user.value)),
 
     async login(returnTo?: string) {
+      // Read from the browser rather than `useRoute()`: this is called from the
+      // Apollo error link as well as from a component, and outside a setup
+      // context there is no route to inject.
+      const here = `${window.location.pathname}${window.location.search}`;
       // The provider hands `state` back untouched, which is how the callback
       // route knows where the person was going before it interrupted them.
-      await manager.signinRedirect({ state: returnTo ?? useRoute().fullPath });
+      await manager.signinRedirect({ state: returnTo ?? here });
     },
 
     async logout() {
-      // `removeUser` rather than `signoutRedirect`: the session belongs to the
-      // provider and signing out of it is its business, not this app's. A
-      // provider without an end-session endpoint would refuse anyway.
+      // `removeUser` rather than `signoutRedirect`: ending the session at the
+      // provider is the provider's business, and one without an end-session
+      // endpoint would refuse anyway.
       await manager.removeUser();
-      await navigateTo("/");
+      // Somewhere the route guard will not immediately bounce back out of.
+      // Every other page needs a token, so navigating to one of those would
+      // send the person straight back to the provider — which, against a
+      // provider holding a session cookie, signs them back in at once.
+      await navigateTo("/signed-out");
     },
 
     async completeLogin() {

@@ -52,6 +52,30 @@ export const test = base.extend<Fixtures>({
 export { expect } from "@playwright/test";
 
 /**
+ * The toast stack.
+ *
+ * Nuxt UI renders toasts into a labelled region rather than giving each one a
+ * role a test can name, so the region is the handle. What is asserted through
+ * it is always a `commit` — what the server recorded, and whether it landed on
+ * the remote — which is the thing this client must never quietly swallow.
+ */
+export function toasts(page: Page) {
+  return page.locator("[aria-label*=Notification]");
+}
+
+/**
+ * Pick a value from a creatable menu, inventing it if the list has never seen
+ * it. Labels, assignees and milestones are free text with no registry behind
+ * them, so inventing one is the ordinary case rather than the exception.
+ */
+export async function chooseOrCreate(page: Page, testid: string, value: string): Promise<void> {
+  await page.getByTestId(testid).click();
+  await page.getByPlaceholder("Search…").fill(value);
+  await page.getByRole("option").first().click();
+  await page.keyboard.press("Escape");
+}
+
+/**
  * Go to the app and come back holding a token.
  *
  * The redirect to the provider happens because the route middleware finds no

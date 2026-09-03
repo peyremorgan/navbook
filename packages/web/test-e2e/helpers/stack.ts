@@ -85,7 +85,7 @@ export async function startStack(): Promise<Stack> {
   const apiPort = await readyPort(server, () => errors);
   const apiUrl = `http://localhost:${apiPort}/graphql`;
 
-  const { url: appUrl, close: closeStatic } = serveBundle({
+  const { url: appUrl, close: closeStatic } = await serveBundle({
     graphqlUrl: apiUrl,
     oidc: { issuer: issuer.issuer, clientId: "navbook-web", audience: AUDIENCE },
   });
@@ -147,7 +147,7 @@ const TYPES: Record<string, string> = {
  * Unknown paths fall back to `200.html`, which is the SPA fallback `nuxi
  * generate` emits and the reason a deep link survives a reload.
  */
-function serveBundle(config: unknown): { url: string; close: () => Promise<void> } {
+async function serveBundle(config: unknown): Promise<{ url: string; close: () => Promise<void> }> {
   const root = mkdtempSync(join(tmpdir(), "navbook-bundle-"));
   cpSync(BUNDLE, root, { recursive: true });
   writeFileSync(join(root, "config.json"), `${JSON.stringify(config, null, 2)}\n`, "utf8");
@@ -174,9 +174,14 @@ function serveBundle(config: unknown): { url: string; close: () => Promise<void>
     }
   });
 
-  server.listen(0, "127.0.0.1");
+  // Awaited: `address()` reports nothing until the socket is actually bound,
+  // and a port of 0 is one the browser refuses outright.
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   const address = server.address();
-  const port = typeof address === "object" && address !== null ? address.port : 0;
+  if (typeof address !== "object" || address === null) {
+    throw new Error("the static server bound no port");
+  }
+  const port = address.port;
 
   return {
     url: `http://localhost:${port}`,

@@ -19,10 +19,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
-      # The resolver types are generated from schema.graphql and committed, so
-      # that development needs no build step. This is what keeps them honest.
-      - name: the generated resolver types must match the schema
-        run: pnpm --filter @navbook/server codegen:check
+      # Types are generated from schema.graphql and committed, so that
+      # development needs no build step — the server's resolvers and the web
+      # client's documents both. This is what keeps them honest.
+      - name: the generated types must match the schema
+        run: pnpm -r --if-present codegen:check
 
   test:
     name: test (node ${{ matrix.node }}, ${{ matrix.os }})
@@ -46,6 +47,36 @@ jobs:
           git config --global user.email "ci@example.invalid"
           git config --global init.defaultBranch main
       - run: pnpm test
+
+  web-e2e:
+    name: web end-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The suite builds a repository and a server that commits to it, so git
+      # needs to know who it is — as the other jobs do, and for the same reason.
+      - name: configure git identity
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@example.invalid"
+          git config --global init.defaultBranch main
+      - run: pnpm --filter @navbook/web exec playwright install --with-deps chromium
+      # The generated bundle is what the suite serves, because it is what gets
+      # deployed: a dev server has no SPA fallback to prove.
+      - run: pnpm --filter @navbook/web build
+      - run: pnpm --filter @navbook/web test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: packages/web/playwright-report
+          retention-days: 7
 
   build:
     name: build + pack smoke test

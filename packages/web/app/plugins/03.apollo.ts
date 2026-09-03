@@ -19,6 +19,7 @@ import { ApolloClient, from, HttpLink, InMemoryCache } from "@apollo/client/core
 import { setContext } from "@apollo/client/link/context";
 import { onError } from "@apollo/client/link/error";
 import { DefaultApolloClient } from "@vue/apollo-composable";
+import type { DocumentNode } from "graphql";
 import { describeApiError, errorHeading, isUnauthenticated } from "~/utils/errors";
 
 /**
@@ -32,6 +33,21 @@ import { describeApiError, errorHeading, isUnauthenticated } from "~/utils/error
  */
 export interface HandledContext {
   handledCodes?: readonly string[];
+}
+
+/**
+ * Whether an operation is a write.
+ *
+ * Only writes are announced. A read that fails has a natural place to say so —
+ * the space its data would have filled, which `QueryState` renders — and
+ * saying it twice is worse than saying it once: two copies of the same
+ * sentence read as two separate faults.
+ */
+function isMutation(document: DocumentNode): boolean {
+  return document.definitions.some(
+    (definition) =>
+      definition.kind === "OperationDefinition" && definition.operation === "mutation",
+  );
 }
 
 export default defineNuxtPlugin((nuxtApp) => {
@@ -58,6 +74,7 @@ export default defineNuxtPlugin((nuxtApp) => {
 
     const context = operation.getContext() as HandledContext;
     if (context.handledCodes?.includes(failure.code ?? "")) return;
+    if (!isMutation(operation.query)) return;
 
     const toast = useToast();
     toast.add({

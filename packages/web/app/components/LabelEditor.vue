@@ -58,15 +58,10 @@ function save(): void {
     </div>
 
     <template v-if="editing">
-      <USelectMenu
+      <CreatableSelect
         v-model="draft"
-        :items="props.suggestions"
-        multiple
-        create-item
-        searchable
-        size="sm"
-        class="w-full"
-        :data-testid="`input-${props.testid}`"
+        :suggestions="props.suggestions"
+        :testid="`input-${props.testid}`"
       />
       <div class="flex gap-1.5">
         <UButton

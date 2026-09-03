@@ -10,9 +10,11 @@
  */
 
 export default defineNuxtRouteMiddleware(async (to) => {
-  // The callback route is where signing in finishes; guarding it would send
-  // anyone completing a sign-in back to the provider to start another.
-  if (to.path === "/auth/callback") return;
+  // Two routes are exempt, for opposite reasons. `/auth/callback` is where
+  // signing in finishes, and guarding it would send anyone completing a
+  // sign-in back to the provider to start another. `/signed-out` is where
+  // signing out lands, and guarding it would undo the signing out.
+  if (to.path === "/auth/callback" || to.path === "/signed-out") return;
 
   const auth = useAuth();
   if (auth.signedIn.value) return;

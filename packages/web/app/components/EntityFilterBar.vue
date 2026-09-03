@@ -106,19 +106,15 @@ const menus = computed(() => [
       </UButton>
     </div>
 
-    <USelectMenu
+    <CreatableSelect
       v-for="menu in menus"
       :key="menu.key"
       :model-value="props.filter[menu.key]"
-      :items="menu.options"
-      multiple
-      create-item
-      searchable
+      :suggestions="menu.options"
       :icon="menu.icon"
       :placeholder="menu.label"
-      size="sm"
       class="min-w-36"
-      :data-testid="`filter-${menu.key}`"
+      :testid="`filter-${menu.key}`"
       @update:model-value="(value: string[]) => emit('patch', { [menu.key]: value })"
     />
 
