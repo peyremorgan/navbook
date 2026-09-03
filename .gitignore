@@ -1,4 +1,11 @@
 node_modules/
-dist/
+dist
 *.tgz
 .DS_Store
+
+# Nuxt's build artefacts and the marker its test module writes.
+.nuxt/
+.output/
+packages/web/.nuxtrc
+packages/web/test-results/
+packages/web/playwright-report/

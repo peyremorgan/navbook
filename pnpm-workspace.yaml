@@ -1,2 +1,19 @@
 packages:
   - "packages/*"
+
+# esbuild fetches its platform binary in a postinstall, and vue-demi picks the
+# Vue 2 or Vue 3 entry point in one. Both are Nuxt's build chain and neither
+# works unbuilt, so pnpm's default of ignoring dependency build scripts is
+# lifted for exactly these two.
+allowBuilds:
+  esbuild: true
+  vue-demi: true
+
+# pnpm refuses a package published within the last few days unless it is named
+# here, and checks the list again on every `--frozen-lockfile` install. These
+# two were the current release when the web client was added; the entries fall
+# away on their own the next time either is bumped to something older than the
+# window.
+minimumReleaseAgeExclude:
+  - happy-dom@20.13.2
+  - vue-router@5.3.1

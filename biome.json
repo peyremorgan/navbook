@@ -36,5 +36,21 @@
       "semicolons": "always",
       "trailingCommas": "all"
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "packages/web/app/app.vue",
+        "packages/web/app/pages/**/*.vue",
+        "packages/web/app/layouts/**/*.vue"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "useVueMultiWordComponentNames": "off"
+          }
+        }
+      }
+    }
+  ]
 }
