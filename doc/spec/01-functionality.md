@@ -163,11 +163,18 @@ merged branch. This read-only rendering is Navbook's zero-install adoption path.
 
 - **Not a forge bridge (yet).** Bidirectional GitHub/GitLab sync is a reserved
   extension ([06-future.md](06-future.md)), not part of v1.
-- **No path for non-committers (yet).** Filing an issue requires the ability to
-  create a commit somewhere (a fork suffices). Gateways for drive-by reporters
-  are reserved for later.
-- **No web UI in v1.** The format renders acceptably on forges; a dedicated
-  viewer comes later and will remain read-only relative to the format.
+- **No path for non-committers, in the format itself.** Filing an issue with
+  `nav` requires the ability to create a commit somewhere (a fork suffices).
+  The gateway that lifts that ([06 §6.2](06-future.md)) is a deployment rather
+  than a format feature: `@navbook/server` commits on a signed-in person's
+  behalf, recording them in `author:` while the machine account is the
+  committer. Somebody has to run it; nothing in the format assumes anybody has.
+- **No web UI is required to use Navbook.** The format renders acceptably on
+  forges with no plugin, and that is the property being protected. One exists
+  all the same ([06 §6.3](06-future.md)) — and it reads *and* writes, which the
+  earlier sketch of a read-only viewer did not anticipate. It changes nothing
+  here: it composes no files of its own, and every write goes through the same
+  operations `nav` runs.
 - **Not an approval enforcement system.** Navbook records reviews; branch
   protection and merge policy remain the responsibility of the forge or of team
   convention.

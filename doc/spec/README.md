@@ -18,7 +18,7 @@ Functionality first, technical details after:
 | 3 | [03-merge-and-branches.md](03-merge-and-branches.md) | **Normative.** Branch semantics, concurrent-edit scenarios, conflict resolution |
 | 4 | [04-cli.md](04-cli.md) | The `nav` CLI: commands, query syntax, hooks, completions, exit codes |
 | 5 | [05-implementation.md](05-implementation.md) | Reference implementation (TypeScript), planned Rust rewrite, conformance testing |
-| 6 | [06-future.md](06-future.md) | Reserved extension points: forge sync, non-committer gateways, the web client, signatures |
+| 6 | [06-future.md](06-future.md) | Reserved extension points: forge sync, non-committer gateways, signatures; and the web client, which has since been built |
 
 The keywords MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY are used as described in
 RFC 2119. Documents 02 and 03 are normative; the others are informative except where

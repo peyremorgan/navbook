@@ -1,9 +1,15 @@
 # 6. Future directions (reserved, non-normative)
 
-None of the following is part of v1. This chapter exists so that v1 files never
-need migration when these arrive: the format reserves the names and shapes
-below, and v1 tools already MUST preserve them untouched
+None of the following changes the v1 format. This chapter exists so that v1
+files never need migration when these arrive: the format reserves the names and
+shapes below, and v1 tools already MUST preserve them untouched
 ([02 §2.4, §2.10](02-data-model.md)).
+
+One of them has since been built. [§6.3](#63-web-client-built) stays here rather
+than moving to [05](05-implementation.md), because this is where its design was
+argued and because the argument is still the useful part: what the web client
+may and may not do is decided by the principles below, not by what happened to
+be convenient to write. It is marked as built, and reads in the present tense.
 
 ## 6.1 Forge synchronization
 
@@ -33,22 +39,37 @@ the committer), and pushes to the default branch or opens a PR with the new
 issue. The 15-year-running precedent is ikiwiki/git-annex's CGI-to-commit
 tracker.
 
-## 6.3 Web client
+One of those exists: the API server of [§6.3](#63-web-client-built) is the web
+form, and it behaves as described here — identity from a bearer token, `author:`
+the person, committer the machine account. The bot, the Action and the email
+ingester remain reserved, and the design is written once here rather than
+per-gateway because it is the same design each time.
+
+## 6.3 Web client (built)
 
 A browser interface so that filing an issue, commenting and reviewing do not
 require a terminal — the audience is everyone on a project who is not working
-from a checkout. Design principles fixed now:
+from a checkout. Two packages: `@navbook/server`, the API, and `@navbook/web`,
+the client ([05 §5.2](05-implementation.md)).
+
+The design principles were fixed before either existed, and holding to them is
+what keeps the format from acquiring a second implementation by accident:
 
 - **A server, not a browser build.** The web client is a thin UI over an API
   server (GraphQL) that imports `@navbook/core`
   ([05 §5.2](05-implementation.md)) and runs the same operations the CLI runs.
   Nothing about the format is reimplemented for the web, and no Navbook logic
-  ships to the browser.
+  ships to the browser: the client sends fields, and the server composes the
+  files. What reaches the browser is the canonical JSON projection of
+  [04 §4.2](04-cli.md), so a reader of the API and a reader of `nav --json`
+  are looking at the same thing.
 - **The server owns a clone, not a database.** It works against its own
   server-side checkout, synchronised with a central origin — pull before an
   operation, push after it. Git remains the single source of truth and the
   only durable state; the clone is a working copy that can be thrown away and
   made again. Nothing index-like is introduced ([§6.6](#66-explicitly-rejected-directions)).
+  The client inherits that: with no index there is no cursor, so a listing is
+  the whole matching set and paging is the browser's own affair.
 - **Read *and* write.** This is the substantive change from a viewer: the
   server commits on a signed-in person's behalf, which is precisely the
   non-committer gateway of [§6.2](#62-non-committer-gateway) — `author:` records
@@ -58,7 +79,25 @@ from a checkout. Design principles fixed now:
   no privileged path.
 - **Conflicts surface, they are not resolved.** A push the server cannot
   fast-forward is reported to the person who made the change, not merged
-  heuristically on their behalf.
+  heuristically on their behalf. So is a change that was committed to the
+  clone but not pushed: it exists nowhere anyone else can pull from, and a
+  client that reported it as saved would be lying about where the work went.
+
+Two consequences worth recording, because both are refusals rather than
+omissions.
+
+**The checkout-centric verbs are not exposed.** Opening, updating and merging a
+pull request, deleting an entity, `init`, and `doctor --fix` need a branch and a
+working tree rather than a request, and a gateway performing them would be
+making decisions on somebody's behalf that they could not see. `doctor` is
+read-only over the API.
+
+**A pull request can be visible and still not commentable.** Its files live on
+the branch it proposes to merge ([03 §3.5](03-merge-and-branches.md)), so a
+cross-ref scan finds ones the serving checkout does not hold. Writing a comment
+beside a `pr.md` that is not there would produce the stranded comment of
+[03 §3.3.1](03-merge-and-branches.md), so the server refuses and names the
+branch that would have to be served instead.
 
 ## 6.4 Cryptographic attestation
 

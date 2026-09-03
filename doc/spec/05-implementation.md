@@ -5,8 +5,8 @@
 Two implementations are planned, in sequence:
 
 1. **TypeScript reference implementation** (now). It defines behavior wherever
-   the prose spec is ambiguous, ultimately survives as the implementation
-   behind the web client's server, and serves as the cross-check oracle for:
+   the prose spec is ambiguous, survives as the implementation behind the web
+   client's server, and serves as the cross-check oracle for:
 2. **Rust CLI rewrite** (when the format and CLI surface have stabilized). At
    that point the Rust binary becomes the recommended installation for CLI use,
    and the TypeScript codebase refocuses on the web/GUI layer. The two are kept
@@ -26,6 +26,9 @@ is mature and widely installed.
   `@navbook/server`, the GraphQL API of [06 §6.3](06-future.md), which installs
   `nav-server`. All ship a compiled JS `dist/` so installed code does not depend
   on type-stripping behavior; `npx @navbook/cli` is the zero-install trial path.
+  A fourth, `@navbook/web`, is the browser client of [06 §6.3](06-future.md) and
+  is not published: it is a static bundle to be served, not a dependency to be
+  installed, and it is the one package here that needs a build step.
 - **Dependencies:** deliberately minimal. A YAML parser (`yaml`) in the core
   and an argument parser in the CLI; no framework. Every dependency added to
   the core is a liability for the Rust rewrite (behavior to reproduce) and MUST
@@ -42,8 +45,7 @@ is mature and widely installed.
 - **Why the split is load-bearing:** `core/` is the layer the Rust rewrite must
   reproduce function-for-function. The library as a whole is what lets a second
   front end exist without reimplementing anything — the API server behind the
-  planned web client ([06 §6.3](06-future.md)) runs the same operations the CLI
-  does. Two rules keep that true: no layer below `cli/` writes to a stream or
+  web client ([06 §6.3](06-future.md)) runs the same operations the CLI does. Two rules keep that true: no layer below `cli/` writes to a stream or
   knows what an exit code is, and an operation that must stop and ask is split
   into a plan half and an execute half rather than calling back into its caller.
   A front end that cannot stop and ask answers the question in its request
