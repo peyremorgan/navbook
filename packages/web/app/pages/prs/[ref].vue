@@ -42,6 +42,7 @@ const replyToAuthor = computed(
 
 /** The branch to serve, once the server has told us it is not this one. */
 const refusedOn = ref<string | null>(null);
+const reviewForm = useTemplateRef<{ clear: () => void }>("reviewForm");
 
 // The refusal is handled here, beside the form, rather than in the shared toast.
 const { mutate, loading: saving } = useMutation(ADD_COMMENT, {
@@ -72,6 +73,8 @@ async function submit(input: {
     const payload = written?.data?.addComment;
     if (payload) {
       commitToast.report(payload.commit, input.verdict === null ? "Commented" : "Review recorded");
+      // Only on success: a refusal must leave the review where it was written.
+      reviewForm.value?.clear();
       replyTo.value = null;
       refusedOn.value = null;
     }
@@ -154,6 +157,7 @@ const branchHint = computed(() => refusedOn.value);
             <p v-else class="text-sm text-muted">No comments yet.</p>
 
             <ReviewForm
+              ref="reviewForm"
               :revisions="pr.revisions"
               :reply-to="replyTo"
               :reply-to-author="replyToAuthor"

@@ -73,6 +73,10 @@ function submit(): void {
   });
 }
 
+/**
+ * Emptied by whoever owns the mutation, once it has actually landed — never on
+ * submit, because a write that failed must not take what was written with it.
+ */
 defineExpose({ clear: () => (body.value = "") });
 </script>
 

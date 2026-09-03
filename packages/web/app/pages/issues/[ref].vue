@@ -101,10 +101,14 @@ const replyTo = ref<string | null>(null);
 const replyToAuthor = computed(
   () => issue.value?.comments.find((item) => item.id === replyTo.value)?.author ?? null,
 );
+const commentForm = useTemplateRef<{ clear: () => void }>("commentForm");
 
 async function addComment(body: string): Promise<void> {
   if (issue.value === null) return;
-  await mutations.addComment(issue.value.id, body, replyTo.value);
+  const written = await mutations.addComment(issue.value.id, body, replyTo.value);
+  // Only now: a failed write must leave what was written where it was typed.
+  if (written === null) return;
+  commentForm.value?.clear();
   replyTo.value = null;
 }
 
@@ -122,8 +126,9 @@ async function link(child: string, allowReparent: boolean): Promise<void> {
     linking.value = false;
     reparent.value = null;
     childRef.value = "";
-    // The child's own page is a different cache entry, and its `parent` just
-    // changed; the tree here comes back with this issue's own refetch.
+    // The payload carries both ends, so the cache already holds them — but a
+    // reparent also changes a *third* issue, the one the subtask came from,
+    // and no payload names it. Asking again is the only way to be right.
     await refetch();
   } catch (failure) {
     const conflict = reparentConflict(describeApiError(failure));
@@ -142,6 +147,8 @@ async function link(child: string, allowReparent: boolean): Promise<void> {
 
 async function unlink(child: string): Promise<void> {
   await mutations.unlinkIssue(child);
+  // `unlinkIssue` returns the child alone, so this issue's own tree — the
+  // thing on screen — is only correct once it has been read again.
   await refetch();
 }
 </script>
@@ -167,6 +174,7 @@ async function unlink(child: string): Promise<void> {
           :value="issue.title"
           label="title"
           testid="title"
+          required
           :saving="mutations.busy.value"
           @save="(title: string) => save({ title })"
         >
@@ -210,6 +218,7 @@ async function unlink(child: string): Promise<void> {
             label="description"
             testid="body"
             multiline
+            required
             :saving="mutations.busy.value"
             @save="(body: string) => save({ body })"
           >
@@ -254,6 +263,7 @@ async function unlink(child: string): Promise<void> {
             <p v-else class="text-sm text-muted">No comments yet.</p>
 
             <CommentForm
+              ref="commentForm"
               :reply-to="replyTo"
               :reply-to-author="replyToAuthor"
               :saving="mutations.busy.value"

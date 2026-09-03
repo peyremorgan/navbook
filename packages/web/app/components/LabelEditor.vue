@@ -33,6 +33,12 @@ function open(): void {
   editing.value = true;
 }
 
+// A milestone is one string on disk, so choosing a second replaces the first
+// rather than being quietly dropped when the patch is built.
+watch(draft, (next) => {
+  if (props.single === true && next.length > 1) draft.value = next.slice(-1);
+});
+
 function save(): void {
   emit("save", draft.value);
   editing.value = false;
@@ -75,7 +81,7 @@ function save(): void {
         <UButton size="xs" color="neutral" variant="ghost" @click="editing = false">Cancel</UButton>
       </div>
       <p v-if="props.single" class="text-xs text-muted">
-        Only the first is kept; the field holds one value.
+        One value: choosing another replaces it.
       </p>
     </template>
 

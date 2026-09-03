@@ -17,10 +17,15 @@ function submit(): void {
   const text = body.value.trim();
   if (text === "") return;
   emit("submit", text);
-  body.value = "";
 }
 
-/** Cleared from outside once the mutation has landed. */
+/**
+ * Emptied by whoever owns the mutation, once it has actually landed.
+ *
+ * Clearing on submit would be a data loss the moment a write fails — a push
+ * the server could not land, a comment on a branch it does not serve — and
+ * what was lost is something a person wrote.
+ */
 defineExpose({ clear: () => (body.value = "") });
 </script>
 

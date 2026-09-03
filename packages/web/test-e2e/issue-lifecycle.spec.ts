@@ -82,15 +82,61 @@ test("sends nothing at all when an edit changed nothing", async ({ signedIn, sta
   await expect(toasts(signedIn)).not.toContainText("That will not do");
 });
 
-test("refuses to empty a title, before asking the server", async ({ signedIn, stack }) => {
+test("refuses to empty a title, and keeps the editor open to say so", async ({
+  signedIn,
+  stack,
+}) => {
   await fileIssue(signedIn, stack.appUrl, "Has a title", "And a description.");
 
   await signedIn.getByTestId("edit-title").click();
   await signedIn.getByTestId("input-title").fill("   ");
   await signedIn.getByTestId("save-title").click();
 
-  await expect(signedIn.getByText("a title is required")).toBeVisible();
-  await expect(signedIn.getByTestId("issue-title")).toHaveText("Has a title");
+  // Beside the field, not in a toast, and with the field still there: a
+  // message about words that have already been discarded is no use.
+  await expect(signedIn.getByTestId("error-title")).toContainText("a title is required");
+  await expect(signedIn.getByTestId("input-title")).toBeVisible();
+
+  // And it is still recoverable from there.
+  await signedIn.getByTestId("input-title").fill("Still has a title");
+  await signedIn.getByTestId("save-title").click();
+  await expect(signedIn.getByTestId("issue-title")).toHaveText("Still has a title");
+});
+
+test("keeps a comment that could not be written", async ({ signedIn, stack }) => {
+  // A pull request on a branch this server does not serve refuses the comment,
+  // and what was typed is what a person wrote: it must survive the refusal.
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0002`);
+  await signedIn.getByTestId("review-body").fill("Words worth keeping.");
+  await signedIn.getByTestId("review-submit").click();
+
+  await expect(signedIn.getByTestId("unserved-branch")).toBeVisible();
+  await expect(signedIn.getByTestId("review-body")).toHaveValue("Words worth keeping.");
+});
+
+test("empties the box once a comment has landed", async ({ signedIn, stack }) => {
+  await fileIssue(signedIn, stack.appUrl, "Will be commented on", "Once.");
+
+  await signedIn.getByTestId("comment-body").fill("Said once.");
+  await signedIn.getByTestId("comment-submit").click();
+  await expect(signedIn.getByTestId("comment-thread")).toContainText("Said once.");
+
+  // Otherwise the obvious next click posts it again.
+  await expect(signedIn.getByTestId("comment-body")).toHaveValue("");
+});
+
+test("replaces a milestone rather than collecting them", async ({ signedIn, stack }) => {
+  await fileIssue(signedIn, stack.appUrl, "Needs a milestone", "One of them.");
+
+  await signedIn.getByTestId("edit-milestone").click();
+  await chooseOrCreate(signedIn, "input-milestone", "2.0");
+  await chooseOrCreate(signedIn, "input-milestone", "3.0");
+  await signedIn.getByTestId("save-milestone").click();
+
+  // The field holds one string on disk, so the second choice replaces the
+  // first rather than being silently dropped when the patch is built.
+  await expect(signedIn.getByTestId("sidebar-milestone")).toContainText("3.0");
+  await expect(signedIn.getByTestId("sidebar-milestone")).not.toContainText("2.0");
 });
 
 test("adds labels, and the listing can then be filtered by one", async ({ signedIn, stack }) => {

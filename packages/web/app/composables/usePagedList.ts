@@ -22,11 +22,18 @@ export function usePagedList<T>(
   items: Ref<readonly T[]> | ComputedRef<readonly T[]>,
 ): PagedList<T> {
   const limit = ref(PAGE);
-  // A new filter is a new listing: keeping the old limit would open it already
-  // scrolled, which is never what was meant.
-  watch(items, () => {
-    limit.value = PAGE;
-  });
+  // Reset on the filter, not on the data. A listing is refetched whenever the
+  // page is revisited — `cache-and-network` — and the array that comes back is
+  // a new one every time; resetting on that would undo "show more" behind the
+  // reader's back. The filter lives in the query string, so that is the thing
+  // that means "a different listing".
+  const route = useRoute();
+  watch(
+    () => route.fullPath,
+    () => {
+      limit.value = PAGE;
+    },
+  );
 
   return {
     shown: computed(() => items.value.slice(0, limit.value) as T[]),

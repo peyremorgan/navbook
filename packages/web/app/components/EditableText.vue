@@ -12,12 +12,15 @@ const props = defineProps<{
   multiline?: boolean;
   saving?: boolean;
   testid?: string;
+  /** The format needs a title and the server refuses an empty body. */
+  required?: boolean;
 }>();
 
 const emit = defineEmits<{ save: [string] }>();
 
 const editing = ref(false);
 const draft = ref(props.value);
+const problem = ref<string | null>(null);
 
 watch(
   () => props.value,
@@ -28,15 +31,25 @@ watch(
 
 function open(): void {
   draft.value = props.value;
+  problem.value = null;
   editing.value = true;
 }
 
 function cancel(): void {
   draft.value = props.value;
+  problem.value = null;
   editing.value = false;
 }
 
 function save(): void {
+  // Said here rather than in a toast, and the editor stays open: a message
+  // that appears while the words it is about have already been discarded is
+  // not much of a message.
+  if (props.required === true && draft.value.trim() === "") {
+    problem.value = `a ${props.label} is required`;
+    return;
+  }
+  problem.value = null;
   emit("save", draft.value);
   editing.value = false;
 }
@@ -78,6 +91,9 @@ function save(): void {
         @keydown.enter="save"
         @keydown.esc="cancel"
       />
+      <p v-if="problem" class="text-sm text-error" :data-testid="props.testid ? `error-${props.testid}` : undefined">
+        {{ problem }}
+      </p>
       <div class="flex gap-2">
         <UButton
           size="sm"
