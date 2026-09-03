@@ -271,7 +271,7 @@ export async function startDevIssuer(options: DevIssuerOptions = {}): Promise<De
   );
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : (options.port ?? 0);
-  issuer = `http://127.0.0.1:${port}`;
+  issuer = `http://${options.hostname ?? "127.0.0.1"}:${port}`;
 
   return {
     issuer,

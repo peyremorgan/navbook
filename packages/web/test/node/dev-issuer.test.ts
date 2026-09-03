@@ -90,6 +90,24 @@ describe("discovery", () => {
     assert.deepEqual(document.grant_types_supported, ["authorization_code", "refresh_token"]);
   });
 
+  it("calls itself by the host name it was given", async () => {
+    // The socket is always 127.0.0.1, but a token's `iss` claim is compared as
+    // a string: the issuer has to name itself whatever the API server was
+    // configured with and the browser reaches. Getting these two spellings out
+    // of step is a 401 with nothing in it to say why.
+    const named = await startDevIssuer({ port: 0, hostname: "localhost" });
+    try {
+      assert.match(named.issuer, /^http:\/\/localhost:\d+$/);
+      const document = (await (
+        await fetch(`http://127.0.0.1:${named.port}/.well-known/openid-configuration`)
+      ).json()) as Record<string, unknown>;
+      assert.equal(document.issuer, named.issuer, "discovery must agree with itself");
+      assert.equal(document.jwks_uri, `${named.issuer}/jwks`);
+    } finally {
+      await named.close();
+    }
+  });
+
   it("publishes one signing key", async () => {
     const { keys } = (await (await fetch(`${issuer.issuer}/jwks`)).json()) as { keys: unknown[] };
     assert.equal(keys.length, 1);
