@@ -82,11 +82,15 @@ async function main(): Promise<void> {
     repoEnv = { ...process.env, ...fixture.env, PATH: process.env.PATH };
   }
 
-  const issuer = await startDevIssuer({ port: ISSUER_PORT, audience: DEFAULT_AUDIENCE });
-  // `public/config.json` names localhost, and a token's issuer claim must match
-  // the discovery document byte for byte, so the server is told the spelling
-  // the browser will use rather than the 127.0.0.1 the socket reports.
-  const issuerUrl = `http://localhost:${issuer.port}`;
+  // One spelling of the host throughout. `public/config.json` says localhost,
+  // and a token's `iss` claim is compared as a string, so the issuer has to
+  // call itself that too — 127.0.0.1 is the same socket and a different issuer.
+  const issuer = await startDevIssuer({
+    port: ISSUER_PORT,
+    audience: DEFAULT_AUDIENCE,
+    hostname: "localhost",
+  });
+  const issuerUrl = issuer.issuer;
   log("issuer", `listening on ${issuerUrl} (client ${DEFAULT_CLIENT_ID})`);
 
   const api = run(
@@ -110,12 +114,12 @@ async function main(): Promise<void> {
     repoEnv,
   );
 
-  const web = run(
-    "web",
-    process.execPath,
-    [join(PACKAGE_ROOT, "node_modules", "nuxi", "bin", "nuxi.mjs"), "dev"],
-    { ...process.env, NUXT_TELEMETRY_DISABLED: "1" },
-  );
+  // The installed shim rather than a guess at where the module lives: pnpm's
+  // store layout puts that somewhere with a hash in it.
+  const web = run("web", join(PACKAGE_ROOT, "node_modules", ".bin", "nuxi"), ["dev"], {
+    ...process.env,
+    NUXT_TELEMETRY_DISABLED: "1",
+  });
 
   log("web", `the clone is on ${SERVED_BRANCH}; sign in as anyone at the issuer's form`);
 

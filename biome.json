@@ -39,6 +39,17 @@
   },
   "overrides": [
     {
+      "includes": ["**/*.vue"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnusedVariables": "off",
+            "noUnusedImports": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": [
         "packages/web/app/app.vue",
         "packages/web/app/pages/**/*.vue",

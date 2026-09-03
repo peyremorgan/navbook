@@ -1,0 +1,137 @@
+<!--
+  The filter, as controls.
+
+  Suggestions come from the listing currently on screen, because there is
+  nowhere else they could come from: the format keeps no registry of labels,
+  assignees or milestones, and the server introduces none (spec 06 §6.6). So
+  the menus are creatable — you can filter by a label no visible entity carries
+  — and what they offer is what is in play right now.
+
+  The status chips are toggles rather than a menu because of an asymmetry worth
+  making visible: naming no status is not "any status", it is the server's
+  default of open only. With nothing selected the Open chip shows as active,
+  which is what is actually happening.
+-->
+<script setup lang="ts">
+import { statusLabel } from "~/utils/entities";
+import type { FilterState } from "~/utils/filter-params";
+import type { Status } from "~~/src/generated/gql/graphql";
+
+const props = defineProps<{
+  filter: FilterState;
+  statuses: readonly Status[];
+  labels: string[];
+  assignees: string[];
+  authors: string[];
+  milestones: string[];
+  empty: boolean;
+}>();
+
+const emit = defineEmits<{ patch: [Partial<FilterState>]; clear: [] }>();
+
+/** The search box is local so typing does not rewrite the URL per keystroke. */
+const text = ref(props.filter.text);
+watch(
+  () => props.filter.text,
+  (next) => {
+    if (next !== text.value) text.value = next;
+  },
+);
+
+function toggleStatus(status: Status): void {
+  const selected = props.filter.status;
+  emit("patch", {
+    status: selected.includes(status)
+      ? selected.filter((item) => item !== status)
+      : [...selected, status],
+  });
+}
+
+/** With nothing chosen, the server shows open entities — so Open is on. */
+function statusActive(status: Status): boolean {
+  return props.filter.status.length === 0
+    ? status === "OPEN"
+    : props.filter.status.includes(status);
+}
+
+const menus = computed(() => [
+  { key: "labels" as const, label: "Label", icon: "i-lucide-tag", options: props.labels },
+  { key: "assignees" as const, label: "Assignee", icon: "i-lucide-user", options: props.assignees },
+  { key: "authors" as const, label: "Author", icon: "i-lucide-pen-line", options: props.authors },
+  {
+    key: "milestones" as const,
+    label: "Milestone",
+    icon: "i-lucide-flag",
+    options: props.milestones,
+  },
+]);
+</script>
+
+<template>
+  <div class="flex flex-wrap items-center gap-2">
+    <UInput
+      v-model="text"
+      icon="i-lucide-search"
+      placeholder="Search title, body and comments"
+      class="min-w-56 flex-1"
+      :ui="{ trailing: 'pe-1' }"
+      data-testid="filter-text"
+      @keydown.enter="emit('patch', { text })"
+      @blur="emit('patch', { text })"
+    >
+      <template v-if="text !== ''" #trailing>
+        <UButton
+          color="neutral"
+          variant="link"
+          size="sm"
+          icon="i-lucide-x"
+          aria-label="Clear the search"
+          @click="((text = ''), emit('patch', { text: '' }))"
+        />
+      </template>
+    </UInput>
+
+    <div class="flex items-center gap-1" role="group" aria-label="Status">
+      <UButton
+        v-for="status in props.statuses"
+        :key="status"
+        size="sm"
+        color="neutral"
+        :variant="statusActive(status) ? 'soft' : 'ghost'"
+        :aria-pressed="statusActive(status)"
+        :data-testid="`filter-status-${status.toLowerCase()}`"
+        @click="toggleStatus(status)"
+      >
+        {{ statusLabel(status) }}
+      </UButton>
+    </div>
+
+    <USelectMenu
+      v-for="menu in menus"
+      :key="menu.key"
+      :model-value="props.filter[menu.key]"
+      :items="menu.options"
+      multiple
+      create-item
+      searchable
+      :icon="menu.icon"
+      :placeholder="menu.label"
+      size="sm"
+      class="min-w-36"
+      :data-testid="`filter-${menu.key}`"
+      @update:model-value="(value: string[]) => emit('patch', { [menu.key]: value })"
+    />
+
+    <UButton
+      v-if="!props.empty"
+      size="sm"
+      color="neutral"
+      variant="ghost"
+      icon="i-lucide-filter-x"
+      data-testid="filter-clear"
+      @click="emit('clear')"
+    >
+      Clear
+    </UButton>
+  </div>
+</template>

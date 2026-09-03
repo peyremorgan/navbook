@@ -29,6 +29,14 @@ export const DEFAULT_CLIENT_ID = "navbook-web";
 export interface DevIssuerOptions {
   /** 0 binds any free port, which is what the end-to-end harness wants. */
   port?: number;
+  /**
+   * The host name the issuer calls itself by.
+   *
+   * It has to be the one the API server is configured with and the one the
+   * browser reaches, because a token's `iss` claim is compared as a string:
+   * `localhost` and `127.0.0.1` are the same socket and two different issuers.
+   */
+  hostname?: string;
   /** The `aud` minted when a request does not ask for one. */
   audience?: string;
   /** The only client id accepted, so a misconfigured app fails loudly. */
@@ -408,6 +416,7 @@ if (
     port,
     ...(argument("audience") === undefined ? {} : { audience: argument("audience") as string }),
     ...(argument("client-id") === undefined ? {} : { clientId: argument("client-id") as string }),
+    ...(argument("hostname") === undefined ? {} : { hostname: argument("hostname") as string }),
   });
   process.stdout.write(`dev-issuer: listening on ${issuer.issuer}\n`);
 }

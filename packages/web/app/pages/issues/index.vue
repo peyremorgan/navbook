@@ -1,3 +1,76 @@
+<!--
+  Every issue that matches the filter, newest first.
+
+  The whole matching set arrives in one answer — the API has no pagination —
+  so what is on screen is decided here, and the suggestions in the filter bar
+  are drawn from the same answer for want of anywhere else to get them.
+-->
+<script setup lang="ts">
+import { useQuery } from "@vue/apollo-composable";
+import { ISSUES_QUERY } from "~/graphql/queries";
+import { distinctValues } from "~/utils/entities";
+import { ISSUE_STATUSES } from "~/utils/filter-params";
+
+const filter = useEntityFilter(ISSUE_STATUSES);
+
+const { result, loading, error, refetch } = useQuery(
+  ISSUES_QUERY,
+  () => ({ filter: filter.variables.value }),
+  { fetchPolicy: "cache-and-network" },
+);
+
+const issues = computed(() => result.value?.issues ?? []);
+const page = usePagedList(issues);
+
+const suggestions = computed(() => ({
+  labels: distinctValues(issues.value, (issue) => issue.labels),
+  assignees: distinctValues(issues.value, (issue) => issue.assignees),
+  authors: distinctValues(issues.value, (issue) => [issue.author]),
+  milestones: distinctValues(issues.value, (issue) => (issue.milestone ? [issue.milestone] : [])),
+}));
+</script>
+
 <template>
-  <h1 class="text-xl font-semibold">Issues</h1>
+  <div class="space-y-4">
+    <div class="flex items-center justify-between gap-4">
+      <h1 class="text-xl font-semibold">Issues</h1>
+      <UButton to="/issues/new" icon="i-lucide-plus" data-testid="new-issue">New issue</UButton>
+    </div>
+
+    <EntityFilterBar
+      :filter="filter.filter.value"
+      :statuses="ISSUE_STATUSES"
+      :empty="filter.empty.value"
+      v-bind="suggestions"
+      @patch="filter.patch"
+      @clear="filter.clear"
+    />
+
+    <QueryState
+      :loading="loading && issues.length === 0"
+      :error="error"
+      :empty="issues.length === 0"
+      empty-title="No issues match this filter"
+      empty-description="Nothing in the tree matches. Widen the filter, or file one."
+      @retry="refetch()"
+    >
+      <div class="rounded-lg border border-default" data-testid="issue-list">
+        <IssueRow v-for="issue in page.shown.value" :key="issue.id" :issue="issue" />
+      </div>
+      <div class="mt-3 flex items-center justify-between text-sm text-muted">
+        <span data-testid="issue-count">
+          Showing {{ page.shown.value.length }} of {{ page.total.value }}
+        </span>
+        <UButton
+          v-if="page.hasMore.value"
+          size="sm"
+          color="neutral"
+          variant="subtle"
+          @click="page.more()"
+        >
+          Show more
+        </UButton>
+      </div>
+    </QueryState>
+  </div>
 </template>

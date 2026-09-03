@@ -26,8 +26,20 @@ export interface WebConfig {
 
 export class ConfigError extends Error {}
 
-/** Where `config.json` sits, relative to wherever the app is mounted. */
-export const CONFIG_PATH = "config.json";
+/** The file's name; where it sits depends on where the app is mounted. */
+export const CONFIG_FILE = "config.json";
+
+/**
+ * The URL to fetch it from, given the base the app is served under.
+ *
+ * It has to be absolute. A relative `config.json` resolves against the current
+ * route, so a reload on `/issues/ab12cd34` would ask for
+ * `/issues/config.json` — which an SPA host answers with the index page, and
+ * the app then fails to parse as JSON on exactly the pages people bookmark.
+ */
+export function configUrl(baseUrl = "/"): string {
+  return `${baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`}${CONFIG_FILE}`;
+}
 
 function requireString(source: Record<string, unknown>, key: string, path: string): string {
   const value = source[key];
@@ -58,22 +70,31 @@ export function parseConfig(raw: unknown): WebConfig {
   };
 }
 
+export interface LoadConfigOptions {
+  /** Where to fetch it from; `configUrl()` builds this from the app's base. */
+  url?: string;
+  fetch?: typeof fetch;
+}
+
 /** Fetch and validate the runtime configuration. */
-export async function loadConfig(fetchImpl: typeof fetch = fetch): Promise<WebConfig> {
+export async function loadConfig(options: LoadConfigOptions = {}): Promise<WebConfig> {
+  const url = options.url ?? configUrl();
+  const fetchImpl = options.fetch ?? fetch;
+
   let response: Response;
   try {
-    response = await fetchImpl(CONFIG_PATH, { cache: "no-store" });
+    response = await fetchImpl(url, { cache: "no-store" });
   } catch (cause) {
-    throw new ConfigError(`could not fetch ${CONFIG_PATH}: ${describe(cause)}`);
+    throw new ConfigError(`could not fetch ${url}: ${describe(cause)}`);
   }
   if (!response.ok) {
-    throw new ConfigError(`could not fetch ${CONFIG_PATH}: HTTP ${response.status}`);
+    throw new ConfigError(`could not fetch ${url}: HTTP ${response.status}`);
   }
   let body: unknown;
   try {
     body = await response.json();
   } catch (cause) {
-    throw new ConfigError(`${CONFIG_PATH} is not valid JSON: ${describe(cause)}`);
+    throw new ConfigError(`${url} is not valid JSON: ${describe(cause)}`);
   }
   return parseConfig(body);
 }

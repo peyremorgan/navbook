@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
-import { ConfigError, loadConfig, parseConfig } from "../../app/utils/config";
+import { ConfigError, configUrl, loadConfig, parseConfig } from "../../app/utils/config";
 
 const VALID = {
   graphqlUrl: "https://nav.example.invalid/graphql",
@@ -48,32 +48,60 @@ describe("parseConfig", () => {
   });
 });
 
+describe("configUrl", () => {
+  it("is absolute, so a deep reload asks for the same file as the front page", () => {
+    assert.equal(configUrl(), "/config.json");
+    assert.equal(configUrl("/"), "/config.json");
+  });
+
+  it("honours a base the app is mounted under, with or without its slash", () => {
+    assert.equal(configUrl("/navbook/"), "/navbook/config.json");
+    assert.equal(configUrl("/navbook"), "/navbook/config.json");
+  });
+});
+
 describe("loadConfig", () => {
   it("fetches, parses and validates", async () => {
-    const config = await loadConfig(async () => Response.json(VALID));
+    const config = await loadConfig({ fetch: async () => Response.json(VALID) });
     assert.deepEqual(config, VALID);
+  });
+
+  it("asks for the url it was given", async () => {
+    let asked = "";
+    await loadConfig({
+      url: "/navbook/config.json",
+      fetch: async (input) => {
+        asked = String(input);
+        return Response.json(VALID);
+      },
+    });
+    assert.equal(asked, "/navbook/config.json");
   });
 
   it("says so when the file is not there", async () => {
     await assert.rejects(
-      loadConfig(async () => new Response("nope", { status: 404 })),
-      /could not fetch config.json: HTTP 404/,
+      loadConfig({ fetch: async () => new Response("nope", { status: 404 }) }),
+      /could not fetch \/config.json: HTTP 404/,
     );
   });
 
   it("says so when the file is not JSON", async () => {
+    // The failure that matters: an SPA host answering an unknown path with the
+    // index page, which is what a route-relative fetch used to provoke.
     await assert.rejects(
-      loadConfig(async () => new Response("<!doctype html>", { status: 200 })),
-      /config.json is not valid JSON/,
+      loadConfig({ fetch: async () => new Response("<!doctype html>", { status: 200 }) }),
+      /\/config.json is not valid JSON/,
     );
   });
 
   it("says so when the fetch itself fails", async () => {
     await assert.rejects(
-      loadConfig(async () => {
-        throw new TypeError("network down");
+      loadConfig({
+        fetch: async () => {
+          throw new TypeError("network down");
+        },
       }),
-      /could not fetch config.json: network down/,
+      /could not fetch \/config.json: network down/,
     );
   });
 });
