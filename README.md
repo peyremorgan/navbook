@@ -188,16 +188,6 @@ pnpm check         # lint and type-check
 pnpm bench         # the performance budget, on its own machine
 ```
 
-The web client has an end-to-end suite of its own, kept out of `pnpm test`
-because it needs a browser and a built bundle; its
-[README](packages/web/README.md#development) says how to run it. One command
-starts everything it takes to develop against — an identity provider, a server,
-and a throwaway repository to serve:
-
-```sh
-pnpm --filter @navbook/web dev:stack
-```
-
 The repository is a pnpm workspace of four packages. `packages/core`
 (`@navbook/core`) is the whole implementation — format logic, git plumbing,
 workspace I/O, and the operations behind each verb — and knows nothing about
@@ -215,6 +205,65 @@ is its TypeScript source, and Node runs it directly.
 The [conformance fixtures](doc/spec/fixtures/README.md) are golden repositories
 that any implementation must pass; they run against `$NAV_BIN`, so the same
 suite validates the planned Rust rewrite.
+
+### Running the web client
+
+The client is a thin UI over an API that needs a token for every operation, so
+developing it means three processes. One command starts all of them:
+
+```sh
+pnpm --filter @navbook/web dev:stack
+```
+
+Then open <http://localhost:3000> and sign in as anybody — the address you type
+is what every issue and comment you file will record as its author.
+
+| | |
+|---|---|
+| <http://localhost:3000> | the client, on Vite, reloading as you edit |
+| <http://localhost:4000/graphql> | `nav-server`, with GraphiQL for poking at the API |
+| <http://localhost:9000> | a development OIDC provider, with a form that asks who you are |
+
+The repository being served is a throwaway built under the system temporary
+directory, seeded with issues and pull requests worth looking at, and kept
+between runs so what you filed yesterday is still there. `--fresh` rebuilds it.
+It is deliberately **not** the repository you are standing in: every mutation
+commits, and a stray click should not file an issue against Navbook itself.
+
+The development provider has no client secret, no consent and no user database,
+so anyone may be anyone. It exists because authentication has no off switch —
+the API answers nothing without a token — and `nuxi dev` needs something to log
+into. Never point anything else at it.
+
+To run the three by hand instead, or to deploy the built bundle, see the
+[package README](packages/web/README.md).
+
+### Building and testing it
+
+```sh
+pnpm --filter @navbook/web build      # nuxi generate → packages/web/.output/public
+pnpm --filter @navbook/web test       # the unit suite; also runs in `pnpm test`
+pnpm --filter @navbook/web test:e2e   # Playwright, against a real stack
+```
+
+The build emits static files: copy `.output/public` to any host and overwrite
+its `config.json` with the addresses that deployment uses. Nothing else is
+configured, because one built artefact has to serve every deployment.
+
+The end-to-end suite is kept out of `pnpm test` because it needs two things
+that suite has no use for — a browser and a built bundle:
+
+```sh
+pnpm --filter @navbook/web exec playwright install chromium
+pnpm --filter @navbook/web build
+pnpm --filter @navbook/web test:e2e
+```
+
+It starts an issuer, a `nav-server` and a fixture repository with an origin to
+push to, and serves what `nuxi generate` produced rather than a dev server,
+because that is what gets deployed. Nothing in it is mocked: the point is to
+prove that a browser, an OIDC flow, a GraphQL API and a git repository work
+together.
 
 ## License
 
