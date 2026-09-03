@@ -50,6 +50,12 @@ function sanitize(html: string): string {
     FORBID_TAGS: ["script", "style", "iframe", "object", "embed", "form", "input", "button"],
     FORBID_ATTR: ["style", "srcset", "formaction", "form"],
     ALLOW_DATA_ATTR: false,
+    // DOMPurify drops `target` by default, on the reasoning that a link
+    // opening a new context is a tabnabbing risk. The rule above answers that
+    // with `rel="noopener"`, so the attribute is put back rather than the
+    // behaviour lost: a link out of the tracker should not replace the page
+    // somebody was reading.
+    ADD_ATTR: ["target"],
   });
 }
 

@@ -40,6 +40,25 @@ export function shortSha(sha: string): string {
   return sha.slice(0, 7);
 }
 
+/**
+ * A comment's timestamp is colon-free.
+ *
+ * Its filename is the timestamp — that is what makes two people commenting at
+ * once impossible to collide (spec 02 §2.6) — and a filename cannot hold
+ * colons, so the API reports it exactly as it stands on disk:
+ * `2026-08-04T110000Z`, which `Date` will not parse. An entity's `created`
+ * carries the ordinary spelling. Both arrive here, so both are read.
+ */
+const COMPACT_STAMP = /^(\d{4}-\d{2}-\d{2})T(\d{2})(\d{2})(\d{2})Z$/;
+
+/** Parse either spelling; null when it is neither. */
+export function parseTimestamp(value: string): Date | null {
+  const compact = COMPACT_STAMP.exec(value.trim());
+  const text = compact ? `${compact[1]}T${compact[2]}:${compact[3]}:${compact[4]}Z` : value;
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 const UNITS: [limitSeconds: number, seconds: number, name: Intl.RelativeTimeFormatUnit][] = [
   [60, 1, "second"],
   [3600, 60, "minute"],
@@ -56,8 +75,8 @@ const UNITS: [limitSeconds: number, seconds: number, name: Intl.RelativeTimeForm
  * pin it; callers pass nothing.
  */
 export function relativeTime(iso: string, now: Date = new Date()): string {
-  const then = new Date(iso);
-  if (Number.isNaN(then.getTime())) return iso;
+  const then = parseTimestamp(iso);
+  if (then === null) return iso;
   const elapsed = (now.getTime() - then.getTime()) / 1000;
   const magnitude = Math.abs(elapsed);
   const format = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
@@ -69,8 +88,7 @@ export function relativeTime(iso: string, now: Date = new Date()): string {
 
 /** The full timestamp, for the tooltip behind the relative one. */
 export function absoluteTime(iso: string): string {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+  return parseTimestamp(iso)?.toLocaleString() ?? iso;
 }
 
 /**

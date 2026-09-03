@@ -1,0 +1,101 @@
+// @vitest-environment jsdom
+
+/**
+ * Rendering is the one place this client turns data into HTML, and the data
+ * comes from a repository anyone with a checkout can write to. So the suite is
+ * mostly about what must not survive.
+ */
+
+import assert from "node:assert/strict";
+import { describe, it } from "vitest";
+import { renderMarkdown, renderMarkdownInline } from "../../app/utils/markdown";
+
+describe("renderMarkdown", () => {
+  it("renders the Markdown an issue body is written in", () => {
+    const html = renderMarkdown("# Title\n\nSome **bold** and `code`.\n\n- one\n- two");
+    assert.match(html, /<h1>Title<\/h1>/);
+    assert.match(html, /<strong>bold<\/strong>/);
+    assert.match(html, /<code>code<\/code>/);
+    assert.match(html, /<li>one<\/li>/);
+  });
+
+  it("renders fenced code without executing anything in it", () => {
+    const html = renderMarkdown("```js\nalert(1)\n```");
+    assert.match(html, /<pre><code/);
+    assert.ok(!html.includes("<script"));
+  });
+
+  it("escapes raw HTML rather than rendering it", () => {
+    // markdown-it is configured with `html: false`, so a tag written into a
+    // body is text. That is the first defence and the one that decides the
+    // shape of everything below: nothing an author writes becomes markup.
+    const html = renderMarkdown("before\n\n<script>alert(1)</script>\n\nafter");
+    assert.ok(!html.includes("<script"), html);
+    assert.match(html, /&lt;script&gt;/);
+    assert.match(html, /<p>before<\/p>/);
+    assert.match(html, /<p>after<\/p>/);
+  });
+
+  it("leaves no element with an event handler on it", () => {
+    for (const source of [
+      '<img src="x" onerror="alert(1)">',
+      '<div onclick="alert(1)">click</div>',
+      '<a href="#" onmouseover="alert(1)">hover</a>',
+    ]) {
+      const html = renderMarkdown(source);
+      assert.ok(
+        !/<[a-z]+[^>]*\son[a-z]+=/i.test(html),
+        `a live handler survived ${source}: ${html}`,
+      );
+    }
+  });
+
+  it("never emits a link that runs script", () => {
+    for (const source of [
+      "[click](javascript:alert(1))",
+      "[click](JaVaScRiPt:alert(1))",
+      "[click](data:text/html,<script>alert(1)</script>)",
+    ]) {
+      const html = renderMarkdown(source);
+      const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((match) => match[1] ?? "");
+      for (const href of hrefs) {
+        assert.ok(
+          !/^\s*(javascript|data|vbscript):/i.test(href),
+          `${source} produced href ${href}`,
+        );
+      }
+    }
+  });
+
+  it("sends links away from the app, and cuts their handle on it", () => {
+    const html = renderMarkdown("[docs](https://example.invalid)");
+    assert.match(html, /target="_blank"/);
+    assert.match(html, /rel="noopener noreferrer nofollow"/);
+  });
+
+  it("gives an autolinked address the same treatment", () => {
+    const html = renderMarkdown("see https://example.invalid for more");
+    assert.match(html, /<a[^>]*href="https:\/\/example.invalid"/);
+    assert.match(html, /rel="noopener noreferrer nofollow"/);
+  });
+
+  it("escapes text that looks like markup", () => {
+    const html = renderMarkdown("compare `a < b` and a <b> tag");
+    assert.match(html, /a &lt; b/);
+  });
+
+  it("renders nothing for nothing", () => {
+    assert.equal(renderMarkdown(""), "");
+  });
+});
+
+describe("renderMarkdownInline", () => {
+  it("leaves out the paragraph a block render would add", () => {
+    const html = renderMarkdownInline("a **title**");
+    assert.equal(html, "a <strong>title</strong>");
+  });
+
+  it("sanitises as thoroughly as the block renderer", () => {
+    assert.ok(!renderMarkdownInline("<script>alert(1)</script>").includes("<script"));
+  });
+});

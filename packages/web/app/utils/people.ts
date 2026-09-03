@@ -35,10 +35,19 @@ export function personLabel(field: string): string {
   return displayPerson(field).label;
 }
 
-/** Two letters for an avatar, from a name or an address. */
+/**
+ * Up to two letters for an avatar.
+ *
+ * A bare address contributes only its local part: `someone@example.invalid`
+ * says nothing about anybody through `example` or `invalid`, and initials
+ * taken from a domain would be the same for a whole organisation.
+ */
 export function personInitials(field: string): string {
-  const { label } = displayPerson(field);
-  const words = label.split(/[\s._-]+/).filter((word) => word !== "");
-  const letters = words.slice(0, 2).map((word) => word[0] ?? "");
-  return (letters.join("") || label.slice(0, 2)).toUpperCase();
+  const { label, email } = displayPerson(field);
+  const source = label === email && email !== null ? (email.split("@")[0] ?? label) : label;
+  const words = source.split(/[\s._-]+/).filter((word) => word !== "");
+  if (words.length >= 2) {
+    return `${words[0]?.[0] ?? ""}${words[1]?.[0] ?? ""}`.toUpperCase();
+  }
+  return (words[0] ?? "").slice(0, 2).toUpperCase();
 }

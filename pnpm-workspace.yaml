@@ -10,10 +10,9 @@ allowBuilds:
   vue-demi: true
 
 # pnpm refuses a package published within the last few days unless it is named
-# here, and checks the list again on every `--frozen-lockfile` install. These
-# two were the current release when the web client was added; the entries fall
-# away on their own the next time either is bumped to something older than the
-# window.
+# here, and checks the list again on every `--frozen-lockfile` install. This one
+# was the current release when the web client was added, and Nuxt asks for it by
+# range; the entry falls away the next time it is bumped to something older than
+# the window.
 minimumReleaseAgeExclude:
-  - happy-dom@20.13.2
   - vue-router@5.3.1
