@@ -45,6 +45,12 @@ deleting anything — renaming or removing a feature or one of its documents
 included. They are checkout-centric maintainer actions and the API does not
 expose them ([server README](../server/README.md#what-it-does-not-do)).
 
+**Where you were**, when you come back: each listing remembers the filter it
+was last showing, so the Issues and Pull requests links reopen their listing
+as it was left rather than at the default. The filter itself still lives in
+the address bar — a bare `/issues`, typed or sent to you, is still the whole
+open list — and the memory lasts as long as the browser tab.
+
 **Dark or light**, without being asked: the theme starts at whatever the
 browser says about `prefers-color-scheme`, and the button in the navbar is
 there for disagreeing with it. A disagreement is remembered in the browser it
