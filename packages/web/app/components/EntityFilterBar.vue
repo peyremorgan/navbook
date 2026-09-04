@@ -37,17 +37,17 @@ watch(
   },
 );
 
+function statusActive(status: Status): boolean {
+  return props.filter.status.includes(status);
+}
+
 function toggleStatus(status: Status): void {
   const selected = props.filter.status;
   emit("patch", {
-    status: selected.includes(status)
+    status: statusActive(status)
       ? selected.filter((item) => item !== status)
       : [...selected, status],
   });
-}
-
-function statusActive(status: Status): boolean {
-  return props.filter.status.includes(status);
 }
 
 const menus = computed(() => [
