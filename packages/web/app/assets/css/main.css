@@ -1,2 +1,20 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
+
+/*
+ * Tell the browser which way round the page is.
+ *
+ * Nuxt UI already declares `color-scheme` on `body`, which covers the form
+ * chrome and scrollbars *inside* the page. It is the root element the browser
+ * propagates to the viewport, though, so without these two rules the window's
+ * own scrollbar and the canvas behind a short page stay light under a dark
+ * document. The class is the one `@nuxtjs/color-mode` writes on `<html>`; the
+ * bare `:root` rule is what answers before it has.
+ */
+:root {
+  color-scheme: light;
+}
+
+:root.dark {
+  color-scheme: dark;
+}
