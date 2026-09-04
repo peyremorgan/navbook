@@ -28,6 +28,12 @@ Opening, updating and merging a pull request are not here, and neither is
 deleting anything. They are checkout-centric maintainer actions and the API
 does not expose them ([server README](../server/README.md#what-it-does-not-do)).
 
+**Dark or light**, without being asked: the theme starts at whatever the
+browser says about `prefers-color-scheme`, and the button in the navbar is
+there for disagreeing with it. A disagreement is remembered in the browser it
+was made in and nowhere else — it is a display preference, not an account
+setting, so none of it reaches the repository.
+
 ## Running it while developing
 
 ```sh
