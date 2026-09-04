@@ -41,7 +41,16 @@ const links = [
           />
         </nav>
 
-        <div class="ms-auto">
+        <div class="ms-auto flex items-center gap-1">
+          <!--
+            The theme, which nobody has to set: `@nuxtjs/color-mode` — already
+            here as a dependency of Nuxt UI — starts at the `system`
+            preference, so the first visit matches whatever the browser says
+            about `prefers-color-scheme`. This button is for disagreeing with
+            it, and the disagreement is what gets stored.
+          -->
+          <UColorModeButton data-testid="theme-toggle" size="sm" />
+
           <UDropdownMenu
             v-if="viewer"
             :items="[[
