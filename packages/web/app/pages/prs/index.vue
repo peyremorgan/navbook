@@ -8,6 +8,10 @@
   The difference is worth a control rather than a default, because the scan
   costs a great deal more and the result is only readable — a pull request on a
   branch this server does not serve cannot be commented on.
+
+  The scan finds open pull requests only, so switching it on narrows by status
+  without the filter having asked — the one place a listing here does that,
+  which is why the switch says so in its own description.
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
@@ -53,7 +57,7 @@ const suggestions = computed(() => ({
       <USwitch
         v-model="allRefs"
         label="Every fetched branch"
-        description="Slower; finds pull requests this checkout does not hold."
+        description="Slower; finds open pull requests this checkout does not hold."
         data-testid="all-refs"
       />
     </div>

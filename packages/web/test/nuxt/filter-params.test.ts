@@ -134,8 +134,8 @@ describe("filterToQuery", () => {
 
 describe("toEntityFilter", () => {
   it("sends nothing at all for an empty filter", () => {
-    // Not `status: []`: the server treats a filter naming no status as open
-    // only, and sending empty keys would only be noise on the wire.
+    // An omitted key and an empty one mean the same thing to the server, so
+    // sending empty keys would only be noise on the wire.
     assert.deepEqual(toEntityFilter(emptyFilter()), {});
   });
 

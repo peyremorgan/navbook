@@ -57,9 +57,8 @@ const matching = (entities: EntityRecord[], ...terms: string[]): string[] =>
     .sort();
 
 describe("parseQuery", () => {
-  it("defaults to open issues when no status term is given", () => {
-    const entities = build([{ id: "aaaaaaa1" }, { id: "bbbbbbb2", status: "closed" }]);
-    assert.deepEqual(matching(entities), ["aaaaaaa1"]);
+  it("leaves the status unnamed when no status term is given", () => {
+    assert.deepEqual(query().status, []);
   });
 
   it("rejects a status that does not exist for the noun", () => {
@@ -87,6 +86,17 @@ describe("parseQuery", () => {
 });
 
 describe("matchesQuery", () => {
+  it("does not filter by status when the query names none", () => {
+    const entities = build([{ id: "aaaaaaa1" }, { id: "bbbbbbb2", status: "closed" }]);
+    assert.deepEqual(matching(entities), ["aaaaaaa1", "bbbbbbb2"]);
+  });
+
+  it("narrows to the one status named", () => {
+    const entities = build([{ id: "aaaaaaa1" }, { id: "bbbbbbb2", status: "closed" }]);
+    assert.deepEqual(matching(entities, "status:open"), ["aaaaaaa1"]);
+    assert.deepEqual(matching(entities, "status:closed"), ["bbbbbbb2"]);
+  });
+
   it("ORs statuses, so both can be listed at once", () => {
     const entities = build([{ id: "aaaaaaa1" }, { id: "bbbbbbb2", status: "closed" }]);
     assert.deepEqual(matching(entities, "status:open", "status:closed"), ["aaaaaaa1", "bbbbbbb2"]);

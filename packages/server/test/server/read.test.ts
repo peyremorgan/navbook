@@ -45,7 +45,7 @@ describe("reads", () => {
     await h.stop();
   });
 
-  it("lists the open issues", async () => {
+  it("lists the issues", async () => {
     const data = ok<{ issues: { id: string; title: string; status: string }[] }>(
       await h.gql(`query { issues { id title status } }`),
     );
@@ -53,7 +53,6 @@ describe("reads", () => {
       "Add a dark theme",
       "Login is broken",
     ]);
-    assert.ok(data.issues.every((issue) => issue.status === "OPEN"));
   });
 
   it("projects an issue's frontmatter onto named fields", async () => {
@@ -138,7 +137,12 @@ describe("reads", () => {
     assert.deepEqual(await ids(`{ authors: ["person@example.invalid"] }`), [theme, bug].sort());
   });
 
-  it("lists closed issues only when the filter asks for them", async () => {
+  /**
+   * Naming no status means no status filter, so a closed issue is in the
+   * listing until something asks otherwise. The CLI's `status:open` default is
+   * its own (spec 04 §4.3) and does not reach the API.
+   */
+  it("lists issues of every status until the filter narrows them", async () => {
     ok(
       await h.gql(
         `mutation Close($ref: ID!) { closeIssue(input: { ref: $ref }) { issue { id } } }`,
@@ -148,13 +152,32 @@ describe("reads", () => {
       ),
     );
 
-    const open = ok<{ issues: { id: string }[] }>(await h.gql(`query { issues { id } }`));
-    assert.deepEqual(open.issues, [{ id: bug }]);
+    const all = ok<{ issues: { id: string; status: string }[] }>(
+      await h.gql(`query { issues { id status } }`),
+    );
+    assert.deepEqual(
+      [...all.issues].sort((a, b) => (a.id < b.id ? -1 : 1)),
+      [
+        { id: bug, status: "OPEN" },
+        { id: theme, status: "CLOSED" },
+      ].sort((a, b) => (a.id < b.id ? -1 : 1)),
+    );
+
+    const open = ok<{ issues: { id: string; status: string }[] }>(
+      await h.gql(`query { issues(filter: { status: [OPEN] }) { id status } }`),
+    );
+    assert.deepEqual(open.issues, [{ id: bug, status: "OPEN" }]);
 
     const closed = ok<{ issues: { id: string; status: string }[] }>(
       await h.gql(`query { issues(filter: { status: [CLOSED] }) { id status } }`),
     );
     assert.deepEqual(closed.issues, [{ id: theme, status: "CLOSED" }]);
+
+    // An empty list names no status either, so it filters by none.
+    const empty = ok<{ issues: { id: string }[] }>(
+      await h.gql(`query { issues(filter: { status: [] }) { id } }`),
+    );
+    assert.deepEqual([...empty.issues.map((issue) => issue.id)].sort(), [bug, theme].sort());
 
     ok(
       await h.gql(`mutation Reopen($ref: ID!) { reopenIssue(ref: $ref) { issue { id } } }`, {

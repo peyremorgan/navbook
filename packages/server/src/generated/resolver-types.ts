@@ -150,7 +150,7 @@ export type EntityFilter = {
   authors?: InputMaybe<Array<Scalars['String']['input']>>;
   labels?: InputMaybe<Array<Scalars['String']['input']>>;
   milestones?: InputMaybe<Array<Scalars['String']['input']>>;
-  /** Defaults to [OPEN], as every listing does. */
+  /** Absent or empty means any status; the listing is not narrowed by one. */
   status?: InputMaybe<Array<Status>>;
   /** Free text, matched against title, body and comments. */
   text?: InputMaybe<Array<Scalars['String']['input']>>;
@@ -342,11 +342,12 @@ export type Query = {
   issues: Array<Issue>;
   pr: Pr;
   /**
-   * Open pull requests.
+   * Pull requests recorded in the working tree.
    *
    * A pull request's files live on the branch it proposes to merge, so the
    * working tree usually does not hold them: `allRefs` scans every fetched
-   * branch instead (spec 03 §3.5).
+   * branch instead (spec 03 §3.5). That scan finds open pull requests only, so
+   * `allRefs` narrows the statuses on offer no matter what `filter` names.
    */
   prs: Array<Pr>;
   viewer: Viewer;

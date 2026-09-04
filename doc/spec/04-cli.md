@@ -206,6 +206,11 @@ kind. Terms AND together:
 | `milestone:M` | Exact milestone |
 | bare word / quoted string | Case-insensitive substring of title, description, or any comment body |
 
+A query naming no status matches every status. The `status:open` default above
+is one the `list` commands supply for themselves, not a property of the
+grammar: other front ends over the same query — the API of
+[06 §6.3](06-future.md) among them — list every status until asked to narrow.
+
 ### Root utilities
 
 - `nav id` — mint and print a fresh valid ID (for hand-editors and

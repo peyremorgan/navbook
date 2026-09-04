@@ -47,7 +47,7 @@ export type EntityFilter = {
   authors?: Array<string> | null | undefined;
   labels?: Array<string> | null | undefined;
   milestones?: Array<string> | null | undefined;
-  /** Defaults to [OPEN], as every listing does. */
+  /** Absent or empty means any status; the listing is not narrowed by one. */
   status?: Array<Status> | null | undefined;
   /** Free text, matched against title, body and comments. */
   text?: Array<string> | null | undefined;

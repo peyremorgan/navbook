@@ -7,10 +7,9 @@
   the menus are creatable — you can filter by a label no visible entity carries
   — and what they offer is what is in play right now.
 
-  The status chips are toggles rather than a menu because of an asymmetry worth
-  making visible: naming no status is not "any status", it is the server's
-  default of open only. With nothing selected the Open chip shows as active,
-  which is what is actually happening.
+  Status is chips rather than a menu because there are only ever two or three to
+  choose from and it is the filter reached for most. Like every other control
+  here, none selected means no narrowing: entities of every status are listed.
 -->
 <script setup lang="ts">
 import { statusLabel } from "~/utils/entities";
@@ -38,20 +37,17 @@ watch(
   },
 );
 
+function statusActive(status: Status): boolean {
+  return props.filter.status.includes(status);
+}
+
 function toggleStatus(status: Status): void {
   const selected = props.filter.status;
   emit("patch", {
-    status: selected.includes(status)
+    status: statusActive(status)
       ? selected.filter((item) => item !== status)
       : [...selected, status],
   });
-}
-
-/** With nothing chosen, the server shows open entities — so Open is on. */
-function statusActive(status: Status): boolean {
-  return props.filter.status.length === 0
-    ? status === "OPEN"
-    : props.filter.status.includes(status);
 }
 
 const menus = computed(() => [

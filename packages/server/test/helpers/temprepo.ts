@@ -16,7 +16,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  closeEntity,
   currentAuthor,
+  type EntityKind,
   makeWsCtx,
   newIssueFile,
   newPrFile,
@@ -73,6 +75,8 @@ export interface Clone {
   fileIssue(title: string, body: string, ids: string): void;
   /** Open a pull request on a new branch, and go back to main. */
   filePr(title: string, body: string, ids: string, branch: string): void;
+  /** Close what this clone holds, as somebody working from a terminal would. */
+  close(kind: EntityKind, ref: string, resolution: string): void;
   write(relativePath: string, content: string): void;
   commitAll(message: string): void;
 }
@@ -188,6 +192,10 @@ export function makeFixture(opts: FixtureOptions = {}): Fixture {
         });
         openPr(ws, { content, fallbackTitle: title }, { commit: true });
         run(dir, ["checkout", "--quiet", "main"]);
+      },
+      close(kind, ref, resolution) {
+        const ws = makeWsCtx({ cwd: dir, env });
+        closeEntity(ws, kind, ref, { resolution }, { commit: true });
       },
     };
     return clone;

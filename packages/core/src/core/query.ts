@@ -30,7 +30,14 @@ export function emptyQuery(): Query {
   return { status: [], labels: [], assignees: [], authors: [], milestones: [], text: [] };
 }
 
-/** Statuses a `list` command defaults to when the query names none. */
+/**
+ * Statuses the CLI's `list` commands default to when the query names none.
+ *
+ * A query is status-neutral on its own — `matchesQuery` filters by status only
+ * when one is named — so this default belongs to the CLI, which applies it in
+ * `parseListQuery`. Other callers, the GraphQL API among them, get every
+ * status when they ask for none (spec 04 §4.3).
+ */
 export function defaultStatuses(): Status[] {
   return ["open"];
 }
@@ -87,8 +94,7 @@ export function needsComments(query: Query): boolean {
 
 /** Evaluate a query against one entity. */
 export function matchesQuery(query: Query, entity: EntityRecord): boolean {
-  const statuses = query.status.length > 0 ? query.status : defaultStatuses();
-  if (!statuses.includes(entity.status)) return false;
+  if (query.status.length > 0 && !query.status.includes(entity.status)) return false;
 
   const labels = readLabels(entity.fm).map((l) => l.toLowerCase());
   for (const wanted of query.labels) {

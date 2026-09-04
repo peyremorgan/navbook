@@ -4,8 +4,9 @@
  * A mutation returns the entity it changed, and Apollo's cache is normalised,
  * so every detail view of that entity corrects itself for free. What it cannot
  * know is whether the entity still belongs in the listings that hold it: an
- * issue that was just closed drops out of the open list, a new label puts it
- * into a filtered one, a new issue belongs at the top of several.
+ * issue that was just closed drops out of a listing filtered to open ones, a
+ * new label puts it into a filtered one, a new issue belongs at the top of
+ * several.
  *
  * Working that out on the client would mean reimplementing `matchesQuery` in
  * the browser, which is exactly the thing this client does not do. Evicting the

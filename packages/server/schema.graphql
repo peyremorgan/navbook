@@ -190,7 +190,7 @@ Terms are ANDed across keys. Within a key the semantics follow the field:
 single-valued fields OR their terms, multi-valued fields AND theirs (spec 04).
 """
 input EntityFilter {
-  "Defaults to [OPEN], as every listing does."
+  "Absent or empty means any status; the listing is not narrowed by one."
   status: [Status!]
   labels: [String!]
   assignees: [String!]
@@ -205,11 +205,12 @@ type Query {
   "`ref` is a full ID or an unambiguous prefix of at least four characters."
   issue(ref: ID!): Issue!
   """
-  Open pull requests.
+  Pull requests recorded in the working tree.
 
   A pull request's files live on the branch it proposes to merge, so the
   working tree usually does not hold them: `allRefs` scans every fetched
-  branch instead (spec 03 §3.5).
+  branch instead (spec 03 §3.5). That scan finds open pull requests only, so
+  `allRefs` narrows the statuses on offer no matter what `filter` names.
   """
   prs(filter: EntityFilter, allRefs: Boolean! = false): [Pr!]!
   pr(ref: ID!): Pr!
