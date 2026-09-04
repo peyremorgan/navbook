@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { newCommentFile, newIssueFile, newPrFile, readRevisions } from "../src/core/files.ts";
+import { emptyQuery } from "../src/core/query.ts";
 import type { EntityRecord } from "../src/core/tree.ts";
 import { git } from "../src/git/exec.ts";
 import {
@@ -114,6 +115,35 @@ describe("ops: opening and listing", () => {
       assert.deepEqual(
         matched.map((entity) => entity.title),
         ["Second"],
+      );
+    }, "aaa11111,bbb22222");
+  });
+
+  /**
+   * The CLI default and the query language's own semantics part ways here: a
+   * `list` command with no status term means open only, while a query naming no
+   * status filters by none — which is what the GraphQL API sends (spec 04 §4.3).
+   */
+  it("applies the CLI's open-only default at parse time, not in the query itself", () => {
+    inWorkspace((ws) => {
+      openIssue(ws, { content: issueText(ws, "Open one", "One."), fallbackTitle: "Open one" }, {});
+      openIssue(ws, { content: issueText(ws, "Shut one", "Two."), fallbackTitle: "Shut one" }, {});
+      closeEntity(ws, "issue", "bbb2", { resolution: "fixed" }, {});
+
+      const parsed = parseListQuery([], "issue");
+      assert.deepEqual(parsed.status, ["open"]);
+      assert.deepEqual(
+        listEntities(ws, "issue", parsed).map((entity) => entity.title),
+        ["Open one"],
+      );
+
+      const neutral = listEntities(ws, "issue", emptyQuery());
+      assert.deepEqual(neutral.map((entity) => entity.title).sort(), ["Open one", "Shut one"]);
+
+      // An explicit status still narrows, in either direction.
+      assert.deepEqual(
+        listEntities(ws, "issue", parseListQuery(["status:closed"], "issue")).map((e) => e.title),
+        ["Shut one"],
       );
     }, "aaa11111,bbb22222");
   });
@@ -509,6 +539,25 @@ describe("ops: updating and merging a pull request", () => {
       assert.equal(findEntity(ws, "pr", "ppp1").status, "closed");
 
       assert.equal(materializePrIfAbsent(ws, "ppp1"), null, "already here, nothing to do");
+    });
+  });
+
+  /** Pull requests follow the same rule issues do; the kind changes nothing. */
+  it("lists a declined pull request unless a status narrows it away", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "main"], { cwd: dir });
+      materializePrIfAbsent(ws, "ppp1");
+      closeEntity(ws, "pr", "ppp1", { resolution: "wontfix" }, {});
+
+      assert.deepEqual(
+        listEntities(ws, "pr", emptyQuery()).map((entity) => entity.id),
+        ["ppp11111"],
+      );
+      assert.deepEqual(listEntities(ws, "pr", parseListQuery([], "pr")), []);
+      assert.deepEqual(
+        listEntities(ws, "pr", parseListQuery(["status:closed"], "pr")).map((entity) => entity.id),
+        ["ppp11111"],
+      );
     });
   });
 });

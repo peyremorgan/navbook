@@ -6,10 +6,9 @@
  * is the state, this file is the only translation, and the components read and
  * write `FilterState`.
  *
- * The one asymmetry worth knowing: an empty `status` is not "any status". The
- * server defaults a listing to open entities when the filter names none
- * (spec 04, `matchesQuery`), so showing closed ones means naming every status
- * wanted — which is exactly what the status chips do.
+ * Every key means the same thing when empty: no narrowing by that key. So an
+ * empty filter is the whole listing, and each parameter that appears in the URL
+ * is one the reader chose.
  */
 
 import type { EntityFilter, Status } from "~~/src/generated/gql/graphql";
@@ -19,7 +18,7 @@ export const ISSUE_STATUSES: readonly Status[] = ["OPEN", "CLOSED"];
 export const PR_STATUSES: readonly Status[] = ["OPEN", "MERGED", "CLOSED"];
 
 export interface FilterState {
-  /** Empty means "whatever the server defaults to", which is open only. */
+  /** Empty means any status, as an empty `EntityFilter.status` does. */
   status: Status[];
   labels: string[];
   assignees: string[];

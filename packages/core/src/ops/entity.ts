@@ -28,7 +28,13 @@ import {
   planPaths,
   planReopen,
 } from "../core/ops.ts";
-import { isQueryError, matchesQuery, parseQuery, type Query } from "../core/query.ts";
+import {
+  defaultStatuses,
+  isQueryError,
+  matchesQuery,
+  parseQuery,
+  type Query,
+} from "../core/query.ts";
 import type { EntityKind, EntityRecord, Repo } from "../core/tree.ts";
 import { uncommittedPaths } from "../git/index-ops.ts";
 import {
@@ -68,10 +74,18 @@ export function sortEntities(entities: readonly EntityRecord[]): EntityRecord[] 
   });
 }
 
-/** Parse query terms, reporting a malformed query as an input error. */
+/**
+ * Parse query terms for a `list` command, reporting a malformed query as an
+ * input error.
+ *
+ * Naming no status here means the CLI's documented default of open only (spec
+ * 04 §4.3), which is why the default is applied at parse time rather than in
+ * `matchesQuery`: a query carrying no status filters by none.
+ */
 export function parseListQuery(terms: readonly string[], kind: EntityKind): Query {
   const query = parseQuery([...terms], kind);
   if (isQueryError(query)) wsFail("invalid-input", query.message);
+  if (query.status.length === 0) query.status = defaultStatuses();
   return query;
 }
 

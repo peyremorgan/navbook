@@ -1,30 +1,44 @@
 /**
  * The listing and its filter, which is the URL.
  *
- * What is asserted is that the query string and what the server returns agree —
- * including the asymmetry that catches everybody: a filter naming no status
- * means open, not any.
+ * What is asserted is that the query string and what the server returns agree,
+ * starting with the empty case: a filter naming no status means any status, so
+ * an unfiltered listing holds closed issues too.
  */
 
 import { expect, test } from "./helpers/fixtures.ts";
 
-test("lists the open issues, newest first", async ({ signedIn, stack }) => {
+test("lists issues of every status, newest first", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/issues`);
   const rows = signedIn.locator("[data-testid^=issue-row-]");
   await expect(rows.first()).toBeVisible();
 
-  // The fixture's closed issue must not be here: no status named means open.
-  await expect(signedIn.getByTestId("issue-row-aaaa0006")).toHaveCount(0);
   await expect(signedIn.getByTestId("issue-row-aaaa0001")).toBeVisible();
+  // The fixture's closed issue belongs here too: no status named means any.
+  await expect(signedIn.getByTestId("issue-row-aaaa0006")).toBeVisible();
+
+  // Nothing is preselected, so no chip reads as pressed.
+  await expect(signedIn.getByTestId("filter-status-open")).toHaveAttribute("aria-pressed", "false");
+  await expect(signedIn.getByTestId("filter-status-closed")).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
 });
 
-test("shows closed issues only when the URL asks for them", async ({ signedIn, stack }) => {
-  await signedIn.goto(`${stack.appUrl}/issues?status=open&status=closed`);
-  await expect(signedIn.getByTestId("issue-row-aaaa0006")).toBeVisible();
+test("narrows to one status when the URL asks for it", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/issues?status=open`);
+  await expect(signedIn.getByTestId("issue-row-aaaa0001")).toBeVisible();
+  await expect(signedIn.getByTestId("issue-row-aaaa0006")).toHaveCount(0);
+  await expect(signedIn.getByTestId("filter-status-open")).toHaveAttribute("aria-pressed", "true");
 
   await signedIn.goto(`${stack.appUrl}/issues?status=closed`);
   await expect(signedIn.getByTestId("issue-row-aaaa0006")).toBeVisible();
   await expect(signedIn.getByTestId("issue-row-aaaa0001")).toHaveCount(0);
+
+  // Naming both is the same set as naming neither.
+  await signedIn.goto(`${stack.appUrl}/issues?status=open&status=closed`);
+  await expect(signedIn.getByTestId("issue-row-aaaa0001")).toBeVisible();
+  await expect(signedIn.getByTestId("issue-row-aaaa0006")).toBeVisible();
 });
 
 test("filters by label, from the URL and from the chips", async ({ signedIn, stack }) => {
@@ -88,9 +102,13 @@ test("toggles a status chip into and out of the URL", async ({ signedIn, stack }
   await signedIn.getByTestId("filter-status-closed").click();
   await expect(signedIn).toHaveURL(/status=closed/);
   await expect(signedIn.getByTestId("issue-row-aaaa0006")).toBeVisible();
+  await expect(signedIn.getByTestId("issue-row-aaaa0001")).toHaveCount(0);
 
+  // Untoggling leaves no status named, which is every status again.
   await signedIn.getByTestId("filter-status-closed").click();
   await expect(signedIn).not.toHaveURL(/status=/);
+  await expect(signedIn.getByTestId("issue-row-aaaa0001")).toBeVisible();
+  await expect(signedIn.getByTestId("issue-row-aaaa0006")).toBeVisible();
 });
 
 test("clears every filter at once", async ({ signedIn, stack }) => {
@@ -103,9 +121,12 @@ test("ignores a status the issue list cannot show, rather than breaking", async 
   signedIn,
   stack,
 }) => {
-  // A URL shared from the pull request list, or typed by hand.
+  // A URL shared from the pull request list, or typed by hand. The status is
+  // dropped, which leaves no status named — so the listing is unnarrowed.
   await signedIn.goto(`${stack.appUrl}/issues?status=merged`);
   await expect(signedIn.getByTestId("issue-list")).toBeVisible();
+  await expect(signedIn.getByTestId("issue-row-aaaa0001")).toBeVisible();
+  await expect(signedIn.getByTestId("issue-row-aaaa0006")).toBeVisible();
 });
 
 test("opens an issue from the list", async ({ signedIn, stack }) => {

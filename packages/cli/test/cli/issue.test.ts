@@ -184,6 +184,39 @@ describe("$EDITOR flows", () => {
   });
 });
 
+/**
+ * The default query is `status:open` (spec 04 §4.3), and it belongs to the CLI
+ * alone: a query naming no status filters by none, which is what the GraphQL
+ * API relies on. These assertions keep the CLI's half of that split honest.
+ */
+describe("nav issue list default query", () => {
+  let repo: TempRepo;
+  before(() => {
+    repo = makeNavRepo();
+    repo.nav(["issue", "open", "Still open", "-m", "Body."], { NAV_IDS: "opn11111" });
+    repo.nav(["issue", "open", "All done", "-m", "Body."], { NAV_IDS: "cls22222" });
+    repo.nav(["issue", "close", "cls2", "--resolution", "fixed"]);
+    repo.commitAll("docs(issue): seed a closed issue");
+  });
+  after(() => repo.cleanup());
+
+  it("lists open issues only when no status is named", () => {
+    const out = repo.nav(["issue", "list"]).stdout;
+    assert.match(out, /opn11111/);
+    assert.equal(out.includes("cls22222"), false, "a closed issue is not in the default listing");
+  });
+
+  it("lists closed issues when the query names them", () => {
+    const closed = repo.nav(["issue", "list", "status:closed"]).stdout;
+    assert.match(closed, /cls22222/);
+    assert.equal(closed.includes("opn11111"), false);
+
+    const both = repo.nav(["issue", "list", "status:open", "status:closed"]).stdout;
+    assert.match(both, /opn11111/);
+    assert.match(both, /cls22222/);
+  });
+});
+
 describe("nav issue edit", () => {
   let repo: TempRepo;
   before(() => {

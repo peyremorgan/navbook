@@ -85,7 +85,7 @@ describe("toQuery", () => {
     );
   });
 
-  it("leaves an unmentioned key empty, so the default statuses apply", () => {
+  it("leaves an unmentioned key empty, which filters by none of its values", () => {
     assert.deepEqual(toQuery({ labels: ["bug"] }).status, []);
   });
 });

@@ -13,6 +13,7 @@
 
 import type { LocationQueryRaw } from "vue-router";
 import {
+  emptyFilter,
   type FilterState,
   filterToQuery,
   isEmptyFilter,
@@ -58,7 +59,6 @@ export function useEntityFilter(allowed: readonly Status[]): EntityFilterHandle 
     empty: computed(() => isEmptyFilter(filter.value)),
     set,
     patch: (next) => set({ ...filter.value, ...next }),
-    clear: () =>
-      set({ status: [], labels: [], assignees: [], authors: [], milestones: [], text: "" }),
+    clear: () => set(emptyFilter()),
   };
 }

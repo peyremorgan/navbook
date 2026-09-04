@@ -247,4 +247,31 @@ describe("reviewing, on the branch that carries the pull request", () => {
     assert.ok(data.pr.comments.some((c) => c.verdict === "REQUEST_CHANGES"));
     assert.ok(data.pr.comments.some((c) => c.verdict === null));
   });
+
+  /**
+   * The same rule as `issues`: naming no status names no filter. Worth its own
+   * assertion because `merged` exists only for pull requests, so this is the
+   * listing where "any status" reaches widest.
+   *
+   * Last in the file because it declines the pull request the tests above
+   * review, and a closed one is not what they are about.
+   */
+  it("keeps listing it once it is declined, until a status narrows it away", async () => {
+    h.fixture.server.close("pr", "pr111111", "wontfix");
+
+    const all = ok<{ prs: { id: string; status: string }[] }>(
+      await h.gql(`query { prs { id status } }`),
+    );
+    assert.deepEqual(all.prs, [{ id: "pr111111", status: "CLOSED" }]);
+
+    const open = ok<{ prs: { id: string }[] }>(
+      await h.gql(`query { prs(filter: { status: [OPEN] }) { id } }`),
+    );
+    assert.deepEqual(open.prs, []);
+
+    const gone = ok<{ prs: { id: string }[] }>(
+      await h.gql(`query { prs(filter: { status: [CLOSED, MERGED] }) { id } }`),
+    );
+    assert.deepEqual(gone.prs, [{ id: "pr111111" }]);
+  });
 });
