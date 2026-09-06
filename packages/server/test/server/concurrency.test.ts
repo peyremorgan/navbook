@@ -20,6 +20,13 @@ import { after, before, describe, it } from "node:test";
 import { type Harness, ok, startHarness } from "../helpers/harness.ts";
 import { originSubjects } from "../helpers/temprepo.ts";
 
+const CREATE_FEATURE = `mutation Create($title: String!, $slug: String!) {
+  createFeature(input: { title: $title, slug: $slug }) {
+    feature { slug title path }
+    commit { committed pushed }
+  }
+}`;
+
 const OPEN = `mutation Open($title: String!) {
   openIssue(input: { title: $title, body: "Body." }) {
     issue { id title status path }
@@ -43,6 +50,35 @@ describe("concurrent requests", () => {
 
   after(async () => {
     await h.stop();
+  });
+
+  it("creates ten features sent at once, each in its own directory", async () => {
+    const slugs = Array.from({ length: 10 }, (_, i) => `concurrent-feature-${i}`);
+    const results = await Promise.all(
+      slugs.map(
+        async (slug) =>
+          ok<{
+            createFeature: {
+              feature: { slug: string; path: string };
+              commit: { committed: boolean; pushed: boolean };
+            };
+          }>(await h.gql(CREATE_FEATURE, { title: `Concurrent ${slug}`, slug })).createFeature,
+      ),
+    );
+
+    assert.ok(results.every((r) => r.commit.committed && r.commit.pushed));
+    assert.equal(new Set(results.map((r) => r.feature.slug)).size, 10);
+    assert.equal(new Set(results.map((r) => r.feature.path)).size, 10);
+
+    const listed = ok<{ features: { slug: string }[] }>(
+      await h.gql(`query { features { slug } }`),
+    ).features.map((feature) => feature.slug);
+    for (const slug of slugs) assert.ok(listed.includes(slug), slug);
+
+    // Ten commits, and a tree nobody left half-written.
+    const subjects = originSubjects(h.fixture.origin);
+    for (const slug of slugs) assert.ok(subjects.includes(`docs(feature): create ${slug}`), slug);
+    assert.equal(h.fixture.server.git(["status", "--porcelain"]).stdout.trim(), "");
   });
 
   it("files ten issues sent at once, each with its own id and commit", async () => {

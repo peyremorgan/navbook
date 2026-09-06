@@ -482,6 +482,41 @@ describe("the commits that touched a feature", () => {
     });
   });
 
+  it("keeps git's order for commits made in the same second", () => {
+    inWorkspace((ws, dir) => {
+      // Every commit here shares one author date, so a sort on the timestamp
+      // alone could put them in any order. git's walk knows which came second.
+      create(ws, "Authentication", "auth");
+      addSpec(
+        ws,
+        "auth",
+        { content: newSpecFile({ title: "One", body: "Body." }), fileName: "one.md" },
+        { commit: true },
+      );
+      addSpec(
+        ws,
+        "auth",
+        { content: newSpecFile({ title: "Two", body: "Body." }), fileName: "two.md" },
+        { commit: true },
+      );
+
+      const repo = loadRepo(ws, { includeComments: false });
+      const found = featureCommits(ws, findFeature(ws, "auth"), featureMembers(repo, "auth"));
+      assert.deepEqual(
+        found.map((commit) => commit.subject),
+        git(["log", "--format=%s"], { cwd: dir }).trim().split("\n").slice(0, found.length),
+      );
+      assert.deepEqual(
+        found.map((commit) => commit.subject),
+        [
+          "docs(feature): add auth/two.md",
+          "docs(feature): add auth/one.md",
+          "docs(feature): create auth",
+        ],
+      );
+    });
+  });
+
   it("honours the limit, and finds the feature's own commits with no members at all", () => {
     inWorkspace((ws) => {
       create(ws, "Authentication", "auth");

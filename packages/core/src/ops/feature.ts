@@ -115,24 +115,39 @@ export function featureCommits(
   ];
   const ids = new Set(entities.map((entity) => entity.id));
 
-  const found = new Map<string, CommitSummary>();
-  for (const commit of searchCommits(ws.repoRoot, { paths, limit })) {
-    found.set(commit.sha, commit);
-  }
+  // Each walk comes back in git's own order, and that order is kept: a walk
+  // knows which of two commits made in the same second came second, and an
+  // author date rounded to the second does not. So the position within a walk
+  // is the tie-break, and the sha only settles a tie between the two walks.
+  const found = new Map<string, { commit: CommitSummary; order: number }>();
+  const collect = (
+    commits: readonly CommitSummary[],
+    keep: (c: CommitSummary) => boolean,
+  ): void => {
+    let order = 0;
+    for (const commit of commits) {
+      if (!keep(commit)) continue;
+      if (!found.has(commit.sha)) found.set(commit.sha, { commit, order });
+      order++;
+    }
+  };
+
+  collect(searchCommits(ws.repoRoot, { paths, limit }), () => true);
   if (ids.size > 0) {
     const grep = [...ids].join("|");
-    for (const commit of searchCommits(ws.repoRoot, { grep, limit })) {
-      if (!referencesAny(commit.message, ids)) continue;
-      found.set(commit.sha, commit);
-    }
+    collect(searchCommits(ws.repoRoot, { grep, limit }), (commit) =>
+      referencesAny(commit.message, ids),
+    );
   }
 
   return [...found.values()]
     .sort((a, b) => {
-      const difference = b.date.getTime() - a.date.getTime();
+      const difference = b.commit.date.getTime() - a.commit.date.getTime();
       if (difference !== 0) return difference;
-      return a.sha < b.sha ? -1 : a.sha > b.sha ? 1 : 0;
+      if (a.order !== b.order) return a.order - b.order;
+      return a.commit.sha < b.commit.sha ? -1 : a.commit.sha > b.commit.sha ? 1 : 0;
     })
+    .map((entry) => entry.commit)
     .slice(0, limit);
 }
 

@@ -424,16 +424,104 @@ describe("features", () => {
     assert.ok(subjects.includes("fix: raise the load-balancer timeout"));
   });
 
-  it("honours the commit limit", async () => {
+  it("honours the commit limit, nought included", async () => {
     const limited = ok<Payload>(
       await h.gql(`query { feature(slug: "auth") { commits(limit: 2) { sha } } }`),
     ).feature;
     assert.equal(limited.commits.length, 2);
+
+    const none = ok<Payload>(
+      await h.gql(`query { feature(slug: "auth") { commits(limit: 0) { sha } } }`),
+    ).feature;
+    assert.deepEqual(none.commits, []);
   });
 
   it("leaves a clean tree that doctor is happy with", async () => {
     assert.equal(h.fixture.server.git(["status", "--porcelain"]).stdout.trim(), "");
     const report = ok<Payload>(await h.gql(`query { doctor { diagnostics { check path } } }`));
     assert.deepEqual(report.doctor.diagnostics, []);
+  });
+});
+
+/**
+ * A document written by hand, under a name no tool would have chosen.
+ *
+ * Spec 02 §2.11 makes reading deliberately more generous than writing: a
+ * `Session Policy.md` committed from an editor is conforming and must keep
+ * working, even though `addSpec` would refuse to create it. That asymmetry is
+ * only safe because nothing joins a name onto a path — the name is looked up
+ * among the documents already parsed — so this is where that is proved.
+ */
+describe("a document a tool would not have created", () => {
+  let h: Harness;
+
+  before(async () => {
+    h = await startHarness({
+      // Written from the clone that stands in for somebody at a terminal, which
+      // is how a document with a name like this comes to exist at all.
+      prepare: (fixture) => {
+        fixture.peer.write(
+          ".navbook/specs/auth/feature.md",
+          "---\ntitle: Authentication\nauthor: alice@example.invalid\ncreated: 2026-09-01T10:00:00Z\n---\n\nSigning in.\n",
+        );
+        fixture.peer.write(
+          ".navbook/specs/auth/Session Policy.md",
+          "---\ntitle: Session policy\nsome-tool-state: {phase: draft}\n---\n\nThirty days.\n",
+        );
+        fixture.peer.commitAll("docs(feature): hand-write a feature");
+        fixture.peer.git(["push", "--quiet"]);
+      },
+    });
+  });
+  after(async () => {
+    await h.stop();
+  });
+
+  it("reads it, hashes it, and lets it be edited", async () => {
+    const found = ok<Payload>(
+      await h.gql(`query { feature(slug: "auth") {
+        specs { fileName title path body baseSha } } }`),
+    ).feature;
+
+    const spec = found.specs[0];
+    assert.equal(spec.fileName, "Session Policy.md");
+    assert.equal(spec.title, "Session policy");
+    assert.equal(spec.path, ".navbook/specs/auth/Session Policy.md");
+    // A hash for every document, whatever it is called: an empty one would be
+    // read as "changed" and would make the document impossible to save.
+    assert.match(spec.baseSha, /^[0-9a-f]{40}$/);
+
+    const saved = ok<Payload>(
+      await h.gql(UPDATE_SPEC, {
+        input: {
+          feature: "auth",
+          fileName: "Session Policy.md",
+          body: "Sixty days.",
+          baseSha: spec.baseSha,
+        },
+      }),
+    ).updateSpec;
+    assert.match(saved.spec.body, /Sixty days\./);
+    assert.equal(saved.commit.subject, "docs(feature): edit auth/Session Policy.md");
+    assert.match(
+      readFileSync(join(h.fixture.server.dir, ".navbook/specs/auth/Session Policy.md"), "utf8"),
+      /^some-tool-state:/m,
+    );
+  });
+
+  it("still refuses to create one under that name", async () => {
+    assert.equal(
+      errorCode(
+        await h.gql(ADD_SPEC, {
+          input: {
+            feature: "auth",
+            title: "X",
+            body: "Body.",
+            fileName: "Another Policy.md",
+          },
+        }),
+      ),
+      "INVALID_INPUT",
+    );
   });
 });
