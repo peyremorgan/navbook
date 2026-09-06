@@ -7,7 +7,15 @@
  * model of the same data.
  */
 
-import type { CommentRecord, Diagnostic, EntityRecord, LinkNode } from "@navbook/core";
+import type {
+  CommentRecord,
+  CommitSummary,
+  Diagnostic,
+  EntityRecord,
+  FeatureRecord,
+  LinkNode,
+  SpecRecord,
+} from "@navbook/core";
 
 export type IssueParent = EntityRecord;
 
@@ -26,6 +34,20 @@ export interface PrParent {
 export type CommentParent = CommentRecord;
 export type LinkNodeParent = LinkNode;
 export type DiagnosticParent = Diagnostic;
+export type FeatureParent = FeatureRecord;
+export type CommitParent = CommitSummary;
+
+/**
+ * A document, and the feature that holds it.
+ *
+ * The feature comes along because a document's own record knows its path but
+ * not which feature it belongs to, and every payload that returns one has to
+ * say. It is also what an edit resolves against.
+ */
+export interface SpecParent {
+  feature: FeatureRecord;
+  spec: SpecRecord;
+}
 
 /** Either kind, as `Entity` and `AddCommentPayload.entity` return it. */
 export type EntityParent = IssueParent | PrParent;

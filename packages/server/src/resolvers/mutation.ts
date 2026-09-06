@@ -14,22 +14,31 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import {
+  absPath,
+  addSpec,
   applyComment,
   applyEntityEdit,
   bindReviewRevision,
   type CommentRecord,
   closeEntity,
+  createFeature,
   currentAuthor,
   type EntityKind,
   type EntityRecord,
+  editFeature,
+  editSpec,
   executeIssueLink,
+  type FeatureRecord,
   findEntity,
+  findFeature,
   findParentIssue,
   loadRepo,
   locatePr,
   type NewCommentInput,
   newCommentFile,
+  newFeatureFile,
   newIssueFile,
+  newSpecFile,
   openIssue,
   planIssueLink,
   prepareOpen,
@@ -40,9 +49,14 @@ import {
   resolveComment,
   resolveEntity,
   resolveEntityForEdit,
+  resolveFeature,
+  resolveSpec,
+  specFileName,
   unlinkIssue,
   validateComment,
+  validateFeature,
   validateIssue,
+  validateSpec,
   WorkspaceError,
 } from "@navbook/core";
 import { checkComposed, requireText } from "../compose.ts";
@@ -53,7 +67,14 @@ import type {
   CommitInfo,
   MutationResolvers,
 } from "../generated/resolver-types.ts";
-import { applyIssuePatch, isEmptyPatch } from "../patch.ts";
+import type { FeatureParent, SpecParent } from "../mappers.ts";
+import {
+  applyFeaturePatch,
+  applyIssuePatch,
+  applySpecPatch,
+  isEmptyPatch,
+  isEmptySpecPatch,
+} from "../patch.ts";
 import { toCoreKind, toCoreVerdict } from "./map.ts";
 
 /** Mutations always commit: a change nobody committed is not a change made. */
@@ -118,6 +139,7 @@ export const Mutation: MutationResolvers = {
             ...(input.labels ? { labels: [...input.labels] } : {}),
             ...(input.assignees ? { assignee: [...input.assignees] } : {}),
             ...(input.milestone ? { milestone: input.milestone } : {}),
+            ...(input.features ? { features: [...input.features] } : {}),
             ...(parent ? { parent: parent.id } : {}),
           });
           checkComposed(content, validateIssue, "issue");
@@ -338,7 +360,144 @@ export const Mutation: MutationResolvers = {
         commit: commitInfo(result.run, pushed),
       };
     }),
+
+  createFeature: (_parent, { input }, ctx) =>
+    run(async () => {
+      requireText(input.title, "title");
+
+      const { result, pushed } = await ctx.sync.write(
+        () => {
+          const { created } = prepareOpen(ctx.ws);
+          const content = newFeatureFile({
+            title: input.title,
+            author: currentAuthor(ctx.ws),
+            created,
+            // A feature may have no summary, so an absent one is absent rather
+            // than refused the way an issue with no description is.
+            ...(input.summary ? { body: input.summary } : {}),
+          });
+          checkComposed(content, validateFeature, "feature");
+
+          const opened = createFeature(
+            ctx.ws,
+            {
+              content,
+              ...(input.slug ? { slug: input.slug } : {}),
+              fallbackTitle: input.title,
+            },
+            COMMIT,
+          );
+          return { run: opened.run, feature: featureAfter(ctx, opened.slug) };
+        },
+        (opened) => opened.run.committed,
+      );
+
+      return { feature: result.feature, commit: commitInfo(result.run, pushed) };
+    }),
+
+  updateFeature: (_parent, { input }, ctx) =>
+    run(async () => {
+      if (input.title === undefined && input.summary === undefined) {
+        throw invalidInput("the patch names no field to change");
+      }
+
+      const { result, pushed } = await ctx.sync.write(
+        () => {
+          const feature = findFeature(ctx.ws, input.slug);
+          const before = readFileSync(absPath(ctx.ws, feature.filePath), "utf8");
+          const patched = applyFeaturePatch(
+            before,
+            input,
+            repoPath(ctx.ws.navDir, feature.filePath),
+          );
+          checkComposed(patched, validateFeature, "feature");
+
+          // Unlike `updateIssue`, nothing is written before the operation runs:
+          // `editSpec`/`editFeature` take the finished text, so core's guards —
+          // the stale check among them — all run before any file is touched.
+          const edited = editFeature(ctx.ws, feature.slug, patched, {
+            commit: true,
+            baseSha: input.baseSha,
+          });
+          return { run: edited.run, feature: featureAfter(ctx, feature.slug) };
+        },
+        (edited) => edited.run.committed,
+      );
+
+      return { feature: result.feature, commit: commitInfo(result.run, pushed) };
+    }),
+
+  addSpec: (_parent, { input }, ctx) =>
+    run(async () => {
+      requireText(input.title, "title");
+      requireText(input.body, "body");
+
+      const { result, pushed } = await ctx.sync.write(
+        () => {
+          const content = newSpecFile({ title: input.title, body: input.body });
+          checkComposed(content, validateSpec, "specification document");
+
+          const added = addSpec(
+            ctx.ws,
+            input.feature,
+            { content, fileName: input.fileName ?? specFileName(input.title) },
+            COMMIT,
+          );
+          return { run: added.run, ...specAfter(ctx, added.feature.slug, added.fileName) };
+        },
+        (added) => added.run.committed,
+      );
+
+      return {
+        feature: result.feature,
+        spec: result.spec,
+        commit: commitInfo(result.run, pushed),
+      };
+    }),
+
+  updateSpec: (_parent, { input }, ctx) =>
+    run(async () => {
+      if (isEmptySpecPatch(input)) throw invalidInput("the patch names no field to change");
+
+      const { result, pushed } = await ctx.sync.write(
+        () => {
+          const feature = findFeature(ctx.ws, input.feature);
+          const spec = resolveSpec(feature, input.fileName);
+          const before = readFileSync(absPath(ctx.ws, spec.path), "utf8");
+          const patched = applySpecPatch(before, input, repoPath(ctx.ws.navDir, spec.path));
+          checkComposed(patched, validateSpec, "specification document");
+
+          const edited = editSpec(ctx.ws, feature.slug, spec.fileName, patched, {
+            commit: true,
+            baseSha: input.baseSha,
+          });
+          return { run: edited.run, ...specAfter(ctx, feature.slug, spec.fileName) };
+        },
+        (edited) => edited.run.committed,
+      );
+
+      return {
+        feature: result.feature,
+        spec: result.spec,
+        commit: commitInfo(result.run, pushed),
+      };
+    }),
 };
+
+/** The feature as the write has just left it, read back inside the transaction. */
+function featureAfter(ctx: GraphQLCtx, slug: string): FeatureParent {
+  return resolveFeature(afterWrite(ctx), slug);
+}
+
+/** The feature and one of its documents, likewise. */
+function specAfter(
+  ctx: GraphQLCtx,
+  slug: string,
+  fileName: string,
+): { feature: FeatureRecord; spec: SpecParent } {
+  const feature = featureAfter(ctx, slug);
+  return { feature, spec: { feature, spec: resolveSpec(feature, fileName) } };
+}
 
 /**
  * The entity a comment is to be added to, in the branch the server serves.

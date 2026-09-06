@@ -12,6 +12,7 @@ import {
   type EntityRecord,
   parentNode,
   readAssignees,
+  readFeatures,
   readLabels,
   readMerged,
   readRevisions,
@@ -57,6 +58,7 @@ function sharedFields<P>(record: (parent: P) => EntityRecord) {
     labels: (parent: P) => readLabels(record(parent).fm),
     assignees: (parent: P) => readAssignees(record(parent).fm),
     milestone: (parent: P) => text(record(parent).fm, "milestone"),
+    features: (parent: P) => readFeatures(record(parent).fm),
     body: (parent: P) => record(parent).body.trim(),
     comments: (parent: P) => record(parent).comments,
   };

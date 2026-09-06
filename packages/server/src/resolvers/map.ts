@@ -82,6 +82,7 @@ export function toQuery(filter: EntityFilter | null | undefined): Query {
   if (filter.assignees) query.assignees = [...filter.assignees];
   if (filter.authors) query.authors = [...filter.authors];
   if (filter.milestones) query.milestones = [...filter.milestones];
+  if (filter.features) query.features = [...filter.features];
   if (filter.text) query.text = [...filter.text];
   return query;
 }

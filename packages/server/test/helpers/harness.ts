@@ -83,8 +83,21 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<Harness> 
     errors += chunk;
   });
 
-  const port = await readyPort(child, () => errors);
-  const defaultToken = await issuer.sign({ name: "A Person", email: "person@example.invalid" });
+  // A server that never becomes ready leaves the issuer listening and the
+  // fixture on disk, and a listening socket keeps this process alive: the file
+  // would then never finish and never print the error it had already collected.
+  // So a failed start is torn down here and reported, rather than hung on.
+  let port: number;
+  let defaultToken: string;
+  try {
+    port = await readyPort(child, () => errors);
+    defaultToken = await issuer.sign({ name: "A Person", email: "person@example.invalid" });
+  } catch (error) {
+    if (child.exitCode === null) child.kill("SIGKILL");
+    await issuer.close();
+    fixture.cleanup();
+    throw error;
+  }
 
   const stop = async (): Promise<void> => {
     if (child.exitCode === null) {

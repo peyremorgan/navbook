@@ -72,6 +72,7 @@ describe("toQuery", () => {
         assignees: ["a@x.invalid"],
         authors: ["b@x.invalid"],
         milestones: ["v1"],
+        features: ["auth"],
         text: ["crash"],
       }),
       {
@@ -80,7 +81,7 @@ describe("toQuery", () => {
         assignees: ["a@x.invalid"],
         authors: ["b@x.invalid"],
         milestones: ["v1"],
-        features: [],
+        features: ["auth"],
         text: ["crash"],
       },
     );

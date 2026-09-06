@@ -22,7 +22,11 @@ import {
   setFlowList,
 } from "@navbook/core";
 import { apiError, invalidInput } from "./errors.ts";
-import type { UpdateIssueInput } from "./generated/resolver-types.ts";
+import type {
+  UpdateFeatureInput,
+  UpdateIssueInput,
+  UpdateSpecInput,
+} from "./generated/resolver-types.ts";
 
 /**
  * An optional list field.
@@ -72,6 +76,19 @@ export function applyIssuePatch(content: string, input: UpdateIssueInput, path: 
     patchDoc(nav, { milestone: input.milestone === null ? undefined : input.milestone });
   }
 
+  // `feature` is singular on disk and, like `assignee`, may be a scalar or a
+  // list (spec 02 §2.11); one feature is written as a scalar, which is what
+  // `newIssueFile` does and what nearly every entity carries.
+  if (input.features !== undefined) {
+    if (input.features === null || input.features.length === 0) {
+      patchDoc(nav, { feature: undefined });
+    } else if (input.features.length === 1) {
+      patchDoc(nav, { feature: input.features[0] });
+    } else {
+      setFlowList(nav, "feature", [...input.features]);
+    }
+  }
+
   if (input.body !== undefined && input.body !== null) {
     if (input.body.trim() === "") throw invalidInput("body must not be empty");
     // Deliberately not marking the document dirty: the body is serialized
@@ -99,6 +116,74 @@ export function isEmptyPatch(input: UpdateIssueInput): boolean {
     input.body === undefined &&
     input.labels === undefined &&
     input.assignees === undefined &&
-    input.milestone === undefined
+    input.milestone === undefined &&
+    input.features === undefined
   );
+}
+
+/**
+ * Apply a patch to a specification document, returning the new text.
+ *
+ * Through the YAML document for the same reason an issue's patch is: a
+ * document may carry keys this schema does not name — `author`, `created`, or
+ * something a future revision defines — and rebuilding the file from the two
+ * fields the client sent would quietly drop them (spec 02 §2.4).
+ */
+export function applySpecPatch(content: string, input: UpdateSpecInput, path: string): string {
+  const nav = parseDoc(content);
+
+  if (input.title !== undefined && input.title !== null) {
+    if (input.title.trim() === "") throw invalidInput("title must not be empty");
+    patchDoc(nav, { title: input.title });
+  }
+  if (input.body !== undefined && input.body !== null) {
+    if (input.body.trim() === "") throw invalidInput("body must not be empty");
+    nav.body = `\n${normalizeBody(input.body)}`;
+  }
+
+  try {
+    return serializeDoc(nav);
+  } catch (error) {
+    if (!(error instanceof FrontmatterError)) throw error;
+    throw apiError(`${path}: ${error.message}`, "FRONTMATTER", {
+      details: ["fix the file by hand, or run 'nav doctor' to see what is wrong"],
+    });
+  }
+}
+
+/**
+ * Apply a patch to a feature's identity card, returning the new text.
+ *
+ * An explicit null clears the summary, which is a thing a feature may go
+ * without; `title` can be replaced but not emptied, since it is the name.
+ */
+export function applyFeaturePatch(
+  content: string,
+  input: UpdateFeatureInput,
+  path: string,
+): string {
+  const nav = parseDoc(content);
+
+  if (input.title !== undefined && input.title !== null) {
+    if (input.title.trim() === "") throw invalidInput("title must not be empty");
+    patchDoc(nav, { title: input.title });
+  }
+  if (input.summary !== undefined) {
+    const summary = input.summary === null ? "" : normalizeBody(input.summary);
+    nav.body = summary === "" ? "" : `\n${summary}`;
+  }
+
+  try {
+    return serializeDoc(nav);
+  } catch (error) {
+    if (!(error instanceof FrontmatterError)) throw error;
+    throw apiError(`${path}: ${error.message}`, "FRONTMATTER", {
+      details: ["fix the file by hand, or run 'nav doctor' to see what is wrong"],
+    });
+  }
+}
+
+/** True when a document patch names nothing to change. */
+export function isEmptySpecPatch(input: UpdateSpecInput): boolean {
+  return input.title === undefined && input.body === undefined;
 }

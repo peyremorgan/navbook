@@ -45,6 +45,8 @@ export type CloseIssueInput = {
 export type EntityFilter = {
   assignees?: Array<string> | null | undefined;
   authors?: Array<string> | null | undefined;
+  /** Feature slugs; an entity must name every one of them. */
+  features?: Array<string> | null | undefined;
   labels?: Array<string> | null | undefined;
   milestones?: Array<string> | null | undefined;
   /** Absent or empty means any status; the listing is not narrowed by one. */
@@ -74,6 +76,8 @@ export type LinkIssueInput = {
 export type OpenIssueInput = {
   assignees?: Array<string> | null | undefined;
   body: string;
+  /** Slugs of features to attach it to (spec 02 §2.11). */
+  features?: Array<string> | null | undefined;
   labels?: Array<string> | null | undefined;
   milestone?: string | null | undefined;
   /** ID or prefix of the issue to file this one under. */
@@ -91,12 +95,14 @@ export type Status =
  * Fields to change on an issue.
  *
  * An omitted field is left alone. An explicit null clears the key, as does an
- * empty list for `labels` and `assignees`; `title` and `body` can be replaced but
- * not cleared. Frontmatter keys this schema does not name are always preserved.
+ * empty list for `labels`, `assignees` and `features`; `title` and `body` can be
+ * replaced but not cleared. Frontmatter keys this schema does not name are always
+ * preserved.
  */
 export type UpdateIssueInput = {
   assignees?: Array<string> | null | undefined;
   body?: string | null | undefined;
+  features?: Array<string> | null | undefined;
   labels?: Array<string> | null | undefined;
   milestone?: string | null | undefined;
   ref: string | number;
