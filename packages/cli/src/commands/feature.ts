@@ -21,7 +21,7 @@ import {
   newFeatureFile,
   newSpecFile,
   prepareOpen,
-  readFeatures,
+  referencedFeatures,
   requireSpecFileName,
   resolveFeature,
   resolveFeatureForEdit,
@@ -278,15 +278,15 @@ function terminalWidth(ctx: Ctx): number | undefined {
   return typeof columns === "number" && columns > 0 ? columns : undefined;
 }
 
-/** Feature slugs offered for completion: those that exist, and those named. */
+/**
+ * Feature slugs offered for completion: those that exist, and those named.
+ *
+ * A slug an entity names but no directory holds is offered too — it is what
+ * somebody typed, and completing it is how they find the typo (D14).
+ */
 export function featureSlugs(ctx: Ctx): string[] {
   try {
-    const repo = loadRepo(ctx, { includeComments: false });
-    const slugs = new Set(repo.features.map((f) => f.slug));
-    for (const entity of [...repo.issues, ...repo.prs]) {
-      for (const slug of readFeatures(entity.fm)) slugs.add(slug);
-    }
-    return [...slugs].sort();
+    return referencedFeatures(loadRepo(ctx, { includeComments: false }));
   } catch {
     return [];
   }
