@@ -10,8 +10,7 @@ const commit = (sha: string, date: string) => ({
   date,
 });
 
-const keys = (events: TimelineEvent[]): string[] =>
-  events.map((event) => (event.kind === "commit" ? event.commit.sha : event.entity.id));
+const keys = (events: TimelineEvent[]): string[] => events.map((event) => event.key);
 
 describe("mergeTimeline", () => {
   it("is empty when there is nothing to show", () => {

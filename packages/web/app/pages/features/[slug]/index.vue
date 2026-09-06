@@ -175,18 +175,13 @@ async function addSpec(): Promise<void> {
       <section class="space-y-2">
         <h2 class="font-semibold">Timeline ({{ timeline.length }})</h2>
         <div v-if="timeline.length" class="rounded-lg border border-default" data-testid="timeline">
-          <template v-for="event in page.shown.value">
-            <CommitRow v-if="event.kind === 'commit'" :key="event.commit.sha" :commit="event.commit" />
+          <template v-for="event in page.shown.value" :key="event.key">
+            <CommitRow v-if="event.kind === 'commit'" :commit="event.commit" />
             <IssueRow
               v-else-if="event.kind === 'issue' && issueById.get(event.entity.id)"
-              :key="event.entity.id"
               :issue="issueById.get(event.entity.id)!"
             />
-            <PrRow
-              v-else-if="prById.get(event.entity.id)"
-              :key="event.entity.id"
-              :pr="prById.get(event.entity.id)!"
-            />
+            <PrRow v-else-if="prById.get(event.entity.id)" :pr="prById.get(event.entity.id)!" />
           </template>
         </div>
         <p v-else class="text-sm text-muted">Nothing has touched this feature yet.</p>

@@ -13,17 +13,22 @@
  * and it reads better after the issue it created than before it.
  */
 
-export interface TimelineEntity {
+interface Placed {
+  /** When it happened, as the source of it records that. */
+  at: string;
+  /** What identifies it: unique across a timeline, and stable between renders. */
+  key: string;
+}
+
+export interface TimelineEntity extends Placed {
   kind: "issue" | "pr";
   /** The entity as its row component wants it. */
   entity: { id: string; created: string };
-  at: string;
 }
 
-export interface TimelineCommit {
+export interface TimelineCommit extends Placed {
   kind: "commit";
   commit: { sha: string; subject: string; author: string; date: string };
-  at: string;
 }
 
 export type TimelineEvent = TimelineEntity | TimelineCommit;
@@ -41,13 +46,13 @@ const RANK = { commit: 0, issue: 1, pr: 2 } as const;
 export function mergeTimeline(input: TimelineInput): TimelineEvent[] {
   const events: TimelineEvent[] = [
     ...(input.issues ?? []).map(
-      (entity): TimelineEvent => ({ kind: "issue", entity, at: entity.created }),
+      (entity): TimelineEvent => ({ kind: "issue", entity, at: entity.created, key: entity.id }),
     ),
     ...(input.prs ?? []).map(
-      (entity): TimelineEvent => ({ kind: "pr", entity, at: entity.created }),
+      (entity): TimelineEvent => ({ kind: "pr", entity, at: entity.created, key: entity.id }),
     ),
     ...(input.commits ?? []).map(
-      (commit): TimelineEvent => ({ kind: "commit", commit, at: commit.date }),
+      (commit): TimelineEvent => ({ kind: "commit", commit, at: commit.date, key: commit.sha }),
     ),
   ];
 
@@ -58,7 +63,7 @@ export function mergeTimeline(input: TimelineInput): TimelineEvent[] {
     const difference = instant(b.at) - instant(a.at);
     if (difference !== 0) return difference;
     if (a.kind !== b.kind) return RANK[a.kind] - RANK[b.kind];
-    return keyOf(a) < keyOf(b) ? -1 : keyOf(a) > keyOf(b) ? 1 : 0;
+    return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
   });
 }
 
@@ -66,9 +71,4 @@ export function mergeTimeline(input: TimelineInput): TimelineEvent[] {
 function instant(value: string): number {
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
-}
-
-/** A stable tie-break, so two events at one instant never swap between renders. */
-function keyOf(event: TimelineEvent): string {
-  return event.kind === "commit" ? event.commit.sha : event.entity.id;
 }
