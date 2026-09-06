@@ -8,7 +8,7 @@
  */
 
 import { commentFileName } from "./comments.ts";
-import { type Revision, readParent, readRevisions, readSubtasks } from "./files.ts";
+import { FEATURE_FILE, type Revision, readParent, readRevisions, readSubtasks } from "./files.ts";
 import {
   appendListItem,
   FrontmatterError,
@@ -20,7 +20,16 @@ import {
 import { isId } from "./id.ts";
 import type { LinkEdit, LinkRepair } from "./links.ts";
 import { dirName as makeDirName, slugify } from "./slug.ts";
-import { type EntityKind, type EntityRecord, NAV_MARKER, type Status, statusDir } from "./tree.ts";
+import {
+  type EntityKind,
+  type EntityRecord,
+  type FeatureRecord,
+  NAV_MARKER,
+  SPECS_DIR,
+  type SpecRecord,
+  type Status,
+  statusDir,
+} from "./tree.ts";
 
 export type FileOp =
   /** Create or overwrite a file, creating parent directories as needed. */
@@ -69,6 +78,19 @@ export function planPaths(plan: Plan): string[] {
  */
 export function docsSubject(kind: EntityKind, action: string, id: string): string {
   return `docs(${kind}): ${action} #${id}`;
+}
+
+/**
+ * Commit subject for a change to a feature, e.g. `docs(feature): edit auth`.
+ *
+ * The slug stands where `#<id>` stands for an entity, because a feature has no
+ * ID and the slug is what names it everywhere else. A change to one of its
+ * documents names the document too, since `edit auth` alone would not say which
+ * of several files moved. One scope covers the family, so
+ * `git log --grep='docs(feature)'` finds every feature change there is.
+ */
+export function docsFeatureSubject(action: string, slug: string, file?: string): string {
+  return `docs(feature): ${action} ${slug}${file === undefined ? "" : `/${file}`}`;
 }
 
 /* --------------------------------------------------------------------- init */
@@ -133,6 +155,66 @@ export function planEntityOpen(
     slug,
     dirPath,
     filePath,
+  };
+}
+
+/* ----------------------------------------------------------------- features */
+
+export interface FeatureOpenResult {
+  plan: Plan;
+  slug: string;
+  dirPath: string;
+  filePath: string;
+}
+
+/**
+ * Create a feature directory holding the given `feature.md`.
+ *
+ * `specs/` is not part of the skeleton `nav init` writes: a repository that has
+ * no features has no reason to carry an empty directory, and requiring one
+ * would make every tree that predates features non-conforming (spec 02 §2.1).
+ * Writing a file creates the directories above it, so the first feature brings
+ * `specs/` with it and there is nothing to create in advance.
+ */
+export function planFeatureCreate(slug: string, content: string): FeatureOpenResult {
+  const dirPath = `${SPECS_DIR}/${slug}`;
+  const filePath = `${dirPath}/${FEATURE_FILE}`;
+  return {
+    plan: {
+      ops: [{ op: "write", path: filePath, content }],
+      message: docsFeatureSubject("create", slug),
+      trailers: [],
+    },
+    slug,
+    dirPath,
+    filePath,
+  };
+}
+
+/** Record an edit to a feature's identity card. */
+export function planFeatureEdit(feature: FeatureRecord, content: string): Plan {
+  return {
+    ops: [{ op: "write", path: feature.filePath, content }],
+    message: docsFeatureSubject("edit", feature.slug),
+    trailers: [],
+  };
+}
+
+/** Add a specification document to a feature. */
+export function planSpecAdd(feature: FeatureRecord, fileName: string, content: string): Plan {
+  return {
+    ops: [{ op: "write", path: `${feature.dirPath}/${fileName}`, content }],
+    message: docsFeatureSubject("add", feature.slug, fileName),
+    trailers: [],
+  };
+}
+
+/** Record an edit to one of a feature's specification documents. */
+export function planSpecEdit(feature: FeatureRecord, spec: SpecRecord, content: string): Plan {
+  return {
+    ops: [{ op: "write", path: spec.path, content }],
+    message: docsFeatureSubject("edit", feature.slug, spec.fileName),
+    trailers: [],
   };
 }
 

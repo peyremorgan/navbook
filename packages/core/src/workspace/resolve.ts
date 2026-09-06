@@ -4,8 +4,18 @@
  * of the other kind points at the right noun).
  */
 
+import { isSpecFileName } from "../core/files.ts";
 import { MIN_PREFIX_LENGTH, resolvePrefix } from "../core/id.ts";
-import { allEntities, type EntityKind, type EntityRecord, type Repo } from "../core/tree.ts";
+import { SLUG_PATTERN } from "../core/slug.ts";
+import {
+  allEntities,
+  type EntityKind,
+  type EntityRecord,
+  type FeatureRecord,
+  type Repo,
+  SPECS_DIR,
+  type SpecRecord,
+} from "../core/tree.ts";
 import { wsFail } from "./errors.ts";
 
 const NOUN: Record<EntityKind, string> = { issue: "issue", pr: "pull request" };
@@ -68,6 +78,53 @@ function verbHint(): string {
 function describe(entity: EntityRecord | undefined): string {
   if (!entity) return "";
   return `#${entity.id}  ${entity.kind === "pr" ? "pr   " : "issue"}  ${entity.title}`;
+}
+
+/**
+ * Resolve a feature by its slug.
+ *
+ * By exact slug, never by prefix: a slug is a word somebody chose and typed,
+ * not eight random characters nobody wants to type in full, so `auth` matching
+ * `authentication` would be a surprise rather than a convenience.
+ */
+export function resolveFeature(repo: Repo, slug: string): FeatureRecord {
+  const feature = repo.featureBySlug.get(slug);
+  if (feature) return feature;
+  if (!SLUG_PATTERN.test(slug)) {
+    wsFail(
+      "invalid-input",
+      `'${slug}' is not a feature slug: lowercase letters, digits and single hyphens`,
+    );
+  }
+  wsFail("not-found", `no feature named '${slug}' in ${SPECS_DIR}/`, [
+    ...repo.features.map((f) => `${f.slug}  ${f.title}`),
+  ]);
+}
+
+/**
+ * Resolve one of a feature's documents by file name.
+ *
+ * By lookup rather than by joining the name onto a path: the record was parsed
+ * from a file this tree holds, so its path cannot be anything the caller made
+ * up. That is what makes serving a document by name safe over an API.
+ */
+export function resolveSpec(feature: FeatureRecord, fileName: string): SpecRecord {
+  const spec = feature.specs.find((s) => s.fileName === fileName);
+  if (spec) return spec;
+  wsFail(
+    "not-found",
+    `feature '${feature.slug}' has no document named '${fileName}'`,
+    feature.specs.map((s) => s.fileName),
+  );
+}
+
+/** Refuse a document name a tool must not create (spec 02 §2.11). */
+export function requireSpecFileName(fileName: string): string {
+  if (isSpecFileName(fileName)) return fileName;
+  wsFail(
+    "invalid-input",
+    `'${fileName}' is not a document name this tool will create: expected a slug and '.md', and not 'feature.md'`,
+  );
 }
 
 /** Resolve a comment ID or prefix within one entity (used by `--reply-to`). */

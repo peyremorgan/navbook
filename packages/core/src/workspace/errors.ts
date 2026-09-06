@@ -26,6 +26,8 @@ export type WorkspaceErrorCode =
   | "precondition"
   | "unrelated-staged"
   | "frontmatter"
+  /** The file changed since the caller last read it (spec 06 §6.3). */
+  | "stale-content"
   /* merging */
   | "merge-conflict"
   | "merge-unresolved"

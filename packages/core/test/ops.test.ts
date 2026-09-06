@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { newIssueFile, parseFile, readRevisions, validateIssue } from "../src/core/files.ts";
 import { FrontmatterError } from "../src/core/frontmatter.ts";
 import {
+  docsFeatureSubject,
   docsSubject,
   type FileOp,
   LinkRewriteError,
@@ -12,17 +13,28 @@ import {
   planComment,
   planDelete,
   planEntityOpen,
+  planFeatureCreate,
+  planFeatureEdit,
   planInit,
   planLink,
   planMergedBlock,
   planPaths,
   planPrUpdate,
   planReopen,
+  planSpecAdd,
+  planSpecEdit,
   planUnlink,
   RevisionUnchangedError,
   rewriteLinks,
 } from "../src/core/ops.ts";
-import { type EntityRecord, NAV_MARKER, type NavTree, parseTree } from "../src/core/tree.ts";
+import {
+  type EntityRecord,
+  type FeatureRecord,
+  NAV_MARKER,
+  type NavTree,
+  parseTree,
+  type SpecRecord,
+} from "../src/core/tree.ts";
 
 const SHA_A = "4f2c9d1e8a7b3c5d9e0f1a2b3c4d5e6f7a8b9c0d";
 const SHA_B = "91d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0";
@@ -96,6 +108,68 @@ describe("planInit", () => {
     // This is what lets one plan serve a repository whatever its root is called.
     for (const op of planInit().ops) {
       if (op.op === "write") assert.ok(!op.path.includes(".navbook"), op.path);
+    }
+  });
+});
+
+describe("the feature planners", () => {
+  const feature = (): FeatureRecord => {
+    const repo = parseTree(
+      new Map([
+        [
+          "specs/auth/feature.md",
+          "---\ntitle: Authentication\nauthor: alice@example.com\ncreated: 2026-09-01T10:00:00Z\n---\n\nSummary.\n",
+        ],
+        ["specs/auth/login-flow.md", "---\ntitle: Login flow\n---\n\nBody.\n"],
+      ]) as NavTree,
+    );
+    return repo.features[0] as FeatureRecord;
+  };
+
+  it("scopes every feature subject the same way, naming the document when there is one", () => {
+    assert.equal(docsFeatureSubject("create", "auth"), "docs(feature): create auth");
+    assert.equal(
+      docsFeatureSubject("edit", "auth", "login-flow.md"),
+      "docs(feature): edit auth/login-flow.md",
+    );
+  });
+
+  it("lays a new feature out under specs/, with no directory to create first", () => {
+    const { plan, dirPath, filePath } = planFeatureCreate("auth", "content");
+    assert.equal(dirPath, "specs/auth");
+    assert.equal(filePath, "specs/auth/feature.md");
+    assert.deepEqual(plan.ops, [
+      { op: "write", path: "specs/auth/feature.md", content: "content" },
+    ]);
+    assert.equal(plan.message, "docs(feature): create auth");
+    // No trailer: a feature has no ID for one to name.
+    assert.deepEqual(plan.trailers, []);
+  });
+
+  it("writes an edit back over the file it came from", () => {
+    const record = feature();
+    assert.deepEqual(planFeatureEdit(record, "new").ops, [
+      { op: "write", path: "specs/auth/feature.md", content: "new" },
+    ]);
+    assert.deepEqual(planSpecAdd(record, "sessions.md", "new").ops, [
+      { op: "write", path: "specs/auth/sessions.md", content: "new" },
+    ]);
+    assert.deepEqual(planSpecEdit(record, record.specs[0] as SpecRecord, "new").ops, [
+      { op: "write", path: "specs/auth/login-flow.md", content: "new" },
+    ]);
+  });
+
+  it("names only paths the --commit guard will accept as its own", () => {
+    const record = feature();
+    assert.deepEqual(planPaths(planFeatureCreate("auth", "x").plan), ["specs/auth/feature.md"]);
+    assert.deepEqual(planPaths(planSpecAdd(record, "sessions.md", "x")), [
+      "specs/auth/sessions.md",
+    ]);
+  });
+
+  it("plans paths relative to the Navbook directory, never naming it", () => {
+    for (const path of planPaths(planFeatureCreate("auth", "x").plan)) {
+      assert.ok(!path.includes(".navbook"), path);
     }
   });
 });
