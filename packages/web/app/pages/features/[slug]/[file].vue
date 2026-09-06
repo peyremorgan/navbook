@@ -33,13 +33,14 @@ async function save(change: { title: string; body: string; baseSha: string }): P
     const message = staleContent(failure);
     // Anything else has already been reported by the shared error toast.
     if (message === null) return;
+    // Said before the refetch, not after. Fetching moves the hash the editor
+    // watches, and an editor that did not already know a save had been refused
+    // would read that as its own save landing and close on the draft.
     stale.value = message;
+    // Then what the file says now, so the author can read the version they
+    // were about to write over and decide with it in front of them.
+    await refetch();
   }
-}
-
-async function reload(): Promise<void> {
-  await refetch();
-  stale.value = null;
 }
 </script>
 
@@ -60,7 +61,7 @@ async function reload(): Promise<void> {
         :saving="mutations.busy.value"
         :stale="stale"
         @save="save"
-        @reload="reload"
+        @dismiss="stale = null"
       />
       <div v-else class="rounded-lg border border-dashed border-default px-4 py-8 text-center">
         <p class="font-medium">No such document</p>

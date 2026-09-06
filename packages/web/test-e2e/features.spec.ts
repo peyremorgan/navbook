@@ -122,9 +122,15 @@ test("refuses a save made against a version somebody has replaced", async ({
   await expect(signedIn.getByTestId("spec-stale")).toBeVisible();
   // The draft is still there: what was typed is the only copy of itself.
   await expect(signedIn.getByTestId("input-spec-body")).toHaveValue("Mine.");
+  // And so is theirs, to read before deciding what to do about it.
+  await expect(signedIn.getByTestId("spec-stale")).toContainText("Theirs.");
 
-  await signedIn.getByTestId("spec-reload").click();
+  // Saving again now lands, because the base moved to what was just shown:
+  // an overwrite made with the other version in front of you.
+  await signedIn.getByTestId("save-spec").click();
+  await expect(signedIn.getByTestId("edit-spec")).toBeVisible();
   await expect(signedIn.getByTestId("spec-stale")).toHaveCount(0);
+  await expect(signedIn.getByText("Mine.")).toBeVisible();
 });
 
 test("sets a feature on an issue from its sidebar", async ({ signedIn, stack }) => {

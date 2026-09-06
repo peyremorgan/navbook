@@ -8,10 +8,15 @@
   only path from text to HTML there is.
 
   A save carries the hash the editor started from, and the server refuses one
-  made against a version somebody has since replaced. That refusal is shown
-  here, above the editor, with the draft still in it: what was typed is the
-  only copy of itself, and a page that threw it away to show an error would be
-  doing the losing that the refusal exists to prevent.
+  made against a version somebody has since replaced. The draft stays in the
+  editor when that happens — what was typed is the only copy of itself, and a
+  page that threw it away to show an error would be doing the losing that the
+  refusal exists to prevent — and what the file says now is shown above it.
+
+  Then the decision is the author's, which is the whole point of surfacing a
+  conflict rather than resolving it (spec 06 §6.3). They can read the other
+  version and fold it into theirs, or overwrite it having seen it. What the
+  page will not do is quietly pick one.
 -->
 <script setup lang="ts">
 import type { SpecDetailFragment } from "~~/src/generated/gql/graphql";
@@ -25,7 +30,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   save: [{ title: string; body: string; baseSha: string }];
-  reload: [];
+  dismiss: [];
 }>();
 
 const editing = ref(false);
@@ -75,7 +80,12 @@ function save(): void {
   });
 }
 
-/** Leave edit mode once a save has landed, which is a new hash arriving. */
+/**
+ * Leave edit mode once a save has landed, which is a new hash arriving.
+ *
+ * Not when the hash moved because somebody else saved: that is the stale case,
+ * where the editor must stay open holding a draft nobody has stored yet.
+ */
 watch(
   () => props.spec.baseSha,
   () => {
@@ -126,21 +136,30 @@ watch(
       </div>
     </div>
 
-    <UAlert
-      v-if="props.stale"
-      color="warning"
-      variant="subtle"
-      icon="i-lucide-triangle-alert"
-      title="Changed since you opened it"
-      :description="props.stale"
-      data-testid="spec-stale"
-    >
-      <template #actions>
-        <UButton size="xs" color="neutral" variant="subtle" data-testid="spec-reload" @click="emit('reload')">
-          Load what it says now
-        </UButton>
-      </template>
-    </UAlert>
+    <div v-if="props.stale" class="space-y-2" data-testid="spec-stale">
+      <UAlert
+        color="warning"
+        variant="subtle"
+        icon="i-lucide-triangle-alert"
+        title="Changed since you opened it"
+        description="Somebody saved this document while you were writing. Yours is untouched below and was never sent. What the file says now is here; fold in what you want from it, or save again to write over it."
+      />
+      <div class="rounded-lg border border-default px-3 py-2">
+        <h4 class="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">
+          What it says now
+        </h4>
+        <MarkdownBody :source="props.spec.body" data-testid="spec-theirs" />
+      </div>
+      <UButton
+        size="xs"
+        color="neutral"
+        variant="subtle"
+        data-testid="spec-dismiss"
+        @click="emit('dismiss')"
+      >
+        Hide this
+      </UButton>
+    </div>
 
     <template v-if="editing">
       <div class="flex gap-1">
