@@ -1,0 +1,2 @@
+{"slug":"auth","path":".navbook/specs/auth","title":"Authentication","author":"Nav Test <nav@test.invalid>","created":"2026-08-01T10:00:00Z","body":"Everything about signing in, sessions and tokens.","specs":[{"file":"login-flow.md","title":"Login flow"}],"issues":["bqlybac0","mz4kq1rv"],"prs":[]}
+{"slug":"billing","path":".navbook/specs/billing","title":"Billing","author":"Nav Test <nav@test.invalid>","created":"2026-08-01T10:00:00Z","body":"Money.","specs":[],"issues":[],"prs":[]}

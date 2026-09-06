@@ -1,0 +1,5 @@
+spec-version: 1
+description: features, their documents and the entities that name them parse with no diagnostics
+init: {from: tree, date: 2026-09-02T12:00:00Z}
+run: {command: [doctor, --json]}
+expect: {exit: 0, diagnostics: []}

@@ -32,6 +32,12 @@ short-lived branches, not parked inside long-lived feature branches.
   (e.g. `docs(issue): close #bqlybac0`, `docs(pr): comment on #dk3mp2x9`), so
   history readers can filter them at a glance. A tracker-wide change that names
   no entity uses the unscoped `docs:` (e.g. `docs: initialize navbook`).
+- A change to a feature ([02 §2.11](02-data-model.md)) uses the scope
+  `feature`, and names the feature by its slug where an entity would be named
+  by its ID: `docs(feature): create auth`, `docs(feature): edit auth`. A change
+  to one of its documents names the document too, since the slug alone would
+  not say which file moved: `docs(feature): add auth/login-flow.md`. Such a
+  commit carries no trailer — there is no ID for one to name.
 - To view code history without tracker noise:
   `git log -- ':!.navbook'`. CI pipelines that should not run for tracker-only
   commits SHOULD use an equivalent path filter on `.navbook/`.
@@ -51,6 +57,8 @@ The format is designed so that the *frequency* of conflicts tracks the
 | Two comments, same entity | Distinct files | Merges clean, always |
 | Comment + metadata edit, same issue | Distinct files (`comments/*` vs `issue.md`) | Merges clean |
 | Two edits of the same `issue.md`/`pr.md` | Textual conflict in a small YAML+Markdown file | Resolve by hand; both intents usually compose (e.g. keep both labels) |
+| Two edits of the same specification document | Textual conflict in a Markdown file | Resolve by hand, as for any prose the two of you both changed |
+| Two new features, or two documents added to one feature | Distinct files | Merges clean, always |
 | Comment added + issue closed (dir moved), entity already had comments | Directory rename on one side, file addition on the other | Git ≥ 2.18 relocates the comment into the moved directory. Clean with `merge.directoryRenames=true`; with git's default that same relocation is reported as a "file location" conflict to confirm. See 3.3.1 |
 | Comment added + issue closed (dir moved), entity had **no** comments yet | Same, but `comments/` is new on one side and renamed on neither | Git cannot infer the move and leaves the comment at the old path. `doctor` reports the orphan; `--fix` moves it. See 3.3.1 |
 | Both sides close the same issue | Identical rename | Merges clean if `issue.md` edits are identical; else a small content conflict (e.g. two different `resolution:` values — pick one) |

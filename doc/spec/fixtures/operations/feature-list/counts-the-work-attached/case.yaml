@@ -1,0 +1,5 @@
+spec-version: 1
+description: the listing shows how many documents a feature holds and how much of its work is open
+init: {from: before}
+run: {command: [feature, list]}
+expect: {exit: 0, stdout: expected/stdout.txt}

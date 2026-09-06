@@ -86,6 +86,14 @@ what keeps the format from acquiring a second implementation by accident:
 Two consequences worth recording, because both are refusals rather than
 omissions.
 
+**Specification documents are edited in the browser, and a stale write is
+refused.** A feature's documents ([02 §2.11](02-data-model.md)) are prose people
+work on together, so the client reads and writes them; what it sends is still
+fields, and the server still composes the file. A save carries the hash the
+editor started from, and a save whose file has moved on since is refused rather
+than landed on top of somebody else's paragraph. That is the rule above applied
+to a document instead of a push: conflicts surface, they are not resolved.
+
 **The checkout-centric verbs are not exposed.** Opening, updating and merging a
 pull request, deleting an entity, `init`, and `doctor --fix` need a branch and a
 working tree rather than a request, and a gateway performing them would be

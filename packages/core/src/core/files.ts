@@ -599,7 +599,10 @@ export interface NewFeatureInput {
 export function newFeatureFile(input: NewFeatureInput): string {
   const nav = emptyDoc();
   patchDoc(nav, { title: input.title, author: input.author, created: input.created });
-  nav.body = `\n${normalizeBody(input.body ?? "")}`;
+  const summary = normalizeBody(input.body ?? "");
+  // A feature with no summary ends at its closing delimiter. The blank line a
+  // body is separated by is part of having one.
+  nav.body = summary === "" ? "" : `\n${summary}`;
   return serializeDoc(nav);
 }
 

@@ -1,0 +1,13 @@
+spec-version: 1
+description: the layout and schema faults of specs/ are reported as D13, and none of them as D1 or D2
+init: {from: tree, date: 2026-09-02T12:00:00Z}
+run: {command: [doctor, --json]}
+expect:
+  exit: 2
+  diagnostics:
+    - {check: D13, level: error, path: .navbook/specs/Auth/feature.md}
+    - {check: D13, level: error, path: .navbook/specs/billing/feature.md}
+    - {check: D13, level: error, path: .navbook/specs/billing/feature.md}
+    - {check: D13, level: error, path: .navbook/specs/billing/invoices.md}
+    - {check: D13, level: error, path: .navbook/specs/loose.md}
+    - {check: D13, level: error, path: .navbook/specs/orphan}

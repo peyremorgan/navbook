@@ -1,0 +1,5 @@
+spec-version: 1
+description: show renders the identity card, the documents and the work; --commits 0 omits the history
+init: {from: before}
+run: {command: [feature, show, auth, --commits, "0"]}
+expect: {exit: 0, stdout: expected/stdout.txt}

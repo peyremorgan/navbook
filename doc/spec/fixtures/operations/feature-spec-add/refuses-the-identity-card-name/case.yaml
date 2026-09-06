@@ -1,0 +1,7 @@
+spec-version: 1
+description: a tool will not create a document called feature.md, whatever the author asks for
+init: {from: before}
+run:
+  command: [feature, spec, add, auth, "Something", --file, feature.md, -m, "x"]
+  env: {NAV_NOW: "2026-08-10T12:00:00Z"}
+expect: {exit: 1, stdout: "", stderr-contains: ["not a document name this tool will create"], tree: expected/tree}

@@ -59,16 +59,36 @@ conflict to confirm. With it, that merge is clean.
 │   │       └── comments/
 │   │           └── 2026-08-03T141207Z-t5kr1gq6.md
 │   └── closed/
-└── prs/
-    ├── open/
-    ├── merged/
-    └── closed/
+├── prs/
+│   ├── open/
+│   ├── merged/
+│   └── closed/
+└── specs/
+    └── auth/
+        ├── feature.md
+        └── login-flow.md
 ```
 
 An issue is a Markdown file with YAML frontmatter. Its status is which directory
 it sits in. A comment is one file, which is why two people commenting at once
 can never conflict. Every forge file browser, every editor, `ls` and `cat` are
 complete Navbook clients for reading.
+
+`specs/` holds **features** — the standing concepts work attaches to. A feature
+is a directory named after itself, holding a `feature.md` and however many
+specification documents describe it. An issue joins one by naming it:
+
+```console
+$ nav feature open "Authentication" --slug auth -m "Signing in, sessions, tokens."
+Created .navbook/specs/auth/  (auth)
+
+$ nav issue open "Login times out" --feature auth -m "Aborts after 5 s on 3G."
+$ nav feature show auth
+```
+
+Nothing lists the members on the feature's side, so two people attaching two
+issues touch two different files. `nav feature show` works the membership out
+from the issues, and reads the commits that touched them straight out of git.
 
 **The files are the product.** The `nav` CLI mints IDs, renders listings and
 validates the tree, but nothing requires it: creating, commenting on, closing
@@ -110,6 +130,8 @@ Everything is noun-verb, with one verb vocabulary shared by both entity kinds.
 ```
 nav {issue|pr} {open|list|show|edit|comment|close|reopen|delete}
 nav pr {update|review|merge}
+nav feature {open|list|show|edit}
+nav feature spec {add|edit|list}
 nav {init|id|doctor|install|uninstall}
 ```
 
@@ -128,6 +150,10 @@ usually enough. A full directory name works too.
 | `nav pr review <id> --approve` | Record a verdict bound to a specific revision. |
 | `nav pr list --all-refs` | Find PRs on branches you have fetched but not checked out. |
 | `nav pr merge <id>` | Merge into the checked-out target, archiving the discussion into its history. |
+| `nav feature open <title>` | Create a feature under `specs/`. `--slug` names its directory; the title otherwise. |
+| `nav feature show <slug>` | Its documents, the issues and pull requests that name it, and the commits that touched any of them. |
+| `nav feature spec add <slug> <title>` | Add a specification document. `nav feature spec edit` opens one in `$EDITOR`. |
+| `nav issue open <title> --feature <slug>` | File it against a feature. Repeatable; `nav issue list feature:auth` finds them again. |
 | `nav doctor [--fix]` | Check the tree against the specification. |
 
 `--commit` on any mutating command wraps the change in a well-formed
@@ -141,9 +167,9 @@ commit.
 nav issue list status:closed label:bug assignee:example.com "timeout"
 ```
 
-`status:`, `label:`, `assignee:`, `author:`, `milestone:`, and bare words that
-match the title, description or any comment body. Terms AND together; the
-default query is `status:open`.
+`status:`, `label:`, `assignee:`, `author:`, `milestone:`, `feature:`, and bare
+words that match the title, description or any comment body. Terms AND
+together; the default query is `status:open`.
 
 ## Why the design is what it is
 

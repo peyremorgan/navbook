@@ -1,0 +1,15 @@
+auth
+
+title:     Authentication
+author:    Nav Test <nav@test.invalid>
+created:   2026-08-01T10:00:00Z
+path:      .navbook/specs/auth
+
+Everything about signing in, sessions and tokens.
+
+specs (1):
+  login-flow.md               Login flow
+
+issues and pull requests (2):
+  #bqlybac0  open   Login times out
+  #mz4kq1rv  closed Old thing

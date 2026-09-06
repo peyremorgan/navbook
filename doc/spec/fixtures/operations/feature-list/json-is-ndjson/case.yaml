@@ -1,0 +1,5 @@
+spec-version: 1
+description: --json emits one object per feature, identity first, with its members named by id
+init: {from: before}
+run: {command: [feature, list, --json]}
+expect: {exit: 0, stdout: expected/stdout.txt}

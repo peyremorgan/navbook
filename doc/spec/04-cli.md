@@ -43,9 +43,9 @@ both entity kinds:
 nav {issue | pr} {open | list | show | edit | comment | close | reopen | delete}
 ```
 
-plus three PR-only verbs (`update`, `review`, `merge`) and repository-level
-utilities at the root of the command tree (`nav id`, `nav doctor`, and the
-setup commands). A verb given an ID of the
+plus three PR-only verbs (`update`, `review`, `merge`), the `nav feature`
+family below, and repository-level utilities at the root of the command tree
+(`nav id`, `nav doctor`, and the setup commands). A verb given an ID of the
 other kind MUST fail with a pointer to the right noun (e.g.
 `#dk3mp2x9 is a pull request — use 'nav pr show'`).
 
@@ -79,7 +79,7 @@ other kind MUST fail with a pointer to the right noun (e.g.
 
 ### Issues — `nav issue <verb>`
 
-- `nav issue open <title> [--label L]... [--assignee EMAIL] [--milestone M] [--parent <id>] [-m DESC | --edit]`
+- `nav issue open <title> [--label L]... [--assignee EMAIL] [--milestone M] [--feature SLUG]... [--parent <id>] [-m DESC | --edit]`
   — mint an ID, create `issues/open/<id>-<slug>/issue.md`. Prints path and
   `#id`. `--edit` (default when no `-m`) opens `$EDITOR` on the new file.
   `--parent` files it as a subtask, writing both sides of the link ([2.5](02-data-model.md))
@@ -149,7 +149,7 @@ other kind MUST fail with a pointer to the right noun (e.g.
 
 The eight shared verbs, plus `update`, `review`, and `merge`:
 
-- `nav pr open [--target BRANCH] [--title T] [--draft]` — on the current
+- `nav pr open [--target BRANCH] [--title T] [--draft] [--feature SLUG]...` — on the current
   branch: mint an ID, create `prs/open/<id>-<slug>/pr.md` with `source` = the
   current branch, `target` (default: the default branch), and one revision
   entry pinning `head` = current `HEAD` SHA and `base` = `git merge-base HEAD
@@ -192,6 +192,37 @@ The eight shared verbs, plus `update`, `review`, and `merge`:
   refuses while any path is still unmerged, and infers the pull request from
   `MERGE_HEAD` when no ID is given.
 
+### Features — `nav feature <verb>`
+
+A feature ([02 §2.11](02-data-model.md)) has no lifecycle and no discussion, so
+it borrows none of the shared verbs: there is nothing to close, and the
+discussion belongs to the issues attached to it.
+
+- `nav feature open <title> [--slug SLUG] [-m TEXT | --edit]` — create
+  `specs/<slug>/feature.md`, deriving the slug from the title when `--slug` is
+  absent. It MUST refuse a slug that already names a feature. The summary MAY
+  be empty, unlike an issue's description.
+- `nav feature list [--json]` — every feature, with how many documents it holds
+  and how much of the work attached to it is open.
+- `nav feature show <slug> [--commits N] [--json]` — the feature, its
+  documents, the issues and pull requests that name it, and the commits that
+  have touched it (below). `--commits 0` omits the history.
+- `nav feature edit <slug>` — open `feature.md` in `$EDITOR`.
+- `nav feature spec add <slug> <title> [--file NAME] [-m TEXT | --edit]` — add a
+  specification document, naming the file from the title unless `--file` says
+  otherwise. It MUST refuse a name outside the grammar of
+  [02 §2.11](02-data-model.md), `feature.md` included.
+- `nav feature spec edit <slug> <file>` — open a document in `$EDITOR`.
+- `nav feature spec list <slug> [--json]` — the documents a feature holds.
+
+**Commits that touched a feature.** `show` reports a commit when it changed
+anything under `specs/<slug>/`, when it changed the directory of an issue or
+pull request that names the feature, or when its message references one of
+those entities by ID — in prose or in a `Refs:`/`Closes:` trailer
+([02 §2.9](02-data-model.md)). That last case is how a commit which only
+touches code joins the story, through a trailer it already carries. The listing
+is derived on demand and never stored.
+
 ### Query grammar
 
 Used by `nav issue list` and `nav pr list`; the noun determines the entity
@@ -204,6 +235,7 @@ kind. Terms AND together:
 | `assignee:EMAIL` | Assignee address (case-insensitive; substring after `@` allowed) |
 | `author:EMAIL` | Author address (same matching) |
 | `milestone:M` | Exact milestone |
+| `feature:SLUG` | `SLUG` ∈ the entity's `feature` ([02 §2.11](02-data-model.md)) |
 | bare word / quoted string | Case-insensitive substring of title, description, or any comment body |
 
 A query naming no status matches every status. The `status:open` default above
@@ -239,6 +271,8 @@ Doctor checks (E = error → exit 2, W = warning → exit 0 with report):
 | D10 | Frontmatter timestamps wildly inconsistent with git history | W |
 | D11 | `parent` and `subtasks` disagree, or a link names a pull request ([2.5](02-data-model.md)) | E |
 | D12 | The `parent` chain loops, an issue naming itself included | E |
+| D13 | The layout and schema of `specs/`: a feature directory name that is not a slug, a file directly in `specs/`, a feature directory with no `feature.md`, or a `feature.md` or document missing a required key ([2.11](02-data-model.md)) | E |
+| D14 | An entity's `feature` names a slug with no `specs/<slug>/` directory in this tree | W |
 
 D8 MUST NOT report a trailer naming an entity that a `docs(<kind>): delete
 #<id>` commit later removed, or that such a commit's `Deletes:` trailers name.
@@ -247,8 +281,14 @@ the warning would name nothing anyone can act on. Prose and frontmatter
 references to a deleted entity are still reported: those live in files the user
 can edit.
 
-D11 and D12 are decidable from the tree alone, so unlike D7, D9 and D10 they
-run under `--staged` and the pre-commit hook blocks a link broken by hand. A
+D14 is a warning for D8's reason: the feature may have been created on a branch
+nobody has fetched, and an error would make the order in which two branches
+land a correctness question. D13 is an error because a directory that violates
+the layout can be read by nothing.
+
+D11, D12, D13 and D14 are decidable from the tree alone, so unlike D7, D9 and
+D10 they run under `--staged` and the pre-commit hook blocks a link broken by
+hand. A
 D11 repair is not offered there, though: it rewrites a whole file, and under
 `--staged` that file's content came from the index, so writing it back into the
 working tree would discard whatever was not staged.

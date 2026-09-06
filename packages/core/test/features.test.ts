@@ -235,14 +235,28 @@ describe("composing feature files", () => {
     assert.deepEqual(validateFeature(parseFile(content)), []);
   });
 
-  it("writes a feature.md with no summary", () => {
+  it("writes a feature.md with no summary, ending at its delimiter", () => {
     const content = newFeatureFile({
       title: "Billing",
       author: "alice@example.com",
       created: "2026-09-01T10:00:00Z",
     });
+    assert.equal(
+      content,
+      "---\ntitle: Billing\nauthor: alice@example.com\ncreated: 2026-09-01T10:00:00Z\n---\n",
+    );
     assert.deepEqual(validateFeature(parseFile(content)), []);
-    assert.equal(parseFile(content).body.trim(), "");
+    assert.equal(parseFile(content).body, "");
+    // And it reads back as the file it is: no body, no blank line invented.
+    assert.equal(
+      newFeatureFile({
+        title: "Billing",
+        author: "alice@example.com",
+        created: "2026-09-01T10:00:00Z",
+        body: "   ",
+      }),
+      content,
+    );
   });
 
   it("writes a spec document that validates", () => {

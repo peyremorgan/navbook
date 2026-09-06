@@ -1,0 +1,7 @@
+spec-version: 1
+description: the slug is derived from the title, and a feature may carry no summary at all
+init: {from: before}
+run:
+  command: [feature, open, "Billing & Invoices", -m, "", --commit]
+  env: {NAV_NOW: "2026-08-10T12:00:00Z"}
+expect: {exit: 0, stdout: expected/stdout.txt, tree: expected/tree, commits: ["docs(feature): create billing-invoices\n"]}

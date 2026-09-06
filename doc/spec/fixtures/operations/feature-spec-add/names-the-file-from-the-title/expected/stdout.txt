@@ -1,0 +1,2 @@
+Created .navbook/specs/auth/session-policy.md
+Committed docs(feature): add auth/session-policy.md

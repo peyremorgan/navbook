@@ -20,14 +20,18 @@ tolerate (preserve, never delete or reorder) anything they do not understand.
 │   └── closed/
 │       └── mz4kq1rv-crash-on-empty-file/
 │           └── issue.md
-└── prs/
-    ├── open/
-    │   └── dk3mp2x9-auth-refactor/
-    │       ├── pr.md
-    │       └── comments/
-    │           └── 2026-08-05T101433Z-q8zm3vp1.md
-    ├── merged/
-    └── closed/
+├── prs/
+│   ├── open/
+│   │   └── dk3mp2x9-auth-refactor/
+│   │       ├── pr.md
+│   │       └── comments/
+│   │           └── 2026-08-05T101433Z-q8zm3vp1.md
+│   ├── merged/
+│   └── closed/
+└── specs/
+    └── auth/
+        ├── feature.md
+        └── login-flow.md
 ```
 
 - The root directory MUST sit at the repository root. Its name defaults to
@@ -43,6 +47,8 @@ tolerate (preserve, never delete or reorder) anything they do not understand.
   begin with the directory's actual name rather than with `.navbook/`.
 - `issues/` MUST contain only the subdirectories `open/` and `closed/`.
 - `prs/` MUST contain only the subdirectories `open/`, `merged/`, and `closed/`.
+- `specs/` holds features (§2.11). It is OPTIONAL: a repository with no
+  features has none, and tools MUST create it only when a feature is created.
 - Status subdirectories contain zero or more **entity directories** and nothing
   else. An entity directory under `issues/` MUST contain an `issue.md`; under
   `prs/`, a `pr.md`. Either MAY contain a `comments/` directory. Tools MUST
@@ -127,6 +133,7 @@ The server never sees the request.
 | `labels` | MAY | list of strings | Free-form; kebab-case RECOMMENDED |
 | `assignee` | MAY | person or list of persons | Who owns the work |
 | `milestone` | MAY | string | Free-form grouping |
+| `feature` | MAY | slug or list of slugs | The feature(s) this issue belongs to (§2.11) |
 | `resolution` | MAY | string | Meaningful for closed issues: `fixed`, `wontfix`, `duplicate`, `invalid` RECOMMENDED; free-form allowed |
 | `duplicate-of` | MAY | ID | With `resolution: duplicate` |
 | `parent` | MAY | ID | The issue this one is a subtask of |
@@ -254,7 +261,7 @@ Closes: bqlybac0
 | `source` | SHOULD | string | Branch the PR rides on (informative; the PR directory itself lives on that branch) |
 | `revisions` | MUST, ≥ 1 entry | list | Append-only history of reviewable states |
 | `draft` | MAY | boolean | Not yet requesting review |
-| `labels`, `assignee`, `milestone` | MAY | as issues | |
+| `labels`, `assignee`, `milestone`, `feature` | MAY | as issues | |
 | `merged` | MAY | map | Added at/after merge: `date`, `by` (person), `commit` (40-hex merge commit, added in a follow-up commit since it cannot be known inside the merge itself) |
 | `resolution` | MAY | string | For `prs/closed/`: `declined`, `superseded`, `abandoned` RECOMMENDED |
 | `superseded-by` | MAY | ID | With `resolution: superseded` |
@@ -315,7 +322,111 @@ remains conforming. A tool that creates a root directory MUST write a marker
 into it, so that a repository which later renames the directory stays
 locatable.
 
+`specs/`, at the top of the root directory, holds features (§2.11).
+
 Future revisions of this spec may define: `.navbook/config.*` (repository-level
 configuration), `.navbook/sync/` (forge-sync state), and additional files
 inside entity directories. Tools MUST leave unrecognized files in these
 locations untouched.
+
+## 2.11 Features and specifications
+
+A **feature** is a standing concept that work attaches to: a business vertical,
+an open-ended goal, or a body of work too large to be one issue. It is
+described by one or more Markdown documents and named by issues and pull
+requests, and it is the one thing in this format that is neither an entity nor
+a bare frontmatter string.
+
+```
+specs/
+└── auth/
+    ├── feature.md
+    ├── login-flow.md
+    └── session-policy.md
+```
+
+- Each subdirectory of `specs/` is one feature. Its name MUST match
+  `^[a-z0-9]+(-[a-z0-9]+)*$` — the slug grammar of §2.3 without the ID — and
+  that name is the feature's identity: it is what `feature:` names, and what a
+  tool accepts wherever a feature is expected.
+- A feature directory MUST contain a `feature.md`. Every other `*.md` in it is
+  a **specification document**. Anything else it holds — subdirectories,
+  images, loose text — MUST be preserved untouched and MUST NOT be interpreted.
+- `specs/` MUST NOT contain files directly.
+
+A feature has **no ID and no status**. It has no ID because its name is what
+refers to it, and an opaque eight characters in an issue's frontmatter would
+be unreadable exactly where the format is meant to be read. It has no status
+because a standing concept does not open and close: the work attached to it
+does, and that is what a tool counts.
+
+### `feature.md`
+
+```markdown
+---
+title: Authentication
+author: Alice Smith <alice@example.com>
+created: 2026-09-01T10:00:00Z
+---
+
+Everything about signing in, sessions and tokens.
+```
+
+| Key | Req. | Type | Meaning |
+|-----|------|------|---------|
+| `title` | MUST | string | The feature's name, for display |
+| `author` | MUST | person | Who introduced it |
+| `created` | MUST | timestamp | When it was introduced |
+
+The body is a summary and MAY be empty: a feature is named by its title and
+described by the documents beside it.
+
+There is no key listing the issues that belong to the feature, deliberately.
+Membership is asserted by the entity alone (below), so two people attaching two
+issues write two different files and can never conflict — the same reasoning
+that rules out a central index ([06 §6.6](06-future.md)).
+
+### Specification documents
+
+```markdown
+---
+title: Login flow
+---
+
+## Requirements
+
+The app SHALL abort a login attempt after 5 s.
+```
+
+| Key | Req. | Type | Meaning |
+|-----|------|------|---------|
+| `title` | MUST | string | The document's name, for display |
+| `author` | MAY | person | Who wrote it |
+| `created` | MAY | timestamp | When it was written |
+
+A document is a living description of how something works or should work, not
+a record of something that happened, so who wrote it and when are git's answer
+to give and are optional here.
+
+File names are unconstrained beyond ending in `.md`: a document written by hand
+as `Login Flow.md` is conforming and MUST keep working. A tool that *creates* a
+document SHOULD name it to the slug grammar above with a `.md` suffix, and MUST
+NOT create one named `feature.md`.
+
+### Attaching an entity to a feature
+
+An issue or pull request names the features it belongs to in its own
+frontmatter:
+
+```yaml
+feature: auth
+feature: [auth, mobile]
+```
+
+- The value is one slug or a list of slugs, in the shape `assignee` takes
+  (§2.5). One feature SHOULD be written as a scalar.
+- A slug that names no directory in this tree is *dangling*, not an error:
+  the feature may live on a branch nobody has fetched, exactly as a `#id`
+  reference may (§2.9). `doctor` warns.
+- The key is not restricted to issues. A pull request is work on something too,
+  and a tool that shows a feature's history has an obvious use for it.

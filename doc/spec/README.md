@@ -14,7 +14,7 @@ Functionality first, technical details after:
 | # | Document | Contents |
 |---|----------|----------|
 | 1 | [01-functionality.md](01-functionality.md) | What Navbook does: concepts, user workflows, guarantees, non-goals |
-| 2 | [02-data-model.md](02-data-model.md) | **Normative.** Directory layout, identifiers, file formats, frontmatter schemas |
+| 2 | [02-data-model.md](02-data-model.md) | **Normative.** Directory layout, identifiers, file formats, frontmatter schemas, features |
 | 3 | [03-merge-and-branches.md](03-merge-and-branches.md) | **Normative.** Branch semantics, concurrent-edit scenarios, conflict resolution |
 | 4 | [04-cli.md](04-cli.md) | The `nav` CLI: commands, query syntax, hooks, completions, exit codes |
 | 5 | [05-implementation.md](05-implementation.md) | Reference implementation (TypeScript), planned Rust rewrite, conformance testing |
@@ -46,6 +46,7 @@ Each decision below is expanded in the linked document.
 | v1 scope | Core format + CLI; sync/gateways reserved as future hooks | Prove the format tool-independent before building bridges | 06 |
 | CLI naming | `nav` binary; configurable git alias defaulting to `git nav` | Short to type; `nav` verified unclaimed by any widely used program (checked 2026-08: no exact-name hit in Debian/Ubuntu, Homebrew, or npm bins; the only bare `nav` command belongs to the niche server-side NAV network-monitoring suite). Alias name stays configurable (e.g. `git issue`) | 04 |
 | CLI structure | Noun-verb: `nav {issue\|pr} {open\|list\|show\|edit\|comment\|close\|reopen\|delete}` + issue-only `link`/`unlink` + PR-only `update`/`review`/`merge` + root utilities (`nav id`, `nav doctor`, setup) | One shared verb vocabulary is easier to learn and remember than per-entity command names | 04 |
+| Features | A directory per feature under `specs/`, holding a `feature.md` and its documents; membership is asserted by the entity's `feature:` key and never listed in the feature | A slug is readable where an ID would not be, and no file every attachment must touch means no conflict magnet | 02 |
 | Decomposition | Both sides of a parent/subtask link stored in frontmatter, kept in step by the CLI and reconciled by `doctor` | Redundancy costs a check but keeps every file self-describing: neither a listing nor a `show` has to traverse a graph, and either half survives the other being lost to a bad merge | 02, 04 |
 | Implementation | TypeScript reference implementation now; Rust CLI rewrite when mature, cross-checked against it | Measured trade-offs (see 05); the TS core survives as the future web layer | 05 |
 | v1 extras | Query syntax, git hook validation, shell completions (all environment setup unified under `nav install`); no web client yet | Selected scope | 04 |

@@ -1,0 +1,7 @@
+spec-version: 1
+description: the first feature brings specs/ with it; nav init never created one
+init: {from: before}
+run:
+  command: [feature, open, "Authentication", --slug, auth, -m, "Everything about signing in.", --commit]
+  env: {NAV_NOW: "2026-08-10T12:00:00Z"}
+expect: {exit: 0, stdout: expected/stdout.txt, tree: expected/tree, commits: ["docs(feature): create auth\n"]}

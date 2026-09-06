@@ -1,0 +1,5 @@
+spec-version: 1
+description: a feature that does not exist is an error naming the ones that do
+init: {from: before}
+run: {command: [feature, show, nope]}
+expect: {exit: 1, stdout: "", stderr-contains: ["no feature named 'nope'", "auth"]}

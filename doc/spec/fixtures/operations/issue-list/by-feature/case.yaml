@@ -1,0 +1,5 @@
+spec-version: 1
+description: "feature: is a query term of its own, and never free text"
+init: {from: before}
+run: {command: [issue, list, "feature:auth", "status:open", "status:closed"]}
+expect: {exit: 0, stdout: expected/stdout.txt}

@@ -1,0 +1,2 @@
+Created .navbook/specs/auth/  (auth)
+Committed docs(feature): create auth
