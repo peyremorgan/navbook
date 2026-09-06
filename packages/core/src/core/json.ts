@@ -10,7 +10,7 @@
  */
 
 import { keysInOrder } from "./frontmatter.ts";
-import type { CommentRecord, EntityRecord } from "./tree.ts";
+import type { CommentRecord, EntityRecord, FeatureRecord, SpecRecord } from "./tree.ts";
 
 /**
  * One entity: identity first, then its frontmatter in file order, then body.
@@ -52,6 +52,48 @@ export function commentJson(navDir: string, comment: CommentRecord): Record<stri
     out[key] = comment.parsed.fm[key];
   }
   out.body = comment.body.trim();
+  return out;
+}
+
+/**
+ * One feature: its slug and path, then its frontmatter in file order, then the
+ * summary, then the documents it holds. A feature has no ID and no status, so
+ * neither key appears — the slug is the identity (spec 02 §2.11).
+ */
+export function featureJson(
+  navDir: string,
+  feature: FeatureRecord,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    slug: feature.slug,
+    path: `${navDir}/${feature.dirPath}`,
+  };
+  for (const key of keysInOrder(feature.parsed.nav)) {
+    if (key === "" || key in out) continue;
+    out[key] = feature.fm[key];
+  }
+  out.body = feature.body.trim();
+  out.specs = feature.specs.map((spec) => ({ file: spec.fileName, title: spec.title }));
+  return { ...out, ...extra };
+}
+
+/** One specification document, named by the feature that holds it. */
+export function specJson(
+  navDir: string,
+  feature: FeatureRecord,
+  spec: SpecRecord,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    feature: feature.slug,
+    file: spec.fileName,
+    path: `${navDir}/${spec.path}`,
+  };
+  for (const key of keysInOrder(spec.parsed.nav)) {
+    if (key === "" || key in out) continue;
+    out[key] = spec.fm[key];
+  }
+  out.body = spec.body.trim();
   return out;
 }
 

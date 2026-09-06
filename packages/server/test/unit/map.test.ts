@@ -80,6 +80,7 @@ describe("toQuery", () => {
         assignees: ["a@x.invalid"],
         authors: ["b@x.invalid"],
         milestones: ["v1"],
+        features: [],
         text: ["crash"],
       },
     );

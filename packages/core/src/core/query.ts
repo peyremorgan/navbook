@@ -4,10 +4,10 @@
  * Terms AND together. Within a single key the semantics follow the field:
  * single-valued fields (`status`, `author`, `milestone`) OR their terms, since
  * requiring two different values at once could never match; multi-valued fields
- * (`label`, `assignee`) AND theirs, matching forge convention.
+ * (`label`, `assignee`, `feature`) AND theirs, matching forge convention.
  */
 
-import { readAssignees, readLabels } from "./files.ts";
+import { readAssignees, readFeatures, readLabels } from "./files.ts";
 import { personMatches } from "./person.ts";
 import type { EntityKind, EntityRecord, Status } from "./tree.ts";
 
@@ -17,6 +17,7 @@ export interface Query {
   assignees: string[];
   authors: string[];
   milestones: string[];
+  features: string[];
   text: string[];
 }
 
@@ -24,10 +25,18 @@ export interface QueryError {
   message: string;
 }
 
-const KEYED_TERM = /^(status|label|assignee|author|milestone):(.*)$/;
+const KEYED_TERM = /^(status|label|assignee|author|milestone|feature):(.*)$/;
 
 export function emptyQuery(): Query {
-  return { status: [], labels: [], assignees: [], authors: [], milestones: [], text: [] };
+  return {
+    status: [],
+    labels: [],
+    assignees: [],
+    authors: [],
+    milestones: [],
+    features: [],
+    text: [],
+  };
 }
 
 /**
@@ -75,6 +84,9 @@ export function parseQuery(terms: readonly string[], kind: EntityKind): Query | 
       case "author":
         query.authors.push(value);
         break;
+      case "feature":
+        query.features.push(value);
+        break;
       default:
         query.milestones.push(value);
         break;
@@ -109,6 +121,13 @@ export function matchesQuery(query: Query, entity: EntityRecord): boolean {
   if (query.authors.length > 0) {
     const author = typeof entity.fm.author === "string" ? entity.fm.author : "";
     if (!query.authors.some((wanted) => personMatches(wanted, author))) return false;
+  }
+
+  // Slugs are lowercase by grammar, so folding case here only forgives a query
+  // typed with a capital; it can never widen what a well-formed tree matches.
+  const features = readFeatures(entity.fm).map((f) => f.toLowerCase());
+  for (const wanted of query.features) {
+    if (!features.includes(wanted.toLowerCase())) return false;
   }
 
   if (query.milestones.length > 0) {

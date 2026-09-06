@@ -1,19 +1,22 @@
 /**
  * Format validation — the `nav doctor` checks of spec 04 §4.3.
  *
- * Checks D1–D6 and D8 are decidable from the tree alone and live here. D7, D9
- * and D10 need git archaeology; their tree-side halves live here and the
+ * Checks D1–D6, D8 and D13–D14 are decidable from the tree alone and live here.
+ * D7, D9 and D10 need git archaeology; their tree-side halves live here and the
  * history queries are supplied by the CLI.
  */
 
 import { parseCommentFileName } from "./comments.ts";
 import {
   type Revision,
+  readFeatures,
   readRevisions,
   readSubtasks,
   validateComment,
+  validateFeature,
   validateIssue,
   validatePr,
+  validateSpec,
 } from "./files.ts";
 import { isId } from "./id.ts";
 import {
@@ -36,6 +39,7 @@ import {
   type NavTree,
   parseTree,
   type Repo,
+  SPECS_DIR,
   statusDir,
 } from "./tree.ts";
 
@@ -52,6 +56,8 @@ export const CHECKS = [
   "D10",
   "D11",
   "D12",
+  "D13",
+  "D14",
 ] as const;
 export type Check = (typeof CHECKS)[number];
 
@@ -80,6 +86,8 @@ export const CHECK_LEVEL: Record<Check, Level> = {
   D10: "warning",
   D11: "error",
   D12: "error",
+  D13: "error",
+  D14: "warning",
 };
 
 export interface LinkRepairOptions {
@@ -121,6 +129,8 @@ export function validateRepo(repo: Repo, opts: ValidateOptions = {}): Diagnostic
   out.push(...checkDanglingRefs(repo, uniqueIds, opts.commitMessages ?? []));
   out.push(...checkLinks(repo, opts));
   out.push(...checkLinkLoops(repo));
+  out.push(...checkFeatures(repo));
+  out.push(...checkFeatureRefs(repo));
   return sortDiagnostics(out);
 }
 
@@ -623,4 +633,61 @@ export function isValidEntityDirName(name: string): boolean {
 /** Validate a bare comment filename. */
 export function isValidCommentFileName(name: string): boolean {
   return parseCommentFileName(name) !== null;
+}
+
+/* ------------------------------------------- D13 : features and their specs */
+
+/**
+ * The `specs/` tree: layout, then schema (§2.11).
+ *
+ * D1's business is entity names and D2's is entity frontmatter; a feature is
+ * neither, and folding it into either would make a diagnostic's meaning depend
+ * on where in the tree it was found. So the layout faults `parseTree` collected
+ * under `specs/` and the schema faults its files carry are one check, reported
+ * as one code somebody can look up.
+ */
+function checkFeatures(repo: Repo): Diagnostic[] {
+  const out: Diagnostic[] = repo.featureProblems.map((problem) => ({
+    check: "D13" as const,
+    level: "error" as const,
+    path: problem.path,
+    message: problem.message,
+  }));
+
+  for (const feature of repo.features) {
+    for (const problem of validateFeature(feature.parsed)) {
+      out.push({ check: "D13", level: "error", path: feature.filePath, message: problem.message });
+    }
+    for (const spec of feature.specs) {
+      for (const problem of validateSpec(spec.parsed)) {
+        out.push({ check: "D13", level: "error", path: spec.path, message: problem.message });
+      }
+    }
+  }
+  return out;
+}
+
+/* ------------------------------------------------- D14 : dangling features */
+
+/**
+ * An entity naming a feature this tree does not hold.
+ *
+ * A warning rather than an error, for D8's reason: the feature may have been
+ * created on a branch nobody here has fetched, and refusing the commit would
+ * make the order in which two branches land a correctness question.
+ */
+function checkFeatureRefs(repo: Repo): Diagnostic[] {
+  const out: Diagnostic[] = [];
+  for (const entity of allEntities(repo)) {
+    for (const slug of readFeatures(entity.fm)) {
+      if (repo.featureBySlug.has(slug)) continue;
+      out.push({
+        check: "D14",
+        level: "warning",
+        path: entity.filePath,
+        message: `feature '${slug}' has no ${SPECS_DIR}/${slug}/ directory in this tree`,
+      });
+    }
+  }
+  return out;
 }
