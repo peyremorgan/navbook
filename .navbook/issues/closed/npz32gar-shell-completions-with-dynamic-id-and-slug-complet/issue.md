@@ -4,6 +4,7 @@ author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-08-02T15:09:43Z
 labels: [milestone-4, cli]
 resolution: fixed
+feature: cli
 ---
 
 Bash, zsh and fish completions, including completing IDs and slugs for the commands that take one.
