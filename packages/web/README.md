@@ -24,9 +24,18 @@ subtasks.
 branches this checkout does not hold; the detail with its target, source,
 revisions and merge; and comments or reviews bound to a revision.
 
+**Features**, read and written: the listing, and a page per feature holding its
+specification documents, the issues and pull requests that name it, and the
+commits that touched any of them, mixed into one timeline. A document is edited
+in place with a preview, since it is longer than an issue's description and is
+prose several people work on. A save carries the version it started from, so a
+save made against a version somebody has since replaced is refused and offered
+a reload rather than landing on top of their paragraph.
+
 Opening, updating and merging a pull request are not here, and neither is
-deleting anything. They are checkout-centric maintainer actions and the API
-does not expose them ([server README](../server/README.md#what-it-does-not-do)).
+deleting anything — renaming or removing a feature or one of its documents
+included. They are checkout-centric maintainer actions and the API does not
+expose them ([server README](../server/README.md#what-it-does-not-do)).
 
 **Dark or light**, without being asked: the theme starts at whatever the
 browser says about `prefers-color-scheme`, and the button in the navbar is

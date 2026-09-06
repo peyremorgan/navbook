@@ -17,7 +17,7 @@
 import type { ApolloClient, NormalizedCacheObject } from "@apollo/client/core";
 
 /** Root fields whose cached answers a write can invalidate. */
-const LISTINGS = ["issues", "prs"] as const;
+const LISTINGS = ["issues", "prs", "features"] as const;
 
 export function evictListings(client: ApolloClient<NormalizedCacheObject>): void {
   for (const fieldName of LISTINGS) {

@@ -16,6 +16,7 @@ const viewer = computed(() => result.value?.viewer ?? null);
 const links = [
   { label: "Issues", to: "/issues", icon: "i-lucide-circle-dot" },
   { label: "Pull requests", to: "/prs", icon: "i-lucide-git-pull-request" },
+  { label: "Features", to: "/features", icon: "i-lucide-layers" },
 ];
 </script>
 

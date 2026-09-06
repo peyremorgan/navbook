@@ -24,13 +24,22 @@ export interface FilterState {
   assignees: string[];
   authors: string[];
   milestones: string[];
+  features: string[];
   /** The search box verbatim; `splitTerms` turns it into `text` terms. */
   text: string;
 }
 
 /** What a query string with none of our parameters in it means. */
 export function emptyFilter(): FilterState {
-  return { status: [], labels: [], assignees: [], authors: [], milestones: [], text: "" };
+  return {
+    status: [],
+    labels: [],
+    assignees: [],
+    authors: [],
+    milestones: [],
+    features: [],
+    text: "",
+  };
 }
 
 export function isEmptyFilter(filter: FilterState): boolean {
@@ -40,6 +49,7 @@ export function isEmptyFilter(filter: FilterState): boolean {
     filter.assignees.length === 0 &&
     filter.authors.length === 0 &&
     filter.milestones.length === 0 &&
+    filter.features.length === 0 &&
     filter.text.trim() === ""
   );
 }
@@ -105,6 +115,7 @@ export function queryToFilter(query: RouteQuery, allowed: readonly Status[]): Fi
     assignees: values(query.assignee),
     authors: values(query.author),
     milestones: values(query.milestone),
+    features: values(query.feature),
     text: joinTerms(values(query.q).flatMap(splitTerms)),
   };
 }
@@ -129,6 +140,7 @@ export function filterToQuery(filter: FilterState): Record<string, string[]> {
   put("assignee", filter.assignees);
   put("author", filter.authors);
   put("milestone", filter.milestones);
+  put("feature", filter.features);
   const terms = splitTerms(filter.text);
   if (terms.length > 0) query.q = [joinTerms(terms)];
   return query;
@@ -142,6 +154,7 @@ export function toEntityFilter(filter: FilterState): EntityFilter {
   if (filter.assignees.length > 0) entityFilter.assignees = [...filter.assignees];
   if (filter.authors.length > 0) entityFilter.authors = [...filter.authors];
   if (filter.milestones.length > 0) entityFilter.milestones = [...filter.milestones];
+  if (filter.features.length > 0) entityFilter.features = [...filter.features];
   const terms = splitTerms(filter.text);
   if (terms.length > 0) entityFilter.text = terms;
   return entityFilter;

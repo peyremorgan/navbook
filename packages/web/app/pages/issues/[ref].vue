@@ -9,7 +9,7 @@
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
-import { ISSUE_QUERY, ISSUES_QUERY } from "~/graphql/queries";
+import { FEATURES_QUERY, ISSUE_QUERY, ISSUES_QUERY } from "~/graphql/queries";
 import { buildCommentTree, countComments } from "~/utils/comments";
 import { distinctValues, shortId } from "~/utils/entities";
 import { describeApiError, reparentConflict } from "~/utils/errors";
@@ -39,12 +39,18 @@ const issue = computed(() => result.value?.issue ?? null);
  * accepts a value that is not in it.
  */
 const { result: listing } = useQuery(ISSUES_QUERY, { filter: {} }, { fetchPolicy: "cache-first" });
+// Features are the exception: they are real directories, so their list is the
+// registry rather than a guess made from whatever the listing mentions.
+const { result: featureList } = useQuery(FEATURES_QUERY, undefined, {
+  fetchPolicy: "cache-first",
+});
 const known = computed(() => {
   const issues = listing.value?.issues ?? [];
   return {
     labels: distinctValues(issues, (item) => item.labels),
     assignees: distinctValues(issues, (item) => item.assignees),
     milestones: distinctValues(issues, (item) => (item.milestone ? [item.milestone] : [])),
+    features: (featureList.value?.features ?? []).map((feature) => feature.slug),
   };
 });
 
@@ -59,6 +65,7 @@ const current = computed<IssueEdit>(() => ({
   labels: [...(issue.value?.labels ?? [])],
   assignees: [...(issue.value?.assignees ?? [])],
   milestone: issue.value?.milestone ?? null,
+  features: [...(issue.value?.features ?? [])],
 }));
 
 async function save(change: Partial<IssueEdit>): Promise<void> {
@@ -291,6 +298,16 @@ async function unlink(child: string): Promise<void> {
             :suggestions="known.assignees"
             :saving="mutations.busy.value"
             @save="(assignees: string[]) => save({ assignees })"
+          />
+          <LabelEditor
+            title="Features"
+            icon="i-lucide-layers"
+            testid="features"
+            link-to="/features/"
+            :values="issue.features"
+            :suggestions="known.features"
+            :saving="mutations.busy.value"
+            @save="(features: string[]) => save({ features })"
           />
           <LabelEditor
             title="Milestone"

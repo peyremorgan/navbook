@@ -5,7 +5,9 @@
   nowhere else they could come from: the format keeps no registry of labels,
   assignees or milestones, and the server introduces none (spec 06 §6.6). So
   the menus are creatable — you can filter by a label no visible entity carries
-  — and what they offer is what is in play right now.
+  — and what they offer is what is in play right now. Features are the one
+  exception: they are real directories, so their menu is offered the actual
+  list and a caller passes it in.
 
   Status is chips rather than a menu because there are only ever two or three to
   choose from and it is the filter reached for most. Like every other control
@@ -23,6 +25,7 @@ const props = defineProps<{
   assignees: string[];
   authors: string[];
   milestones: string[];
+  features: string[];
   empty: boolean;
 }>();
 
@@ -60,6 +63,7 @@ const menus = computed(() => [
     icon: "i-lucide-flag",
     options: props.milestones,
   },
+  { key: "features" as const, label: "Feature", icon: "i-lucide-layers", options: props.features },
 ]);
 </script>
 

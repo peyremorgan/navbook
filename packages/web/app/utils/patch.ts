@@ -22,6 +22,7 @@ export interface IssueEdit {
   labels: string[];
   assignees: string[];
   milestone: string | null;
+  features: string[];
 }
 
 /** An `UpdateIssueInput` without the `ref`, which the caller knows. */
@@ -98,6 +99,11 @@ export function buildIssuePatch(before: IssueEdit, after: Partial<IssueEdit>): I
   if (after.milestone !== undefined) {
     const milestone = normalizeOptional(after.milestone);
     if (milestone !== normalizeOptional(before.milestone)) patch.milestone = milestone;
+  }
+
+  if (after.features !== undefined) {
+    const features = normalizeList(after.features);
+    if (!sameList(features, normalizeList(before.features))) patch.features = features;
   }
 
   return Object.keys(patch).length === 0 ? null : patch;

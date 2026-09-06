@@ -25,17 +25,22 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  addSpec,
   applyComment,
   closeEntity,
+  createFeature,
   currentAuthor,
   findEntity,
   makeWsCtx,
   newCommentFile,
+  newFeatureFile,
   newIssueFile,
   newPrFile,
+  newSpecFile,
   openIssue,
   openPr,
   preparePrOpen,
+  specFileName,
 } from "@navbook/core";
 
 /** Fixed so a screenshot, a diff and an assertion all say the same thing. */
@@ -195,6 +200,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
       labels?: string[];
       assignee?: string[];
       milestone?: string;
+      features?: string[];
       parent?: string;
       author?: string;
     },
@@ -211,6 +217,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
           ...(input.labels ? { labels: input.labels } : {}),
           ...(input.assignee ? { assignee: input.assignee } : {}),
           ...(input.milestone ? { milestone: input.milestone } : {}),
+          ...(input.features ? { features: input.features } : {}),
           ...(input.parent ? { parent: input.parent } : {}),
         }),
         fallbackTitle: input.title,
@@ -256,6 +263,80 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     );
   };
 
+  /* ------------------------------------------------------------- features */
+
+  const feature = (
+    date: string,
+    slug: string,
+    input: { title: string; summary?: string },
+  ): void => {
+    const context = ws(date, []);
+    createFeature(
+      context,
+      {
+        content: newFeatureFile({
+          title: input.title,
+          author: currentAuthor(context),
+          created: date,
+          ...(input.summary ? { body: input.summary } : {}),
+        }),
+        slug,
+        fallbackTitle: input.title,
+      },
+      { commit: true },
+    );
+  };
+
+  const spec = (date: string, slug: string, input: { title: string; body: string }): void => {
+    const context = ws(date, []);
+    addSpec(
+      context,
+      slug,
+      {
+        content: newSpecFile({ title: input.title, body: input.body }),
+        fileName: specFileName(input.title),
+      },
+      { commit: true },
+    );
+  };
+
+  feature("2026-07-15T09:00:00Z", "authentication", {
+    title: "Authentication",
+    summary: [
+      "Everything about proving who somebody is: the sign-in form, the session",
+      "it opens, and the tokens that keep it open.",
+    ].join("\n"),
+  });
+  spec("2026-07-15T09:30:00Z", "authentication", {
+    title: "Login flow",
+    body: [
+      "## Requirements",
+      "",
+      "The form SHALL accept an address and a password, and SHALL NOT give up",
+      "on a request before the server has had ten seconds to answer it.",
+      "",
+      "## Scenarios",
+      "",
+      "WHEN the connection is slow, THEN the form waits rather than failing.",
+    ].join("\n"),
+  });
+  spec("2026-07-16T10:00:00Z", "authentication", {
+    title: "Session policy",
+    body: [
+      "## Requirements",
+      "",
+      "A session SHALL last thirty days, and SHALL end at once when the",
+      "password behind it changes.",
+    ].join("\n"),
+  });
+
+  // A feature with nothing written down yet: the empty state has to look like
+  // something too.
+  feature("2026-07-20T09:00:00Z", "billing", {
+    title: "Billing",
+    summary: "Seats, invoices, and what happens when a card is refused.",
+  });
+
   /* --------------------------------------------------------------- issues */
 
   issue("2026-08-01T10:00:00Z", IDS.parent, {
@@ -271,6 +352,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
       "See `app/auth/session.ts` for where the timeout lives.",
     ].join("\n"),
     labels: ["bug", "auth"],
+    features: ["authentication"],
     assignee: ["A Person <person@example.invalid>"],
     milestone: "1.0",
   });
@@ -279,6 +361,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     title: "Raise the sign-in deadline to thirty seconds",
     body: "Five seconds is not enough on a throttled connection.",
     labels: ["bug"],
+    features: ["authentication"],
     parent: IDS.parent,
   });
 
@@ -305,6 +388,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
       "> Terms AND together; the default query is `status:open`.",
     ].join("\n"),
     labels: ["documentation"],
+    features: ["authentication", "billing"],
     assignee: ["Someone Else <someone@example.invalid>"],
     author: "Someone Else <someone@example.invalid>",
   });
@@ -369,6 +453,20 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     {
       GIT_AUTHOR_DATE: "2026-08-03T15:05:00Z",
       GIT_COMMITTER_DATE: "2026-08-03T15:05:00Z",
+    },
+  );
+
+  // A commit that touches no Navbook file at all. It reaches the feature's
+  // timeline through the trailer it carries, which is the whole reason the
+  // timeline reads history rather than the tree (spec 04 §4.3).
+  write("app/auth/session.ts", "export const DEADLINE_MS = 30_000;\n");
+  git(dir, ["add", "-A"]);
+  git(
+    dir,
+    ["commit", "--quiet", "-m", `fix: raise the sign-in deadline\n\nCloses: ${IDS.child}\n`],
+    {
+      GIT_AUTHOR_DATE: "2026-08-02T12:00:00Z",
+      GIT_COMMITTER_DATE: "2026-08-02T12:00:00Z",
     },
   );
 

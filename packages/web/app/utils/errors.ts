@@ -43,6 +43,7 @@ const HEADINGS: Record<string, string> = {
   PRECONDITION: "Not from here",
   PREFIX_TOO_SHORT: "That prefix is too short",
   REPARENT_REQUIRED: "It already has a parent",
+  STALE_CONTENT: "Changed since you opened it",
   SYNC_CONFLICT: "The server's clone conflicts with the remote",
   SYNC_FAILED: "The server could not synchronise its clone",
   SYNC_PUSH_REJECTED: "The remote refused the push",

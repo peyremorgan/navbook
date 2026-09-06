@@ -90,6 +90,10 @@ export default defineNuxtPlugin((nuxtApp) => {
     possibleTypes: { Entity: ["Issue", "Pr"] },
     typePolicies: {
       Issue: { keyFields: ["id"] },
+      // A feature is named by its slug, a document by its path within one.
+      Feature: { keyFields: ["slug"] },
+      Spec: { keyFields: ["path"] },
+      Commit: { keyFields: ["sha"] },
       Pr: { keyFields: ["id"] },
       Comment: { keyFields: ["id"] },
       LinkNode: { keyFields: false },
@@ -104,6 +108,8 @@ export default defineNuxtPlugin((nuxtApp) => {
           // the label-filtered listing back for the unfiltered one.
           issues: { keyArgs: ["filter"] },
           prs: { keyArgs: ["filter", "allRefs"] },
+          features: { keyArgs: [] },
+          feature: { keyArgs: ["slug"] },
         },
       },
     },

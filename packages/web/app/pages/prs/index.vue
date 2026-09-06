@@ -15,7 +15,7 @@
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
-import { PRS_QUERY } from "~/graphql/queries";
+import { FEATURES_QUERY, PRS_QUERY } from "~/graphql/queries";
 import { distinctValues } from "~/utils/entities";
 import { PR_STATUSES } from "~/utils/filter-params";
 
@@ -42,11 +42,21 @@ const { result, loading, error, refetch } = useQuery(
 const prs = computed(() => result.value?.prs ?? []);
 const page = usePagedList(prs);
 
+// The feature registry, for the filter bar's menu. Cached: it changes far
+// less often than a listing does, and every page that shows it wants the same
+// answer.
+const { result: featureList } = useQuery(FEATURES_QUERY, undefined, {
+  fetchPolicy: "cache-first",
+});
+
 const suggestions = computed(() => ({
   labels: distinctValues(prs.value, (pr) => pr.labels),
   assignees: distinctValues(prs.value, (pr) => pr.assignees),
   authors: distinctValues(prs.value, (pr) => [pr.author]),
   milestones: distinctValues(prs.value, (pr) => (pr.milestone ? [pr.milestone] : [])),
+  // Features are real directories, so the registry is the registry rather than
+  // whatever the listing on screen happens to mention.
+  features: (featureList.value?.features ?? []).map((feature) => feature.slug),
 }));
 </script>
 

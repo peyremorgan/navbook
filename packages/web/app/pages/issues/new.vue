@@ -7,7 +7,7 @@
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
-import { ISSUES_QUERY } from "~/graphql/queries";
+import { FEATURES_QUERY, ISSUES_QUERY } from "~/graphql/queries";
 import { distinctValues } from "~/utils/entities";
 import { normalizeList, normalizeOptional } from "~/utils/patch";
 
@@ -19,17 +19,30 @@ const body = ref("");
 const labels = ref<string[]>([]);
 const assignees = ref<string[]>([]);
 const milestone = ref("");
+/** Pre-filled when the page was reached from a feature's "file an issue". */
+const features = ref<string[]>(featureFromQuery(route.query.feature));
 /** Pre-filled when the page was reached from an issue's "add subtask". */
 const parent = ref(String(route.query.parent ?? ""));
 
+/** A `?feature=` parameter, however the router spelled it. */
+function featureFromQuery(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : [raw];
+  return list.filter((item): item is string => typeof item === "string" && item.trim() !== "");
+}
+
 /* The only source of suggestions there is; see the detail page for why. */
 const { result: listing } = useQuery(ISSUES_QUERY, { filter: {} }, { fetchPolicy: "cache-first" });
+const { result: featureList } = useQuery(FEATURES_QUERY, undefined, {
+  fetchPolicy: "cache-first",
+});
 const known = computed(() => {
   const issues = listing.value?.issues ?? [];
   return {
     labels: distinctValues(issues, (item) => item.labels),
     assignees: distinctValues(issues, (item) => item.assignees),
     milestones: distinctValues(issues, (item) => (item.milestone ? [item.milestone] : [])),
+    // A real registry, unlike the three above.
+    features: (featureList.value?.features ?? []).map((feature) => feature.slug),
   };
 });
 
@@ -43,6 +56,7 @@ async function submit(): Promise<void> {
     labels: normalizeList(labels.value),
     assignees: normalizeList(assignees.value),
     milestone: normalizeOptional(milestone.value),
+    features: normalizeList(features.value),
     parent: normalizeOptional(parent.value),
   });
   if (payload) await navigateTo(`/issues/${payload.issue.id}`);
@@ -86,6 +100,15 @@ async function submit(): Promise<void> {
       </UFormField>
       <UFormField label="Milestone">
         <UInput v-model="milestone" class="w-full" data-testid="new-milestone" />
+      </UFormField>
+      <UFormField label="Features" description="The concepts this work belongs to.">
+        <CreatableSelect
+          v-model="features"
+          :suggestions="known.features"
+          placeholder="Attach to a feature"
+          icon="i-lucide-layers"
+          testid="new-features"
+        />
       </UFormField>
       <UFormField label="Parent" description="File it under another issue, by id or prefix.">
         <UInput v-model="parent" class="w-full" data-testid="new-parent" />

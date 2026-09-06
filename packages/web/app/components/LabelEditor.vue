@@ -1,9 +1,12 @@
 <!--
-  Labels, assignees or a milestone.
+  Labels, assignees, a milestone, or the features an entity belongs to.
 
-  Creatable, and offering whatever the listing had in it, because there is no
-  registry to offer instead: the format keeps none and the server introduces
-  none (spec 06 §6.6). Anything you type is a valid value.
+  Creatable, and offering whatever the listing had in it, because for most of
+  these there is no registry to offer instead: the format keeps none and the
+  server introduces none (spec 06 §6.6). Anything you type is a valid value.
+
+  Features are the exception, and `linkTo` is how that shows: they are real
+  directories with a page of their own, so their chips lead somewhere.
 -->
 <script setup lang="ts">
 const props = defineProps<{
@@ -12,11 +15,18 @@ const props = defineProps<{
   values: string[];
   suggestions: string[];
   single?: boolean;
+  /** Route prefix that makes each chip a link, e.g. `/features/`. */
+  linkTo?: string;
   testid: string;
   saving?: boolean;
 }>();
 
 const emit = defineEmits<{ save: [string[]] }>();
+
+// Resolved rather than named as a string: `<component is="NuxtLink">` finds
+// nothing in a built bundle, where auto-imported components are not registered
+// globally, and the chip silently stops being a link.
+const Link = resolveComponent("NuxtLink");
 
 const editing = ref(false);
 const draft = ref<string[]>([...props.values]);
@@ -86,15 +96,22 @@ function save(): void {
     </template>
 
     <div v-else-if="props.values.length" class="flex flex-wrap gap-1">
-      <UBadge
+      <component
+        :is="props.linkTo ? Link : 'span'"
         v-for="value in props.values"
         :key="value"
-        color="neutral"
-        variant="subtle"
-        size="sm"
+        :to="props.linkTo ? `${props.linkTo}${value}` : undefined"
+        :data-testid="`chip-${props.testid}-${value}`"
       >
-        {{ value }}
-      </UBadge>
+        <UBadge
+          color="neutral"
+          variant="subtle"
+          size="sm"
+          :class="props.linkTo ? 'hover:bg-elevated' : undefined"
+        >
+          {{ value }}
+        </UBadge>
+      </component>
     </div>
     <p v-else class="text-sm text-muted">None</p>
   </section>

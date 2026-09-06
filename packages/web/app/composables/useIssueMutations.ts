@@ -84,6 +84,7 @@ export function useIssueMutations() {
       labels?: string[];
       assignees?: string[];
       milestone?: string | null;
+      features?: string[];
       parent?: string | null;
     }) {
       return reported(async () => {

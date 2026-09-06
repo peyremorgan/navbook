@@ -24,6 +24,7 @@ const BEFORE: IssueEdit = {
   labels: ["bug", "auth"],
   assignees: ["A Person <person@example.invalid>"],
   milestone: "1.0",
+  features: ["auth"],
 };
 
 describe("normalizeList", () => {
