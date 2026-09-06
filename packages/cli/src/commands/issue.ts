@@ -25,6 +25,7 @@ export interface IssueOpenOptions extends GlobalFlags {
   label?: string[];
   assignee?: string[];
   milestone?: string;
+  feature?: string[];
   parent?: string;
 }
 
@@ -48,6 +49,7 @@ export function cmdIssueOpen(ctx: Ctx, title: string, opts: IssueOpenOptions): v
         labels: opts.label,
         assignee: opts.assignee,
         milestone: opts.milestone,
+        features: opts.feature,
         parent: parent?.id,
       }),
     validate: validateIssue,

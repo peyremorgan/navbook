@@ -56,6 +56,7 @@ export interface PrOpenOptions extends GlobalFlags {
   label?: string[];
   assignee?: string[];
   milestone?: string;
+  feature?: string[];
 }
 
 export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
@@ -78,6 +79,7 @@ export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
         labels: opts.label,
         assignee: opts.assignee,
         milestone: opts.milestone,
+        features: opts.feature,
       }),
     validate: validatePr,
   });
