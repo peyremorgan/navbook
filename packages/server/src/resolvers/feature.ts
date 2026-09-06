@@ -17,22 +17,23 @@ import type {
 import type { FeatureParent, PrParent } from "../mappers.ts";
 
 /**
- * Blob hashes for a feature's files, worked out once per request.
+ * Blob hashes for a feature's files, worked out once per record.
  *
  * `baseSha` is asked for on the identity card and on every document, and one
  * `git hash-object` per file would make a listing cost a subprocess a piece.
- * The memo is per request, which is the same lifetime the tree already has.
+ *
+ * Keyed by the record rather than by its slug, which is what makes it correct
+ * as well as cheap. A write reads its feature back afterwards, so its payload
+ * holds a *new* record; two writes to one feature in a single request would
+ * otherwise have the second reported with the first's hashes, and a client
+ * that saved with one of those would be refused as out of date. A fresh record
+ * gets a fresh answer, and a record that never changes is only hashed once.
  */
-const HASHES = new WeakMap<GraphQLCtx, Map<string, Map<string, string>>>();
+const HASHES = new WeakMap<FeatureParent, Map<string, string>>();
 
 /** Every file of one feature, hashed in a single call, keyed by tree path. */
 function hashesOf(ctx: GraphQLCtx, feature: FeatureParent): Map<string, string> {
-  let byFeature = HASHES.get(ctx);
-  if (!byFeature) {
-    byFeature = new Map();
-    HASHES.set(ctx, byFeature);
-  }
-  const cached = byFeature.get(feature.slug);
+  const cached = HASHES.get(feature);
   if (cached) return cached;
 
   const paths = [feature.filePath, ...feature.specs.map((spec) => spec.path)];
@@ -45,7 +46,7 @@ function hashesOf(ctx: GraphQLCtx, feature: FeatureParent): Map<string, string> 
     const found = hashed.get(absPath(ctx.ws, path));
     if (found !== undefined) keyed.set(path, found);
   }
-  byFeature.set(feature.slug, keyed);
+  HASHES.set(feature, keyed);
   return keyed;
 }
 

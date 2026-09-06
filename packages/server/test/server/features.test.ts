@@ -436,6 +436,51 @@ describe("features", () => {
     assert.deepEqual(none.commits, []);
   });
 
+  it("reports the hash each write in one request actually left behind", async () => {
+    // GraphQL runs a document's mutations serially and completes each payload
+    // before the next begins, so a hash worked out for the first write is
+    // already in hand when the second reports. A client that saved with a
+    // stale one would be refused on its next save, which is why every write
+    // reads its feature back and every record is hashed on its own.
+    const before = await feature("auth");
+    const spec = before.specs.find((s: Payload) => s.fileName === "login-flow.md");
+
+    const both = ok<Payload>(
+      await h.gql(
+        `mutation Two($add: AddSpecInput!, $edit: UpdateSpecInput!) {
+          added: addSpec(input: $add) { spec { fileName baseSha } }
+          edited: updateSpec(input: $edit) { spec { fileName baseSha } }
+        }`,
+        {
+          add: { feature: "auth", title: "Token rotation", body: "Body." },
+          edit: {
+            feature: "auth",
+            fileName: "login-flow.md",
+            body: "Edited beside another write.",
+            baseSha: spec.baseSha,
+          },
+        },
+      ),
+    );
+
+    const now = await feature("auth");
+    const byName = new Map(now.specs.map((s: Payload) => [s.fileName, s.baseSha]));
+    assert.equal(both.added.spec.baseSha, byName.get("token-rotation.md"));
+    assert.equal(both.edited.spec.baseSha, byName.get("login-flow.md"));
+
+    // And the hash it reported is one a further save is accepted with.
+    ok<Payload>(
+      await h.gql(UPDATE_SPEC, {
+        input: {
+          feature: "auth",
+          fileName: "login-flow.md",
+          body: "Saved with the hash the last payload gave.",
+          baseSha: both.edited.spec.baseSha,
+        },
+      }),
+    );
+  });
+
   it("leaves a clean tree that doctor is happy with", async () => {
     assert.equal(h.fixture.server.git(["status", "--porcelain"]).stdout.trim(), "");
     const report = ok<Payload>(await h.gql(`query { doctor { diagnostics { check path } } }`));
