@@ -2,10 +2,10 @@
   One thing to do, as a row.
 
   A line rather than the two the listings use. An inbox is read down the left
-  edge — what it is, then what it is called — and the metadata a listing spends
-  its second line on is either already known here (who it is assigned to: you)
-  or beside the point (which branch it rides on). What earns its place instead
-  is why the row is here at all, which no listing has to say.
+  edge — what it is, then what it is called — and most of what a listing spends
+  its second line on is beside the point here: which branch it rides on, and a
+  milestone nobody scanning a to-do list is asking about. What earns the space
+  instead is why the row is here at all, which no listing ever has to say.
 
   The status is the icon's colour rather than a badge, because the same three
   colours are doing the work of a badge in a quarter of the width, and an

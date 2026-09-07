@@ -76,7 +76,7 @@ const emptyTitle = computed(() => {
   }
 });
 
-/** What is not being looked at, which is worth saying before anything else. */
+/** What is being left out, which a page showing nothing has to own up to. */
 const unfinished = computed(() => (finished.value ? "" : " Finished work is not shown."));
 
 const emptyDescription = computed(() => {
