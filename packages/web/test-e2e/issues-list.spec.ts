@@ -5,6 +5,11 @@
  * starting with the empty case: a filter naming no status means any status, so
  * an unfiltered listing holds closed issues too.
  *
+ * Then the ways in. The front page and the wordmark both name a status, since
+ * arriving nowhere in particular should not mean arriving on the closed ones;
+ * the tab beside the wordmark still means the whole listing. Those are the only
+ * assertions about what a URL is before anybody has typed one.
+ *
  * The last few are about the bar rather than the answer: which of its controls
  * a screen is wide enough to hold, which is the one thing here that a URL
  * cannot say.
@@ -45,6 +50,48 @@ test("narrows to one status when the URL asks for it", async ({ signedIn, stack 
   // Naming both is the same set as naming neither.
   await signedIn.goto(`${stack.appUrl}/issues?status=open&status=closed`);
   await expect(signedIn.getByTestId("issue-row-aaaa0001")).toBeVisible();
+  await expect(signedIn.getByTestId("issue-row-aaaa0006")).toBeVisible();
+});
+
+test("sends the root to the open issues", async ({ signedIn, stack }) => {
+  await signedIn.goto(stack.appUrl);
+  await expect(signedIn).toHaveURL(`${stack.appUrl}/issues?status=open`);
+
+  // The filter arrived and not merely the path: the closed fixture issue is
+  // gone, and the chip reads as pressed — which is what makes it removable.
+  await expect(signedIn.getByTestId("issue-row-aaaa0001")).toBeVisible();
+  await expect(signedIn.getByTestId("issue-row-aaaa0006")).toHaveCount(0);
+  await expect(signedIn.getByTestId("filter-status-open")).toHaveAttribute("aria-pressed", "true");
+
+  // A place to land rather than a new default for the listing, so Clear still
+  // gets every status back.
+  await signedIn.getByTestId("filter-clear").click();
+  await expect(signedIn).not.toHaveURL(/status=/);
+  await expect(signedIn.getByTestId("issue-row-aaaa0006")).toBeVisible();
+});
+
+test("replaces a query on the root rather than carrying it in", async ({ signedIn, stack }) => {
+  // Nothing in the app links to `/` with a query, so one arriving there came
+  // from a bookmark or a keyboard. The redirect names the whole filter, and
+  // what it names is what the listing gets.
+  await signedIn.goto(`${stack.appUrl}/?label=bug`);
+  await expect(signedIn).toHaveURL(`${stack.appUrl}/issues?status=open`);
+
+  // An open issue carrying no `bug` label is still listed, so the label was
+  // dropped; the closed one is not, so the status was not.
+  await expect(signedIn.getByTestId("issue-row-cafe0005")).toBeVisible();
+  await expect(signedIn.getByTestId("issue-row-aaaa0006")).toHaveCount(0);
+});
+
+test("takes the wordmark home and the tab to the whole listing", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/issues?label=bug`);
+  await signedIn.getByRole("link", { name: "Navbook", exact: true }).click();
+  await expect(signedIn).toHaveURL(`${stack.appUrl}/issues?status=open`);
+
+  // The two sit next to each other and do not mean the same thing: one is the
+  // way home, the other is the way out of whatever filter home arrived with.
+  await signedIn.getByRole("link", { name: "Issues", exact: true }).click();
+  await expect(signedIn).toHaveURL(`${stack.appUrl}/issues`);
   await expect(signedIn.getByTestId("issue-row-aaaa0006")).toBeVisible();
 });
 
