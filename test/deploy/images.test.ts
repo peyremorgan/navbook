@@ -130,6 +130,17 @@ describe("the Dockerfiles", () => {
     assert.match(read("packages/web/nuxt.config.ts"), /preset:\s*"static"/);
   });
 
+  it("leaves a person exec-ing into the API image standing in the clone", () => {
+    const workdirs = instructions(DOCKERFILES.api)
+      .filter((line) => /^WORKDIR\s/i.test(line))
+      .map((line) => line.split(/\s+/)[1]);
+    const entrypointDefault = /^repo=\$\{NAV_SERVER_REPO:-(\S+)\}/m.exec(
+      readFileSync(ENTRYPOINT, "utf8"),
+    )?.[1];
+
+    assert.equal(workdirs.at(-1), entrypointDefault);
+  });
+
   it("gives the API image the git it shells out to for every read and write", () => {
     assert.match(read(DOCKERFILES.api), /apk add --no-cache .*\bgit\b/);
   });

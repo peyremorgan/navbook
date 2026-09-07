@@ -72,6 +72,10 @@ RUN mkdir -p /srv/navbook && chown node:node /srv/navbook
 COPY --chmod=755 packages/server/docker/entrypoint.sh /entrypoint.sh
 
 USER node
+# The clone, so that `docker compose exec api sh` puts a person in the thing
+# they came to look at. The entrypoint still moves there itself, for when
+# NAV_SERVER_REPO names somewhere else.
+WORKDIR /srv/navbook
 EXPOSE 4000
 
 # Yoga answers /health before the context that checks a token, so this asks
