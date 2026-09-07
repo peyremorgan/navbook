@@ -169,7 +169,7 @@ const branchHint = computed(() => refusedOn.value);
           </span>
           <span>opened <TimeAgo :iso="pr.created" /> by <PersonLabel :person="pr.author" /></span>
           <span>· {{ commentCount }} comment{{ commentCount === 1 ? "" : "s" }}</span>
-          <ReviewBadge :decision="pr.reviewDecision" :asked="pr.reviews.length > 0" />
+          <ReviewBadge :decision="pr.reviewDecision" :asked="pr.reviewers.length > 0" />
         </div>
         <div v-if="pr.refs.length" class="flex flex-wrap items-center gap-1 text-xs text-muted">
           <UIcon name="i-lucide-git-branch" class="size-3" />
