@@ -189,6 +189,21 @@ test("keeps a menu in view when the window narrows after it was used", async ({
   await expect(signedIn.getByTestId("filter-labels")).toBeVisible();
 });
 
+test("gives the menus back when the window widens, without being asked", async ({
+  signedIn,
+  stack,
+}) => {
+  // The other half of hiding them with CSS: nothing is listening for a resize,
+  // so widening has to be enough on its own.
+  await signedIn.setViewportSize({ width: 390, height: 844 });
+  await signedIn.goto(`${stack.appUrl}/issues`);
+  await expect(signedIn.getByTestId("filter-labels")).toBeHidden();
+
+  await signedIn.setViewportSize({ width: 1280, height: 800 });
+  await expect(signedIn.getByTestId("filter-labels")).toBeVisible();
+  await expect(signedIn.getByTestId("filter-advanced")).toBeHidden();
+});
+
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
@@ -201,6 +216,9 @@ test.describe("on a phone", () => {
     const toggle = signedIn.getByTestId("filter-advanced");
     await expect(toggle).toBeVisible();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // A disclosure, said as one: a button that names what it holds and reports
+    // whether it is open.
+    await expect(signedIn.getByRole("button", { name: "Advanced search" })).toBeVisible();
     for (const key of MENUS) {
       await expect(signedIn.getByTestId(`filter-${key}`)).toBeHidden();
     }
@@ -219,6 +237,18 @@ test.describe("on a phone", () => {
     await expect(signedIn.getByTestId("filter-labels")).toBeHidden();
   });
 
+  test("narrows the listing from a menu once unfolded", async ({ signedIn, stack }) => {
+    // The whole point of the toggle: what it hides still works when asked for.
+    await signedIn.goto(`${stack.appUrl}/issues`);
+    await signedIn.getByTestId("filter-advanced").click();
+    await chooseOrCreate(signedIn, "filter-labels", "bug");
+
+    await expect(signedIn).toHaveURL(/[?&]label=bug/);
+    await expect(signedIn.getByTestId("issue-row-aaaa0001")).toBeVisible();
+    await expect(signedIn.getByTestId("issue-row-cafe0005")).toHaveCount(0);
+    await expect(signedIn.getByTestId("filter-advanced-count")).toHaveText("1");
+  });
+
   test("unfolds itself when the URL already names a menu filter", async ({ signedIn, stack }) => {
     // A filter you cannot see is one you cannot take off.
     await signedIn.goto(`${stack.appUrl}/issues?label=bug`);
@@ -233,6 +263,8 @@ test.describe("on a phone", () => {
     // Two labels are two things chosen, though they are one menu.
     await signedIn.goto(`${stack.appUrl}/issues?label=bug&label=auth`);
     await expect(signedIn.getByTestId("filter-advanced-count")).toHaveText("2");
+    // And a number on its own says nothing when it is read out rather than seen.
+    await expect(signedIn.getByRole("button", { name: "Advanced search 2 chosen" })).toBeVisible();
 
     // The box and the chips are on screen already, so they are not counted and
     // they do not unfold anything — but they are still a filter to clear.
