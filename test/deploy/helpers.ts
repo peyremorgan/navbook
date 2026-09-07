@@ -173,6 +173,21 @@ export function makeFixture(options: { defaultBranch?: string } = {}): Fixture {
   };
 }
 
+/**
+ * Run the web image's start-up script against a directory standing in for the
+ * bundle, with `env` as the whole of its environment.
+ */
+export function runWebConfig(
+  root: string,
+  env: Record<string, string | undefined>,
+): { code: number; stdout: string; stderr: string } {
+  const merged: NodeJS.ProcessEnv = { PATH: process.env.PATH ?? "", NAVBOOK_WEB_ROOT: root };
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined) merged[key] = value;
+  }
+  return run("sh", [WEB_CONFIG_SCRIPT], { env: merged });
+}
+
 /** Reports what the real server would have found, then exits as it would. */
 const STUB_SERVER = `#!/usr/bin/env node
 import { spawnSync } from "node:child_process";
