@@ -124,3 +124,99 @@ jobs:
           ../node_modules/.bin/nav doctor
       - name: conformance suite against the installed package
         run: NAV_BIN="node /tmp/smoke/node_modules/.bin/nav" pnpm test:conformance
+
+  docker:
+    name: container images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The seed repository below is made with `nav`, which commits.
+      - name: configure git identity
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@example.invalid"
+          git config --global init.defaultBranch main
+
+      # `.env.example` is the file a deployment starts from, so it has to render
+      # as it stands — a required key left empty there is a broken first run.
+      - name: the descriptor renders against the example environment
+        run: docker compose --env-file .env.example config --quiet
+
+      # Through compose rather than two `docker build` commands, so the build
+      # contexts the descriptor names are covered as well as the Dockerfiles.
+      - name: both images build
+        run: docker compose --env-file .env.example build
+
+      - name: the web image serves what it was told, and deep links reach the app
+        run: |
+          docker run -d --name web-smoke -p 8080:80 \
+            -e NAVBOOK_GRAPHQL_URL=https://api.smoke.invalid/graphql \
+            -e NAVBOOK_OIDC_ISSUER=https://accounts.smoke.invalid \
+            -e NAVBOOK_OIDC_CLIENT_ID=navbook-web \
+            -e NAVBOOK_OIDC_AUDIENCE=navbook \
+            navbook-web:local
+          for _ in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8080/config.json > /dev/null && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8080/config.json | tee /tmp/config.json
+          jq -e '.graphqlUrl == "https://api.smoke.invalid/graphql"' /tmp/config.json
+          jq -e '.oidc.issuer == "https://accounts.smoke.invalid"' /tmp/config.json
+          jq -e '.oidc.clientId == "navbook-web" and .oidc.audience == "navbook"' /tmp/config.json
+          # Routing happens in the browser: a reload on a deep link has to find
+          # the app rather than a 404.
+          curl -fsS http://127.0.0.1:8080/issues/ab12cd34 | grep -q 'id="__nuxt"'
+          # And a prerendered listing is served where it is asked for, not one
+          # redirect away.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/issues)" = 200
+
+      - name: the API image makes its own clone and serves it
+        run: |
+          seed="$RUNNER_TEMP/seed"
+          git init -q -b main "$seed"
+          (cd "$seed" && node "$GITHUB_WORKSPACE/packages/cli/src/main.ts" init --commit)
+          git clone -q --bare "$seed" "$RUNNER_TEMP/seed.git"
+          # git refuses to serve a repository owned by somebody else, and the
+          # container is uid 1000 while the runner is not.
+          sudo chown -R 1000:1000 "$RUNNER_TEMP/seed.git"
+          docker run -d --name api-smoke -p 4000:4000 \
+            -v "$RUNNER_TEMP/seed.git:/seed.git" \
+            -e NAVBOOK_REPO_URL=file:///seed.git \
+            -e NAVBOOK_GIT_NAME="Navbook CI" \
+            -e NAVBOOK_GIT_EMAIL=navbook@example.invalid \
+            -e NAV_SERVER_OIDC_ISSUER=https://issuer.invalid \
+            -e NAV_SERVER_OIDC_AUDIENCE=navbook \
+            -e NAV_SERVER_OIDC_JWKS_URL=https://issuer.invalid/jwks \
+            -e NAV_SERVER_GRAPHIQL=false \
+            navbook-server:local
+          for _ in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:4000/health > /dev/null && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4000/health
+          docker logs api-smoke 2>&1 | grep -q "nav-server listening"
+          # Authentication has no off switch, and the identity provider above
+          # does not exist: the refusal proves both that it answers and that it
+          # never went looking for keys to start.
+          curl -sS -X POST http://127.0.0.1:4000/graphql \
+            -H 'content-type: application/json' \
+            -d '{"query":"{issues{id}}"}' | grep -q UNAUTHENTICATED
+          # A restart serves the clone it already has rather than making another.
+          docker restart api-smoke
+          for _ in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:4000/health > /dev/null && break
+            sleep 1
+          done
+          docker logs api-smoke 2>&1 | grep -q "serving the clone already in"
+
+      - name: what the containers said
+        if: always()
+        run: |
+          docker logs web-smoke 2>&1 | tail -30 || true
+          docker logs api-smoke 2>&1 | tail -30 || true
