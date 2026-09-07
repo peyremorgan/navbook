@@ -4,6 +4,7 @@ author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-08-02T15:09:43Z
 labels: [milestone-4, performance]
 resolution: fixed
+feature: cli
 ---
 
 Spec 05 §5.2 sets a budget: cold `nav issue list` on a 1000-issue repository must finish in under 500 ms on commodity hardware.

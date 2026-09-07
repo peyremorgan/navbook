@@ -15,8 +15,9 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "check": "biome check . && pnpm typecheck",
-    "test": "pnpm -r test && pnpm test:conformance",
+    "test": "pnpm -r test && pnpm test:conformance && pnpm test:deploy",
     "test:conformance": "node --test \"test/conformance/**/*.test.ts\"",
+    "test:deploy": "node --test \"test/deploy/**/*.test.ts\"",
     "bench": "pnpm --filter @navbook/cli bench",
     "codegen": "pnpm -r --if-present codegen"
   },

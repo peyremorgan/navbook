@@ -21,6 +21,10 @@ const verdict = computed(() => {
       return { label: "Approved", color: "success" as const, icon: "i-lucide-check-check" };
     case "REQUEST_CHANGES":
       return { label: "Changes requested", color: "warning" as const, icon: "i-lucide-file-pen" };
+    // A review that judges nothing, which is not the same as a comment carrying
+    // no verdict at all: this one names the revision its author read (§2.6).
+    case "COMMENT":
+      return { label: "Reviewed", color: "neutral" as const, icon: "i-lucide-message-square" };
     default:
       return null;
   }

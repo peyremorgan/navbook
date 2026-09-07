@@ -4,6 +4,7 @@ author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-08-02T15:09:43Z
 labels: [milestone-5, release]
 resolution: fixed
+feature: packaging
 ---
 
 The name is unclaimed as of 2026-08-02. Publishing waits for the full v1 command surface, per the project's decision to avoid a placeholder release.

@@ -21,12 +21,23 @@ resolution, reopening, commenting and replying, and linking or unlinking
 subtasks.
 
 **Pull requests**, read and reviewed: the listing, with a toggle for the
-branches this checkout does not hold; the detail with its target, source,
-revisions and merge; and comments or reviews bound to a revision.
+branches this checkout does not hold and one for the reviews you owe; the
+detail with its target, source, revisions and merge; comments or reviews bound
+to a revision; and who was asked to review, what each of them has said about
+the latest revision, and the decision that reading adds up to.
+
+**Features**, read and written: the listing, and a page per feature holding its
+specification documents, the issues and pull requests that name it, and the
+commits that touched any of them, mixed into one timeline. A document is edited
+in place with a preview, since it is longer than an issue's description and is
+prose several people work on. A save carries the version it started from, so a
+save made against a version somebody has since replaced is refused and offered
+a reload rather than landing on top of their paragraph.
 
 Opening, updating and merging a pull request are not here, and neither is
-deleting anything. They are checkout-centric maintainer actions and the API
-does not expose them ([server README](../server/README.md#what-it-does-not-do)).
+deleting anything — renaming or removing a feature or one of its documents
+included. They are checkout-centric maintainer actions and the API does not
+expose them ([server README](../server/README.md#what-it-does-not-do)).
 
 **Dark or light**, without being asked: the theme starts at whatever the
 browser says about `prefers-color-scheme`, and the button in the navbar is
@@ -113,6 +124,11 @@ What the identity provider has to do:
 
 Authorization is out of scope here as it is on the server: any token the issuer
 signs for this audience may write. Put the policy you need in front.
+
+[`compose.yaml`](../../compose.yaml) does both of the host's jobs in a
+container: nginx over the generated bundle, with `config.json` written from the
+environment every time it starts, so one image serves every deployment. The
+[root README](../../README.md#deploying) describes it.
 
 ## Development
 

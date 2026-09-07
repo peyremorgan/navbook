@@ -14,22 +14,31 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import {
+  absPath,
+  addSpec,
   applyComment,
   applyEntityEdit,
   bindReviewRevision,
   type CommentRecord,
   closeEntity,
+  createFeature,
   currentAuthor,
   type EntityKind,
   type EntityRecord,
+  editFeature,
+  editSpec,
   executeIssueLink,
+  type FeatureRecord,
   findEntity,
+  findFeature,
   findParentIssue,
   loadRepo,
   locatePr,
   type NewCommentInput,
   newCommentFile,
+  newFeatureFile,
   newIssueFile,
+  newSpecFile,
   openIssue,
   planIssueLink,
   prepareOpen,
@@ -39,10 +48,15 @@ import {
   repoPath,
   resolveComment,
   resolveEntity,
-  resolveEntityForEdit,
+  resolveFeature,
+  resolveSpec,
+  specFileName,
   unlinkIssue,
   validateComment,
+  validateFeature,
   validateIssue,
+  validatePr,
+  validateSpec,
   WorkspaceError,
 } from "@navbook/core";
 import { checkComposed, requireText } from "../compose.ts";
@@ -52,8 +66,17 @@ import type {
   AddCommentInput,
   CommitInfo,
   MutationResolvers,
+  UpdateIssueInput,
+  UpdatePrInput,
 } from "../generated/resolver-types.ts";
-import { applyIssuePatch, isEmptyPatch } from "../patch.ts";
+import type { FeatureParent, SpecParent } from "../mappers.ts";
+import {
+  applyEntityPatch,
+  applyFeaturePatch,
+  applySpecPatch,
+  isEmptyPatch,
+  isEmptySpecPatch,
+} from "../patch.ts";
 import { toCoreKind, toCoreVerdict } from "./map.ts";
 
 /** Mutations always commit: a change nobody committed is not a change made. */
@@ -118,6 +141,7 @@ export const Mutation: MutationResolvers = {
             ...(input.labels ? { labels: [...input.labels] } : {}),
             ...(input.assignees ? { assignee: [...input.assignees] } : {}),
             ...(input.milestone ? { milestone: input.milestone } : {}),
+            ...(input.features ? { features: [...input.features] } : {}),
             ...(parent ? { parent: parent.id } : {}),
           });
           checkComposed(content, validateIssue, "issue");
@@ -142,38 +166,15 @@ export const Mutation: MutationResolvers = {
 
   updateIssue: (_parent, { input }, ctx) =>
     run(async () => {
-      if (isEmptyPatch(input)) throw invalidInput("the patch names no field to change");
+      const { result, pushed } = await patchEntity(ctx, "issue", input);
+      return { issue: result.entity, commit: commitInfo(result.run, pushed) };
+    }),
 
-      const { result, pushed } = await ctx.sync.write(
-        () => {
-          const { entity, path } = resolveEntityForEdit(ctx.ws, "issue", input.ref);
-          const before = readFileSync(path, "utf8");
-          const patched = applyIssuePatch(before, input, repoPath(ctx.ws.navDir, entity.filePath));
-          // Validated before the file is touched, so a rejected patch leaves
-          // the tree exactly as it was.
-          checkComposed(patched, validateIssue, "issue");
-
-          // Editing in place is what `applyEntityEdit` records — it reads the
-          // file back, which is what puts the edit in the plan and so under the
-          // --commit guard. Every other operation writes nothing until it is
-          // sure it can commit (core's guard runs first, by design); this one
-          // cannot, so it undoes its own write instead. A patched file left
-          // behind by a failure would become the base of the next edit, and be
-          // committed under somebody else's request.
-          writeFileSync(path, patched, "utf8");
-          let edit: RunPlanResult;
-          try {
-            edit = applyEntityEdit(ctx.ws, entity, COMMIT);
-          } catch (error) {
-            writeFileSync(path, before, "utf8");
-            throw error;
-          }
-          return { run: edit, issue: from(afterWrite(ctx), "issue", entity.id) };
-        },
-        (edit) => edit.run.committed,
-      );
-
-      return { issue: result.issue, commit: commitInfo(result.run, pushed) };
+  updatePr: (_parent, { input }, ctx) =>
+    run(async () => {
+      const { result, pushed } = await patchEntity(ctx, "pr", input);
+      // A working-tree read, so it was found on no ref in particular.
+      return { pr: { entity: result.entity, refs: [] }, commit: commitInfo(result.run, pushed) };
     }),
 
   closeIssue: (_parent, { input }, ctx) =>
@@ -235,7 +236,7 @@ export const Mutation: MutationResolvers = {
 
       const { result, pushed } = await ctx.sync.write(
         () => {
-          const entity = commentTarget(ctx, kind, input.ref);
+          const entity = writeTarget(ctx, kind, input.ref);
           const replyTo =
             input.replyTo === undefined || input.replyTo === null
               ? undefined
@@ -338,19 +339,157 @@ export const Mutation: MutationResolvers = {
         commit: commitInfo(result.run, pushed),
       };
     }),
+
+  createFeature: (_parent, { input }, ctx) =>
+    run(async () => {
+      requireText(input.title, "title");
+
+      const { result, pushed } = await ctx.sync.write(
+        () => {
+          const { created } = prepareOpen(ctx.ws);
+          const content = newFeatureFile({
+            title: input.title,
+            author: currentAuthor(ctx.ws),
+            created,
+            // A feature may have no summary, so an absent one is absent rather
+            // than refused the way an issue with no description is.
+            ...(input.summary ? { body: input.summary } : {}),
+          });
+          checkComposed(content, validateFeature, "feature");
+
+          const opened = createFeature(
+            ctx.ws,
+            {
+              content,
+              ...(input.slug ? { slug: input.slug } : {}),
+              fallbackTitle: input.title,
+            },
+            COMMIT,
+          );
+          return { run: opened.run, feature: featureAfter(ctx, opened.slug) };
+        },
+        (opened) => opened.run.committed,
+      );
+
+      return { feature: result.feature, commit: commitInfo(result.run, pushed) };
+    }),
+
+  updateFeature: (_parent, { input }, ctx) =>
+    run(async () => {
+      if (input.title === undefined && input.summary === undefined) {
+        throw invalidInput("the patch names no field to change");
+      }
+
+      const { result, pushed } = await ctx.sync.write(
+        () => {
+          const feature = findFeature(ctx.ws, input.slug);
+          const before = readFileSync(absPath(ctx.ws, feature.filePath), "utf8");
+          const patched = applyFeaturePatch(
+            before,
+            input,
+            repoPath(ctx.ws.navDir, feature.filePath),
+          );
+          checkComposed(patched, validateFeature, "feature");
+
+          // Unlike `updateIssue`, nothing is written before the operation runs:
+          // `editSpec`/`editFeature` take the finished text, so core's guards —
+          // the stale check among them — all run before any file is touched.
+          const edited = editFeature(ctx.ws, feature.slug, patched, {
+            commit: true,
+            baseSha: input.baseSha,
+          });
+          return { run: edited.run, feature: featureAfter(ctx, feature.slug) };
+        },
+        (edited) => edited.run.committed,
+      );
+
+      return { feature: result.feature, commit: commitInfo(result.run, pushed) };
+    }),
+
+  addSpec: (_parent, { input }, ctx) =>
+    run(async () => {
+      requireText(input.title, "title");
+      requireText(input.body, "body");
+
+      const { result, pushed } = await ctx.sync.write(
+        () => {
+          const content = newSpecFile({ title: input.title, body: input.body });
+          checkComposed(content, validateSpec, "specification document");
+
+          const added = addSpec(
+            ctx.ws,
+            input.feature,
+            { content, fileName: input.fileName ?? specFileName(input.title) },
+            COMMIT,
+          );
+          return { run: added.run, ...specAfter(ctx, added.feature.slug, added.fileName) };
+        },
+        (added) => added.run.committed,
+      );
+
+      return {
+        feature: result.feature,
+        spec: result.spec,
+        commit: commitInfo(result.run, pushed),
+      };
+    }),
+
+  updateSpec: (_parent, { input }, ctx) =>
+    run(async () => {
+      if (isEmptySpecPatch(input)) throw invalidInput("the patch names no field to change");
+
+      const { result, pushed } = await ctx.sync.write(
+        () => {
+          const feature = findFeature(ctx.ws, input.feature);
+          const spec = resolveSpec(feature, input.fileName);
+          const before = readFileSync(absPath(ctx.ws, spec.path), "utf8");
+          const patched = applySpecPatch(before, input, repoPath(ctx.ws.navDir, spec.path));
+          checkComposed(patched, validateSpec, "specification document");
+
+          const edited = editSpec(ctx.ws, feature.slug, spec.fileName, patched, {
+            commit: true,
+            baseSha: input.baseSha,
+          });
+          return { run: edited.run, ...specAfter(ctx, feature.slug, spec.fileName) };
+        },
+        (edited) => edited.run.committed,
+      );
+
+      return {
+        feature: result.feature,
+        spec: result.spec,
+        commit: commitInfo(result.run, pushed),
+      };
+    }),
 };
 
+/** The feature as the write has just left it, read back inside the transaction. */
+function featureAfter(ctx: GraphQLCtx, slug: string): FeatureParent {
+  return resolveFeature(afterWrite(ctx), slug);
+}
+
+/** The feature and one of its documents, likewise. */
+function specAfter(
+  ctx: GraphQLCtx,
+  slug: string,
+  fileName: string,
+): { feature: FeatureRecord; spec: SpecParent } {
+  const feature = featureAfter(ctx, slug);
+  return { feature, spec: { feature, spec: resolveSpec(feature, fileName) } };
+}
+
 /**
- * The entity a comment is to be added to, in the branch the server serves.
+ * The entity a write is to be made to, in the branch the server serves.
  *
  * A pull request's files live on the branch it proposes to merge (spec 03
- * §3.5), so one this checkout does not hold cannot be commented on here: the
- * comment would land in a directory with no `pr.md` beside it, which is the
- * stranded-comment fault of spec 03 §3.3.1 rather than a review. The cross-ref
- * scan can still see it, so the refusal says where it actually lives instead of
- * repeating that it was not found.
+ * §3.5), so one this checkout does not hold can be neither commented on nor
+ * patched here: a comment would land in a directory with no `pr.md` beside it,
+ * which is the stranded-comment fault of spec 03 §3.3.1 rather than a review,
+ * and there is no `pr.md` here to patch at all. The cross-ref scan can still
+ * see it, so the refusal says where it actually lives instead of repeating that
+ * it was not found.
  */
-function commentTarget(ctx: GraphQLCtx, kind: EntityKind, ref: string): EntityRecord {
+function writeTarget(ctx: GraphQLCtx, kind: EntityKind, ref: string): EntityRecord {
   try {
     return findEntity(ctx.ws, kind, ref);
   } catch (error) {
@@ -364,12 +503,57 @@ function commentTarget(ctx: GraphQLCtx, kind: EntityKind, ref: string): EntityRe
       {
         sourceRef: located.sourceRef,
         details: [
-          "a comment must be written beside the pull request it belongs to",
-          `serve a checkout of '${located.sourceRef}' to review it`,
+          "a pull request is written beside the files it proposes to change",
+          `serve a checkout of '${located.sourceRef}' to write to it`,
         ],
       },
     );
   }
+}
+
+/**
+ * Rewrite an entity's file from a patch, and record the edit as an edit.
+ *
+ * Both kinds go through here: the difference between them is which validator
+ * the result must satisfy and, for a pull request, that its file may not be on
+ * this branch at all — the refusal `writeTarget` raises.
+ */
+async function patchEntity(
+  ctx: GraphQLCtx,
+  kind: EntityKind,
+  input: UpdateIssueInput | UpdatePrInput,
+): Promise<{ result: { entity: EntityRecord; run: RunPlanResult }; pushed: boolean }> {
+  if (isEmptyPatch(input)) throw invalidInput("the patch names no field to change");
+
+  return ctx.sync.write(
+    () => {
+      const entity = writeTarget(ctx, kind, input.ref);
+      const path = absPath(ctx.ws, entity.filePath);
+      const before = readFileSync(path, "utf8");
+      const patched = applyEntityPatch(before, input, repoPath(ctx.ws.navDir, entity.filePath));
+      // Validated before the file is touched, so a rejected patch leaves the
+      // tree exactly as it was.
+      checkComposed(patched, kind === "issue" ? validateIssue : validatePr, kind);
+
+      // Editing in place is what `applyEntityEdit` records — it reads the file
+      // back, which is what puts the edit in the plan and so under the --commit
+      // guard. Every other operation writes nothing until it is sure it can
+      // commit (core's guard runs first, by design); this one cannot, so it
+      // undoes its own write instead. A patched file left behind by a failure
+      // would become the base of the next edit, and be committed under somebody
+      // else's request.
+      writeFileSync(path, patched, "utf8");
+      let edit: RunPlanResult;
+      try {
+        edit = applyEntityEdit(ctx.ws, entity, COMMIT);
+      } catch (error) {
+        writeFileSync(path, before, "utf8");
+        throw error;
+      }
+      return { run: edit, entity: from(afterWrite(ctx), kind, entity.id) };
+    },
+    (edit) => edit.run.committed,
+  );
 }
 
 type ReviewFields = Pick<NewCommentInput, "verdict" | "revision" | "file" | "line">;

@@ -1,0 +1,7 @@
+spec-version: 1
+description: a slug that already names a feature is refused, and nothing is written
+init: {from: before}
+run:
+  command: [feature, open, "Another", --slug, auth, -m, "x"]
+  env: {NAV_NOW: "2026-08-10T12:00:00Z"}
+expect: {exit: 1, stdout: "", stderr-contains: ["already exists"], tree: expected/tree}

@@ -23,6 +23,14 @@ export interface ComposeOptions {
   validate: (parsed: ParsedFile) => Problem[];
   /** Noun used in error messages, e.g. "issue" or "comment". */
   noun: string;
+  /**
+   * Accept a file with no body.
+   *
+   * An issue with no description says nothing, but a feature is named by its
+   * title and described by the documents beside it, so an empty summary is a
+   * reasonable thing to commit (spec 02 §2.11).
+   */
+  allowEmptyBody?: boolean;
 }
 
 export interface Composed {
@@ -32,7 +40,9 @@ export interface Composed {
 
 export function composeFile(ctx: Ctx, opts: ComposeOptions): Composed {
   if (opts.message !== undefined) {
-    if (opts.message.trim() === "") fail(`empty ${opts.noun} text; aborting`);
+    if (opts.message.trim() === "" && !opts.allowEmptyBody) {
+      fail(`empty ${opts.noun} text; aborting`);
+    }
     return check(opts, opts.render(opts.message));
   }
   const edited = editBuffer(ctx, opts.bufferName, opts.render(""));
@@ -42,7 +52,9 @@ export function composeFile(ctx: Ctx, opts: ComposeOptions): Composed {
   } catch (error) {
     fail(`aborting: ${error instanceof Error ? error.message : String(error)}`);
   }
-  if (parsed.body.trim() === "") fail(`aborting ${opts.noun} due to empty body`);
+  if (parsed.body.trim() === "" && !opts.allowEmptyBody) {
+    fail(`aborting ${opts.noun} due to empty body`);
+  }
   return check(opts, edited);
 }
 

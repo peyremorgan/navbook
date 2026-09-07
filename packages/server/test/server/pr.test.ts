@@ -107,6 +107,19 @@ describe("pull requests", () => {
     assert.match(response.errors[0]?.message ?? "", /does not have checked out/);
   });
 
+  it("refuses to patch one this checkout does not hold, saying where it is", async () => {
+    // There is no `pr.md` on this branch to patch at all, so the answer is the
+    // same as for a comment: serve the branch that carries it.
+    const response = await h.gql(
+      `mutation P($ref: ID!) {
+         updatePr(input: { ref: $ref, reviewers: ["alice@example.com"] }) { pr { id } }
+       }`,
+      { ref: "pr111111" },
+    );
+    assert.equal(errorCode(response), "PRECONDITION");
+    assert.equal(response.errors[0]?.extensions?.sourceRef, "origin/fix-login");
+  });
+
   it("points an issue query at a pull request back at the right noun", async () => {
     const response = await h.gql(`query { issue(ref: "pr111111") { id } }`);
     // The id is real, but it names a pull request. The working tree does not
@@ -246,6 +259,138 @@ describe("reviewing, on the branch that carries the pull request", () => {
     assert.ok(data.pr.comments.some((c) => c.verdict === "APPROVE"));
     assert.ok(data.pr.comments.some((c) => c.verdict === "REQUEST_CHANGES"));
     assert.ok(data.pr.comments.some((c) => c.verdict === null));
+  });
+
+  it("asks people to review, writing the key the format spells singular", async () => {
+    const patched = ok<{
+      updatePr: { pr: { reviewers: string[] }; commit: { subject: string; pushed: boolean } };
+    }>(
+      await h.gql(
+        `mutation P($ref: ID!, $who: [String!]) {
+           updatePr(input: { ref: $ref, reviewers: $who }) {
+             pr { reviewers }
+             commit { subject pushed }
+           }
+         }`,
+        { ref: "pr111111", who: ["alice@example.com", "bo@example.com"] },
+      ),
+    ).updatePr;
+
+    assert.deepEqual(patched.pr.reviewers, ["alice@example.com", "bo@example.com"]);
+    assert.equal(patched.commit.subject, "docs(pr): edit #pr111111");
+    assert.equal(patched.commit.pushed, true);
+  });
+
+  it("reports what each reviewer said about the latest revision", async () => {
+    const data = ok<{
+      pr: {
+        reviewDecision: string;
+        reviews: { person: string; state: string; volunteer: boolean; comment: string | null }[];
+      };
+    }>(
+      await h.gql(
+        `query { pr(ref: "pr111111") {
+           reviewDecision
+           reviews { person state volunteer comment }
+         } }`,
+      ),
+    );
+
+    // Neither person asked has answered, and both stay listed as pending with
+    // nothing to point at. Everyone asked comes first, in the order the file
+    // asks them (spec 02 §2.7).
+    assert.deepEqual(data.pr.reviews.slice(0, 2), [
+      { person: "alice@example.com", state: "PENDING", volunteer: false, comment: null },
+      { person: "bo@example.com", state: "PENDING", volunteer: false, comment: null },
+    ]);
+
+    // The reviews recorded above were written through the API, so their author
+    // is the token's identity rather than the pull request's — a volunteer,
+    // whose verdict counts exactly as much as an invited one does. Which of
+    // them is the latest is deliberately not asserted: they were written in the
+    // same second, so the tie falls to the comment ids, exactly as the rendered
+    // thread orders them.
+    const volunteer = data.pr.reviews[2];
+    assert.equal(volunteer?.person, "A Person <person@example.invalid>");
+    assert.equal(volunteer?.volunteer, true);
+    assert.ok(["APPROVE", "REQUEST_CHANGES"].includes(volunteer?.state ?? ""), volunteer?.state);
+    assert.match(String(volunteer?.comment), /^[a-z][a-z0-9]{7}$/);
+  });
+
+  it("answers a request made of somebody the API never signed in", async () => {
+    // Written by hand on the branch: the format's first-class path, and the
+    // only way to get a review by one of the invited reviewers into a fixture
+    // whose every API write carries the same token.
+    const revision = ok<{ pr: { revisions: { head: string }[] } }>(
+      await h.gql(`query { pr(ref: "pr111111") { revisions { head } } }`),
+    ).pr.revisions[0]?.head as string;
+    h.fixture.server.write(
+      ".navbook/prs/open/pr111111-fix-the-login/comments/2026-08-09T101010Z-rv111111.md",
+      `---\nauthor: alice@example.com\nverdict: request-changes\nrevision: ${revision}\n---\n\nNot yet.\n`,
+    );
+    h.fixture.server.commitAll("docs(pr): review #pr111111");
+
+    const data = ok<{
+      pr: { reviews: { person: string; state: string; comment: string }[] };
+    }>(await h.gql(`query { pr(ref: "pr111111") { reviews { person state comment } } }`));
+    assert.equal(data.pr.reviews[0]?.state, "REQUEST_CHANGES");
+    assert.equal(data.pr.reviews[0]?.comment, "rv111111");
+  });
+
+  it("filters a listing by the request and by what it came to", async () => {
+    const ids = async (filter: string): Promise<string[]> =>
+      ok<{ prs: { id: string }[] }>(await h.gql(`query { prs(filter: ${filter}) { id } }`)).prs.map(
+        (pr) => pr.id,
+      );
+
+    assert.deepEqual(await ids(`{ reviewers: ["alice@example.com"] }`), ["pr111111"]);
+    assert.deepEqual(await ids(`{ reviewers: ["nobody@example.com"] }`), []);
+    // Alice blocks, and a block outranks anything the volunteer said.
+    assert.deepEqual(await ids(`{ reviews: [CHANGES_REQUESTED] }`), ["pr111111"]);
+    assert.deepEqual(await ids(`{ reviews: [APPROVED] }`), []);
+    assert.deepEqual(await ids(`{ reviews: [APPROVED, CHANGES_REQUESTED] }`), ["pr111111"]);
+    assert.deepEqual(await ids(`{ awaiting: ["bo@example.com"] }`), ["pr111111"]);
+    assert.deepEqual(await ids(`{ awaiting: ["alice@example.com"] }`), []);
+  });
+
+  it("clears the request with an empty list, and leaves it alone when unmentioned", async () => {
+    const reviewers = async (patch: string): Promise<string[]> =>
+      ok<{ updatePr: { pr: { reviewers: string[] } } }>(
+        await h.gql(
+          `mutation P($ref: ID!) { updatePr(input: { ref: $ref, ${patch} }) { pr { reviewers } } }`,
+          { ref: "pr111111" },
+        ),
+      ).updatePr.pr.reviewers;
+
+    assert.deepEqual(await reviewers(`milestone: "v2"`), ["alice@example.com", "bo@example.com"]);
+    assert.deepEqual(await reviewers(`reviewers: []`), []);
+  });
+
+  it("refuses a reviewer who is not a person, before anything is written", async () => {
+    const reviewers = async (): Promise<string[]> =>
+      ok<{ pr: { reviewers: string[] } }>(
+        await h.gql(`query { pr(ref: "pr111111") { reviewers } }`),
+      ).pr.reviewers;
+    const before = await reviewers();
+
+    const response = await h.gql(
+      `mutation P($ref: ID!) {
+         updatePr(input: { ref: $ref, reviewers: ["the-auth-team"] }) { pr { reviewers } }
+       }`,
+      { ref: "pr111111" },
+    );
+    // The same refusal a composed file gets anywhere else: it is validated
+    // before the tree is touched, so there is nothing written to undo.
+    assert.equal(errorCode(response), "INVALID_INPUT");
+    assert.deepEqual(await reviewers(), before, "and the pull request still says what it said");
+  });
+
+  it("refuses a patch that names nothing to change", async () => {
+    const response = await h.gql(
+      `mutation P($ref: ID!) { updatePr(input: { ref: $ref }) { pr { id } } }`,
+      { ref: "pr111111" },
+    );
+    assert.equal(errorCode(response), "INVALID_INPUT");
   });
 
   /**

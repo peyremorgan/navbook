@@ -4,16 +4,16 @@
   Editing is in place and one field at a time, which is not a stylistic
   preference. `updateIssue` distinguishes an absent field from an explicit
   null, so sending the whole form on every save would rewrite frontmatter
-  nobody touched; `buildIssuePatch` sends only what changed, and nothing at
+  nobody touched; `buildEntityPatch` sends only what changed, and nothing at
   all when nothing did.
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
-import { ISSUE_QUERY, ISSUES_QUERY } from "~/graphql/queries";
+import { FEATURES_QUERY, ISSUE_QUERY, ISSUES_QUERY } from "~/graphql/queries";
 import { buildCommentTree, countComments } from "~/utils/comments";
 import { distinctValues, shortId } from "~/utils/entities";
 import { describeApiError, reparentConflict } from "~/utils/errors";
-import { buildIssuePatch, type IssueEdit, normalizeOptional, PatchError } from "~/utils/patch";
+import { buildEntityPatch, type EntityEdit, normalizeOptional, PatchError } from "~/utils/patch";
 import { countSubtasks } from "~/utils/subtasks";
 
 const route = useRoute();
@@ -39,12 +39,18 @@ const issue = computed(() => result.value?.issue ?? null);
  * accepts a value that is not in it.
  */
 const { result: listing } = useQuery(ISSUES_QUERY, { filter: {} }, { fetchPolicy: "cache-first" });
+// Features are the exception: they are real directories, so their list is the
+// registry rather than a guess made from whatever the listing mentions.
+const { result: featureList } = useQuery(FEATURES_QUERY, undefined, {
+  fetchPolicy: "cache-first",
+});
 const known = computed(() => {
   const issues = listing.value?.issues ?? [];
   return {
     labels: distinctValues(issues, (item) => item.labels),
     assignees: distinctValues(issues, (item) => item.assignees),
     milestones: distinctValues(issues, (item) => (item.milestone ? [item.milestone] : [])),
+    features: (featureList.value?.features ?? []).map((feature) => feature.slug),
   };
 });
 
@@ -53,19 +59,20 @@ const commentCount = computed(() => countComments(comments.value));
 const subtaskCount = computed(() => countSubtasks(issue.value?.subtasks ?? []));
 
 /** The issue as the patch builder compares against. */
-const current = computed<IssueEdit>(() => ({
+const current = computed<EntityEdit>(() => ({
   title: issue.value?.title ?? "",
   body: issue.value?.body ?? "",
   labels: [...(issue.value?.labels ?? [])],
   assignees: [...(issue.value?.assignees ?? [])],
   milestone: issue.value?.milestone ?? null,
+  features: [...(issue.value?.features ?? [])],
 }));
 
-async function save(change: Partial<IssueEdit>): Promise<void> {
+async function save(change: Partial<EntityEdit>): Promise<void> {
   if (issue.value === null) return;
-  let patch: ReturnType<typeof buildIssuePatch>;
+  let patch: ReturnType<typeof buildEntityPatch>;
   try {
-    patch = buildIssuePatch(current.value, change);
+    patch = buildEntityPatch(current.value, change);
   } catch (failure) {
     if (!(failure instanceof PatchError)) throw failure;
     toast.add({ title: "That will not do", description: failure.message, color: "error" });
@@ -291,6 +298,16 @@ async function unlink(child: string): Promise<void> {
             :suggestions="known.assignees"
             :saving="mutations.busy.value"
             @save="(assignees: string[]) => save({ assignees })"
+          />
+          <LabelEditor
+            title="Features"
+            icon="i-lucide-layers"
+            testid="features"
+            link-to="/features/"
+            :values="issue.features"
+            :suggestions="known.features"
+            :saving="mutations.busy.value"
+            @save="(features: string[]) => save({ features })"
           />
           <LabelEditor
             title="Milestone"

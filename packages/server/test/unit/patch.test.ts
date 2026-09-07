@@ -8,10 +8,16 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseFile } from "@navbook/core";
-import { applyIssuePatch, isEmptyPatch } from "../../src/patch.ts";
+import { parseFile, readFeatures } from "@navbook/core";
+import {
+  applyEntityPatch,
+  applyFeaturePatch,
+  applySpecPatch,
+  isEmptyPatch,
+  isEmptySpecPatch,
+} from "../../src/patch.ts";
 
-// Repository-relative: `applyIssuePatch` reports the path it is given rather
+// Repository-relative: `applyEntityPatch` reports the path it is given rather
 // than prefixing one, so the Navbook directory's name stays the caller's business.
 const PATH = ".navbook/issues/open/aa111111-x/issue.md";
 
@@ -28,9 +34,31 @@ The body.
 `;
 
 const patch = (input: Record<string, unknown>): string =>
-  applyIssuePatch(ORIGINAL, { ref: "aa111111", ...input }, PATH);
+  applyEntityPatch(ORIGINAL, { ref: "aa111111", ...input }, PATH);
 
-describe("applyIssuePatch", () => {
+describe("applyEntityPatch — reviewers", () => {
+  // The pull-request half of the same patch: `reviewer` is singular on disk and
+  // takes a scalar or a list, exactly as `assignee` does (spec 02 §2.7).
+  const reviewer = (value: readonly string[] | null | undefined, from = ORIGINAL): string =>
+    applyEntityPatch(from, { ref: "aa111111", reviewers: value }, PATH);
+
+  it("writes one as a scalar and several as a flow list", () => {
+    assert.match(reviewer(["alice@example.com"]), /^reviewer: alice@example\.com$/m);
+    assert.match(
+      reviewer(["alice@example.com", "bo@example.com"]),
+      /^reviewer: \[alice@example\.com, bo@example\.com\]$/m,
+    );
+  });
+
+  it("clears the key for an empty list or a null, and leaves it alone when absent", () => {
+    const asked = reviewer(["alice@example.com"]);
+    assert.equal(reviewer([], asked).includes("reviewer"), false);
+    assert.equal(reviewer(null, asked).includes("reviewer"), false);
+    assert.match(reviewer(undefined, asked), /^reviewer: alice@example\.com$/m);
+  });
+});
+
+describe("applyEntityPatch", () => {
   it("leaves a file it was asked to change nothing about byte-identical", () => {
     assert.equal(patch({}), ORIGINAL);
   });
@@ -83,7 +111,7 @@ describe("applyIssuePatch", () => {
   it("reports frontmatter it cannot rewrite, naming the file", () => {
     const broken = "---\ntitle: [unclosed\n---\n\nBody.\n";
     assert.throws(
-      () => applyIssuePatch(broken, { ref: "aa111111", title: "New" }, PATH),
+      () => applyEntityPatch(broken, { ref: "aa111111", title: "New" }, PATH),
       (error: unknown) => {
         const extensions = (error as { extensions?: Record<string, unknown> }).extensions ?? {};
         assert.equal(extensions.code, "FRONTMATTER");
@@ -101,5 +129,132 @@ describe("isEmptyPatch", () => {
     // An explicit null is a change: it clears the key.
     assert.equal(isEmptyPatch({ ref: "aa111111", milestone: null }), false);
     assert.equal(isEmptyPatch({ ref: "aa111111", labels: [] }), false);
+  });
+});
+
+/* ----------------------------------------------------------------- features */
+
+const FEATURE_PATH = ".navbook/specs/auth/feature.md";
+const SPEC_PATH = ".navbook/specs/auth/login-flow.md";
+
+const FEATURE = `---
+title: Authentication
+author: A Person <person@example.invalid>
+created: 2026-09-01T10:00:00Z
+my-tool-state: {phase: draft}
+---
+
+Signing in.
+`;
+
+const SPEC = `---
+title: Login flow
+author: A Person <person@example.invalid>
+imported-from: github:acme/repo#12
+---
+
+## Requirements
+`;
+
+describe("the feature key on an issue patch", () => {
+  it("writes one feature as a scalar and several as a flow list", () => {
+    assert.match(patch({ features: ["auth"] }), /^feature: auth$/m);
+    assert.match(patch({ features: ["auth", "mobile"] }), /^feature: \[auth, mobile\]$/m);
+  });
+
+  it("clears the key on an explicit null and on an empty list", () => {
+    const attached = applyEntityPatch(ORIGINAL, { ref: "aa111111", features: ["auth"] }, PATH);
+    for (const features of [null, []]) {
+      const cleared = applyEntityPatch(attached, { ref: "aa111111", features }, PATH);
+      assert.deepEqual(readFeatures(parseFile(cleared).fm), []);
+      assert.doesNotMatch(cleared, /^feature:/m);
+    }
+  });
+
+  it("leaves the key alone when the patch does not name it", () => {
+    const attached = applyEntityPatch(ORIGINAL, { ref: "aa111111", features: ["auth"] }, PATH);
+    const renamed = applyEntityPatch(attached, { ref: "aa111111", title: "Renamed" }, PATH);
+    assert.deepEqual(readFeatures(parseFile(renamed).fm), ["auth"]);
+  });
+
+  it("counts as something to change", () => {
+    assert.equal(isEmptyPatch({ ref: "aa111111" }), true);
+    assert.equal(isEmptyPatch({ ref: "aa111111", features: [] }), false);
+  });
+});
+
+describe("applyFeaturePatch", () => {
+  it("leaves a file it was asked to change nothing about byte-identical", () => {
+    assert.equal(applyFeaturePatch(FEATURE, { slug: "auth", baseSha: "x" }, FEATURE_PATH), FEATURE);
+  });
+
+  it("replaces the title, preserving a key the schema does not name", () => {
+    const result = applyFeaturePatch(
+      FEATURE,
+      { slug: "auth", title: "Authentication and sessions", baseSha: "x" },
+      FEATURE_PATH,
+    );
+    const { fm, body } = parseFile(result);
+    assert.equal(fm.title, "Authentication and sessions");
+    assert.deepEqual(fm["my-tool-state"], { phase: "draft" });
+    assert.equal(body.trim(), "Signing in.");
+  });
+
+  it("clears the summary on an explicit null, leaving no trailing blank line", () => {
+    const result = applyFeaturePatch(
+      FEATURE,
+      { slug: "auth", summary: null, baseSha: "x" },
+      FEATURE_PATH,
+    );
+    assert.equal(parseFile(result).body, "");
+    assert.ok(result.endsWith("---\n"));
+  });
+
+  it("refuses a title emptied rather than replaced", () => {
+    assert.throws(() =>
+      applyFeaturePatch(FEATURE, { slug: "auth", title: "  ", baseSha: "x" }, FEATURE_PATH),
+    );
+  });
+});
+
+describe("applySpecPatch", () => {
+  it("leaves a file it was asked to change nothing about byte-identical", () => {
+    assert.equal(
+      applySpecPatch(SPEC, { feature: "auth", fileName: "x.md", baseSha: "x" }, SPEC_PATH),
+      SPEC,
+    );
+  });
+
+  it("replaces the body, preserving keys the schema does not name", () => {
+    const result = applySpecPatch(
+      SPEC,
+      { feature: "auth", fileName: "x.md", body: "Rewritten.", baseSha: "x" },
+      SPEC_PATH,
+    );
+    const { fm, body } = parseFile(result);
+    assert.equal(fm.title, "Login flow");
+    assert.equal(fm.author, "A Person <person@example.invalid>");
+    assert.equal(fm["imported-from"], "github:acme/repo#12");
+    assert.equal(body.trim(), "Rewritten.");
+  });
+
+  it("refuses a title or body emptied rather than replaced", () => {
+    for (const input of [{ title: "  " }, { body: "  " }]) {
+      assert.throws(() =>
+        applySpecPatch(
+          SPEC,
+          { feature: "auth", fileName: "x.md", baseSha: "x", ...input },
+          SPEC_PATH,
+        ),
+      );
+    }
+  });
+
+  it("knows a patch that names nothing to change", () => {
+    assert.equal(isEmptySpecPatch({ feature: "auth", fileName: "x.md", baseSha: "x" }), true);
+    assert.equal(
+      isEmptySpecPatch({ feature: "auth", fileName: "x.md", baseSha: "x", body: "y" }),
+      false,
+    );
   });
 });

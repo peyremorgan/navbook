@@ -4,11 +4,12 @@
  * Terms AND together. Within a single key the semantics follow the field:
  * single-valued fields (`status`, `author`, `milestone`) OR their terms, since
  * requiring two different values at once could never match; multi-valued fields
- * (`label`, `assignee`) AND theirs, matching forge convention.
+ * (`label`, `assignee`, `feature`) AND theirs, matching forge convention.
  */
 
-import { readAssignees, readLabels } from "./files.ts";
+import { readAssignees, readFeatures, readLabels, readReviewers } from "./files.ts";
 import { personMatches } from "./person.ts";
+import { isAwaiting, REVIEW_DECISIONS, type ReviewDecision, reviewSummary } from "./review.ts";
 import type { EntityKind, EntityRecord, Status } from "./tree.ts";
 
 export interface Query {
@@ -17,6 +18,13 @@ export interface Query {
   assignees: string[];
   authors: string[];
   milestones: string[];
+  features: string[];
+  /** `reviewer:` — who the pull request asks for a review (spec 02 §2.7). */
+  reviewers: string[];
+  /** `review:` — the decision the reviews add up to. */
+  reviews: ReviewDecision[];
+  /** `awaiting:` — who is asked and has not answered on the latest revision. */
+  awaiting: string[];
   text: string[];
 }
 
@@ -24,10 +32,25 @@ export interface QueryError {
   message: string;
 }
 
-const KEYED_TERM = /^(status|label|assignee|author|milestone):(.*)$/;
+const KEYED_TERM =
+  /^(status|label|assignee|author|milestone|feature|reviewer|review|awaiting):(.*)$/;
+
+/** Terms that describe something only a pull request has (spec 04 §4.3). */
+const PR_ONLY_TERMS = ["reviewer", "review", "awaiting"] as const;
 
 export function emptyQuery(): Query {
-  return { status: [], labels: [], assignees: [], authors: [], milestones: [], text: [] };
+  return {
+    status: [],
+    labels: [],
+    assignees: [],
+    authors: [],
+    milestones: [],
+    features: [],
+    reviewers: [],
+    reviews: [],
+    awaiting: [],
+    text: [],
+  };
 }
 
 /**
@@ -55,6 +78,9 @@ export function parseQuery(terms: readonly string[], kind: EntityKind): Query | 
     const key = match[1] as string;
     const value = (match[2] as string).trim();
     if (value === "") return { message: `query term '${term}' is missing a value` };
+    if (kind === "issue" && (PR_ONLY_TERMS as readonly string[]).includes(key)) {
+      return { message: `'${key}:' describes a pull request; issues have no reviews` };
+    }
     switch (key) {
       case "status": {
         const allowed = kind === "issue" ? ["open", "closed"] : ["open", "merged", "closed"];
@@ -75,6 +101,24 @@ export function parseQuery(terms: readonly string[], kind: EntityKind): Query | 
       case "author":
         query.authors.push(value);
         break;
+      case "feature":
+        query.features.push(value);
+        break;
+      case "reviewer":
+        query.reviewers.push(value);
+        break;
+      case "review": {
+        if (!(REVIEW_DECISIONS as readonly string[]).includes(value)) {
+          return {
+            message: `unknown review decision '${value}' (expected ${REVIEW_DECISIONS.join(", ")})`,
+          };
+        }
+        query.reviews.push(value as ReviewDecision);
+        break;
+      }
+      case "awaiting":
+        query.awaiting.push(value);
+        break;
       default:
         query.milestones.push(value);
         break;
@@ -87,9 +131,14 @@ export function isQueryError(value: Query | QueryError): value is QueryError {
   return (value as QueryError).message !== undefined;
 }
 
-/** True when evaluating the query requires reading comment bodies. */
+/**
+ * True when evaluating the query requires the entity's comments to be loaded.
+ *
+ * A text search reads their bodies; `review:` and `awaiting:` read the verdicts
+ * in their frontmatter, since that is where a review lives (spec 02 §2.6).
+ */
 export function needsComments(query: Query): boolean {
-  return query.text.length > 0;
+  return query.text.length > 0 || query.reviews.length > 0 || query.awaiting.length > 0;
 }
 
 /** Evaluate a query against one entity. */
@@ -109,6 +158,28 @@ export function matchesQuery(query: Query, entity: EntityRecord): boolean {
   if (query.authors.length > 0) {
     const author = typeof entity.fm.author === "string" ? entity.fm.author : "";
     if (!query.authors.some((wanted) => personMatches(wanted, author))) return false;
+  }
+
+  // Slugs are lowercase by grammar, so folding case here only forgives a query
+  // typed with a capital; it can never widen what a well-formed tree matches.
+  const features = readFeatures(entity.fm).map((f) => f.toLowerCase());
+  for (const wanted of query.features) {
+    if (!features.includes(wanted.toLowerCase())) return false;
+  }
+
+  const reviewers = readReviewers(entity.fm);
+  for (const wanted of query.reviewers) {
+    if (!reviewers.some((person) => personMatches(wanted, person))) return false;
+  }
+
+  // Derived, so it costs a read of the comments — which is why `needsComments`
+  // names these two terms alongside a text search.
+  if (query.reviews.length > 0 || query.awaiting.length > 0) {
+    const summary = reviewSummary(entity);
+    if (query.reviews.length > 0 && !query.reviews.includes(summary.decision)) return false;
+    for (const wanted of query.awaiting) {
+      if (!isAwaiting(summary, wanted)) return false;
+    }
   }
 
   if (query.milestones.length > 0) {

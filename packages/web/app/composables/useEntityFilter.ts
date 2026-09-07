@@ -47,7 +47,16 @@ export function useEntityFilter(allowed: readonly Status[]): EntityFilterHandle 
     // something else in its URL — `allRefs` on the pull request list — without
     // every filter change dropping it.
     const kept: LocationQueryRaw = { ...route.query };
-    for (const key of ["status", "label", "assignee", "author", "milestone", "q"]) {
+    for (const key of [
+      "status",
+      "label",
+      "assignee",
+      "author",
+      "milestone",
+      "feature",
+      "reviewer",
+      "q",
+    ]) {
       delete kept[key];
     }
     void router.replace({ query: { ...kept, ...filterToQuery(next) } });

@@ -10,9 +10,13 @@
 
   The file and line are only meaningful on a review, and the server says so
   (`INVALID_INPUT`), so they appear only once a verdict is chosen.
+
+  A review that judges nothing is still a review: it binds to a revision and it
+  answers a request for one, which is why it is a choice here rather than the
+  same thing as a plain comment.
 -->
 <script setup lang="ts">
-import { shortSha } from "~/utils/entities";
+import { newestFirst, shortSha } from "~/utils/entities";
 import type { PrDetailFragment, Verdict } from "~~/src/generated/gql/graphql";
 
 const props = defineProps<{
@@ -38,21 +42,37 @@ const emit = defineEmits<{
 }>();
 
 const body = ref("");
-const verdict = ref<Verdict | "NONE">("NONE");
+type Choice = Verdict | "NONE";
+
+const verdict = ref<Choice>("NONE");
 const revision = ref<string>("");
 const file = ref("");
 const line = ref("");
 
-/** Newest first, as the API returns them; the first is what a review defaults to. */
+/**
+ * Newest first, which the API's own order is not: `revisions:` is append-only,
+ * so the latest is the last entry. It is the one a review binds to when none is
+ * named, so it heads the menu and says so.
+ */
 const options = computed(() =>
-  props.revisions.map((item, index) => ({
+  newestFirst(props.revisions).map((item, index) => ({
     label: `${shortSha(item.head)}${index === 0 ? " (latest)" : ""}`,
     value: item.head,
   })),
 );
 
+/**
+ * The four things a submission can be.
+ *
+ * `NONE` is discussion: a comment bound to no revision, which is what the
+ * server writes when no verdict is given. `COMMENT` is the third verdict — a
+ * review that judges nothing and records only that its author read the
+ * revision it names (spec 02 §2.6). They read similarly and are not the same
+ * thing, so the labels say which one is about a revision.
+ */
 const verdicts = [
-  { label: "Comment only", value: "NONE" as const },
+  { label: "Comment", value: "NONE" as const },
+  { label: "Reviewed, no verdict", value: "COMMENT" as const },
   { label: "Approve", value: "APPROVE" as const },
   { label: "Request changes", value: "REQUEST_CHANGES" as const },
 ];
@@ -126,8 +146,9 @@ defineExpose({ clear: () => (body.value = "") });
       />
 
       <URadioGroup
-        v-model="verdict"
+        :model-value="verdict"
         :items="verdicts"
+        @update:model-value="(value: unknown) => (verdict = value as Choice)"
         orientation="horizontal"
         legend="Verdict"
         data-testid="review-verdict"

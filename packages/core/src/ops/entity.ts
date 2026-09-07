@@ -101,7 +101,7 @@ export function listEntities(
   query: Query,
   opts: ListEntitiesOptions = {},
 ): EntityRecord[] {
-  const source = opts.entities ?? selectEntities(loadRepoForQuery(ws, query), kind);
+  const source = opts.entities ?? selectEntities(loadRepoForQuery(ws, query, kind), kind);
   return sortEntities(source.filter((entity) => matchesQuery(query, entity)));
 }
 

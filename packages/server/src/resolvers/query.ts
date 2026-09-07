@@ -8,7 +8,9 @@
 
 import {
   findEntity,
+  findFeature,
   listEntities,
+  listFeatures,
   listPrsAcrossRefs,
   locatePr,
   runDoctor,
@@ -56,6 +58,10 @@ export const Query: QueryResolvers = {
         }
       }),
     ),
+
+  features: (_parent, _args, ctx) => run(() => ctx.sync.read(() => listFeatures(ctx.ws))),
+
+  feature: (_parent, args, ctx) => run(() => ctx.sync.read(() => findFeature(ctx.ws, args.slug))),
 
   doctor: (_parent, _args, ctx) =>
     run(() => ctx.sync.read(() => ({ diagnostics: runDoctor(ctx.ws).diagnostics }))),

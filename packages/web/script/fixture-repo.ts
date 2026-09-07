@@ -25,17 +25,24 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  addSpec,
   applyComment,
   closeEntity,
+  createFeature,
   currentAuthor,
   findEntity,
   makeWsCtx,
   newCommentFile,
+  newFeatureFile,
   newIssueFile,
   newPrFile,
+  newSpecFile,
   openIssue,
   openPr,
+  parseFile,
   preparePrOpen,
+  readRevisions,
+  specFileName,
 } from "@navbook/core";
 
 /** Fixed so a screenshot, a diff and an assertion all say the same thing. */
@@ -195,6 +202,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
       labels?: string[];
       assignee?: string[];
       milestone?: string;
+      features?: string[];
       parent?: string;
       author?: string;
     },
@@ -211,6 +219,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
           ...(input.labels ? { labels: input.labels } : {}),
           ...(input.assignee ? { assignee: input.assignee } : {}),
           ...(input.milestone ? { milestone: input.milestone } : {}),
+          ...(input.features ? { features: input.features } : {}),
           ...(input.parent ? { parent: input.parent } : {}),
         }),
         fallbackTitle: input.title,
@@ -228,7 +237,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
       body: string;
       author?: string;
       replyTo?: string;
-      verdict?: "approve" | "request-changes";
+      verdict?: "approve" | "request-changes" | "comment";
       revision?: string;
       file?: string;
       line?: string;
@@ -256,6 +265,80 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     );
   };
 
+  /* ------------------------------------------------------------- features */
+
+  const feature = (
+    date: string,
+    slug: string,
+    input: { title: string; summary?: string },
+  ): void => {
+    const context = ws(date, []);
+    createFeature(
+      context,
+      {
+        content: newFeatureFile({
+          title: input.title,
+          author: currentAuthor(context),
+          created: date,
+          ...(input.summary ? { body: input.summary } : {}),
+        }),
+        slug,
+        fallbackTitle: input.title,
+      },
+      { commit: true },
+    );
+  };
+
+  const spec = (date: string, slug: string, input: { title: string; body: string }): void => {
+    const context = ws(date, []);
+    addSpec(
+      context,
+      slug,
+      {
+        content: newSpecFile({ title: input.title, body: input.body }),
+        fileName: specFileName(input.title),
+      },
+      { commit: true },
+    );
+  };
+
+  feature("2026-07-15T09:00:00Z", "authentication", {
+    title: "Authentication",
+    summary: [
+      "Everything about proving who somebody is: the sign-in form, the session",
+      "it opens, and the tokens that keep it open.",
+    ].join("\n"),
+  });
+  spec("2026-07-15T09:30:00Z", "authentication", {
+    title: "Login flow",
+    body: [
+      "## Requirements",
+      "",
+      "The form SHALL accept an address and a password, and SHALL NOT give up",
+      "on a request before the server has had ten seconds to answer it.",
+      "",
+      "## Scenarios",
+      "",
+      "WHEN the connection is slow, THEN the form waits rather than failing.",
+    ].join("\n"),
+  });
+  spec("2026-07-16T10:00:00Z", "authentication", {
+    title: "Session policy",
+    body: [
+      "## Requirements",
+      "",
+      "A session SHALL last thirty days, and SHALL end at once when the",
+      "password behind it changes.",
+    ].join("\n"),
+  });
+
+  // A feature with nothing written down yet: the empty state has to look like
+  // something too.
+  feature("2026-07-20T09:00:00Z", "billing", {
+    title: "Billing",
+    summary: "Seats, invoices, and what happens when a card is refused.",
+  });
+
   /* --------------------------------------------------------------- issues */
 
   issue("2026-08-01T10:00:00Z", IDS.parent, {
@@ -271,6 +354,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
       "See `app/auth/session.ts` for where the timeout lives.",
     ].join("\n"),
     labels: ["bug", "auth"],
+    features: ["authentication"],
     assignee: ["A Person <person@example.invalid>"],
     milestone: "1.0",
   });
@@ -279,6 +363,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     title: "Raise the sign-in deadline to thirty seconds",
     body: "Five seconds is not enough on a throttled connection.",
     labels: ["bug"],
+    features: ["authentication"],
     parent: IDS.parent,
   });
 
@@ -305,6 +390,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
       "> Terms AND together; the default query is `status:open`.",
     ].join("\n"),
     labels: ["documentation"],
+    features: ["authentication", "billing"],
     assignee: ["Someone Else <someone@example.invalid>"],
     author: "Someone Else <someone@example.invalid>",
   });
@@ -372,6 +458,20 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     },
   );
 
+  // A commit that touches no Navbook file at all. It reaches the feature's
+  // timeline through the trailer it carries, which is the whole reason the
+  // timeline reads history rather than the tree (spec 04 §4.3).
+  write("app/auth/session.ts", "export const DEADLINE_MS = 30_000;\n");
+  git(dir, ["add", "-A"]);
+  git(
+    dir,
+    ["commit", "--quiet", "-m", `fix: raise the sign-in deadline\n\nCloses: ${IDS.child}\n`],
+    {
+      GIT_AUTHOR_DATE: "2026-08-02T12:00:00Z",
+      GIT_COMMITTER_DATE: "2026-08-02T12:00:00Z",
+    },
+  );
+
   comment("2026-08-01T11:00:00Z", "cccc0001", "issue", IDS.parent, {
     body: "I can reproduce this with the network throttled to 3G.",
     author: "Someone Else <someone@example.invalid>",
@@ -383,11 +483,29 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
 
   /* -------------------------------------------------- pull requests */
 
+  /** The head a pull request pinned when it was opened, read back from its file. */
+  const pinnedRevision = (id: string): string => {
+    const context = ws(FIXTURE_DATE, []);
+    const entity = findEntity(context, "pr", id);
+    const revisions = readRevisions(
+      parseFile(readFileSync(join(dir, ".navbook", entity.filePath), "utf8")).fm,
+    );
+    const head = revisions[revisions.length - 1]?.head;
+    if (head === undefined) throw new Error(`#${id} pinned no revision`);
+    return head;
+  };
+
   const openPrOn = (
     date: string,
     id: string,
     branch: string,
-    input: { title: string; body: string; labels?: string[]; draft?: boolean },
+    input: {
+      title: string;
+      body: string;
+      labels?: string[];
+      reviewers?: string[];
+      draft?: boolean;
+    },
   ): void => {
     git(dir, ["checkout", "--quiet", "-b", branch]);
     write(`${branch.replaceAll("/", "-")}.txt`, `work on ${branch}\n`);
@@ -411,6 +529,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
           source: draft.source,
           revisions: [draft.revision],
           ...(input.labels ? { labels: input.labels } : {}),
+          ...(input.reviewers ? { reviewers: input.reviewers } : {}),
           ...(input.draft ? { draft: true } : {}),
         }),
         fallbackTitle: input.title,
@@ -424,12 +543,17 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     title: "Raise the sign-in deadline",
     body: "Thirty seconds, and configurable. Closes the subtask under #aaaa0001.",
     labels: ["bug"],
+    reviewers: ["someone@example.invalid"],
   });
 
+  // Asked of the person the suite signs in as, and on the branch nothing can
+  // write to — so what this request looks like from the outside stays put
+  // however much the rest of the suite reviews the other pull request.
   openPrOn("2026-08-05T10:00:00Z", IDS.unservedPr, UNSERVED_BRANCH, {
     title: "A pull request this server does not serve",
     body: "Its files live on a branch the clone does not have checked out.",
     draft: true,
+    reviewers: ["person@example.invalid"],
   });
 
   // A comment and a review on the served pull request, written on its branch
@@ -439,11 +563,16 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     body: "Thirty seconds still feels short for a satellite link, but it is better.",
     author: "Someone Else <someone@example.invalid>",
   });
-  const head = git(dir, ["rev-parse", "HEAD"]).trim();
+  // The revision the pull request actually pinned, not whatever HEAD has since
+  // become: a verdict names a recorded revision (spec 02 §2.7), and one that
+  // named anything else would be a review of a state nobody offered — which is
+  // what doctor check D6 reports.
   comment("2026-08-04T12:00:00Z", "cccc0004", "pr", IDS.servedPr, {
     body: "Reads well. One note on the constant's name.",
+    // By one of the people it asked, so the panel shows an answered request.
+    author: "Someone Else <someone@example.invalid>",
     verdict: "approve",
-    revision: head,
+    revision: pinnedRevision(IDS.servedPr),
     file: "app/auth/session.ts",
     line: "42-48",
   });

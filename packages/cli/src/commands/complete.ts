@@ -8,12 +8,17 @@
 
 import { allEntities, type EntityKind, loadRepo } from "@navbook/core";
 import type { Ctx } from "../context.ts";
+import { featureSlugs } from "./feature.ts";
 
-const ROOT_COMMANDS = ["issue", "pr", "init", "id", "doctor", "install", "uninstall"];
+const ROOT_COMMANDS = ["issue", "pr", "feature", "init", "id", "doctor", "install", "uninstall"];
 const SHARED_VERBS = ["open", "list", "show", "edit", "comment", "close", "reopen", "delete"];
 const ISSUE_VERBS = [...SHARED_VERBS, "link", "unlink"];
-const PR_VERBS = [...SHARED_VERBS, "update", "review", "merge"];
-const QUERY_KEYS = ["status:", "label:", "assignee:", "author:", "milestone:"];
+const PR_VERBS = [...SHARED_VERBS, "update", "request", "review", "merge"];
+const FEATURE_VERBS = ["open", "list", "show", "edit", "spec"];
+const SPEC_VERBS = ["add", "edit", "list"];
+const QUERY_KEYS = ["status:", "label:", "assignee:", "author:", "milestone:", "feature:"];
+/** Terms only a pull request has (spec 04 §4.3), offered only where they work. */
+const PR_QUERY_KEYS = ["reviewer:", "review:", "awaiting:"];
 
 export function cmdComplete(ctx: Ctx, words: string[]): void {
   for (const candidate of completionsFor(ctx, words)) ctx.stdout.write(`${candidate}\n`);
@@ -22,6 +27,7 @@ export function cmdComplete(ctx: Ctx, words: string[]): void {
 function completionsFor(ctx: Ctx, words: string[]): string[] {
   const [noun, verb] = words;
   if (noun === undefined) return ROOT_COMMANDS;
+  if (noun === "feature") return featureCompletions(ctx, words);
   if (noun !== "issue" && noun !== "pr") {
     return words.length === 1 ? ROOT_COMMANDS : [];
   }
@@ -31,10 +37,51 @@ function completionsFor(ctx: Ctx, words: string[]): string[] {
   if (verb === undefined) return verbs;
   if (!verbs.includes(verb)) return [];
 
-  if (verb === "list") return [...QUERY_KEYS, ...labels(ctx)];
+  if (verb === "list") {
+    const keys = kind === "pr" ? [...QUERY_KEYS, ...PR_QUERY_KEYS] : QUERY_KEYS;
+    return [...keys, ...labels(ctx), ...features(ctx)];
+  }
   if (verb === "open") return [];
   // Every other verb takes an ID as its first argument.
   return words.length === 2 ? entityCandidates(ctx, kind) : [];
+}
+
+/**
+ * `nav feature …`, whose second word may be a verb or the `spec` group.
+ *
+ * Slugs are offered wherever one is expected, and document names once the
+ * feature is known — which is the whole reason completion is written here
+ * rather than in three shell dialects.
+ */
+function featureCompletions(ctx: Ctx, words: string[]): string[] {
+  const [, verb, third] = words;
+  if (verb === undefined) return FEATURE_VERBS;
+
+  if (verb === "spec") {
+    if (third === undefined) return SPEC_VERBS;
+    if (!SPEC_VERBS.includes(third)) return [];
+    if (words.length === 3) return featureSlugs(ctx);
+    // `spec edit <slug> <file>` is the one place a document name is wanted.
+    if (third === "edit" && words.length === 4) return specNames(ctx, words[3] as string);
+    return [];
+  }
+
+  if (!FEATURE_VERBS.includes(verb)) return [];
+  if (verb === "list" || verb === "open") return [];
+  return words.length === 2 ? featureSlugs(ctx) : [];
+}
+
+function specNames(ctx: Ctx, slug: string): string[] {
+  try {
+    const feature = loadRepo(ctx, { comments: "none" }).featureBySlug.get(slug);
+    return feature ? feature.specs.map((spec) => spec.fileName) : [];
+  } catch {
+    return [];
+  }
+}
+
+function features(ctx: Ctx): string[] {
+  return featureSlugs(ctx).map((slug) => `feature:${slug}`);
 }
 
 /**
@@ -43,7 +90,7 @@ function completionsFor(ctx: Ctx, words: string[]): string[] {
  */
 function entityCandidates(ctx: Ctx, kind: EntityKind): string[] {
   try {
-    const repo = loadRepo(ctx, { includeComments: false });
+    const repo = loadRepo(ctx, { comments: "none" });
     return allEntities(repo)
       .filter((entity) => entity.kind === kind)
       .flatMap((entity) => [entity.id, entity.dirName])
@@ -55,7 +102,7 @@ function entityCandidates(ctx: Ctx, kind: EntityKind): string[] {
 
 function labels(ctx: Ctx): string[] {
   try {
-    const repo = loadRepo(ctx, { includeComments: false });
+    const repo = loadRepo(ctx, { comments: "none" });
     const found = new Set<string>();
     for (const entity of allEntities(repo)) {
       const values = entity.fm.labels;

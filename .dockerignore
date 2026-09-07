@@ -1,0 +1,32 @@
+# What the image builds must not be given.
+#
+# Both Dockerfiles take the repository root as their build context, because a
+# pnpm workspace install needs the lockfile and every manifest beside it. That
+# makes this file the thing keeping the context honest.
+
+# Installed for whichever machine ran `pnpm install`. A Linux image resolves its
+# own, and copying these in would hand it a macOS esbuild.
+node_modules
+**/node_modules
+
+# Rebuilt inside the image. A stale local copy would otherwise be the one that
+# ships.
+**/dist
+**/.nuxt
+**/.output
+*.tgz
+
+# The marker the web test module writes, which changes what a build produces.
+packages/web/.nuxtrc
+
+# History, prose, CI and test artefacts: nothing either build reads.
+.git
+.github
+.navbook
+doc
+test
+packages/web/test-results
+packages/web/playwright-report
+
+# Never. This is the file that holds the token.
+.env

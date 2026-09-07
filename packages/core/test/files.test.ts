@@ -9,6 +9,7 @@ import {
   readAssignees,
   readLabels,
   readParent,
+  readReviewers,
   readRevisions,
   readSubtasks,
   validateComment,
@@ -165,6 +166,43 @@ Replaces the ad-hoc token cache.
     assert.match(problems, /'subtasks' is an issue-only key/);
   });
 
+  it("accepts one reviewer or several, and reads them back", () => {
+    const one = parseFile(
+      valid.replace("source: feat/auth-refactor", "source: x\nreviewer: alice@example.com"),
+    );
+    assert.deepEqual(validatePr(one), []);
+    assert.deepEqual(readReviewers(one.fm), ["alice@example.com"]);
+
+    const many = parseFile(
+      valid.replace(
+        "source: feat/auth-refactor",
+        "source: x\nreviewer: [alice@example.com, Bo <bo@example.com>]",
+      ),
+    );
+    assert.deepEqual(validatePr(many), []);
+    assert.deepEqual(readReviewers(many.fm), ["alice@example.com", "Bo <bo@example.com>"]);
+  });
+
+  it("rejects a reviewer that is not a person", () => {
+    const text = valid.replace("source: feat/auth-refactor", "reviewer: nobody");
+    assert.match(
+      messages(validatePr(parseFile(text))),
+      /'reviewer' must be a person or list of persons/,
+    );
+  });
+
+  it("rejects an empty reviewer list, which says nothing at all", () => {
+    const text = valid.replace("source: feat/auth-refactor", "reviewer: []");
+    assert.match(
+      messages(validatePr(parseFile(text))),
+      /'reviewer' must be a person or list of persons/,
+    );
+  });
+
+  it("reads no reviewers from a file that names none", () => {
+    assert.deepEqual(readReviewers(parseFile(valid).fm), []);
+  });
+
   it("rejects an empty revisions list", () => {
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\ntarget: main\nrevisions: []\n---\n\nbody\n`;
     assert.match(messages(validatePr(parseFile(text))), /at least one entry/);
@@ -230,6 +268,11 @@ describe("comments", () => {
       messages(validateComment(withFile, { onPr: true })),
       /'revision' \(40-hex SHA\) is required/,
     );
+  });
+
+  it("accepts the third verdict, which judges nothing", () => {
+    const text = `---\nauthor: a@b.co\nverdict: comment\nrevision: ${SHA_A}\n---\n\nRead it.\n`;
+    assert.deepEqual(validateComment(parseFile(text), { onPr: true }), []);
   });
 
   it("rejects unknown verdicts", () => {
@@ -333,6 +376,27 @@ describe("constructors", () => {
     assert.deepEqual(readRevisions(parsed.fm), [
       { head: SHA_A, base: SHA_B, date: "2026-08-04T16:40:00Z" },
     ]);
+  });
+
+  it("writes one reviewer as a scalar and several as a flow list", () => {
+    const render = (reviewers: string[]): string =>
+      newPrFile({
+        title: "Refactor auth",
+        author: "ked@example.com",
+        created: "2026-08-04T16:40:00Z",
+        target: "main",
+        source: "feat/auth",
+        revisions: [{ head: SHA_A, base: SHA_B, date: "2026-08-04T16:40:00Z" }],
+        body: "Replaces the cache.",
+        reviewers,
+      });
+    assert.match(render(["alice@example.com"]), /^reviewer: alice@example\.com$/m);
+    assert.match(
+      render(["alice@example.com", "bo@example.com"]),
+      /^reviewer: \[alice@example\.com, bo@example\.com\]$/m,
+    );
+    assert.equal(render([]).includes("reviewer"), false);
+    assert.deepEqual(validatePr(parseFile(render(["alice@example.com", "bo@example.com"]))), []);
   });
 
   it("renders a review comment that validates", () => {

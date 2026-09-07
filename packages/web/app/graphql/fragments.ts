@@ -25,6 +25,7 @@ export const ENTITY_CORE = graphql(`
     labels
     assignees
     milestone
+    features
   }
 `);
 
@@ -57,6 +58,8 @@ export const PR_LIST_ITEM = graphql(`
     source
     draft
     refs
+    reviewers
+    reviewDecision
     merged {
       date
       by
@@ -132,8 +135,87 @@ export const PR_DETAIL = graphql(`
       base
       date
     }
+    reviews {
+      person
+      state
+      volunteer
+      comment
+    }
     comments {
       ...CommentFields
+    }
+  }
+`);
+
+/**
+ * A feature as its listing row shows it, members included for the counts.
+ *
+ * `path` is selected on each document although the row never draws it: it is
+ * the cache key for a `Spec`, and a normalised object Apollo cannot key is an
+ * error rather than a quietly denormalised copy.
+ */
+export const FEATURE_LIST_ITEM = graphql(`
+  fragment FeatureListItem on Feature {
+    slug
+    title
+    author
+    created
+    summary
+    specs {
+      path
+      fileName
+      title
+    }
+    issues {
+      id
+      status
+    }
+    prs {
+      id
+      status
+    }
+  }
+`);
+
+/** One of a feature's documents, whole. */
+export const SPEC_DETAIL = graphql(`
+  fragment SpecDetail on Spec {
+    fileName
+    title
+    path
+    body
+    baseSha
+  }
+`);
+
+/**
+ * A feature's page: the card, its documents, and the work and history that
+ * make up its timeline. The entities come back as list rows because that is
+ * what the timeline renders them as.
+ */
+export const FEATURE_DETAIL = graphql(`
+  fragment FeatureDetail on Feature {
+    slug
+    title
+    author
+    created
+    summary
+    path
+    baseSha
+    specs {
+      ...SpecDetail
+    }
+    issues {
+      ...IssueListItem
+    }
+    prs {
+      ...PrListItem
+    }
+    commits {
+      sha
+      subject
+      author
+      date
     }
   }
 `);

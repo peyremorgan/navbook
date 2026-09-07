@@ -1,9 +1,20 @@
 <!--
-  Labels, assignees or a milestone.
+  Labels, assignees, a milestone, or the features an entity belongs to.
 
-  Creatable, and offering whatever the listing had in it, because there is no
-  registry to offer instead: the format keeps none and the server introduces
-  none (spec 06 §6.6). Anything you type is a valid value.
+  Creatable, and offering whatever the listing had in it, because for most of
+  these there is no registry to offer instead: the format keeps none and the
+  server introduces none (spec 06 §6.6). Anything you type is a valid value.
+
+  Features are the exception, and `linkTo` is how that shows: they are real
+  directories with a page of their own, so their chips lead somewhere.
+
+  What it shows when it is not being edited can be replaced through the
+  `display` slot, for a field whose reading is richer than its list of values.
+
+  `disabled` withdraws the offer to edit, for the one case where the server has
+  already said it cannot take the write: a pull request whose branch this
+  checkout does not hold. Letting somebody type a second thing that will be
+  refused the same way is not better than not offering.
 -->
 <script setup lang="ts">
 const props = defineProps<{
@@ -12,11 +23,20 @@ const props = defineProps<{
   values: string[];
   suggestions: string[];
   single?: boolean;
+  /** Route prefix that makes each chip a link, e.g. `/features/`. */
+  linkTo?: string;
   testid: string;
   saving?: boolean;
+  /** Set when this cannot be written at all; the field reads but does not offer. */
+  disabled?: boolean;
 }>();
 
 const emit = defineEmits<{ save: [string[]] }>();
+
+// Resolved rather than named as a string: `<component is="NuxtLink">` finds
+// nothing in a built bundle, where auto-imported components are not registered
+// globally, and the chip silently stops being a link.
+const Link = resolveComponent("NuxtLink");
 
 const editing = ref(false);
 const draft = ref<string[]>([...props.values]);
@@ -52,7 +72,7 @@ function save(): void {
         <UIcon :name="props.icon" class="size-3.5" />{{ props.title }}
       </h3>
       <UButton
-        v-if="!editing"
+        v-if="!editing && !props.disabled"
         size="xs"
         color="neutral"
         variant="ghost"
@@ -85,16 +105,31 @@ function save(): void {
       </p>
     </template>
 
+    <!--
+      The read-only half is replaceable, because one field needs to show more
+      than the values it edits: the reviewers panel lists what each person said
+      about the latest revision, which is derived and so is not what a save
+      sends back (spec 02 §2.7).
+    -->
+    <slot v-else-if="$slots.display" name="display" />
+
     <div v-else-if="props.values.length" class="flex flex-wrap gap-1">
-      <UBadge
+      <component
+        :is="props.linkTo ? Link : 'span'"
         v-for="value in props.values"
         :key="value"
-        color="neutral"
-        variant="subtle"
-        size="sm"
+        :to="props.linkTo ? `${props.linkTo}${value}` : undefined"
+        :data-testid="`chip-${props.testid}-${value}`"
       >
-        {{ value }}
-      </UBadge>
+        <UBadge
+          color="neutral"
+          variant="subtle"
+          size="sm"
+          :class="props.linkTo ? 'hover:bg-elevated' : undefined"
+        >
+          {{ value }}
+        </UBadge>
+      </component>
     </div>
     <p v-else class="text-sm text-muted">None</p>
   </section>

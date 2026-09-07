@@ -30,6 +30,8 @@ interface Entity {
   "The `assignee` key, which the format allows to be a scalar or a list."
   assignees: [String!]!
   milestone: String
+  "Slugs of the features this entity belongs to (spec 02 §2.11)."
+  features: [String!]!
   "Markdown body, trimmed."
   body: String!
   comments: [Comment!]!
@@ -47,9 +49,17 @@ enum Status {
   MERGED
 }
 
+"""
+What a review says about the revision it names (spec 02 §2.6).
+
+`COMMENT` is the third: a review that judges nothing and records only that its
+author read the revision. It satisfies a request for review like the other two
+and never counts toward `reviewDecision`.
+"""
 enum Verdict {
   APPROVE
   REQUEST_CHANGES
+  COMMENT
 }
 
 enum DiagnosticLevel {
@@ -70,6 +80,7 @@ type Issue implements Entity {
   labels: [String!]!
   assignees: [String!]!
   milestone: String
+  features: [String!]!
   body: String!
   comments: [Comment!]!
 
@@ -110,6 +121,7 @@ type Pr implements Entity {
   labels: [String!]!
   assignees: [String!]!
   milestone: String
+  features: [String!]!
   body: String!
   comments: [Comment!]!
 
@@ -122,6 +134,41 @@ type Pr implements Entity {
   merged: MergedInfo
   "Branches the cross-ref scan found it on; empty for a working-tree read."
   refs: [String!]!
+
+  "Who it asks to review, as `reviewer:` records them (spec 02 §2.7)."
+  reviewers: [String!]!
+  """
+  Everyone asked, plus anyone else who reviewed the latest revision, minus the
+  author. Derived from the reviews and stored nowhere.
+  """
+  reviews: [ReviewerState!]!
+  "What those reviews add up to. Never a gate: policy is the forge's (spec 01 §1.7)."
+  reviewDecision: ReviewDecision!
+}
+
+"What one person has said about a pull request's latest revision."
+type ReviewerState {
+  person: String!
+  state: ReviewState!
+  "True when nobody asked them; their review counts all the same."
+  volunteer: Boolean!
+  "The review this was read from, absent while they have not answered."
+  comment: ID
+}
+
+enum ReviewState {
+  APPROVE
+  REQUEST_CHANGES
+  "They read the revision and judged nothing."
+  COMMENTED
+  "They were asked and have not answered this revision."
+  PENDING
+}
+
+enum ReviewDecision {
+  APPROVED
+  CHANGES_REQUESTED
+  PENDING
 }
 
 "A comment or a review (spec 02 §2.6)."
@@ -196,8 +243,84 @@ input EntityFilter {
   assignees: [String!]
   authors: [String!]
   milestones: [String!]
+  "Feature slugs; an entity must name every one of them."
+  features: [String!]
+  """
+  Asked to review it; a pull request must name every one of them.
+
+  This and the two below describe something only a pull request has, so
+  `issues` rejects them rather than matching nothing.
+  """
+  reviewers: [String!]
+  "The pull request's derived decision; any one of them matches."
+  reviews: [ReviewDecision!]
+  "Asked to review it and has not answered the latest revision."
+  awaiting: [String!]
   "Free text, matched against title, body and comments."
   text: [String!]
+}
+
+"""
+A feature: a standing concept work attaches to (spec 02 §2.11).
+
+It has no ID and no status. Its `slug` is the directory that holds it and is
+what an entity's `feature` key names; the work attached to it has the status.
+"""
+type Feature {
+  slug: String!
+  title: String!
+  "RFC 5322 address as stored in frontmatter: `Name <email>`."
+  author: String!
+  created: String!
+  "Markdown summary, trimmed. A feature may have none."
+  summary: String!
+  "Path from the repository root, e.g. `.navbook/specs/auth`."
+  path: String!
+  """
+  The blob hash of `feature.md` as it now stands.
+
+  Hand it back as `baseSha` when editing, and an edit made against an older
+  version is refused rather than landed on top of somebody else's.
+  """
+  baseSha: String!
+  "Specification documents, in file-name order."
+  specs: [Spec!]!
+  "Issues naming this feature, newest first, whatever their status."
+  issues: [Issue!]!
+  "Pull requests naming this feature, newest first."
+  prs: [Pr!]!
+  """
+  Commits that touched this feature, newest first.
+
+  A commit counts when it changed the feature's documents, when it changed the
+  directory of an issue or pull request naming the feature, or when its message
+  references one of those by ID — which is how a commit that only touches code
+  joins the story (spec 04 §4.3). Read from the served checkout's history.
+  """
+  commits(limit: Int! = 100): [Commit!]!
+}
+
+"One of a feature's specification documents (spec 02 §2.11)."
+type Spec {
+  "File name inside the feature's directory, e.g. `login-flow.md`."
+  fileName: String!
+  title: String!
+  "Path from the repository root."
+  path: String!
+  "Markdown body, trimmed."
+  body: String!
+  "The blob hash of this file as it now stands; see `Feature.baseSha`."
+  baseSha: String!
+}
+
+"A commit, as a feature's history reports it."
+type Commit {
+  sha: String!
+  subject: String!
+  "RFC 5322 address of the commit's author: `Name <email>`."
+  author: String!
+  "Author date, ISO 8601."
+  date: String!
 }
 
 type Query {
@@ -214,6 +337,10 @@ type Query {
   """
   prs(filter: EntityFilter, allRefs: Boolean! = false): [Pr!]!
   pr(ref: ID!): Pr!
+  "Every feature in the working tree, in slug order (spec 02 §2.11)."
+  features: [Feature!]!
+  "`slug` is exact: a feature is named by a word somebody chose, not a prefix."
+  feature(slug: String!): Feature!
   doctor: DoctorReport!
   viewer: Viewer!
 }
@@ -233,6 +360,8 @@ input OpenIssueInput {
   labels: [String!]
   assignees: [String!]
   milestone: String
+  "Slugs of features to attach it to (spec 02 §2.11)."
+  features: [String!]
   "ID or prefix of the issue to file this one under."
   parent: ID
 }
@@ -248,8 +377,9 @@ type OpenIssuePayload {
 Fields to change on an issue.
 
 An omitted field is left alone. An explicit null clears the key, as does an
-empty list for `labels` and `assignees`; `title` and `body` can be replaced but
-not cleared. Frontmatter keys this schema does not name are always preserved.
+empty list for `labels`, `assignees` and `features`; `title` and `body` can be
+replaced but not cleared. Frontmatter keys this schema does not name are always
+preserved.
 """
 input UpdateIssueInput {
   ref: ID!
@@ -258,10 +388,35 @@ input UpdateIssueInput {
   labels: [String!]
   assignees: [String!]
   milestone: String
+  features: [String!]
 }
 
 type UpdateIssuePayload {
   issue: Issue!
+  commit: CommitInfo!
+}
+
+"""
+Fields to change on a pull request.
+
+The twin of `UpdateIssueInput`, with the same absent-versus-null rules, plus
+the people it asks to review. What a pull request *is* — its revisions, its
+target, whether it merged — is not patchable here: those need a branch and a
+working tree, and the checkout-centric verbs are not exposed (spec 06 §6.3).
+"""
+input UpdatePrInput {
+  ref: ID!
+  title: String
+  body: String
+  labels: [String!]
+  assignees: [String!]
+  reviewers: [String!]
+  milestone: String
+  features: [String!]
+}
+
+type UpdatePrPayload {
+  pr: Pr!
   commit: CommitInfo!
 }
 
@@ -344,12 +499,93 @@ type UnlinkIssuePayload {
   commit: CommitInfo!
 }
 
+input CreateFeatureInput {
+  title: String!
+  "Directory to file it under; derived from the title when absent."
+  slug: String
+  "Markdown summary; a feature may have none."
+  summary: String
+}
+
+type CreateFeaturePayload {
+  feature: Feature!
+  commit: CommitInfo!
+}
+
+"""
+Fields to change on a feature's identity card.
+
+An omitted field is left alone; `title` can be replaced but not cleared, and an
+explicit null clears the summary. Frontmatter keys this schema does not name
+are always preserved.
+"""
+input UpdateFeatureInput {
+  slug: String!
+  title: String
+  summary: String
+  """
+  The `baseSha` the editor started from.
+
+  A save whose file has moved on since is refused with `STALE_CONTENT` rather
+  than landed on top of the change that moved it (spec 06 §6.3).
+  """
+  baseSha: String!
+}
+
+type UpdateFeaturePayload {
+  feature: Feature!
+  commit: CommitInfo!
+}
+
+input AddSpecInput {
+  "Slug of the feature to add it to."
+  feature: String!
+  title: String!
+  body: String!
+  "File to write it to; derived from the title when absent."
+  fileName: String
+}
+
+type AddSpecPayload {
+  feature: Feature!
+  spec: Spec!
+  commit: CommitInfo!
+}
+
+"Fields to change on a document; `title` and `body` are replaced, never cleared."
+input UpdateSpecInput {
+  feature: String!
+  fileName: String!
+  title: String
+  body: String
+  "See `UpdateFeatureInput.baseSha`."
+  baseSha: String!
+}
+
+type UpdateSpecPayload {
+  feature: Feature!
+  spec: Spec!
+  commit: CommitInfo!
+}
+
 type Mutation {
   openIssue(input: OpenIssueInput!): OpenIssuePayload!
   updateIssue(input: UpdateIssueInput!): UpdateIssuePayload!
+  """
+  Patch a pull request's metadata, `reviewers` included.
+
+  Refused with `PRECONDITION` when this checkout does not hold the branch the
+  pull request lives on, for the reason `addComment` is: there is no `pr.md`
+  here to patch, and the answer is to serve that branch.
+  """
+  updatePr(input: UpdatePrInput!): UpdatePrPayload!
   closeIssue(input: CloseIssueInput!): CloseIssuePayload!
   reopenIssue(ref: ID!): ReopenIssuePayload!
   addComment(input: AddCommentInput!): AddCommentPayload!
   linkIssue(input: LinkIssueInput!): LinkIssuePayload!
   unlinkIssue(ref: ID!): UnlinkIssuePayload!
+  createFeature(input: CreateFeatureInput!): CreateFeaturePayload!
+  updateFeature(input: UpdateFeatureInput!): UpdateFeaturePayload!
+  addSpec(input: AddSpecInput!): AddSpecPayload!
+  updateSpec(input: UpdateSpecInput!): UpdateSpecPayload!
 }

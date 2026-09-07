@@ -35,6 +35,7 @@ import {
   resolveEntity,
   resolveEntityForEdit,
   revalidateEntityFile,
+  reviewSummary,
   subtaskTree,
   toNdjson,
   uncommittedUnder,
@@ -60,6 +61,10 @@ const PLURAL: Record<EntityKind, string> = { issue: "issues", pr: "pull requests
 export interface ExtraColumn {
   header: string;
   value: (entity: EntityRecord) => string;
+  /** Shown only when this holds of some entity listed; always, when absent. */
+  when?: (entities: readonly EntityRecord[]) => boolean;
+  /** Grown to fill the terminal, like `title`, rather than sized to content. */
+  flexible?: boolean;
 }
 
 export interface ListOptions extends GlobalFlags {
@@ -109,7 +114,11 @@ function renderList(
   const columns: Column[] = [{ header: "id" }, { header: "status" }];
   const values: ((entity: EntityRecord) => string)[] = [(e) => `#${e.id}`, (e) => e.status];
   for (const column of extra) {
-    columns.push({ header: column.header });
+    if (column.when && !column.when(entities)) continue;
+    columns.push({
+      header: column.header,
+      ...(column.flexible ? { flexible: true, minWidth: 6 } : {}),
+    });
     values.push(column.value);
   }
   columns.push({ header: "title", flexible: true, minWidth: 20 });
@@ -144,9 +153,13 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
   if (opts.json) {
     // `parent` and `subtasks` are frontmatter, so they are already in the
     // object; resolving them would be a second, differently-shaped answer.
+    // `review` is not frontmatter at all — it is the derived state of spec 02
+    // §2.7, and it is here rather than in `list` because `show` is the command
+    // that has already read every comment it is computed from.
     ctx.stdout.write(
       `${JSON.stringify(
         entityJson(ctx.navDir, entity, {
+          ...(kind === "pr" ? { review: reviewSummary(entity) } : {}),
           comments: entity.comments.map((comment) => commentJson(ctx.navDir, comment)),
         }),
       )}\n`,

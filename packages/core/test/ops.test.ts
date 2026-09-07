@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { newIssueFile, parseFile, readRevisions, validateIssue } from "../src/core/files.ts";
+import {
+  newIssueFile,
+  parseFile,
+  readReviewers,
+  readRevisions,
+  validateIssue,
+  validatePr,
+} from "../src/core/files.ts";
 import { FrontmatterError } from "../src/core/frontmatter.ts";
 import {
+  docsFeatureSubject,
   docsSubject,
   type FileOp,
   LinkRewriteError,
@@ -12,17 +20,29 @@ import {
   planComment,
   planDelete,
   planEntityOpen,
+  planFeatureCreate,
+  planFeatureEdit,
   planInit,
   planLink,
   planMergedBlock,
   planPaths,
   planPrUpdate,
   planReopen,
+  planRequest,
+  planSpecAdd,
+  planSpecEdit,
   planUnlink,
   RevisionUnchangedError,
   rewriteLinks,
 } from "../src/core/ops.ts";
-import { type EntityRecord, NAV_MARKER, type NavTree, parseTree } from "../src/core/tree.ts";
+import {
+  type EntityRecord,
+  type FeatureRecord,
+  NAV_MARKER,
+  type NavTree,
+  parseTree,
+  type SpecRecord,
+} from "../src/core/tree.ts";
 
 const SHA_A = "4f2c9d1e8a7b3c5d9e0f1a2b3c4d5e6f7a8b9c0d";
 const SHA_B = "91d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0";
@@ -96,6 +116,68 @@ describe("planInit", () => {
     // This is what lets one plan serve a repository whatever its root is called.
     for (const op of planInit().ops) {
       if (op.op === "write") assert.ok(!op.path.includes(".navbook"), op.path);
+    }
+  });
+});
+
+describe("the feature planners", () => {
+  const feature = (): FeatureRecord => {
+    const repo = parseTree(
+      new Map([
+        [
+          "specs/auth/feature.md",
+          "---\ntitle: Authentication\nauthor: alice@example.com\ncreated: 2026-09-01T10:00:00Z\n---\n\nSummary.\n",
+        ],
+        ["specs/auth/login-flow.md", "---\ntitle: Login flow\n---\n\nBody.\n"],
+      ]) as NavTree,
+    );
+    return repo.features[0] as FeatureRecord;
+  };
+
+  it("scopes every feature subject the same way, naming the document when there is one", () => {
+    assert.equal(docsFeatureSubject("create", "auth"), "docs(feature): create auth");
+    assert.equal(
+      docsFeatureSubject("edit", "auth", "login-flow.md"),
+      "docs(feature): edit auth/login-flow.md",
+    );
+  });
+
+  it("lays a new feature out under specs/, with no directory to create first", () => {
+    const { plan, dirPath, filePath } = planFeatureCreate("auth", "content");
+    assert.equal(dirPath, "specs/auth");
+    assert.equal(filePath, "specs/auth/feature.md");
+    assert.deepEqual(plan.ops, [
+      { op: "write", path: "specs/auth/feature.md", content: "content" },
+    ]);
+    assert.equal(plan.message, "docs(feature): create auth");
+    // No trailer: a feature has no ID for one to name.
+    assert.deepEqual(plan.trailers, []);
+  });
+
+  it("writes an edit back over the file it came from", () => {
+    const record = feature();
+    assert.deepEqual(planFeatureEdit(record, "new").ops, [
+      { op: "write", path: "specs/auth/feature.md", content: "new" },
+    ]);
+    assert.deepEqual(planSpecAdd(record, "sessions.md", "new").ops, [
+      { op: "write", path: "specs/auth/sessions.md", content: "new" },
+    ]);
+    assert.deepEqual(planSpecEdit(record, record.specs[0] as SpecRecord, "new").ops, [
+      { op: "write", path: "specs/auth/login-flow.md", content: "new" },
+    ]);
+  });
+
+  it("names only paths the --commit guard will accept as its own", () => {
+    const record = feature();
+    assert.deepEqual(planPaths(planFeatureCreate("auth", "x").plan), ["specs/auth/feature.md"]);
+    assert.deepEqual(planPaths(planSpecAdd(record, "sessions.md", "x")), [
+      "specs/auth/sessions.md",
+    ]);
+  });
+
+  it("plans paths relative to the Navbook directory, never naming it", () => {
+    for (const path of planPaths(planFeatureCreate("auth", "x").plan)) {
+      assert.ok(!path.includes(".navbook"), path);
     }
   });
 });
@@ -291,6 +373,104 @@ describe("planPrUpdate", () => {
     });
     const write = plan.ops[0];
     assert.equal(readRevisions(parseFile(write?.op === "write" ? write.content : "").fm).length, 3);
+  });
+});
+
+describe("planRequest", () => {
+  /** The `reviewer:` line the plan would write, or "" when it writes none. */
+  const written = (entity: EntityRecord, people: string[], remove = false): string => {
+    const { plan } = planRequest(entity, people, { remove });
+    const content = frontmatterOf(plan.ops[0]);
+    assert.deepEqual(validatePr(parseFile(content)), [], "the plan wrote a file doctor rejects");
+    return readReviewers(parseFile(content).fm).join(", ");
+  };
+
+  it("asks one person, as a scalar", () => {
+    assert.equal(written(prEntity(ONE_REVISION), ["alice@example.com"]), "alice@example.com");
+  });
+
+  it("asks several, keeping the ones already there", () => {
+    const pr = prEntity(ONE_REVISION, "reviewer: alice@example.com\n");
+    assert.equal(
+      written(pr, ["bo@example.com", "cy@example.com"]),
+      "alice@example.com, bo@example.com, cy@example.com",
+    );
+  });
+
+  it("names the commit after what it did", () => {
+    const pr = prEntity(ONE_REVISION);
+    assert.equal(
+      planRequest(pr, ["alice@example.com"]).plan.message,
+      "docs(pr): request review #dk3mp2x9",
+    );
+    assert.equal(
+      planRequest(pr, ["alice@example.com"], { remove: true }).plan.message,
+      "docs(pr): remove reviewer #dk3mp2x9",
+    );
+  });
+
+  it("refers to the pull request it changed", () => {
+    assert.deepEqual(planRequest(prEntity(ONE_REVISION), ["a@b.co"]).plan.trailers, [
+      { key: "Refs", id: "dk3mp2x9" },
+    ]);
+  });
+
+  it("reports who it added and who was already there", () => {
+    const pr = prEntity(ONE_REVISION, "reviewer: alice@example.com\n");
+    const result = planRequest(pr, ["Alice <alice@example.com>", "bo@example.com"]);
+    assert.deepEqual(result.changed, ["bo@example.com"]);
+    assert.deepEqual(result.unchanged, ["alice@example.com"], "reported as the file spells them");
+  });
+
+  it("does not list one person twice under two spellings", () => {
+    const pr = prEntity(ONE_REVISION, "reviewer: alice@example.com\n");
+    assert.equal(written(pr, ["ALICE@example.com"]), "alice@example.com");
+  });
+
+  it("treats a name given twice in one call as one request", () => {
+    const result = planRequest(prEntity(ONE_REVISION), ["a@b.co", "a@b.co"]);
+    assert.deepEqual(result.changed, ["a@b.co"]);
+    assert.deepEqual(result.unchanged, []);
+  });
+
+  it("removes whichever spelling the file carries", () => {
+    const pr = prEntity(ONE_REVISION, "reviewer: [Alice <alice@example.com>, bo@example.com]\n");
+    const result = planRequest(pr, ["alice@example.com"], { remove: true });
+    assert.deepEqual(result.changed, ["Alice <alice@example.com>"]);
+    assert.equal(written(pr, ["alice@example.com"], true), "bo@example.com");
+  });
+
+  it("drops the key entirely when the last reviewer goes", () => {
+    const pr = prEntity(ONE_REVISION, "reviewer: alice@example.com\n");
+    const content = frontmatterOf(
+      planRequest(pr, ["alice@example.com"], { remove: true }).plan.ops[0],
+    );
+    assert.equal(content.includes("reviewer"), false);
+    assert.deepEqual(validatePr(parseFile(content)), []);
+  });
+
+  it("reports a removal of somebody who was never there", () => {
+    const result = planRequest(prEntity(ONE_REVISION), ["zoe@example.com"], { remove: true });
+    assert.deepEqual(result.changed, []);
+    assert.deepEqual(result.unchanged, ["zoe@example.com"]);
+  });
+
+  it("leaves the key where the file put it", () => {
+    const pr = prEntity(ONE_REVISION, "reviewer: alice@example.com\nmilestone: v2\n");
+    const content = frontmatterOf(planRequest(pr, ["bo@example.com"]).plan.ops[0]);
+    const keys = content.split("\n").filter((line) => /^[a-z-]+:/.test(line));
+    assert.deepEqual(keys.slice(-3, -1), [
+      "reviewer: [alice@example.com, bo@example.com]",
+      "milestone: v2",
+    ]);
+  });
+
+  it("touches nothing else in the file", () => {
+    const pr = prEntity(ONE_REVISION, "labels: [auth]\nassignee: ked@example.com\n");
+    const content = frontmatterOf(planRequest(pr, ["alice@example.com"]).plan.ops[0]);
+    assert.match(content, /^labels: \[auth\]$/m);
+    assert.match(content, /^assignee: ked@example\.com$/m);
+    assert.equal(readRevisions(parseFile(content).fm).length, 1);
   });
 });
 

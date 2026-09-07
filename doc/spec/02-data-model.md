@@ -20,14 +20,18 @@ tolerate (preserve, never delete or reorder) anything they do not understand.
 │   └── closed/
 │       └── mz4kq1rv-crash-on-empty-file/
 │           └── issue.md
-└── prs/
-    ├── open/
-    │   └── dk3mp2x9-auth-refactor/
-    │       ├── pr.md
-    │       └── comments/
-    │           └── 2026-08-05T101433Z-q8zm3vp1.md
-    ├── merged/
-    └── closed/
+├── prs/
+│   ├── open/
+│   │   └── dk3mp2x9-auth-refactor/
+│   │       ├── pr.md
+│   │       └── comments/
+│   │           └── 2026-08-05T101433Z-q8zm3vp1.md
+│   ├── merged/
+│   └── closed/
+└── specs/
+    └── auth/
+        ├── feature.md
+        └── login-flow.md
 ```
 
 - The root directory MUST sit at the repository root. Its name defaults to
@@ -43,6 +47,8 @@ tolerate (preserve, never delete or reorder) anything they do not understand.
   begin with the directory's actual name rather than with `.navbook/`.
 - `issues/` MUST contain only the subdirectories `open/` and `closed/`.
 - `prs/` MUST contain only the subdirectories `open/`, `merged/`, and `closed/`.
+- `specs/` holds features (§2.11). It is OPTIONAL: a repository with no
+  features has none, and tools MUST create it only when a feature is created.
 - Status subdirectories contain zero or more **entity directories** and nothing
   else. An entity directory under `issues/` MUST contain an `issue.md`; under
   `prs/`, a `pr.md`. Either MAY contain a `comments/` directory. Tools MUST
@@ -127,6 +133,7 @@ The server never sees the request.
 | `labels` | MAY | list of strings | Free-form; kebab-case RECOMMENDED |
 | `assignee` | MAY | person or list of persons | Who owns the work |
 | `milestone` | MAY | string | Free-form grouping |
+| `feature` | MAY | slug or list of slugs | The feature(s) this issue belongs to (§2.11) |
 | `resolution` | MAY | string | Meaningful for closed issues: `fixed`, `wontfix`, `duplicate`, `invalid` RECOMMENDED; free-form allowed |
 | `duplicate-of` | MAY | ID | With `resolution: duplicate` |
 | `parent` | MAY | ID | The issue this one is a subtask of |
@@ -201,7 +208,7 @@ A comment on a PR MAY additionally carry:
 
 | Key | Req. | Type | Meaning |
 |-----|------|------|---------|
-| `verdict` | MAY | `approve` \| `request-changes` | Makes this comment a review |
+| `verdict` | MAY | `approve` \| `request-changes` \| `comment` | Makes this comment a review |
 | `revision` | MUST if `verdict` or `file` present | 40-hex SHA | The revision `head` ([2.7](#27-prmd)) this review or anchor refers to |
 | `file` | MAY | repo-relative path | Inline comment anchor |
 | `line` | MAY | integer or `start-end` range | Line(s) in `file` at commit `revision` |
@@ -211,6 +218,23 @@ approvals until re-reviewed — this rule is what prevents a force-push from
 inheriting a stale approval. Inline comments SHOULD quote the code they discuss
 in the body (blockquote), so they remain meaningful to humans even after the
 anchor drifts.
+
+`approve` and `request-changes` are **opinionated**: they judge the revision.
+`comment` judges nothing and says only that its author read the revision named
+— it is what a reviewer files when they have looked and have nothing to
+withhold or demand. It is still a review, and it still binds to a revision, so
+it satisfies a request for review ([2.7](#27-prmd)) exactly as the other two
+do; it is simply never counted for or against the change.
+
+A `comment` verdict is not the same as a comment with no verdict at all. The
+latter is discussion, bound to nothing, and a tool that recorded it as a review
+would be claiming its author had read a revision they may never have opened.
+
+**A tool that predates this key's third value will reject a `comment` verdict
+as malformed.** Nothing else about such a file is new, so this is the only
+compatibility cost of the addition, and it is why `comment` is a value of an
+existing key rather than a key of its own: the alternative would have older
+tools silently reading a review as discussion.
 
 ```markdown
 ---
@@ -235,6 +259,7 @@ author: ked@example.com
 created: 2026-08-04T16:40:00Z
 target: main
 source: feat/auth-refactor
+reviewer: alice@example.com
 revisions:
   - head: 4f2c9d1e8a7b3c5d9e0f1a2b3c4d5e6f7a8b9c0d
     base: 91d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0
@@ -254,7 +279,8 @@ Closes: bqlybac0
 | `source` | SHOULD | string | Branch the PR rides on (informative; the PR directory itself lives on that branch) |
 | `revisions` | MUST, ≥ 1 entry | list | Append-only history of reviewable states |
 | `draft` | MAY | boolean | Not yet requesting review |
-| `labels`, `assignee`, `milestone` | MAY | as issues | |
+| `reviewer` | MAY | person or list of persons | Who is asked to review (below) |
+| `labels`, `assignee`, `milestone`, `feature` | MAY | as issues | |
 | `merged` | MAY | map | Added at/after merge: `date`, `by` (person), `commit` (40-hex merge commit, added in a follow-up commit since it cannot be known inside the merge itself) |
 | `resolution` | MAY | string | For `prs/closed/`: `declined`, `superseded`, `abandoned` RECOMMENDED |
 | `superseded-by` | MAY | ID | With `resolution: superseded` |
@@ -269,12 +295,59 @@ Entries MUST only be appended, never edited or removed. Amending or
 force-pushing the source branch is represented by appending a new entry. The
 branch name in `source` is intent; the SHAs are truth.
 
+### Review requests
+
+`reviewer` names the people a pull request asks to review it. It takes the
+shape `assignee` takes (§2.5) — one person written as a scalar, several as a
+list — and it is the whole of the request: **being listed is being asked.**
+
+There is deliberately no second key recording whether a request is still
+outstanding. Such a key would have to be cleared by the reviewer's own commit,
+so every review would rewrite `pr.md` and race whatever the author was editing
+there (§3.3) — a conflict manufactured by the format, in the one file two
+people are most likely to touch at once. A review is a new file, and it stays
+one.
+
+What is outstanding is therefore **derived**, not stored, and the reviews
+themselves are what it is derived from:
+
+- A person's **state** on a revision is their latest opinionated verdict
+  (§2.6) among the reviews they bound to it; failing that, `commented` if they
+  bound a `comment` verdict to it; failing that, `pending`. "Latest" is by
+  comment filename (§2.6), which is the order the thread itself renders in, so
+  what a reader sees and what a tool computes can never disagree — including
+  for two reviews written inside the same second, which the timestamp cannot
+  separate and the ID therefore orders.
+- A pull request's state is read on its **latest revision**, so appending a
+  revision returns every reviewer to `pending` — the same rule that stops a
+  verdict carrying forward, seen from the other side. Re-requesting a review
+  after a force-push is thus not an action anyone has to remember to take.
+- A **decision** for the whole pull request is `changes-requested` when any
+  person's state is `request-changes`, otherwise `approved` when any person's
+  state is `approve`, otherwise `pending`.
+- The people considered are those `reviewer` names **and** anyone else who has
+  bound a verdict to that revision: a review nobody asked for is still a
+  review. The pull request's own `author` is excluded throughout, from the
+  listing and from the decision alike.
+
+Nothing here is a gate. A decision of `pending` does not make a merge wrong,
+and `approved` does not make one right; both are readings of what the files
+say, and merge policy belongs to the forge or to team convention ([01
+§1.7](01-functionality.md)). A tool MUST NOT refuse an operation on the
+strength of a derived review state, and MUST NOT write any of these states
+into a file.
+
+`draft` and `reviewer` are independent: a draft may name the people it will
+ask, and one that does is still not asking.
+
 ## 2.8 PR lifecycle
 
 1. **Open** — the author commits `.navbook/prs/open/<id>-<slug>/` on the source
    branch, with one revision entry. Publishing the branch publishes the PR.
 2. **Iterate** — new reviewable states append revisions; discussion and reviews
-   accumulate as comment files, all on the source branch.
+   accumulate as comment files, all on the source branch. Asking someone to
+   review is an edit to `reviewer` on `pr.md`; answering is a comment file, and
+   never an edit to `pr.md` (§2.7).
 3. **Merge** — the source branch is merged into `target`; the PR directory is
    moved to `prs/merged/` either inside the merge commit or in an immediate
    follow-up on the target branch. The full discussion is thereby archived in
@@ -315,7 +388,111 @@ remains conforming. A tool that creates a root directory MUST write a marker
 into it, so that a repository which later renames the directory stays
 locatable.
 
+`specs/`, at the top of the root directory, holds features (§2.11).
+
 Future revisions of this spec may define: `.navbook/config.*` (repository-level
 configuration), `.navbook/sync/` (forge-sync state), and additional files
 inside entity directories. Tools MUST leave unrecognized files in these
 locations untouched.
+
+## 2.11 Features and specifications
+
+A **feature** is a standing concept that work attaches to: a business vertical,
+an open-ended goal, or a body of work too large to be one issue. It is
+described by one or more Markdown documents and named by issues and pull
+requests, and it is the one thing in this format that is neither an entity nor
+a bare frontmatter string.
+
+```
+specs/
+└── auth/
+    ├── feature.md
+    ├── login-flow.md
+    └── session-policy.md
+```
+
+- Each subdirectory of `specs/` is one feature. Its name MUST match
+  `^[a-z0-9]+(-[a-z0-9]+)*$` — the slug grammar of §2.3 without the ID — and
+  that name is the feature's identity: it is what `feature:` names, and what a
+  tool accepts wherever a feature is expected.
+- A feature directory MUST contain a `feature.md`. Every other `*.md` in it is
+  a **specification document**. Anything else it holds — subdirectories,
+  images, loose text — MUST be preserved untouched and MUST NOT be interpreted.
+- `specs/` MUST NOT contain files directly.
+
+A feature has **no ID and no status**. It has no ID because its name is what
+refers to it, and an opaque eight characters in an issue's frontmatter would
+be unreadable exactly where the format is meant to be read. It has no status
+because a standing concept does not open and close: the work attached to it
+does, and that is what a tool counts.
+
+### `feature.md`
+
+```markdown
+---
+title: Authentication
+author: Alice Smith <alice@example.com>
+created: 2026-09-01T10:00:00Z
+---
+
+Everything about signing in, sessions and tokens.
+```
+
+| Key | Req. | Type | Meaning |
+|-----|------|------|---------|
+| `title` | MUST | string | The feature's name, for display |
+| `author` | MUST | person | Who introduced it |
+| `created` | MUST | timestamp | When it was introduced |
+
+The body is a summary and MAY be empty: a feature is named by its title and
+described by the documents beside it.
+
+There is no key listing the issues that belong to the feature, deliberately.
+Membership is asserted by the entity alone (below), so two people attaching two
+issues write two different files and can never conflict — the same reasoning
+that rules out a central index ([06 §6.6](06-future.md)).
+
+### Specification documents
+
+```markdown
+---
+title: Login flow
+---
+
+## Requirements
+
+The app SHALL abort a login attempt after 5 s.
+```
+
+| Key | Req. | Type | Meaning |
+|-----|------|------|---------|
+| `title` | MUST | string | The document's name, for display |
+| `author` | MAY | person | Who wrote it |
+| `created` | MAY | timestamp | When it was written |
+
+A document is a living description of how something works or should work, not
+a record of something that happened, so who wrote it and when are git's answer
+to give and are optional here.
+
+File names are unconstrained beyond ending in `.md`: a document written by hand
+as `Login Flow.md` is conforming and MUST keep working. A tool that *creates* a
+document SHOULD name it to the slug grammar above with a `.md` suffix, and MUST
+NOT create one named `feature.md`.
+
+### Attaching an entity to a feature
+
+An issue or pull request names the features it belongs to in its own
+frontmatter:
+
+```yaml
+feature: auth
+feature: [auth, mobile]
+```
+
+- The value is one slug or a list of slugs, in the shape `assignee` takes
+  (§2.5). One feature SHOULD be written as a scalar.
+- A slug that names no directory in this tree is *dangling*, not an error:
+  the feature may live on a branch nobody has fetched, exactly as a `#id`
+  reference may (§2.9). `doctor` warns.
+- The key is not restricted to issues. A pull request is work on something too,
+  and a tool that shows a feature's history has an obvious use for it.

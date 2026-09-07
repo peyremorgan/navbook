@@ -3,7 +3,7 @@
  */
 
 import type { Trailer } from "../core/ops.ts";
-import { git, gitRun, splitNul } from "./exec.ts";
+import { git, gitRun, splitLines, splitNul } from "./exec.ts";
 
 /** Repository-relative paths currently staged in the index. */
 export function stagedPaths(cwd: string): string[] {
@@ -39,6 +39,35 @@ export function uncommittedPaths(cwd: string, pathspecs: readonly string[]): str
     if (entry.startsWith("R") || entry.startsWith("C")) i++;
   }
   return entries;
+}
+
+/**
+ * Blob hashes of files as they stand on disk, keyed by the path asked for.
+ *
+ * Asked of git rather than computed here, because the answer depends on the
+ * repository: which hash algorithm it uses, and which filters its attributes
+ * apply. A hash worked out in this process would be right for most
+ * repositories and quietly wrong for the rest.
+ *
+ * Batched, since the caller usually wants a directory's worth at once and one
+ * subprocess is the difference between a listing costing one and costing one
+ * per file. git refuses the whole batch when any path is unreadable, and an
+ * empty map is the honest answer to "what do these look like now".
+ */
+export function hashObjects(cwd: string, paths: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  if (paths.length === 0) return out;
+  const result = gitRun(["hash-object", "--", ...paths], { cwd });
+  if (result.code !== 0) return out;
+  const hashes = splitLines(result.stdout);
+  if (hashes.length !== paths.length) return out;
+  for (const [index, path] of paths.entries()) out.set(path, hashes[index] as string);
+  return out;
+}
+
+/** The blob hash of one file on disk, or null when it cannot be read. */
+export function hashObject(cwd: string, path: string): string | null {
+  return hashObjects(cwd, [path]).get(path) ?? null;
 }
 
 /** Repository-relative paths of every file in the index. */

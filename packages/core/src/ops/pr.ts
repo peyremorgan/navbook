@@ -14,8 +14,11 @@ import {
   type Plan,
   planMergedBlock,
   planPrUpdate,
+  planRequest,
+  type RequestResult,
   RevisionUnchangedError,
 } from "../core/ops.ts";
+import { parsePerson, sameEmail } from "../core/person.ts";
 import { matchesQuery, type Query } from "../core/query.ts";
 import { allEntities, type EntityRecord, parseTree } from "../core/tree.ts";
 import { gitMaybe } from "../git/exec.ts";
@@ -186,6 +189,85 @@ export function updatePr(ws: WsCtx, ref: string, opts: CommitOptions): PrUpdateR
     revisionCount: readRevisions(entity.fm).length + 1,
     run: runPlan(ws, plan, { commit: opts.commit }),
   };
+}
+
+/* ------------------------------------------------------ review requests */
+
+export interface RequestReviewResult {
+  entity: EntityRecord;
+  /** The people this changed the file for, as it now spells them. */
+  changed: string[];
+  /** The people it already agreed about. */
+  unchanged: string[];
+  run: RunPlanResult;
+}
+
+/**
+ * Ask people to review a pull request, or take them off the list (spec 02 §2.7).
+ *
+ * Requesting a review from the author is refused. It is a mistake essentially
+ * every time — the reviewers block ignores them, so the request could never be
+ * answered — and refusing here is cheaper than explaining an entry that never
+ * changes. A file that names them anyway stays valid: doctor enforces the
+ * spec, not this command's manners.
+ */
+export function requestReview(
+  ws: WsCtx,
+  ref: string,
+  people: readonly string[],
+  opts: CommitOptions & { remove?: boolean },
+): RequestReviewResult {
+  const entity = findEntity(ws, "pr", ref);
+  const author = typeof entity.fm.author === "string" ? entity.fm.author : "";
+  if (!opts.remove) {
+    // Only what this command is being asked to write: a `reviewer` entry
+    // somebody typed by hand and got wrong is doctor's business, and refusing
+    // to act on the file until they fix it would help nobody.
+    const nonsense = people.filter((person) => parsePerson(person) === null);
+    if (nonsense.length > 0) {
+      wsFail("invalid-input", `'${nonsense[0]}' is not a person`, [
+        "a reviewer is an address, optionally with a name: 'alice@example.com' or 'Alice <alice@example.com>'",
+        "a review is answered by somebody, so there is no way to write down a team (§2.7)",
+      ]);
+    }
+    if (author !== "") {
+      const own = people.filter((person) => sameEmail(emailOf(person), emailOf(author)));
+      if (own.length > 0) {
+        wsFail("precondition", `#${entity.id} is ${author}'s own pull request`, [
+          "a pull request's author is not among its reviewers, so the request would never be answered",
+        ]);
+      }
+    }
+  }
+
+  // The callback either returns or throws, so the result is set by the time
+  // `rewritePlan` hands the plan back.
+  let result!: RequestResult;
+  const plan = rewritePlan(ws.navDir, entity, () => {
+    result = planRequest(entity, people, { remove: opts.remove === true });
+    return result.plan;
+  });
+  const { changed, unchanged } = result;
+  if (changed.length === 0) {
+    // Nothing to write, so nothing is written: an empty commit saying a file
+    // already said what it says would be noise in a history people read.
+    const verb = opts.remove ? "is not asked to review" : "is already asked to review";
+    if (unchanged.length === 1) {
+      wsFail("precondition", `${unchanged[0]} ${verb} #${entity.id}`);
+    }
+    wsFail(
+      "precondition",
+      `every one of them ${opts.remove ? "is already off" : "is already on"} the reviewers of #${entity.id}`,
+      unchanged.map((person) => `  ${person}`),
+    );
+  }
+
+  return { entity, changed, unchanged, run: runPlan(ws, plan, { commit: opts.commit }) };
+}
+
+/** The address a person string identifies, for comparing two spellings of one. */
+function emailOf(person: string): string {
+  return parsePerson(person)?.email ?? person;
 }
 
 /* ------------------------------------------------------------------- review */
@@ -550,7 +632,7 @@ export interface Materialized {
  * The close itself is the ordinary shared verb, run afterwards.
  */
 export function materializePrIfAbsent(ws: WsCtx, ref: string): Materialized | null {
-  const repo = loadRepo(ws, { includeComments: false });
+  const repo = loadRepo(ws, { comments: "none" });
   const wanted = asId(ref).toLowerCase();
   const present = allEntities(repo).some(
     (entity) => entity.kind === "pr" && entity.id.startsWith(wanted),

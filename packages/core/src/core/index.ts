@@ -15,6 +15,7 @@ export * from "./ops.ts";
 export * from "./person.ts";
 export * from "./query.ts";
 export * from "./refs.ts";
+export * from "./review.ts";
 export * from "./slug.ts";
 export * from "./time.ts";
 export * from "./tree.ts";

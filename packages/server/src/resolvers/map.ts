@@ -9,6 +9,8 @@
  */
 
 import {
+  type ReviewDecision as CoreReviewDecision,
+  type ReviewState as CoreReviewState,
   type Verdict as CoreVerdict,
   type EntityKind,
   emptyQuery,
@@ -20,6 +22,8 @@ import type {
   EntityFilter,
   Status as GqlStatus,
   Kind,
+  ReviewDecision,
+  ReviewState,
   Verdict,
 } from "../generated/resolver-types.ts";
 
@@ -40,10 +44,29 @@ const KIND_IN: Record<Kind, EntityKind> = { ISSUE: "issue", PR: "pr" };
 const VERDICT_OUT: Record<CoreVerdict, Verdict> = {
   approve: "APPROVE",
   "request-changes": "REQUEST_CHANGES",
+  comment: "COMMENT",
 };
 const VERDICT_IN: Record<Verdict, CoreVerdict> = {
   APPROVE: "approve",
   REQUEST_CHANGES: "request-changes",
+  COMMENT: "comment",
+};
+
+const STATE_OUT: Record<CoreReviewState, ReviewState> = {
+  approve: "APPROVE",
+  "request-changes": "REQUEST_CHANGES",
+  commented: "COMMENTED",
+  pending: "PENDING",
+};
+const DECISION_OUT: Record<CoreReviewDecision, ReviewDecision> = {
+  approved: "APPROVED",
+  "changes-requested": "CHANGES_REQUESTED",
+  pending: "PENDING",
+};
+const DECISION_IN: Record<ReviewDecision, CoreReviewDecision> = {
+  APPROVED: "approved",
+  CHANGES_REQUESTED: "changes-requested",
+  PENDING: "pending",
 };
 
 export const toGqlStatus = (status: Status): GqlStatus => STATUS_OUT[status];
@@ -51,6 +74,9 @@ export const toCoreStatus = (status: GqlStatus): Status => STATUS_IN[status];
 export const toGqlKind = (kind: EntityKind): Kind => KIND_OUT[kind];
 export const toCoreKind = (kind: Kind): EntityKind => KIND_IN[kind];
 export const toCoreVerdict = (verdict: Verdict): CoreVerdict => VERDICT_IN[verdict];
+export const toGqlReviewState = (state: CoreReviewState): ReviewState => STATE_OUT[state];
+export const toGqlDecision = (decision: CoreReviewDecision): ReviewDecision =>
+  DECISION_OUT[decision];
 export const toGqlLevel = (level: "error" | "warning"): DiagnosticLevel =>
   level === "error" ? "ERROR" : "WARNING";
 
@@ -82,6 +108,10 @@ export function toQuery(filter: EntityFilter | null | undefined): Query {
   if (filter.assignees) query.assignees = [...filter.assignees];
   if (filter.authors) query.authors = [...filter.authors];
   if (filter.milestones) query.milestones = [...filter.milestones];
+  if (filter.features) query.features = [...filter.features];
+  if (filter.reviewers) query.reviewers = [...filter.reviewers];
+  if (filter.reviews) query.reviews = filter.reviews.map((decision) => DECISION_IN[decision]);
+  if (filter.awaiting) query.awaiting = [...filter.awaiting];
   if (filter.text) query.text = [...filter.text];
   return query;
 }

@@ -4,13 +4,17 @@
  * branch the server is on decides what it can read and what it can write.
  *
  * The fixture is arranged around that. One pull request is on the branch the
- * clone is checked out at — readable and commentable. The other is on a branch
- * the clone has only fetched — findable with `allRefs`, readable, and not
- * commentable. Proving the second refuses, and says which branch to serve, is
- * the point of this file.
+ * clone is checked out at — readable and writable. The other is on a branch the
+ * clone has only fetched — findable with `allRefs`, readable, and writable by
+ * nobody. Proving the second refuses, and says which branch to serve, is the
+ * point of this file.
+ *
+ * The unserved one is also where the review request is asserted, for the same
+ * reason: nothing here can write to it, so what it asks of the signed-in person
+ * stays outstanding however much the rest of the suite reviews the other.
  */
 
-import { expect, test, toasts } from "./helpers/fixtures.ts";
+import { chooseOrCreate, expect, test, toasts } from "./helpers/fixtures.ts";
 
 test("lists what the checkout holds, and no more", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/prs`);
@@ -108,6 +112,80 @@ test("refuses a comment on a branch it does not serve, and says which", async ({
 
   // And the form stops offering, rather than letting it be tried again.
   await expect(signedIn.getByTestId("review-submit")).toBeDisabled();
+});
+
+test("shows who was asked to review, and what each of them said", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0001`);
+  const states = signedIn.getByTestId("reviewer-states");
+  // Asked in the fixture, and answered there too.
+  await expect(states.getByTestId("reviewer-someone@example.invalid")).toContainText("Approved");
+});
+
+test("asks somebody else to review, and shows them as pending", async ({ signedIn, stack }) => {
+  // A fresh address each run: the suite shares one repository, so a request
+  // made here must not depend on nobody having made it before.
+  const who = `reviewer-${Date.now()}@example.invalid`;
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0001`);
+
+  await signedIn.getByTestId("edit-reviewers").click();
+  await chooseOrCreate(signedIn, "input-reviewers", who);
+  await signedIn.getByTestId("save-reviewers").click();
+
+  await expect(toasts(signedIn)).toContainText("docs(pr): edit #bbbb0001");
+  await expect(signedIn.getByTestId(`reviewer-${who}`)).toContainText("Pending");
+});
+
+test("records a review that judges nothing", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0001`);
+  await signedIn.getByTestId("review-body").fill("Read it through; nothing to add.");
+  await signedIn.getByRole("radio", { name: "Reviewed, no verdict" }).check();
+  // It binds to a revision like any review, so the fields appear.
+  await expect(signedIn.getByTestId("review-revision")).toBeVisible();
+  await signedIn.getByTestId("review-submit").click();
+
+  await expect(toasts(signedIn)).toContainText("Review recorded");
+  await expect(signedIn.getByTestId("pr-comment-thread")).toContainText("Reviewed");
+});
+
+test("says a review is pending on one nobody has answered", async ({ signedIn, stack }) => {
+  // The unserved pull request: nothing in this suite can write to it, so its
+  // request stays outstanding however much the rest of the suite reviews.
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0002`);
+  await expect(signedIn.getByTestId("review-decision")).toContainText("Review pending");
+  await expect(signedIn.getByTestId("reviewer-person@example.invalid")).toContainText("Pending");
+});
+
+test("finds the reviews this person still owes", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/prs?refs=all`);
+  await signedIn.getByTestId("awaiting-me").click();
+  await expect(signedIn).toHaveURL(/awaiting=me/);
+
+  // Asked of the signed-in person and unanswered; the other one asked somebody
+  // else, so it drops out.
+  await expect(signedIn.getByTestId("pr-row-bbbb0002")).toBeVisible();
+  await expect(signedIn.getByTestId("pr-row-bbbb0001")).toHaveCount(0);
+
+  await signedIn.getByTestId("awaiting-me").click();
+  await expect(signedIn).not.toHaveURL(/awaiting=me/);
+  await expect(signedIn.getByTestId("pr-row-bbbb0001")).toBeVisible();
+});
+
+test("refuses to change the reviewers of a branch it does not serve", async ({
+  signedIn,
+  stack,
+}) => {
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0002`);
+  await signedIn.getByTestId("edit-reviewers").click();
+  await chooseOrCreate(signedIn, "input-reviewers", "nobody@example.invalid");
+  await signedIn.getByTestId("save-reviewers").click();
+
+  const alert = signedIn.getByTestId("unserved-branch");
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText("feat/unserved");
+
+  // And it stops offering, as the comment form does: a second attempt would be
+  // refused the same way, and typing into one is worse than not being asked.
+  await expect(signedIn.getByTestId("edit-reviewers")).toHaveCount(0);
 });
 
 test("says so when there is no such pull request", async ({ signedIn, stack }) => {

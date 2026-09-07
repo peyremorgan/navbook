@@ -4,6 +4,7 @@ author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-08-02T15:09:41Z
 labels: [milestone-2, doctor]
 resolution: fixed
+feature: doctor
 ---
 
 Implement `nav doctor` over the tree and `--staged`, exit 2 on errors and 0 on warnings.

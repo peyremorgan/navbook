@@ -30,7 +30,11 @@ with the user's confirmation).
 - Author identity is taken from `git config user.name` / `user.email`.
 - Machine output: every listing command accepts `--json` (one JSON object per
   entity, schema mirroring the frontmatter plus `id`, `slug`, `status`,
-  `path`).
+  `path`). `nav pr show --json` additionally carries `review`, the derived
+  state of [02 §2.7](02-data-model.md), so a script need not re-derive it. It
+  is on `show` and not on `list` because `show` has already read every comment
+  it is computed from, and a listing that read them all to fill in one column
+  would pay for it on every entity in the tree.
 - Exit codes: `0` success; `1` operational error (not found, ambiguous,
   malformed input); `2` format violation detected (doctor errors).
 
@@ -43,9 +47,9 @@ both entity kinds:
 nav {issue | pr} {open | list | show | edit | comment | close | reopen | delete}
 ```
 
-plus three PR-only verbs (`update`, `review`, `merge`) and repository-level
-utilities at the root of the command tree (`nav id`, `nav doctor`, and the
-setup commands). A verb given an ID of the
+plus four PR-only verbs (`update`, `request`, `review`, `merge`), the `nav feature`
+family below, and repository-level utilities at the root of the command tree
+(`nav id`, `nav doctor`, and the setup commands). A verb given an ID of the
 other kind MUST fail with a pointer to the right noun (e.g.
 `#dk3mp2x9 is a pull request — use 'nav pr show'`).
 
@@ -79,7 +83,7 @@ other kind MUST fail with a pointer to the right noun (e.g.
 
 ### Issues — `nav issue <verb>`
 
-- `nav issue open <title> [--label L]... [--assignee EMAIL] [--milestone M] [--parent <id>] [-m DESC | --edit]`
+- `nav issue open <title> [--label L]... [--assignee EMAIL] [--milestone M] [--feature SLUG]... [--parent <id>] [-m DESC | --edit]`
   — mint an ID, create `issues/open/<id>-<slug>/issue.md`. Prints path and
   `#id`. `--edit` (default when no `-m`) opens `$EDITOR` on the new file.
   `--parent` files it as a subtask, writing both sides of the link ([2.5](02-data-model.md))
@@ -147,9 +151,9 @@ other kind MUST fail with a pointer to the right noun (e.g.
 
 ### Pull requests — `nav pr <verb>`
 
-The eight shared verbs, plus `update`, `review`, and `merge`:
+The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
 
-- `nav pr open [--target BRANCH] [--title T] [--draft]` — on the current
+- `nav pr open [--target BRANCH] [--title T] [--draft] [--reviewer EMAIL]... [--feature SLUG]...` — on the current
   branch: mint an ID, create `prs/open/<id>-<slug>/pr.md` with `source` = the
   current branch, `target` (default: the default branch), and one revision
   entry pinning `head` = current `HEAD` SHA and `base` = `git merge-base HEAD
@@ -174,9 +178,35 @@ The eight shared verbs, plus `update`, `review`, and `merge`:
   request on the branch that holds it.
 - `nav pr update <id>` — append a revision entry for the current `HEAD`
   (refuses if `HEAD` equals the last recorded head).
-- `nav pr review <id> [--approve | --request-changes] [-m TEXT | --edit] [--file PATH --line N[-M]]`
+- `nav pr request <id> <email>... [--remove]` — add the named people to
+  `reviewer:` on `pr.md` ([02 §2.7](02-data-model.md)), or take them off with
+  `--remove`. Addresses are matched as identities, not as text: a person
+  already listed is not listed twice under another spelling of the same
+  address, and `--remove` takes off whichever spelling the file carries.
+
+  It MUST refuse to ask somebody who is not a person ([02 §2.4](02-data-model.md)),
+  rather than write a file `doctor` would reject; `--remove` accepts any name,
+  since taking one off is how a hand-written mistake is undone. It MUST refuse
+  to request a review from the pull request's own author. And it MUST exit 1
+  when it would change nothing — every name already listed, or none of them
+  listed for `--remove` — naming what it found, since a commit saying a file
+  already says what it says is noise in a history people read.
+
+  The commit subjects are `docs(pr): request review #<id>` and
+  `docs(pr): remove reviewer #<id>`.
+- `nav pr review <id> [--approve | --request-changes | --comment] [-m TEXT | --edit] [--file PATH --line N[-M]]`
   — create a review comment bound to the PR's latest revision (`revision:` set
-  automatically; `--revision SHA` to bind an older one).
+  automatically; `--revision SHA` to bind an older one). With no verdict flag
+  the verdict is `comment` ([02 §2.6](02-data-model.md)): this verb files
+  reviews, and a review that judges nothing is still a review, recording that
+  its author read the revision it names. To say something without reading a
+  revision, use `nav pr comment`, which binds to nothing and carries no
+  verdict.
+
+  The one exception is `--file` without a verdict flag, which anchors a comment
+  to a line without judging anything: an inline note is discussion about a
+  place in the diff, and turning every one of them into a review would say its
+  author had read the whole revision.
 - `nav pr merge <id> [--no-ff]` — from the target branch: `git merge` the
   source branch with the PR directory moved to `prs/merged/` inside the merge
   commit, then record the `merged:` block in a follow-up commit
@@ -192,6 +222,37 @@ The eight shared verbs, plus `update`, `review`, and `merge`:
   refuses while any path is still unmerged, and infers the pull request from
   `MERGE_HEAD` when no ID is given.
 
+### Features — `nav feature <verb>`
+
+A feature ([02 §2.11](02-data-model.md)) has no lifecycle and no discussion, so
+it borrows none of the shared verbs: there is nothing to close, and the
+discussion belongs to the issues attached to it.
+
+- `nav feature open <title> [--slug SLUG] [-m TEXT | --edit]` — create
+  `specs/<slug>/feature.md`, deriving the slug from the title when `--slug` is
+  absent. It MUST refuse a slug that already names a feature. The summary MAY
+  be empty, unlike an issue's description.
+- `nav feature list [--json]` — every feature, with how many documents it holds
+  and how much of the work attached to it is open.
+- `nav feature show <slug> [--commits N] [--json]` — the feature, its
+  documents, the issues and pull requests that name it, and the commits that
+  have touched it (below). `--commits 0` omits the history.
+- `nav feature edit <slug>` — open `feature.md` in `$EDITOR`.
+- `nav feature spec add <slug> <title> [--file NAME] [-m TEXT | --edit]` — add a
+  specification document, naming the file from the title unless `--file` says
+  otherwise. It MUST refuse a name outside the grammar of
+  [02 §2.11](02-data-model.md), `feature.md` included.
+- `nav feature spec edit <slug> <file>` — open a document in `$EDITOR`.
+- `nav feature spec list <slug> [--json]` — the documents a feature holds.
+
+**Commits that touched a feature.** `show` reports a commit when it changed
+anything under `specs/<slug>/`, when it changed the directory of an issue or
+pull request that names the feature, or when its message references one of
+those entities by ID — in prose or in a `Refs:`/`Closes:` trailer
+([02 §2.9](02-data-model.md)). That last case is how a commit which only
+touches code joins the story, through a trailer it already carries. The listing
+is derived on demand and never stored.
+
 ### Query grammar
 
 Used by `nav issue list` and `nav pr list`; the noun determines the entity
@@ -203,13 +264,26 @@ kind. Terms AND together:
 | `label:L` | `L` ∈ `labels` |
 | `assignee:EMAIL` | Assignee address (case-insensitive; substring after `@` allowed) |
 | `author:EMAIL` | Author address (same matching) |
+| `reviewer:EMAIL` | `EMAIL` ∈ the PR's `reviewer` ([02 §2.7](02-data-model.md)); same matching. PRs only |
+| `review:pending\|approved\|changes-requested` | The PR's derived decision ([02 §2.7](02-data-model.md)). PRs only |
+| `awaiting:EMAIL` | `EMAIL` is asked to review and is `pending` on the latest revision. PRs only |
 | `milestone:M` | Exact milestone |
+| `feature:SLUG` | `SLUG` ∈ the entity's `feature` ([02 §2.11](02-data-model.md)) |
 | bare word / quoted string | Case-insensitive substring of title, description, or any comment body |
 
 A query naming no status matches every status. The `status:open` default above
 is one the `list` commands supply for themselves, not a property of the
 grammar: other front ends over the same query — the API of
 [06 §6.3](06-future.md) among them — list every status until asked to narrow.
+
+`reviewer`, `review` and `awaiting` describe something only a pull request has,
+so `nav issue list` MUST reject them the way it rejects `status:merged`, rather
+than matching nothing. The last two read the comment files, as a bare-word
+search does, since that is where the verdicts they judge live.
+
+`nav pr list` shows a `reviewer` column when any pull request listed names one,
+as it does for `assignee`, and a `review` column carrying the derived decision.
+`nav pr show` renders each person's state under the reviewers it lists.
 
 ### Root utilities
 
@@ -239,6 +313,8 @@ Doctor checks (E = error → exit 2, W = warning → exit 0 with report):
 | D10 | Frontmatter timestamps wildly inconsistent with git history | W |
 | D11 | `parent` and `subtasks` disagree, or a link names a pull request ([2.5](02-data-model.md)) | E |
 | D12 | The `parent` chain loops, an issue naming itself included | E |
+| D13 | The layout and schema of `specs/`: a feature directory name that is not a slug, a file directly in `specs/`, a feature directory with no `feature.md`, or a `feature.md` or document missing a required key ([2.11](02-data-model.md)) | E |
+| D14 | An entity's `feature` names a slug with no `specs/<slug>/` directory in this tree | W |
 
 D8 MUST NOT report a trailer naming an entity that a `docs(<kind>): delete
 #<id>` commit later removed, or that such a commit's `Deletes:` trailers name.
@@ -247,8 +323,14 @@ the warning would name nothing anyone can act on. Prose and frontmatter
 references to a deleted entity are still reported: those live in files the user
 can edit.
 
-D11 and D12 are decidable from the tree alone, so unlike D7, D9 and D10 they
-run under `--staged` and the pre-commit hook blocks a link broken by hand. A
+D14 is a warning for D8's reason: the feature may have been created on a branch
+nobody has fetched, and an error would make the order in which two branches
+land a correctness question. D13 is an error because a directory that violates
+the layout can be read by nothing.
+
+D11, D12, D13 and D14 are decidable from the tree alone, so unlike D7, D9 and
+D10 they run under `--staged` and the pre-commit hook blocks a link broken by
+hand. A
 D11 repair is not offered there, though: it rewrites a whole file, and under
 `--staged` that file's content came from the index, so writing it back into the
 working tree would discard whatever was not staged.

@@ -32,6 +32,12 @@ short-lived branches, not parked inside long-lived feature branches.
   (e.g. `docs(issue): close #bqlybac0`, `docs(pr): comment on #dk3mp2x9`), so
   history readers can filter them at a glance. A tracker-wide change that names
   no entity uses the unscoped `docs:` (e.g. `docs: initialize navbook`).
+- A change to a feature ([02 §2.11](02-data-model.md)) uses the scope
+  `feature`, and names the feature by its slug where an entity would be named
+  by its ID: `docs(feature): create auth`, `docs(feature): edit auth`. A change
+  to one of its documents names the document too, since the slug alone would
+  not say which file moved: `docs(feature): add auth/login-flow.md`. Such a
+  commit carries no trailer — there is no ID for one to name.
 - To view code history without tracker noise:
   `git log -- ':!.navbook'`. CI pipelines that should not run for tracker-only
   commits SHOULD use an equivalent path filter on `.navbook/`.
@@ -50,7 +56,10 @@ The format is designed so that the *frequency* of conflicts tracks the
 | Two new issues/PRs | Distinct directories | Merges clean, always (random IDs) |
 | Two comments, same entity | Distinct files | Merges clean, always |
 | Comment + metadata edit, same issue | Distinct files (`comments/*` vs `issue.md`) | Merges clean |
+| Review + metadata edit, same PR | Distinct files (`comments/*` vs `pr.md`) | Merges clean. This is why answering a review request writes no key ([02 §2.7](02-data-model.md)): a review that cleared one would land in `pr.md` and take the row below instead |
 | Two edits of the same `issue.md`/`pr.md` | Textual conflict in a small YAML+Markdown file | Resolve by hand; both intents usually compose (e.g. keep both labels) |
+| Two edits of the same specification document | Textual conflict in a Markdown file | Resolve by hand, as for any prose the two of you both changed |
+| Two new features, or two documents added to one feature | Distinct files | Merges clean, always |
 | Comment added + issue closed (dir moved), entity already had comments | Directory rename on one side, file addition on the other | Git ≥ 2.18 relocates the comment into the moved directory. Clean with `merge.directoryRenames=true`; with git's default that same relocation is reported as a "file location" conflict to confirm. See 3.3.1 |
 | Comment added + issue closed (dir moved), entity had **no** comments yet | Same, but `comments/` is new on one side and renamed on neither | Git cannot infer the move and leaves the comment at the old path. `doctor` reports the orphan; `--fix` moves it. See 3.3.1 |
 | Both sides close the same issue | Identical rename | Merges clean if `issue.md` edits are identical; else a small content conflict (e.g. two different `resolution:` values — pick one) |
@@ -164,7 +173,10 @@ spec-level facts, not bugs:
 1. **The reviewed SHA can never contain its own review.** Approvals are commits
    *after* the `revision.head` they approve. Verifiers MUST check that a
    verdict's `revision` matches a recorded revision entry, not the commit
-   containing the verdict.
+   containing the verdict. The request that preceded the review is on `pr.md`
+   and so *is* inside the reviewed state — which is why being asked is a key on
+   the PR and being answered is not ([02 §2.7](02-data-model.md)): only one of
+   the two can ever be recorded where the reviewer is writing.
 2. **The target branch does not show open PRs.** Open PRs are discovered by
    enumerating branches (`nav pr list` scans
    `.navbook/prs/open/` across local and fetched remote branches). This is

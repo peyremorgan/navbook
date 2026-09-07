@@ -1,0 +1,11 @@
+spec-version: 1
+description: a document is filed under the name its title slugs to, and the commit names the file
+init: {from: before}
+run:
+  command: [feature, spec, add, auth, "Session policy", -m, "Sessions expire after 30 days.", --commit]
+  env: {NAV_NOW: "2026-08-10T12:00:00Z"}
+expect:
+  exit: 0
+  stdout: expected/stdout.txt
+  tree: expected/tree
+  commits: ["docs(feature): add auth/session-policy.md\n"]

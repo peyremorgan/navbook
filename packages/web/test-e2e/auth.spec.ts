@@ -32,6 +32,20 @@ test("comes back to the page that was asked for, not the front one", async ({ pa
   await expect(page.getByTestId("issue-title")).toContainText("Sign-in is unreliable");
 });
 
+test("comes back to the open issues after walking in through the root", async ({ page, stack }) => {
+  // The front door and the guard have to agree. `/` is a redirect record, so
+  // an anonymous visitor there is bounced twice — once by the router and once
+  // by the middleware — and what they must not end up with is the unfiltered
+  // listing that `/` used to mean.
+  await page.goto(stack.appUrl);
+  await page.waitForSelector("#email");
+  await page.click("button[type=submit]");
+
+  await page.waitForURL(`${stack.appUrl}/issues?status=open`);
+  await expect(page.getByTestId("issue-list")).toBeVisible();
+  await expect(page.getByTestId("filter-status-open")).toHaveAttribute("aria-pressed", "true");
+});
+
 test("shows who the server thinks is acting", async ({ page, stack }) => {
   await page.goto(`${stack.appUrl}/issues`);
   await page.waitForSelector("#email");

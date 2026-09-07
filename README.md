@@ -59,16 +59,36 @@ conflict to confirm. With it, that merge is clean.
 │   │       └── comments/
 │   │           └── 2026-08-03T141207Z-t5kr1gq6.md
 │   └── closed/
-└── prs/
-    ├── open/
-    ├── merged/
-    └── closed/
+├── prs/
+│   ├── open/
+│   ├── merged/
+│   └── closed/
+└── specs/
+    └── auth/
+        ├── feature.md
+        └── login-flow.md
 ```
 
 An issue is a Markdown file with YAML frontmatter. Its status is which directory
 it sits in. A comment is one file, which is why two people commenting at once
 can never conflict. Every forge file browser, every editor, `ls` and `cat` are
 complete Navbook clients for reading.
+
+`specs/` holds **features** — the standing concepts work attaches to. A feature
+is a directory named after itself, holding a `feature.md` and however many
+specification documents describe it. An issue joins one by naming it:
+
+```console
+$ nav feature open "Authentication" --slug auth -m "Signing in, sessions, tokens."
+Created .navbook/specs/auth/  (auth)
+
+$ nav issue open "Login times out" --feature auth -m "Aborts after 5 s on 3G."
+$ nav feature show auth
+```
+
+Nothing lists the members on the feature's side, so two people attaching two
+issues touch two different files. `nav feature show` works the membership out
+from the issues, and reads the commits that touched them straight out of git.
 
 **The files are the product.** The `nav` CLI mints IDs, renders listings and
 validates the tree, but nothing requires it: creating, commenting on, closing
@@ -109,7 +129,9 @@ Everything is noun-verb, with one verb vocabulary shared by both entity kinds.
 
 ```
 nav {issue|pr} {open|list|show|edit|comment|close|reopen|delete}
-nav pr {update|review|merge}
+nav pr {update|request|review|merge}
+nav feature {open|list|show|edit}
+nav feature spec {add|edit|list}
 nav {init|id|doctor|install|uninstall}
 ```
 
@@ -125,9 +147,15 @@ usually enough. A full directory name works too.
 | `nav issue show <id> [--depth N]` | Render it, with the title and status of its parent and of the subtasks beneath it. |
 | `nav issue delete <id>` | Remove its directory entirely — for the duplicate you filed twice. Its subtasks survive as top-level issues unless you pass `--recursive`. Asks first if it holds uncommitted changes; `--force` skips that. |
 | `nav pr open [--target BRANCH]` | Open a PR from the current branch, pinning the exact head and merge base under review. |
-| `nav pr review <id> --approve` | Record a verdict bound to a specific revision. |
+| `nav pr request <id> <email>` | Ask someone to review it. Being listed is the request; nothing records it answered, and a new revision asks again. |
+| `nav pr review <id> --approve` | Record a verdict bound to a specific revision. Without a flag the verdict is `comment`: a review that judges nothing. |
+| `nav pr list awaiting:me@example.com` | Pull requests waiting on one person. `reviewer:` and `review:approved` filter the same listing. |
 | `nav pr list --all-refs` | Find PRs on branches you have fetched but not checked out. |
 | `nav pr merge <id>` | Merge into the checked-out target, archiving the discussion into its history. |
+| `nav feature open <title>` | Create a feature under `specs/`. `--slug` names its directory; the title otherwise. |
+| `nav feature show <slug>` | Its documents, the issues and pull requests that name it, and the commits that touched any of them. |
+| `nav feature spec add <slug> <title>` | Add a specification document. `nav feature spec edit` opens one in `$EDITOR`. |
+| `nav issue open <title> --feature <slug>` | File it against a feature. Repeatable; `nav issue list feature:auth` finds them again. |
 | `nav doctor [--fix]` | Check the tree against the specification. |
 
 `--commit` on any mutating command wraps the change in a well-formed
@@ -141,9 +169,9 @@ commit.
 nav issue list status:closed label:bug assignee:example.com "timeout"
 ```
 
-`status:`, `label:`, `assignee:`, `author:`, `milestone:`, and bare words that
-match the title, description or any comment body. Terms AND together; the
-default query is `status:open`.
+`status:`, `label:`, `assignee:`, `author:`, `milestone:`, `feature:`, and bare
+words that match the title, description or any comment body. Terms AND
+together; the default query is `status:open`.
 
 ## Why the design is what it is
 
@@ -168,6 +196,50 @@ judged, so a force-push can never inherit a stale approval.
 Developed and tested on Linux and macOS. Windows is not guaranteed; use
 [Git Bash](https://gitforwindows.org/) or WSL, where Navbook works because both
 provide the POSIX shell the hooks and completions expect.
+
+## Deploying
+
+The API and the web client ship as two containers, described by
+[`compose.yaml`](compose.yaml) and configured by one file:
+
+```sh
+cp .env.example .env      # then edit it
+docker compose up -d --build
+```
+
+[`.env.example`](.env.example) names every key with the value it takes when you
+leave it alone, and is the reference for what each one does. Four things have
+to exist first:
+
+- **A Traefik** with its Docker provider watching a network the containers can
+  join (`docker network create traefik`). Nothing about Traefik itself is
+  configured here — the containers carry host rules and it does the rest.
+- **Two hostnames**, one for the client and one for the API. They need not
+  share a domain: the API answers any origin that brings an `Authorization`
+  header.
+- **An identity provider**, because authentication has no off switch. What it
+  has to mint is in the [web client's README](packages/web/README.md#deploying-it).
+- **A repository, and a token that may push to it.** The token is what commits
+  reach the remote as; the person a commit is *for* comes from their own token
+  and is recorded as `author:`.
+
+The API container makes its own clone on the first start and keeps it in a
+volume. That volume is not a database — it can be deleted, and the next start
+fetches the repository again. Changing any value in `.env` is an edit and a
+restart, because both containers read their configuration when they start:
+nothing is baked into an image, including which API the client talks to.
+
+Two things worth knowing when something goes wrong. A push the server cannot
+land is reported as `SYNC_CONFLICT` and **left committed in the clone** for a
+person to reconcile — `docker compose exec api sh` puts you in it, and the
+container will not throw that work away on the next restart. And the server
+refuses to start on a clone with a dirty tree or a detached HEAD, which is the
+same thing said earlier: it would otherwise surface as a puzzling failure on
+somebody's first mutation.
+
+The details of each half — every server option, and what the client reads at
+boot — are in [`packages/server`](packages/server/README.md#deploying-it) and
+[`packages/web`](packages/web/README.md#deploying-it).
 
 ## Documentation
 

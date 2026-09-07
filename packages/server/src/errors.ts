@@ -26,6 +26,7 @@ const CODES: Record<WorkspaceErrorCode, string> = {
   precondition: "PRECONDITION",
   "unrelated-staged": "UNRELATED_STAGED",
   frontmatter: "FRONTMATTER",
+  "stale-content": "STALE_CONTENT",
   "merge-conflict": "MERGE_CONFLICT",
   "merge-unresolved": "MERGE_UNRESOLVED",
   "merge-ambiguous": "MERGE_AMBIGUOUS",

@@ -30,6 +30,14 @@ const SHOW = `query Show($ref: ID!) {
   issue(ref: $ref) { id path comments { id path } }
 }`;
 
+const CREATE_FEATURE = `mutation Create($input: CreateFeatureInput!) {
+  createFeature(input: $input) { feature { slug path } }
+}`;
+
+const ADD_SPEC = `mutation AddSpec($input: AddSpecInput!) {
+  addSpec(input: $input) { spec { path } feature { path specs { path } } }
+}`;
+
 describe("a renamed Navbook directory, over HTTP", () => {
   let h: Harness;
   let issue: string;
@@ -76,10 +84,26 @@ describe("a renamed Navbook directory, over HTTP", () => {
     assert.match(data.issue.comments[0]?.path ?? "", /^\.issues\//);
   });
 
+  it("reports a feature's paths under the configured name", async () => {
+    const created = ok<{ createFeature: { feature: { path: string } } }>(
+      await h.gql(CREATE_FEATURE, { input: { title: "Authentication", slug: "auth" } }),
+    );
+    assert.equal(created.createFeature.feature.path, ".issues/specs/auth");
+
+    const added = ok<{ addSpec: { spec: { path: string }; feature: { path: string } } }>(
+      await h.gql(ADD_SPEC, { input: { feature: "auth", title: "Login flow", body: "Body." } }),
+    );
+    assert.equal(added.addSpec.spec.path, ".issues/specs/auth/login-flow.md");
+    assert.equal(added.addSpec.feature.path, ".issues/specs/auth");
+    assert.ok(existsSync(join(h.fixture.server.dir, NAV_ROOT, "specs", "auth", "feature.md")));
+  });
+
   it("never names the default directory in any response", async () => {
     const responses = [
       await h.gql(SHOW, { ref: issue }),
       await h.gql(`query { issues { id path } }`),
+      await h.gql(`query { features { slug path specs { path } baseSha } }`),
+      await h.gql(`query { feature(slug: "auth") { path commits(limit: 5) { sha } } }`),
       await h.gql(`query { doctor { diagnostics { check level path message } } }`),
     ];
     for (const response of responses) {

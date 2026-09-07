@@ -6,7 +6,9 @@
  * (spec 06 §6.6 rejects anything index-like), so paging and sorting are the
  * client's job — see `app/utils/paging.ts`. It also means a listing already
  * holds every label, assignee and milestone in play, which is where the filter
- * bar's suggestions come from; there is no registry to query.
+ * bar's suggestions come from; there is no registry to query. Features are the
+ * exception: `FEATURES_QUERY` is a real registry, because a feature exists
+ * whether or not any issue names it yet.
  */
 
 import { graphql } from "~~/src/generated/gql";
@@ -48,6 +50,22 @@ export const PR_QUERY = graphql(`
   query Pr($ref: ID!) {
     pr(ref: $ref) {
       ...PrDetail
+    }
+  }
+`);
+
+export const FEATURES_QUERY = graphql(`
+  query Features {
+    features {
+      ...FeatureListItem
+    }
+  }
+`);
+
+export const FEATURE_QUERY = graphql(`
+  query Feature($slug: String!) {
+    feature(slug: $slug) {
+      ...FeatureDetail
     }
   }
 `);

@@ -72,6 +72,21 @@ export const REOPEN_ISSUE = graphql(`
   }
 `);
 
+export const UPDATE_PR = graphql(`
+  mutation UpdatePr($input: UpdatePrInput!) {
+    updatePr(input: $input) {
+      pr {
+        ...PrDetail
+      }
+      commit {
+        committed
+        subject
+        pushed
+      }
+    }
+  }
+`);
+
 export const ADD_COMMENT = graphql(`
   mutation AddComment($input: AddCommentInput!) {
     addComment(input: $input) {
@@ -119,6 +134,72 @@ export const UNLINK_ISSUE = graphql(`
         ...IssueDetail
       }
       previousParentId
+      commit {
+        committed
+        subject
+        pushed
+      }
+    }
+  }
+`);
+
+export const CREATE_FEATURE = graphql(`
+  mutation CreateFeature($input: CreateFeatureInput!) {
+    createFeature(input: $input) {
+      feature {
+        ...FeatureDetail
+      }
+      commit {
+        committed
+        subject
+        pushed
+      }
+    }
+  }
+`);
+
+export const UPDATE_FEATURE = graphql(`
+  mutation UpdateFeature($input: UpdateFeatureInput!) {
+    updateFeature(input: $input) {
+      feature {
+        ...FeatureDetail
+      }
+      commit {
+        committed
+        subject
+        pushed
+      }
+    }
+  }
+`);
+
+export const ADD_SPEC = graphql(`
+  mutation AddSpec($input: AddSpecInput!) {
+    addSpec(input: $input) {
+      feature {
+        ...FeatureDetail
+      }
+      spec {
+        ...SpecDetail
+      }
+      commit {
+        committed
+        subject
+        pushed
+      }
+    }
+  }
+`);
+
+export const UPDATE_SPEC = graphql(`
+  mutation UpdateSpec($input: UpdateSpecInput!) {
+    updateSpec(input: $input) {
+      feature {
+        ...FeatureDetail
+      }
+      spec {
+        ...SpecDetail
+      }
       commit {
         committed
         subject

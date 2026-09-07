@@ -87,6 +87,11 @@ off if reaching it at all is more than you want to offer.
   that lets somebody set an unverified email lets them author as that person.
   Tokens must carry an expiry; ones without are refused.
 
+[`compose.yaml`](../../compose.yaml) arranges all of that in a container: it
+makes the clone on the first start, gives it an identity through the
+environment rather than the volume, and pushes with a token. The
+[root README](../../README.md#deploying) describes it.
+
 ## The API
 
 `schema.graphql` is the contract, and it ships with the package. The types
@@ -114,12 +119,12 @@ mutation {
 Failures carry a machine-readable `extensions.code`: every
 `WorkspaceErrorCode` from the core library (`NOT_FOUND`, `AMBIGUOUS`,
 `PRECONDITION`, …), plus `UNAUTHENTICATED`, `SYNC_CONFLICT`,
-`SYNC_FAILED`, `SYNC_PUSH_REJECTED`, `REPARENT_REQUIRED`, and
+`SYNC_FAILED`, `SYNC_PUSH_REJECTED`, `REPARENT_REQUIRED`, `STALE_CONTENT`, and
 `GIT_ERROR`. A `GIT_ERROR` says only that a git command failed; what git
 actually said goes to the server's log, because its stderr can carry the
 remote's URL, server-side paths, and hook output.
 
-Two mutations have a shape worth knowing:
+Three mutations have a shape worth knowing:
 
 - **`linkIssue`** refuses with `REPARENT_REQUIRED` when the issue already has a
   parent, naming the one it has now. Moving a subtask changes a structure
@@ -127,11 +132,29 @@ Two mutations have a shape worth knowing:
 - **`updateIssue`** distinguishes an absent field from an explicit `null`: the
   first leaves the key alone, the second clears it. Frontmatter keys the schema
   does not name are always preserved.
+- **`updateSpec`** and **`updateFeature`** require the `baseSha` the editor
+  started from, and refuse with `STALE_CONTENT` when the file has moved on
+  since. A specification document is prose several people work on, and landing
+  a save on top of somebody else's paragraph is exactly the conflict this
+  server surfaces rather than resolves. Read the file again, apply the change
+  to what it says now, and save with the hash it now carries.
+
+### Features
+
+`Feature` and `Spec` project the `specs/` tree of spec 02 §2.11: an identity
+card, the documents beside it, and — derived rather than stored — the issues
+and pull requests that name the feature. `Feature.commits` is the one field
+that reads history instead of the tree: it reports commits that changed the
+feature's documents, changed a member's directory, or named a member in the
+message, which is how a commit that only touches code appears at all. It is
+bounded by `limit` and read from the served checkout, so it sees what this
+clone has fetched and no more.
 
 ### What it does not do
 
-Pull request `merge`, `open` and `update`, entity `delete`, `init`, and
-`doctor --fix` are not exposed; they are checkout-centric maintainer actions,
+Pull request `merge`, `open` and `update`, entity `delete`, `init`,
+`doctor --fix`, and renaming or deleting a feature or one of its documents are
+not exposed; they are checkout-centric maintainer actions,
 and `doctor` is read-only here. A pull request's files live on the branch it
 proposes to merge, so `prs(allRefs: true)` can find one this checkout does not
 hold, but commenting on it needs a server serving that branch — the refusal

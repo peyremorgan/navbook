@@ -85,7 +85,7 @@ function composedParent(ws: WsCtx, content: string): EntityRecord | undefined {
  * comments would be thousands of reads and parses that answer nothing.
  */
 function linkRepo(ws: WsCtx): Repo {
-  return loadRepo(ws, { includeComments: false });
+  return loadRepo(ws, { comments: "none" });
 }
 
 /** Resolve the issue named by `--parent`, failing before anything is composed. */

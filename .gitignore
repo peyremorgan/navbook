@@ -9,3 +9,7 @@ dist
 packages/web/.nuxtrc
 packages/web/test-results/
 packages/web/playwright-report/
+
+# What one deployment differs from another by: hostnames, an issuer, a token.
+# `.env.example` is the committed one, and names every key.
+.env

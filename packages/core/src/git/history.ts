@@ -1,6 +1,7 @@
 /**
  * Reading history, for the doctor checks that cannot be decided from the tree
- * alone (D7, D9, D10) and for pinning pull-request revisions.
+ * alone (D7, D9, D10), for pinning pull-request revisions, and for the commit
+ * listings a feature's timeline is built from.
  */
 
 import { git, gitMaybe, gitRun, splitLines } from "./exec.ts";
@@ -90,6 +91,66 @@ export function authoredAt(cwd: string, sha: string): Date | null {
   if (value === null) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export interface CommitSummary {
+  sha: string;
+  subject: string;
+  /** The author, formatted as `Name <email>`. */
+  author: string;
+  date: Date;
+  /** The whole message, subject included, for a caller that must read it. */
+  message: string;
+}
+
+export interface CommitSearch {
+  /** Limit to commits touching these paths; a directory means everything under it. */
+  paths?: readonly string[];
+  /** Limit to commits whose message matches this extended regular expression. */
+  grep?: string;
+  limit?: number;
+}
+
+/**
+ * Commits matching a search, newest first.
+ *
+ * One search, not two: git ANDs `--grep` with a pathspec, so asking for "this
+ * path *or* this word" in a single invocation is not a thing `git log` can be
+ * told to do. A caller that wants a union runs this twice and merges, which is
+ * what {@link featureCommits} does.
+ *
+ * The whole message comes back because the only honest way to decide whether a
+ * commit really references an entity is to parse it with the reference grammar
+ * of spec 02 §2.9. A regular expression handed to git narrows the walk; it does
+ * not get to be a second, differently-spelled definition of a reference.
+ */
+export function searchCommits(cwd: string, search: CommitSearch): CommitSummary[] {
+  const args = ["log", `--format=%x01%H%x02%aI%x02%an <%ae>%x02%s%x02%B`];
+  if (search.limit !== undefined) args.push("-n", String(search.limit));
+  if (search.grep !== undefined) args.push("--extended-regexp", `--grep=${search.grep}`);
+  if (search.paths?.length) args.push("--", ...search.paths);
+
+  const result = gitRun(args, { cwd });
+  if (result.code !== 0) return [];
+
+  const out: CommitSummary[] = [];
+  for (const record of result.stdout.split(RECORD_SEPARATOR)) {
+    if (record === "") continue;
+    const [sha, authored, author, subject, ...rest] = record.split(FIELD_SEPARATOR);
+    if (!sha || !authored || subject === undefined) continue;
+    const date = new Date(authored);
+    if (Number.isNaN(date.getTime())) continue;
+    // The message is last and may itself hold the field separator, so whatever
+    // follows the subject is the message rather than only the next field.
+    out.push({
+      sha,
+      subject,
+      author: author ?? "",
+      date,
+      message: rest.join(FIELD_SEPARATOR),
+    });
+  }
+  return out;
 }
 
 /** Resolve a revision, throwing a useful message when it does not exist. */

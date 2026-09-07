@@ -26,11 +26,28 @@ import {
 } from "./frontmatter.ts";
 import { isId } from "./id.ts";
 import { formatPerson, parsePerson } from "./person.ts";
+import { SLUG_PATTERN, slugify } from "./slug.ts";
 import { parseIso } from "./time.ts";
 
 export const SHA_PATTERN = /^[0-9a-f]{40}$/;
-export const VERDICTS = ["approve", "request-changes"] as const;
+/** The identity card at the top of a feature directory (spec 02 §2.11). */
+export const FEATURE_FILE = "feature.md";
+export const VERDICTS = ["approve", "request-changes", "comment"] as const;
 export type Verdict = (typeof VERDICTS)[number];
+
+/**
+ * The verdicts that judge the revision they name (spec 02 §2.6).
+ *
+ * `comment` is the third verdict and is not among them: it records that its
+ * author read the revision and says nothing for or against it, which is why it
+ * satisfies a request for review without ever counting toward a decision.
+ */
+export const OPINIONATED_VERDICTS = ["approve", "request-changes"] as const;
+export type OpinionatedVerdict = (typeof OPINIONATED_VERDICTS)[number];
+
+export function isOpinionated(verdict: unknown): verdict is OpinionatedVerdict {
+  return (OPINIONATED_VERDICTS as readonly unknown[]).includes(verdict);
+}
 
 export interface Problem {
   key?: string;
@@ -104,7 +121,7 @@ function normalizeKey(nav: NavDoc, key: string, rawValue: unknown): unknown {
     return stringAt(nav, [key]) ?? rawValue;
   }
   if (key === "labels" || key === "subtasks") return normalizeStringList(nav, key, rawValue);
-  if (key === "assignee") {
+  if (key === "assignee" || key === "feature" || key === "reviewer") {
     return Array.isArray(rawValue)
       ? normalizeStringList(nav, key, rawValue)
       : (stringAt(nav, [key]) ?? rawValue);
@@ -204,19 +221,44 @@ function checkLabels(parsed: ParsedFile, problems: Problem[]): void {
   }
 }
 
-function checkAssignee(parsed: ParsedFile, problems: Problem[]): void {
-  const value = parsed.fm.assignee;
+/**
+ * Check a key holding one person or a list of them — `assignee` (§2.5) and
+ * `reviewer` (§2.7), which take the same shape for the same reason: one name
+ * is the overwhelmingly common case and reads better as a scalar.
+ */
+function checkPersonList(parsed: ParsedFile, key: string, problems: Problem[]): void {
+  const value = parsed.fm[key];
   if (value === undefined || value === null) return;
+  const complain = (): void => {
+    problems.push({ key, message: `'${key}' must be a person or list of persons` });
+  };
   const entries = Array.isArray(value) ? value : [value];
   if (entries.length === 0) {
-    problems.push({ key: "assignee", message: "'assignee' must be a person or list of persons" });
+    complain();
     return;
   }
   for (const entry of entries) {
     if (typeof entry !== "string" || !parsePerson(entry)) {
-      problems.push({ key: "assignee", message: "'assignee' must be a person or list of persons" });
+      complain();
       return;
     }
+  }
+}
+
+/**
+ * `feature` names the feature directories an entity belongs to (§2.11). It is a
+ * slug or a list of slugs, and a value that is not a slug can name no directory
+ * at all, so it is a schema fault rather than a dangling reference (D14).
+ */
+function checkFeature(parsed: ParsedFile, problems: Problem[]): void {
+  const value = parsed.fm.feature;
+  if (value === undefined || value === null) return;
+  const entries = Array.isArray(value) ? value : [value];
+  const bad =
+    entries.length === 0 ||
+    entries.some((entry) => typeof entry !== "string" || !SLUG_PATTERN.test(entry));
+  if (bad) {
+    problems.push({ key: "feature", message: "'feature' must be a slug or list of slugs" });
   }
 }
 
@@ -280,12 +322,30 @@ export function readLabels(fm: Record<string, unknown>): string[] {
   return value.filter((v): v is string => typeof v === "string");
 }
 
-/** Read `assignee` (scalar or list) defensively. */
-export function readAssignees(fm: Record<string, unknown>): string[] {
-  const value = fm.assignee;
+/** Read a scalar-or-list person key defensively, ignoring malformed entries. */
+export function readPersonList(fm: Record<string, unknown>, key: string): string[] {
+  const value = fm[key];
   if (value === undefined || value === null) return [];
   const entries = Array.isArray(value) ? value : [value];
   return entries.filter((v): v is string => typeof v === "string");
+}
+
+/** Read `assignee` (scalar or list) defensively. */
+export function readAssignees(fm: Record<string, unknown>): string[] {
+  return readPersonList(fm, "assignee");
+}
+
+/** Read `reviewer` — who the pull request asks for a review (§2.7). */
+export function readReviewers(fm: Record<string, unknown>): string[] {
+  return readPersonList(fm, "reviewer");
+}
+
+/** Read `feature` (scalar or list) defensively, keeping only slugs. */
+export function readFeatures(fm: Record<string, unknown>): string[] {
+  const value = fm.feature;
+  if (value === undefined || value === null) return [];
+  const entries = Array.isArray(value) ? value : [value];
+  return entries.filter((v): v is string => typeof v === "string" && SLUG_PATTERN.test(v));
 }
 
 /** Read `revisions` defensively, keeping only well-formed entries. */
@@ -320,8 +380,9 @@ export function validateIssue(parsed: ParsedFile): Problem[] {
   checkPerson(parsed, "author", problems);
   checkTimestamp(parsed, "created", problems);
   checkLabels(parsed, problems);
-  checkAssignee(parsed, problems);
+  checkPersonList(parsed, "assignee", problems);
   checkOptionalString(parsed, "milestone", problems);
+  checkFeature(parsed, problems);
   checkOptionalString(parsed, "resolution", problems);
   checkIdReference(parsed, "duplicate-of", problems);
   checkIdReference(parsed, "parent", problems);
@@ -342,8 +403,10 @@ export function validatePr(parsed: ParsedFile): Problem[] {
   requireString(parsed, "target", problems);
   checkOptionalString(parsed, "source", problems);
   checkLabels(parsed, problems);
-  checkAssignee(parsed, problems);
+  checkPersonList(parsed, "assignee", problems);
+  checkPersonList(parsed, "reviewer", problems);
   checkOptionalString(parsed, "milestone", problems);
+  checkFeature(parsed, problems);
   checkOptionalString(parsed, "resolution", problems);
   checkIdReference(parsed, "superseded-by", problems);
   checkNoLinkKeys(parsed, problems);
@@ -467,6 +530,8 @@ export interface NewIssueInput {
   labels?: string[];
   assignee?: string[];
   milestone?: string;
+  /** Feature slugs this entity belongs to (§2.11). */
+  features?: string[];
   /** The issue this one is a subtask of; the reciprocal side is the caller's. */
   parent?: string;
 }
@@ -486,6 +551,8 @@ export interface NewPrInput extends NewIssueInput {
   source: string;
   revisions: Revision[];
   draft?: boolean;
+  /** Who to ask for a review (§2.7); the key is singular on disk. */
+  reviewers?: string[];
 }
 
 /** Render a new `pr.md`. */
@@ -499,6 +566,7 @@ export function newPrFile(input: NewPrInput): string {
     source: input.source,
   });
   if (input.draft) patchDoc(nav, { draft: true });
+  writeScalarOrList(nav, "reviewer", input.reviewers);
   applyOptionalMeta(nav, input);
   patchDoc(nav, { revisions: input.revisions });
   nav.body = `\n${normalizeBody(input.body)}`;
@@ -507,11 +575,124 @@ export function newPrFile(input: NewPrInput): string {
 
 function applyOptionalMeta(nav: NavDoc, input: NewIssueInput): void {
   if (input.labels?.length) setFlowList(nav, "labels", input.labels);
-  if (input.assignee?.length) {
-    if (input.assignee.length === 1) patchDoc(nav, { assignee: input.assignee[0] });
-    else setFlowList(nav, "assignee", input.assignee);
-  }
+  writeScalarOrList(nav, "assignee", input.assignee);
   if (input.milestone) patchDoc(nav, { milestone: input.milestone });
+  // Singular on disk and scalar-or-list like `assignee` (§2.11): one feature is
+  // written as a scalar, which is what nearly every entity carries.
+  writeScalarOrList(nav, "feature", input.features);
+}
+
+/**
+ * Write a key the format spells singular and accepts either way — `assignee`,
+ * `feature`, `reviewer`.
+ *
+ * One value is written as a scalar and several as a flow list, which is what
+ * the spec's own examples show; nothing at all removes the key rather than
+ * leaving an empty list behind. A key already present keeps its position in the
+ * file, so rewriting one never reorders somebody's hand-authored frontmatter.
+ */
+export function writeScalarOrList(nav: NavDoc, key: string, values?: readonly string[]): void {
+  if (!values?.length) patchDoc(nav, { [key]: undefined });
+  else if (values.length === 1) patchDoc(nav, { [key]: values[0] });
+  else setFlowList(nav, key, [...values]);
+}
+
+/**
+ * Validate a `feature.md` (§2.11).
+ *
+ * The body is the feature's summary and may be empty: a title and an author is
+ * enough to name a concept, and the specification documents beside it are where
+ * the substance belongs.
+ */
+export function validateFeature(parsed: ParsedFile): Problem[] {
+  const problems = [...parsed.problems];
+  requireString(parsed, "title", problems);
+  checkPerson(parsed, "author", problems);
+  checkTimestamp(parsed, "created", problems);
+  checkNoStatusKey(parsed, problems);
+  return problems;
+}
+
+/**
+ * Validate a specification document (§2.11).
+ *
+ * Only `title` is required. A spec is a living document rather than a record of
+ * something that happened, so who wrote it and when are git's answer to give.
+ */
+export function validateSpec(parsed: ParsedFile): Problem[] {
+  const problems = [...parsed.problems];
+  requireString(parsed, "title", problems);
+  if (parsed.fm.author !== undefined && parsed.fm.author !== null) {
+    checkPerson(parsed, "author", problems);
+  }
+  if (parsed.fm.created !== undefined && parsed.fm.created !== null) {
+    checkTimestamp(parsed, "created", problems);
+  }
+  checkNoStatusKey(parsed, problems);
+  return problems;
+}
+
+export interface NewFeatureInput {
+  title: string;
+  author: string;
+  created: string;
+  /** The summary; a feature may have none. */
+  body?: string;
+}
+
+/** Render a new `feature.md`. */
+export function newFeatureFile(input: NewFeatureInput): string {
+  const nav = emptyDoc();
+  patchDoc(nav, { title: input.title, author: input.author, created: input.created });
+  const summary = normalizeBody(input.body ?? "");
+  // A feature with no summary ends at its closing delimiter. The blank line a
+  // body is separated by is part of having one.
+  nav.body = summary === "" ? "" : `\n${summary}`;
+  return serializeDoc(nav);
+}
+
+export interface NewSpecInput {
+  title: string;
+  body: string;
+  author?: string;
+  created?: string;
+}
+
+/** Render a new specification document. */
+export function newSpecFile(input: NewSpecInput): string {
+  const nav = emptyDoc();
+  patchDoc(nav, { title: input.title });
+  if (input.author) patchDoc(nav, { author: input.author });
+  if (input.created) patchDoc(nav, { created: input.created });
+  nav.body = `\n${normalizeBody(input.body)}`;
+  return serializeDoc(nav);
+}
+
+/**
+ * The grammar a spec document's name must follow to be *created* by a tool.
+ *
+ * Reading is deliberately more generous — the tree model takes any `*.md` —
+ * because a hand-written `Login Flow.md` is legal and must keep working. What a
+ * tool mints for somebody else to live with is held to the slug grammar, and
+ * `feature.md` is excluded because that name already means something else.
+ */
+export const SPEC_FILE_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*\.md$/;
+
+/** True when a tool may create a spec document under this name. */
+export function isSpecFileName(name: string): boolean {
+  return name !== FEATURE_FILE && SPEC_FILE_PATTERN.test(name);
+}
+
+/**
+ * Derive a spec document's file name from its title.
+ *
+ * A title that slugs to `feature` would collide with the identity card, so it
+ * gains a suffix rather than being refused: the author named a document, and
+ * which file holds it is the tool's business.
+ */
+export function specFileName(title: string): string {
+  const slug = slugify(title);
+  return slug === "feature" ? "feature-spec.md" : `${slug}.md`;
 }
 
 export interface NewCommentInput {
