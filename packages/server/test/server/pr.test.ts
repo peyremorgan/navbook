@@ -366,6 +366,25 @@ describe("reviewing, on the branch that carries the pull request", () => {
     assert.deepEqual(await reviewers(`reviewers: []`), []);
   });
 
+  it("refuses a reviewer who is not a person, before anything is written", async () => {
+    const reviewers = async (): Promise<string[]> =>
+      ok<{ pr: { reviewers: string[] } }>(
+        await h.gql(`query { pr(ref: "pr111111") { reviewers } }`),
+      ).pr.reviewers;
+    const before = await reviewers();
+
+    const response = await h.gql(
+      `mutation P($ref: ID!) {
+         updatePr(input: { ref: $ref, reviewers: ["the-auth-team"] }) { pr { reviewers } }
+       }`,
+      { ref: "pr111111" },
+    );
+    // The same refusal a composed file gets anywhere else: it is validated
+    // before the tree is touched, so there is nothing written to undo.
+    assert.equal(errorCode(response), "INVALID_INPUT");
+    assert.deepEqual(await reviewers(), before, "and the pull request still says what it said");
+  });
+
   it("refuses a patch that names nothing to change", async () => {
     const response = await h.gql(
       `mutation P($ref: ID!) { updatePr(input: { ref: $ref }) { pr { id } } }`,

@@ -178,11 +178,17 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   `reviewer:` on `pr.md` ([02 §2.7](02-data-model.md)), or take them off with
   `--remove`. Addresses are matched as identities, not as text: a person
   already listed is not listed twice under another spelling of the same
-  address, and `--remove` takes off whichever spelling the file carries. It
-  MUST refuse to request a review from the pull request's own author, and it
-  MUST exit 1 when it would change nothing — every name already listed, or
-  none of them listed for `--remove` — naming what it found. The commit
-  subjects are `docs(pr): request review #<id>` and
+  address, and `--remove` takes off whichever spelling the file carries.
+
+  It MUST refuse to ask somebody who is not a person ([02 §2.4](02-data-model.md)),
+  rather than write a file `doctor` would reject; `--remove` accepts any name,
+  since taking one off is how a hand-written mistake is undone. It MUST refuse
+  to request a review from the pull request's own author. And it MUST exit 1
+  when it would change nothing — every name already listed, or none of them
+  listed for `--remove` — naming what it found, since a commit saying a file
+  already says what it says is noise in a history people read.
+
+  The commit subjects are `docs(pr): request review #<id>` and
   `docs(pr): remove reviewer #<id>`.
 - `nav pr review <id> [--approve | --request-changes | --comment] [-m TEXT | --edit] [--file PATH --line N[-M]]`
   — create a review comment bound to the PR's latest revision (`revision:` set

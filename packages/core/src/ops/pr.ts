@@ -219,12 +219,24 @@ export function requestReview(
 ): RequestReviewResult {
   const entity = findEntity(ws, "pr", ref);
   const author = typeof entity.fm.author === "string" ? entity.fm.author : "";
-  if (!opts.remove && author !== "") {
-    const own = people.filter((person) => sameEmail(emailOf(person), emailOf(author)));
-    if (own.length > 0) {
-      wsFail("precondition", `#${entity.id} is ${author}'s own pull request`, [
-        "a pull request's author is not among its reviewers, so the request would never be answered",
+  if (!opts.remove) {
+    // Only what this command is being asked to write: a `reviewer` entry
+    // somebody typed by hand and got wrong is doctor's business, and refusing
+    // to act on the file until they fix it would help nobody.
+    const nonsense = people.filter((person) => parsePerson(person) === null);
+    if (nonsense.length > 0) {
+      wsFail("invalid-input", `'${nonsense[0]}' is not a person`, [
+        "a reviewer is an address, optionally with a name: 'alice@example.com' or 'Alice <alice@example.com>'",
+        "a review is answered by somebody, so there is no way to write down a team (§2.7)",
       ]);
+    }
+    if (author !== "") {
+      const own = people.filter((person) => sameEmail(emailOf(person), emailOf(author)));
+      if (own.length > 0) {
+        wsFail("precondition", `#${entity.id} is ${author}'s own pull request`, [
+          "a pull request's author is not among its reviewers, so the request would never be answered",
+        ]);
+      }
     }
   }
 

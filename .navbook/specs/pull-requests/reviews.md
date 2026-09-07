@@ -26,7 +26,7 @@ Ordering within one revision is by comment filename — a UTC timestamp to the s
 
 ## Surfaces
 
-- `nav pr request <id> <email>... [--remove]`, `nav pr open --reviewer`, and `nav pr review --comment`.
+- `nav pr request <id> <email>... [--remove]`, `nav pr open --reviewer`, and `nav pr review --comment`. Requesting refuses a name that is not a person, the author's own pull request, and a change that would change nothing; removing accepts any name, because that is how a hand-written mistake is undone.
 - Query terms `reviewer:`, `review:` and `awaiting:`, the last being the queue of what a person owes. All three are pull-request-only and rejected on `nav issue list`.
 - `nav pr show` lists each reviewer with their state; `nav pr list` gains a `reviewer` column when any row has one, and a `review` column carrying the decision.
 - The API exposes `reviewers`, `reviews` and `reviewDecision` on `Pr`, the three filter fields, and `updatePr` — the pull-request twin of `updateIssue`, patching the same metadata plus `reviewers`.

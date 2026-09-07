@@ -50,6 +50,9 @@ function commentFile(repo: TempRepo, name: string): string {
   );
 }
 
+/** The fixture pull request's own file, as `repo.write` addresses it. */
+const PR_PATH = ".navbook/prs/open/dk3mp2x9-refactor-auth/pr.md";
+
 function prFile(repo: TempRepo, status: string): string {
   return readFileSync(
     join(repo.dir, `.navbook/prs/${status}/dk3mp2x9-refactor-auth/pr.md`),
@@ -330,6 +333,42 @@ describe("nav pr request", () => {
       repo.nav(["pr", "request", "dk3m", "alice@example.com", "--remove", "--commit"]);
       assert.equal(prFile(repo, "open").includes("reviewer"), false);
       assert.equal(repo.nav(["doctor"]).code, 0);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses a reviewer who is not a person, rather than writing a file doctor rejects", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      const result = repo.nav(["pr", "request", "dk3m", "the-auth-team"]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /is not a person/);
+      assert.equal(prFile(repo, "open").includes("reviewer"), false);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("still takes off a name somebody wrote by hand, whatever it says", () => {
+    // Removing is how a hand-written mistake is undone, so it must not be
+    // refused for being the very thing that needs removing.
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      repo.nav(["pr", "request", "dk3m", "alice@example.com", "--commit"]);
+      repo.write(
+        PR_PATH,
+        prFile(repo, "open").replace(
+          "reviewer: alice@example.com",
+          "reviewer: [the-auth-team, alice@example.com]",
+        ),
+      );
+
+      const result = repo.nav(["pr", "request", "dk3m", "the-auth-team", "--remove"]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(prFile(repo, "open"), /^reviewer: alice@example\.com$/m);
     } finally {
       repo.cleanup();
     }
