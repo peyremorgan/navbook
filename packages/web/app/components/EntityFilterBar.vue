@@ -48,15 +48,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{ patch: [Partial<FilterState>]; clear: [] }>();
 
-/** The search box is local so typing does not rewrite the URL per keystroke. */
-const text = ref(props.filter.text);
-watch(
-  () => props.filter.text,
-  (next) => {
-    if (next !== text.value) text.value = next;
-  },
-);
-
 function statusActive(status: Status): boolean {
   return props.filter.status.includes(status);
 }
@@ -121,27 +112,12 @@ const menusId = useId();
 <template>
   <div class="flex flex-col gap-2">
     <div class="flex flex-wrap items-center gap-2">
-      <UInput
-        v-model="text"
-        icon="i-lucide-search"
-        placeholder="Search title, body and comments"
+      <SearchBox
+        :text="props.filter.text"
+        testid="filter-text"
         class="w-full md:w-auto md:min-w-56 md:flex-1"
-        :ui="{ trailing: 'pe-1' }"
-        data-testid="filter-text"
-        @keydown.enter="emit('patch', { text })"
-        @blur="emit('patch', { text })"
-      >
-        <template v-if="text !== ''" #trailing>
-          <UButton
-            color="neutral"
-            variant="link"
-            size="sm"
-            icon="i-lucide-x"
-            aria-label="Clear the search"
-            @click="((text = ''), emit('patch', { text: '' }))"
-          />
-        </template>
-      </UInput>
+        @commit="(text: string) => emit('patch', { text })"
+      />
 
       <div class="flex items-center gap-1" role="group" aria-label="Status">
         <UButton
