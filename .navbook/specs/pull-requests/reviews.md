@@ -40,4 +40,4 @@ None of it gates anything. `nav pr merge` merges a pull request nobody approved 
 - `packages/core/src/core/files.ts` — the `reviewer` key and the verdict vocabulary
 - `packages/cli/src/commands/pr.ts` — `request`, `review`
 - `packages/server/src/resolvers/` — `updatePr`, the derived fields
-- `packages/web/app/components/ReviewPanel.vue`, `app/pages/prs/[ref].vue`
+- `packages/web/app/components/{ReviewList,ReviewBadge}.vue`, `app/pages/prs/[ref].vue`
