@@ -196,4 +196,144 @@ describe("needsComments", () => {
     assert.equal(needsComments(query("label:bug", "status:open")), false);
     assert.equal(needsComments(query("timeout")), true);
   });
+
+  it("is true for the terms read from the reviews themselves", () => {
+    assert.equal(needsComments(prQuery("reviewer:alice@example.com")), false);
+    assert.equal(needsComments(prQuery("review:approved")), true);
+    assert.equal(needsComments(prQuery("awaiting:alice@example.com")), true);
+  });
+});
+
+/* ------------------------------------------------------ the review terms */
+
+const HEAD = "1111111111111111111111111111111111111111";
+const OLD_HEAD = "2222222222222222222222222222222222222222";
+const BASE = "9999999999999999999999999999999999999999";
+
+interface PrSpec {
+  id: string;
+  reviewer?: string;
+  /** `author verdict revision` per review, in the order they were written. */
+  reviews?: string[];
+  heads?: string[];
+}
+
+function buildPrs(specs: PrSpec[]): EntityRecord[] {
+  const entries: Record<string, string> = {};
+  for (const spec of specs) {
+    const dir = `prs/open/${spec.id}-slug`;
+    const lines = [
+      "---",
+      "title: A change",
+      "author: ked@example.com",
+      "created: 2026-08-04T16:40:00Z",
+      "target: main",
+    ];
+    if (spec.reviewer) lines.push(`reviewer: ${spec.reviewer}`);
+    lines.push("revisions:");
+    for (const head of spec.heads ?? [HEAD]) {
+      lines.push(`  - head: ${head}`, `    base: ${BASE}`, "    date: 2026-08-04T16:40:00Z");
+    }
+    lines.push("---", "", "Body text.", "");
+    entries[`${dir}/pr.md`] = lines.join("\n");
+    (spec.reviews ?? []).forEach((review, index) => {
+      const [who, verdict, revision] = review.split(" ");
+      entries[`${dir}/comments/2026-08-0${index + 3}T141207Z-ccccccc${index + 1}.md`] =
+        `---\nauthor: ${who}\nverdict: ${verdict}\nrevision: ${revision ?? HEAD}\n---\n\nSaid so.\n`;
+    });
+  }
+  return parseTree(new Map(Object.entries(entries)) as NavTree).prs;
+}
+
+const prQuery = (...terms: string[]): Query => {
+  const result = parseQuery(terms, "pr");
+  assert.equal(isQueryError(result), false, JSON.stringify(result));
+  return result as Query;
+};
+
+const prMatching = (entities: EntityRecord[], ...terms: string[]): string[] =>
+  entities
+    .filter((e) => matchesQuery(prQuery(...terms), e))
+    .map((e) => e.id)
+    .sort();
+
+describe("the review query terms", () => {
+  const entities = buildPrs([
+    { id: "aaaaaaa1", reviewer: "alice@example.com", reviews: ["alice@example.com approve"] },
+    { id: "bbbbbbb2", reviewer: "[alice@example.com, bo@corp.example]" },
+    { id: "ccccccc3", reviewer: "bo@corp.example", reviews: ["bo@corp.example request-changes"] },
+    { id: "ddddddd4", reviews: ["zoe@example.com approve"] },
+    {
+      id: "eeeeeee5",
+      reviewer: "alice@example.com",
+      heads: [OLD_HEAD, HEAD],
+      reviews: [`alice@example.com approve ${OLD_HEAD}`],
+    },
+  ]);
+
+  it("finds the pull requests that asked one person", () => {
+    assert.deepEqual(prMatching(entities, "reviewer:alice@example.com"), [
+      "aaaaaaa1",
+      "bbbbbbb2",
+      "eeeeeee5",
+    ]);
+  });
+
+  it("matches a reviewer by domain fragment, as assignee does", () => {
+    assert.deepEqual(prMatching(entities, "reviewer:corp"), ["bbbbbbb2", "ccccccc3"]);
+  });
+
+  it("does not treat a volunteer as somebody who was asked", () => {
+    assert.deepEqual(prMatching(entities, "reviewer:zoe@example.com"), []);
+  });
+
+  it("ANDs two reviewer terms, since the key holds several", () => {
+    assert.deepEqual(
+      prMatching(entities, "reviewer:alice@example.com", "reviewer:bo@corp.example"),
+      ["bbbbbbb2"],
+    );
+  });
+
+  it("filters by the decision the reviews add up to", () => {
+    assert.deepEqual(prMatching(entities, "review:approved"), ["aaaaaaa1", "ddddddd4"]);
+    assert.deepEqual(prMatching(entities, "review:changes-requested"), ["ccccccc3"]);
+    assert.deepEqual(prMatching(entities, "review:pending"), ["bbbbbbb2", "eeeeeee5"]);
+  });
+
+  it("ORs two decisions, since a pull request has only one", () => {
+    assert.deepEqual(prMatching(entities, "review:approved", "review:changes-requested"), [
+      "aaaaaaa1",
+      "ccccccc3",
+      "ddddddd4",
+    ]);
+  });
+
+  it("finds what one person still owes", () => {
+    assert.deepEqual(prMatching(entities, "awaiting:alice@example.com"), ["bbbbbbb2", "eeeeeee5"]);
+    assert.deepEqual(prMatching(entities, "awaiting:bo@corp.example"), ["bbbbbbb2"]);
+  });
+
+  it("counts a stale approval as still owed, since the revision moved on", () => {
+    assert.deepEqual(prMatching(entities, "awaiting:alice@example.com").includes("eeeeeee5"), true);
+  });
+
+  it("rejects the review terms on issues, which have no reviews", () => {
+    for (const term of ["reviewer:a@b.co", "review:approved", "awaiting:a@b.co"]) {
+      const result = parseQuery([term], "issue");
+      assert.equal(isQueryError(result), true, term);
+      assert.match((result as { message: string }).message, /describes a pull request/);
+    }
+  });
+
+  it("rejects a decision that does not exist", () => {
+    const result = parseQuery(["review:merged"], "pr");
+    assert.equal(isQueryError(result), true);
+    assert.match((result as { message: string }).message, /unknown review decision 'merged'/);
+  });
+
+  it("rejects the review terms with no value, as every keyed term does", () => {
+    for (const term of ["reviewer:", "review:", "awaiting:"]) {
+      assert.equal(isQueryError(parseQuery([term], "pr")), true, term);
+    }
+  });
 });

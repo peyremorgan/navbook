@@ -82,6 +82,9 @@ describe("toQuery", () => {
         authors: ["b@x.invalid"],
         milestones: ["v1"],
         features: ["auth"],
+        reviewers: [],
+        reviews: [],
+        awaiting: [],
         text: ["crash"],
       },
     );

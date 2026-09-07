@@ -40,10 +40,12 @@ const KIND_IN: Record<Kind, EntityKind> = { ISSUE: "issue", PR: "pr" };
 const VERDICT_OUT: Record<CoreVerdict, Verdict> = {
   approve: "APPROVE",
   "request-changes": "REQUEST_CHANGES",
+  comment: "COMMENT",
 };
 const VERDICT_IN: Record<Verdict, CoreVerdict> = {
   APPROVE: "approve",
   REQUEST_CHANGES: "request-changes",
+  COMMENT: "comment",
 };
 
 export const toGqlStatus = (status: Status): GqlStatus => STATUS_OUT[status];

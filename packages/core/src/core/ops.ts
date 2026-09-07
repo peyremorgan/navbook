@@ -8,7 +8,15 @@
  */
 
 import { commentFileName } from "./comments.ts";
-import { FEATURE_FILE, type Revision, readParent, readRevisions, readSubtasks } from "./files.ts";
+import {
+  FEATURE_FILE,
+  type Revision,
+  readParent,
+  readReviewers,
+  readRevisions,
+  readSubtasks,
+  writeScalarOrList,
+} from "./files.ts";
 import {
   appendListItem,
   FrontmatterError,
@@ -19,6 +27,7 @@ import {
 } from "./frontmatter.ts";
 import { isId } from "./id.ts";
 import type { LinkEdit, LinkRepair } from "./links.ts";
+import { parsePerson } from "./person.ts";
 import { dirName as makeDirName, slugify } from "./slug.ts";
 import {
   type EntityKind,
@@ -549,6 +558,78 @@ export function planPrUpdate(entity: EntityRecord, revision: Revision): Plan {
     ops: [{ op: "write", path: entity.filePath, content: serializeDoc(nav) }],
     message: docsSubject(entity.kind, "update", entity.id),
     trailers: [{ key: "Refs", id: entity.id }],
+  };
+}
+
+/* ---------------------------------------------------------- review requests */
+
+export interface RequestResult {
+  plan: Plan;
+  /** The people the file did not already name, as it now spells them. */
+  changed: string[];
+  /** The people it already agreed about, so a caller can say so. */
+  unchanged: string[];
+}
+
+/**
+ * Add people to, or take them off, a pull request's `reviewer:` key (§2.7).
+ *
+ * Addresses are compared as identities rather than as text, so one person is
+ * never listed twice under two spellings of the same address, and a removal
+ * finds whichever spelling the file carries. Nothing else about the file moves:
+ * the request is the only thing being said.
+ */
+export function planRequest(
+  entity: EntityRecord,
+  people: readonly string[],
+  opts: { remove?: boolean } = {},
+): RequestResult {
+  const key = (person: string): string =>
+    (parsePerson(person)?.email ?? person).trim().toLowerCase();
+  const listed = readReviewers(entity.fm);
+  const present = new Map(listed.map((person) => [key(person), person]));
+
+  const changed: string[] = [];
+  const unchanged: string[] = [];
+  const next = [...listed];
+  const seen = new Set<string>();
+  for (const person of people) {
+    const id = key(person);
+    // A name given twice in one invocation is one request, not two.
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const already = present.get(id);
+    if (opts.remove) {
+      if (already === undefined) {
+        unchanged.push(person);
+        continue;
+      }
+      next.splice(next.indexOf(already), 1);
+      changed.push(already);
+      continue;
+    }
+    if (already !== undefined) {
+      unchanged.push(already);
+      continue;
+    }
+    next.push(person);
+    changed.push(person);
+  }
+
+  const nav = parseDoc(serializeDoc(entity.parsed.nav));
+  writeScalarOrList(nav, "reviewer", next);
+  return {
+    plan: {
+      ops: [{ op: "write", path: entity.filePath, content: serializeDoc(nav) }],
+      message: docsSubject(
+        entity.kind,
+        opts.remove ? "remove reviewer" : "request review",
+        entity.id,
+      ),
+      trailers: [{ key: "Refs", id: entity.id }],
+    },
+    changed,
+    unchanged,
   };
 }
 

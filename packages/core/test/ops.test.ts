@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { newIssueFile, parseFile, readRevisions, validateIssue } from "../src/core/files.ts";
+import {
+  newIssueFile,
+  parseFile,
+  readReviewers,
+  readRevisions,
+  validateIssue,
+  validatePr,
+} from "../src/core/files.ts";
 import { FrontmatterError } from "../src/core/frontmatter.ts";
 import {
   docsFeatureSubject,
@@ -21,6 +28,7 @@ import {
   planPaths,
   planPrUpdate,
   planReopen,
+  planRequest,
   planSpecAdd,
   planSpecEdit,
   planUnlink,
@@ -365,6 +373,104 @@ describe("planPrUpdate", () => {
     });
     const write = plan.ops[0];
     assert.equal(readRevisions(parseFile(write?.op === "write" ? write.content : "").fm).length, 3);
+  });
+});
+
+describe("planRequest", () => {
+  /** The `reviewer:` line the plan would write, or "" when it writes none. */
+  const written = (entity: EntityRecord, people: string[], remove = false): string => {
+    const { plan } = planRequest(entity, people, { remove });
+    const content = frontmatterOf(plan.ops[0]);
+    assert.deepEqual(validatePr(parseFile(content)), [], "the plan wrote a file doctor rejects");
+    return readReviewers(parseFile(content).fm).join(", ");
+  };
+
+  it("asks one person, as a scalar", () => {
+    assert.equal(written(prEntity(ONE_REVISION), ["alice@example.com"]), "alice@example.com");
+  });
+
+  it("asks several, keeping the ones already there", () => {
+    const pr = prEntity(ONE_REVISION, "reviewer: alice@example.com\n");
+    assert.equal(
+      written(pr, ["bo@example.com", "cy@example.com"]),
+      "alice@example.com, bo@example.com, cy@example.com",
+    );
+  });
+
+  it("names the commit after what it did", () => {
+    const pr = prEntity(ONE_REVISION);
+    assert.equal(
+      planRequest(pr, ["alice@example.com"]).plan.message,
+      "docs(pr): request review #dk3mp2x9",
+    );
+    assert.equal(
+      planRequest(pr, ["alice@example.com"], { remove: true }).plan.message,
+      "docs(pr): remove reviewer #dk3mp2x9",
+    );
+  });
+
+  it("refers to the pull request it changed", () => {
+    assert.deepEqual(planRequest(prEntity(ONE_REVISION), ["a@b.co"]).plan.trailers, [
+      { key: "Refs", id: "dk3mp2x9" },
+    ]);
+  });
+
+  it("reports who it added and who was already there", () => {
+    const pr = prEntity(ONE_REVISION, "reviewer: alice@example.com\n");
+    const result = planRequest(pr, ["Alice <alice@example.com>", "bo@example.com"]);
+    assert.deepEqual(result.changed, ["bo@example.com"]);
+    assert.deepEqual(result.unchanged, ["alice@example.com"], "reported as the file spells them");
+  });
+
+  it("does not list one person twice under two spellings", () => {
+    const pr = prEntity(ONE_REVISION, "reviewer: alice@example.com\n");
+    assert.equal(written(pr, ["ALICE@example.com"]), "alice@example.com");
+  });
+
+  it("treats a name given twice in one call as one request", () => {
+    const result = planRequest(prEntity(ONE_REVISION), ["a@b.co", "a@b.co"]);
+    assert.deepEqual(result.changed, ["a@b.co"]);
+    assert.deepEqual(result.unchanged, []);
+  });
+
+  it("removes whichever spelling the file carries", () => {
+    const pr = prEntity(ONE_REVISION, "reviewer: [Alice <alice@example.com>, bo@example.com]\n");
+    const result = planRequest(pr, ["alice@example.com"], { remove: true });
+    assert.deepEqual(result.changed, ["Alice <alice@example.com>"]);
+    assert.equal(written(pr, ["alice@example.com"], true), "bo@example.com");
+  });
+
+  it("drops the key entirely when the last reviewer goes", () => {
+    const pr = prEntity(ONE_REVISION, "reviewer: alice@example.com\n");
+    const content = frontmatterOf(
+      planRequest(pr, ["alice@example.com"], { remove: true }).plan.ops[0],
+    );
+    assert.equal(content.includes("reviewer"), false);
+    assert.deepEqual(validatePr(parseFile(content)), []);
+  });
+
+  it("reports a removal of somebody who was never there", () => {
+    const result = planRequest(prEntity(ONE_REVISION), ["zoe@example.com"], { remove: true });
+    assert.deepEqual(result.changed, []);
+    assert.deepEqual(result.unchanged, ["zoe@example.com"]);
+  });
+
+  it("leaves the key where the file put it", () => {
+    const pr = prEntity(ONE_REVISION, "reviewer: alice@example.com\nmilestone: v2\n");
+    const content = frontmatterOf(planRequest(pr, ["bo@example.com"]).plan.ops[0]);
+    const keys = content.split("\n").filter((line) => /^[a-z-]+:/.test(line));
+    assert.deepEqual(keys.slice(-3, -1), [
+      "reviewer: [alice@example.com, bo@example.com]",
+      "milestone: v2",
+    ]);
+  });
+
+  it("touches nothing else in the file", () => {
+    const pr = prEntity(ONE_REVISION, "labels: [auth]\nassignee: ked@example.com\n");
+    const content = frontmatterOf(planRequest(pr, ["alice@example.com"]).plan.ops[0]);
+    assert.match(content, /^labels: \[auth\]$/m);
+    assert.match(content, /^assignee: ked@example\.com$/m);
+    assert.equal(readRevisions(parseFile(content).fm).length, 1);
   });
 });
 

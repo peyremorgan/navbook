@@ -617,8 +617,16 @@ export type UpdateSpecPayload = {
   spec: Spec;
 };
 
+/**
+ * What a review says about the revision it names (spec 02 §2.6).
+ *
+ * `COMMENT` is the third: a review that judges nothing and records only that its
+ * author read the revision. It satisfies a request for review like the other two
+ * and never counts toward `reviewDecision`.
+ */
 export type Verdict =
   | 'APPROVE'
+  | 'COMMENT'
   | 'REQUEST_CHANGES';
 
 /** Who the presented token says is acting; what mutations record as `author`. */
