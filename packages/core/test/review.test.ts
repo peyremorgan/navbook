@@ -356,6 +356,26 @@ describe("isAwaiting", () => {
     assert.equal(isAwaiting(reviewSummary(pr), "alice@example.com"), false);
   });
 
+  it("is false once they have answered with a verdict that judges nothing", () => {
+    // The whole point of the third verdict: it says the revision was read, so
+    // the request it answers is no longer outstanding (§2.6).
+    const answered = build({
+      reviewer: "bob@corp.example.com",
+      reviews: [{ who: "bob@corp.example.com", verdict: "comment", revision: HEAD_1 }],
+    });
+    assert.equal(isAwaiting(reviewSummary(answered), "bob@corp.example.com"), false);
+    assert.equal(reviewSummary(answered).decision, "pending", "and it still judges nothing");
+  });
+
+  it("is true again once a new revision supersedes the answer", () => {
+    const moved = build({
+      reviewer: "bob@corp.example.com",
+      heads: [HEAD_1, HEAD_2],
+      reviews: [{ who: "bob@corp.example.com", verdict: "approve", revision: HEAD_1 }],
+    });
+    assert.equal(isAwaiting(reviewSummary(moved), "bob@corp.example.com"), true);
+  });
+
   it("is false for a volunteer, who was never asked", () => {
     assert.equal(isAwaiting(reviewSummary(pr), "zoe@example.com"), false);
   });
