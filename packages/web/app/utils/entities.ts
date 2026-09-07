@@ -112,3 +112,16 @@ export function distinctValues<T>(
   }
   return [...seen.values()].sort((a, b) => a.localeCompare(b));
 }
+
+/**
+ * A pull request's revisions, newest first.
+ *
+ * `revisions:` is append-only, so the file — and the API, which projects it
+ * unchanged — puts the oldest first (spec 02 §2.7). Every reading here wants
+ * the opposite: the latest is the one a review binds to by default and the one
+ * every reviewer's state is read against, so it belongs at the top of a list
+ * and at the top of a menu.
+ */
+export function newestFirst<T>(revisions: readonly T[]): T[] {
+  return [...revisions].reverse();
+}

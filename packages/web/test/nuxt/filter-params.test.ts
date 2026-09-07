@@ -55,6 +55,7 @@ describe("queryToFilter", () => {
         author: "c@example.invalid",
         milestone: "1.0",
         feature: ["auth", "billing"],
+        reviewer: "d@example.invalid",
         q: "timeout",
       },
       ISSUE_STATUSES,
@@ -66,6 +67,7 @@ describe("queryToFilter", () => {
       authors: ["c@example.invalid"],
       milestones: ["1.0"],
       features: ["auth", "billing"],
+      reviewers: ["d@example.invalid"],
       text: "timeout",
     });
   });
@@ -125,6 +127,7 @@ describe("filterToQuery", () => {
       authors: ["b@example.invalid"],
       milestones: ["1.0"],
       features: ["auth"],
+      reviewers: ["c@example.invalid"],
       text: 'timeout "slow link"',
     };
     const query = filterToQuery({ ...original, status: [...original.status] });

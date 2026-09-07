@@ -25,6 +25,8 @@ export interface FilterState {
   authors: string[];
   milestones: string[];
   features: string[];
+  /** Asked to review it; pull requests only (spec 02 §2.7). */
+  reviewers: string[];
   /** The search box verbatim; `splitTerms` turns it into `text` terms. */
   text: string;
 }
@@ -38,6 +40,7 @@ export function emptyFilter(): FilterState {
     authors: [],
     milestones: [],
     features: [],
+    reviewers: [],
     text: "",
   };
 }
@@ -50,6 +53,7 @@ export function isEmptyFilter(filter: FilterState): boolean {
     filter.authors.length === 0 &&
     filter.milestones.length === 0 &&
     filter.features.length === 0 &&
+    filter.reviewers.length === 0 &&
     filter.text.trim() === ""
   );
 }
@@ -116,6 +120,7 @@ export function queryToFilter(query: RouteQuery, allowed: readonly Status[]): Fi
     authors: values(query.author),
     milestones: values(query.milestone),
     features: values(query.feature),
+    reviewers: values(query.reviewer),
     text: joinTerms(values(query.q).flatMap(splitTerms)),
   };
 }
@@ -141,6 +146,7 @@ export function filterToQuery(filter: FilterState): Record<string, string[]> {
   put("author", filter.authors);
   put("milestone", filter.milestones);
   put("feature", filter.features);
+  put("reviewer", filter.reviewers);
   const terms = splitTerms(filter.text);
   if (terms.length > 0) query.q = [joinTerms(terms)];
   return query;
@@ -155,6 +161,7 @@ export function toEntityFilter(filter: FilterState): EntityFilter {
   if (filter.authors.length > 0) entityFilter.authors = [...filter.authors];
   if (filter.milestones.length > 0) entityFilter.milestones = [...filter.milestones];
   if (filter.features.length > 0) entityFilter.features = [...filter.features];
+  if (filter.reviewers.length > 0) entityFilter.reviewers = [...filter.reviewers];
   const terms = splitTerms(filter.text);
   if (terms.length > 0) entityFilter.text = terms;
   return entityFilter;

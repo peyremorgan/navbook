@@ -2,23 +2,26 @@
   One pull request: what it proposes, which revisions it has had, and the
   review it has attracted.
 
-  Read-only apart from commenting. Opening, updating and merging a pull request
-  are checkout-centric — they need a branch, a working tree and a merge — and
-  the API deliberately does not expose them, so neither does this.
+  Read apart from commenting and asking for a review. Opening a pull request,
+  appending a revision to one and merging it are checkout-centric — they need a
+  branch, a working tree and a merge — and the API deliberately does not expose
+  them, so neither does this. Its metadata is another matter: asking somebody to
+  review is a patch to one file, and it is exposed exactly as an issue's is.
 
   The refusal worth designing for is `PRECONDITION`. A pull request's files
   live on the branch it proposes to merge, so `allRefs` can find one this
-  server does not have checked out: it can be read, and it cannot be commented
-  on. The alert says which branch to serve instead, because that is the actual
-  remedy and nothing this client does can substitute for it.
+  server does not have checked out: it can be read, and it can be written to by
+  nobody. The alert says which branch to serve instead, because that is the
+  actual remedy and nothing this client does can substitute for it.
 -->
 <script setup lang="ts">
 import { useMutation, useQuery } from "@vue/apollo-composable";
-import { ADD_COMMENT } from "~/graphql/mutations";
+import { ADD_COMMENT, UPDATE_PR } from "~/graphql/mutations";
 import { PR_QUERY } from "~/graphql/queries";
 import { buildCommentTree, countComments } from "~/utils/comments";
-import { shortSha } from "~/utils/entities";
+import { newestFirst, shortSha } from "~/utils/entities";
 import { describeApiError, unservedBranch } from "~/utils/errors";
+import { buildEntityPatch, type EntityEdit } from "~/utils/patch";
 import type { Verdict } from "~~/src/generated/gql/graphql";
 
 const route = useRoute();
@@ -34,6 +37,9 @@ const pr = computed(() => result.value?.pr ?? null);
 
 const comments = computed(() => buildCommentTree(pr.value?.comments ?? []));
 const commentCount = computed(() => countComments(comments.value));
+
+/** Newest first for reading; the file's own order is the reverse (spec 02 §2.7). */
+const revisions = computed(() => newestFirst(pr.value?.revisions ?? []));
 
 const replyTo = ref<string | null>(null);
 const replyToAuthor = computed(
@@ -89,6 +95,52 @@ async function submit(input: {
   }
 }
 
+/* ---------------------------------------------------------- review requests */
+
+const { mutate: patch, loading: patching } = useMutation(UPDATE_PR, {
+  context: { handledCodes: ["PRECONDITION"] },
+});
+
+/**
+ * Ask somebody to review, or take them off the list.
+ *
+ * Only `reviewers` is editable here, so the patch is built against a `before`
+ * that names only what this page can change: the shared builder still does the
+ * work of sending nothing when nothing moved, which is what keeps a closed
+ * editor from committing an empty edit.
+ */
+async function saveReviewers(reviewers: string[]): Promise<void> {
+  if (pr.value === null) return;
+  const before: EntityEdit = {
+    title: pr.value.title,
+    body: pr.value.body,
+    labels: [...pr.value.labels],
+    assignees: [...pr.value.assignees],
+    milestone: pr.value.milestone ?? null,
+    features: [...pr.value.features],
+    reviewers: [...pr.value.reviewers],
+  };
+  const built = buildEntityPatch(before, { reviewers });
+  if (built === null) return;
+
+  try {
+    const written = await patch({ input: { ref: pr.value.id, ...built } });
+    const payload = written?.data?.updatePr;
+    if (payload) {
+      commitToast.report(payload.commit, "Reviewers updated");
+      refusedOn.value = null;
+    }
+  } catch (failure) {
+    const described = describeApiError(failure);
+    const branch = unservedBranch(described);
+    if (branch === null) {
+      toast.add({ title: "Could not save", description: described.message, color: "error" });
+      return;
+    }
+    refusedOn.value = branch;
+  }
+}
+
 /**
  * Whether commenting is possible at all.
  *
@@ -117,6 +169,7 @@ const branchHint = computed(() => refusedOn.value);
           </span>
           <span>opened <TimeAgo :iso="pr.created" /> by <PersonLabel :person="pr.author" /></span>
           <span>· {{ commentCount }} comment{{ commentCount === 1 ? "" : "s" }}</span>
+          <ReviewBadge :decision="pr.reviewDecision" :asked="pr.reviews.length > 0" />
         </div>
         <div v-if="pr.refs.length" class="flex flex-wrap items-center gap-1 text-xs text-muted">
           <UIcon name="i-lucide-git-branch" class="size-3" />
@@ -174,7 +227,7 @@ const branchHint = computed(() => refusedOn.value);
             <h3 class="text-xs font-semibold uppercase tracking-wide text-muted">Revisions</h3>
             <ol class="space-y-1 text-sm" data-testid="revisions">
               <li
-                v-for="(revision, index) in pr.revisions"
+                v-for="(revision, index) in revisions"
                 :key="revision.head"
                 class="flex flex-wrap items-baseline gap-x-2"
               >
@@ -186,8 +239,27 @@ const branchHint = computed(() => refusedOn.value);
                 </span>
               </li>
             </ol>
-            <p v-if="!pr.revisions.length" class="text-sm text-muted">None recorded.</p>
+            <p v-if="!revisions.length" class="text-sm text-muted">None recorded.</p>
           </section>
+
+          <!--
+            Who was asked, and what each of them said about the latest revision.
+            The list edits `reviewer:`; the states beside it are derived and are
+            not what a save sends back (spec 02 §2.7).
+          -->
+          <LabelEditor
+            title="Reviewers"
+            icon="i-lucide-eye"
+            testid="reviewers"
+            :values="pr.reviewers"
+            :suggestions="pr.reviewers"
+            :saving="patching"
+            @save="saveReviewers"
+          >
+            <template #display>
+              <ReviewList :reviews="pr.reviews" />
+            </template>
+          </LabelEditor>
 
           <section v-if="pr.labels.length" class="space-y-1.5">
             <h3 class="text-xs font-semibold uppercase tracking-wide text-muted">Labels</h3>

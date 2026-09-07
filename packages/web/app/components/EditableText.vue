@@ -2,7 +2,7 @@
   A field you edit in place.
 
   Saving emits the new value and nothing else; whether it is a change at all is
-  `buildIssuePatch`'s question, and an edit that changed nothing must not be
+  `buildEntityPatch`'s question, and an edit that changed nothing must not be
   sent — the mutation refuses an empty patch, and rightly.
 -->
 <script setup lang="ts">

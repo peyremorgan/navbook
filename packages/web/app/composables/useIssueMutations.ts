@@ -20,7 +20,7 @@ import {
   UNLINK_ISSUE,
   UPDATE_ISSUE,
 } from "~/graphql/mutations";
-import type { IssuePatch } from "~/utils/patch";
+import type { EntityPatch } from "~/utils/patch";
 
 /**
  * Failures the caller answers itself, so the shared toast stays quiet.
@@ -97,7 +97,7 @@ export function useIssueMutations() {
       });
     },
 
-    updateIssue(ref: string, patch: IssuePatch) {
+    updateIssue(ref: string, patch: EntityPatch) {
       return reported(async () => {
         const payload = (await update.mutate({ input: { ref, ...patch } }))?.data?.updateIssue;
         if (payload) {

@@ -7,6 +7,9 @@
 
   Features are the exception, and `linkTo` is how that shows: they are real
   directories with a page of their own, so their chips lead somewhere.
+
+  What it shows when it is not being edited can be replaced through the
+  `display` slot, for a field whose reading is richer than its list of values.
 -->
 <script setup lang="ts">
 const props = defineProps<{
@@ -94,6 +97,14 @@ function save(): void {
         One value: choosing another replaces it.
       </p>
     </template>
+
+    <!--
+      The read-only half is replaceable, because one field needs to show more
+      than the values it edits: the reviewers panel lists what each person said
+      about the latest revision, which is derived and so is not what a save
+      sends back (spec 02 §2.7).
+    -->
+    <slot v-else-if="$slots.display" name="display" />
 
     <div v-else-if="props.values.length" class="flex flex-wrap gap-1">
       <component

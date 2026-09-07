@@ -58,6 +58,8 @@ export const PR_LIST_ITEM = graphql(`
     source
     draft
     refs
+    reviewers
+    reviewDecision
     merged {
       date
       by
@@ -132,6 +134,12 @@ export const PR_DETAIL = graphql(`
       head
       base
       date
+    }
+    reviews {
+      person
+      state
+      volunteer
+      comment
     }
     comments {
       ...CommentFields

@@ -1,5 +1,5 @@
 /**
- * Turning an edited form back into the smallest `updateIssue` that says it.
+ * Turning an edited form back into the smallest patch that says it.
  *
  * The mutation distinguishes three things a field can mean, and getting them
  * confused is how an edit quietly destroys data: absent leaves the key alone,
@@ -8,25 +8,32 @@
  * touched, so only what actually changed is sent.
  *
  * An empty patch is refused by the server (`INVALID_INPUT`), so a save with
- * nothing in it must not be sent at all: `buildIssuePatch` returns null and the
+ * nothing in it must not be sent at all: `buildEntityPatch` returns null and the
  * caller does nothing, which is also the right thing for the person who opened
  * an editor and closed it again.
  */
 
-import type { UpdateIssueInput } from "~~/src/generated/gql/graphql";
+import type { UpdateIssueInput, UpdatePrInput } from "~~/src/generated/gql/graphql";
 
-/** The fields of an issue this client can edit. */
-export interface IssueEdit {
+/**
+ * The fields this client can edit, on either kind.
+ *
+ * `reviewers` is a pull request's alone (spec 02 §2.7). It is optional rather
+ * than a second interface because everything else about the two patches is the
+ * same, and the builder below only ever looks at what it was handed.
+ */
+export interface EntityEdit {
   title: string;
   body: string;
   labels: string[];
   assignees: string[];
   milestone: string | null;
   features: string[];
+  reviewers?: string[];
 }
 
-/** An `UpdateIssueInput` without the `ref`, which the caller knows. */
-export type IssuePatch = Omit<UpdateIssueInput, "ref">;
+/** An update input without the `ref`, which the caller knows. */
+export type EntityPatch = Omit<UpdateIssueInput, "ref"> & Pick<UpdatePrInput, "reviewers">;
 
 export class PatchError extends Error {}
 
@@ -67,8 +74,11 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
  * `after` is partial: a form that edits only the title passes only the title,
  * and every field it leaves out is left alone rather than treated as cleared.
  */
-export function buildIssuePatch(before: IssueEdit, after: Partial<IssueEdit>): IssuePatch | null {
-  const patch: IssuePatch = {};
+export function buildEntityPatch(
+  before: EntityEdit,
+  after: Partial<EntityEdit>,
+): EntityPatch | null {
+  const patch: EntityPatch = {};
 
   if (after.title !== undefined) {
     const title = after.title.trim();
@@ -104,6 +114,11 @@ export function buildIssuePatch(before: IssueEdit, after: Partial<IssueEdit>): I
   if (after.features !== undefined) {
     const features = normalizeList(after.features);
     if (!sameList(features, normalizeList(before.features))) patch.features = features;
+  }
+
+  if (after.reviewers !== undefined) {
+    const reviewers = normalizeList(after.reviewers);
+    if (!sameList(reviewers, normalizeList(before.reviewers ?? []))) patch.reviewers = reviewers;
   }
 
   return Object.keys(patch).length === 0 ? null : patch;

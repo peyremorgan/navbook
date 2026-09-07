@@ -12,6 +12,11 @@
   The scan finds open pull requests only, so switching it on narrows by status
   without the filter having asked — the one place a listing here does that,
   which is why the switch says so in its own description.
+
+  "Awaiting me" is the other switch, and it is one because it takes no value:
+  it asks about whoever is signed in. A reviewer who has answered the latest
+  revision drops out of it by itself, and a new revision puts everybody back
+  (spec 02 §2.7).
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
@@ -33,9 +38,33 @@ const allRefs = computed({
   },
 });
 
+/**
+ * The reviews this person owes, from the identity the token carries.
+ *
+ * `awaiting` is not part of the shared filter because it is not a value anybody
+ * picks from a menu — it is one question with one answer, asked about whoever
+ * is signed in, and a switch is what that is.
+ */
+const auth = useAuth();
+const awaitingMe = computed({
+  get: () => route.query.awaiting === "me" && auth.email.value !== null,
+  set: (value: boolean) => {
+    const query = { ...route.query };
+    if (value) query.awaiting = "me";
+    else delete query.awaiting;
+    void router.replace({ query });
+  },
+});
+
 const { result, loading, error, refetch } = useQuery(
   PRS_QUERY,
-  () => ({ filter: filter.variables.value, allRefs: allRefs.value }),
+  () => ({
+    filter: {
+      ...filter.variables.value,
+      ...(awaitingMe.value && auth.email.value !== null ? { awaiting: [auth.email.value] } : {}),
+    },
+    allRefs: allRefs.value,
+  }),
   { fetchPolicy: "cache-and-network" },
 );
 
@@ -57,6 +86,7 @@ const suggestions = computed(() => ({
   // Features are real directories, so the registry is the registry rather than
   // whatever the listing on screen happens to mention.
   features: (featureList.value?.features ?? []).map((feature) => feature.slug),
+  reviewers: distinctValues(prs.value, (pr) => pr.reviewers),
 }));
 </script>
 
@@ -64,12 +94,21 @@ const suggestions = computed(() => ({
   <div class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-4">
       <h1 class="text-xl font-semibold">Pull requests</h1>
-      <USwitch
-        v-model="allRefs"
-        label="Every fetched branch"
-        description="Slower; finds open pull requests this checkout does not hold."
-        data-testid="all-refs"
-      />
+      <div class="flex flex-wrap items-center gap-4">
+        <USwitch
+          v-if="auth.email.value"
+          v-model="awaitingMe"
+          label="Awaiting me"
+          description="Asked for your review, and you have not answered the latest revision."
+          data-testid="awaiting-me"
+        />
+        <USwitch
+          v-model="allRefs"
+          label="Every fetched branch"
+          description="Slower; finds open pull requests this checkout does not hold."
+          data-testid="all-refs"
+        />
+      </div>
     </div>
 
     <EntityFilterBar

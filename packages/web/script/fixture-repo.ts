@@ -39,7 +39,9 @@ import {
   newSpecFile,
   openIssue,
   openPr,
+  parseFile,
   preparePrOpen,
+  readRevisions,
   specFileName,
 } from "@navbook/core";
 
@@ -235,7 +237,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
       body: string;
       author?: string;
       replyTo?: string;
-      verdict?: "approve" | "request-changes";
+      verdict?: "approve" | "request-changes" | "comment";
       revision?: string;
       file?: string;
       line?: string;
@@ -481,11 +483,29 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
 
   /* -------------------------------------------------- pull requests */
 
+  /** The head a pull request pinned when it was opened, read back from its file. */
+  const pinnedRevision = (id: string): string => {
+    const context = ws(FIXTURE_DATE, []);
+    const entity = findEntity(context, "pr", id);
+    const revisions = readRevisions(
+      parseFile(readFileSync(join(dir, ".navbook", entity.filePath), "utf8")).fm,
+    );
+    const head = revisions[revisions.length - 1]?.head;
+    if (head === undefined) throw new Error(`#${id} pinned no revision`);
+    return head;
+  };
+
   const openPrOn = (
     date: string,
     id: string,
     branch: string,
-    input: { title: string; body: string; labels?: string[]; draft?: boolean },
+    input: {
+      title: string;
+      body: string;
+      labels?: string[];
+      reviewers?: string[];
+      draft?: boolean;
+    },
   ): void => {
     git(dir, ["checkout", "--quiet", "-b", branch]);
     write(`${branch.replaceAll("/", "-")}.txt`, `work on ${branch}\n`);
@@ -509,6 +529,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
           source: draft.source,
           revisions: [draft.revision],
           ...(input.labels ? { labels: input.labels } : {}),
+          ...(input.reviewers ? { reviewers: input.reviewers } : {}),
           ...(input.draft ? { draft: true } : {}),
         }),
         fallbackTitle: input.title,
@@ -522,12 +543,17 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     title: "Raise the sign-in deadline",
     body: "Thirty seconds, and configurable. Closes the subtask under #aaaa0001.",
     labels: ["bug"],
+    reviewers: ["someone@example.invalid"],
   });
 
+  // Asked of the person the suite signs in as, and on the branch nothing can
+  // write to — so what this request looks like from the outside stays put
+  // however much the rest of the suite reviews the other pull request.
   openPrOn("2026-08-05T10:00:00Z", IDS.unservedPr, UNSERVED_BRANCH, {
     title: "A pull request this server does not serve",
     body: "Its files live on a branch the clone does not have checked out.",
     draft: true,
+    reviewers: ["person@example.invalid"],
   });
 
   // A comment and a review on the served pull request, written on its branch
@@ -537,11 +563,16 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     body: "Thirty seconds still feels short for a satellite link, but it is better.",
     author: "Someone Else <someone@example.invalid>",
   });
-  const head = git(dir, ["rev-parse", "HEAD"]).trim();
+  // The revision the pull request actually pinned, not whatever HEAD has since
+  // become: a verdict names a recorded revision (spec 02 §2.7), and one that
+  // named anything else would be a review of a state nobody offered — which is
+  // what doctor check D6 reports.
   comment("2026-08-04T12:00:00Z", "cccc0004", "pr", IDS.servedPr, {
     body: "Reads well. One note on the constant's name.",
+    // By one of the people it asked, so the panel shows an answered request.
+    author: "Someone Else <someone@example.invalid>",
     verdict: "approve",
-    revision: head,
+    revision: pinnedRevision(IDS.servedPr),
     file: "app/auth/session.ts",
     line: "42-48",
   });

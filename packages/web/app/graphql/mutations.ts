@@ -72,6 +72,21 @@ export const REOPEN_ISSUE = graphql(`
   }
 `);
 
+export const UPDATE_PR = graphql(`
+  mutation UpdatePr($input: UpdatePrInput!) {
+    updatePr(input: $input) {
+      pr {
+        ...PrDetail
+      }
+      commit {
+        committed
+        subject
+        pushed
+      }
+    }
+  }
+`);
+
 export const ADD_COMMENT = graphql(`
   mutation AddComment($input: AddCommentInput!) {
     addComment(input: $input) {

@@ -16,6 +16,7 @@ const props = defineProps<{ pr: PrListItemFragment }>();
       <UBadge v-for="label in props.pr.labels" :key="label" color="primary" variant="soft" size="sm">
         {{ label }}
       </UBadge>
+      <ReviewBadge :decision="props.pr.reviewDecision" :asked="props.pr.reviewers.length > 0" />
     </div>
     <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
       <code>#{{ props.pr.id }}</code>

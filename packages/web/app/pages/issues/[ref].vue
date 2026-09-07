@@ -4,7 +4,7 @@
   Editing is in place and one field at a time, which is not a stylistic
   preference. `updateIssue` distinguishes an absent field from an explicit
   null, so sending the whole form on every save would rewrite frontmatter
-  nobody touched; `buildIssuePatch` sends only what changed, and nothing at
+  nobody touched; `buildEntityPatch` sends only what changed, and nothing at
   all when nothing did.
 -->
 <script setup lang="ts">
@@ -13,7 +13,7 @@ import { FEATURES_QUERY, ISSUE_QUERY, ISSUES_QUERY } from "~/graphql/queries";
 import { buildCommentTree, countComments } from "~/utils/comments";
 import { distinctValues, shortId } from "~/utils/entities";
 import { describeApiError, reparentConflict } from "~/utils/errors";
-import { buildIssuePatch, type IssueEdit, normalizeOptional, PatchError } from "~/utils/patch";
+import { buildEntityPatch, type EntityEdit, normalizeOptional, PatchError } from "~/utils/patch";
 import { countSubtasks } from "~/utils/subtasks";
 
 const route = useRoute();
@@ -59,7 +59,7 @@ const commentCount = computed(() => countComments(comments.value));
 const subtaskCount = computed(() => countSubtasks(issue.value?.subtasks ?? []));
 
 /** The issue as the patch builder compares against. */
-const current = computed<IssueEdit>(() => ({
+const current = computed<EntityEdit>(() => ({
   title: issue.value?.title ?? "",
   body: issue.value?.body ?? "",
   labels: [...(issue.value?.labels ?? [])],
@@ -68,11 +68,11 @@ const current = computed<IssueEdit>(() => ({
   features: [...(issue.value?.features ?? [])],
 }));
 
-async function save(change: Partial<IssueEdit>): Promise<void> {
+async function save(change: Partial<EntityEdit>): Promise<void> {
   if (issue.value === null) return;
-  let patch: ReturnType<typeof buildIssuePatch>;
+  let patch: ReturnType<typeof buildEntityPatch>;
   try {
-    patch = buildIssuePatch(current.value, change);
+    patch = buildEntityPatch(current.value, change);
   } catch (failure) {
     if (!(failure instanceof PatchError)) throw failure;
     toast.add({ title: "That will not do", description: failure.message, color: "error" });

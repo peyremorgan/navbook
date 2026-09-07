@@ -41,6 +41,8 @@ const props = defineProps<{
   authors: string[];
   milestones: string[];
   features: string[];
+  /** Absent for issues, which have no reviewers (spec 02 §2.7). */
+  reviewers?: string[];
   empty: boolean;
 }>();
 
@@ -79,6 +81,18 @@ const menus = computed(() => [
     options: props.milestones,
   },
   { key: "features" as const, label: "Feature", icon: "i-lucide-layers", options: props.features },
+  // Only where the noun has one: an issue is never reviewed, and the API
+  // refuses the term rather than matching nothing.
+  ...(props.reviewers === undefined
+    ? []
+    : [
+        {
+          key: "reviewers" as const,
+          label: "Reviewer",
+          icon: "i-lucide-eye",
+          options: props.reviewers,
+        },
+      ]),
 ]);
 
 /** Values chosen across the menus, which is what the shut toggle reports. */
