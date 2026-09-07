@@ -204,9 +204,14 @@ test("searches the same words the listings do", async ({ signedIn, stack }) => {
   await expect(signedIn).toHaveURL(/[?&]q=deadline/);
   await expect(signedIn.getByTestId("inbox-row-bbbb0001")).toBeVisible();
 
+  // An empty answer to a search is not the same news as an empty inbox, and
+  // does not get told as though it were.
   await signedIn.getByTestId("inbox-search").fill("nothingmatchesthis");
   await signedIn.getByTestId("inbox-search").press("Enter");
-  await expect(signedIn.getByText("Nothing in your inbox")).toBeVisible();
+  await expect(signedIn.getByText("Nothing matches those words")).toBeVisible();
+  // Told as a search that found nothing, not as an inbox that holds nothing:
+  // the second names the address, and would be answering another question.
+  await expect(signedIn.getByText("waiting on their review")).toHaveCount(0);
 });
 
 test("names the address it looked for when there is nothing", async ({ page, stack }) => {

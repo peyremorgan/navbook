@@ -51,26 +51,47 @@ const finished = computed({
   set: (value: boolean) => view.patch({ finished: value }),
 });
 
-/** Empty because there is nothing at all, or because the rail hid it. */
-const emptiness = computed(() => {
+/**
+ * Why there is nothing to show, which is three different things.
+ *
+ * The rail narrows what has already arrived, the search box narrows what is
+ * asked for, and an inbox can simply be clear. Saying "nothing is assigned to
+ * you" to somebody who has just searched for a word would be answering a
+ * question they did not ask.
+ */
+const emptiness = computed<"nothing" | "searched" | "narrowed" | null>(() => {
   if (shown.value.length > 0) return null;
-  return inbox.items.value.length === 0 ? "nothing" : "narrowed";
+  if (inbox.items.value.length > 0) return "narrowed";
+  return view.params.value.text === "" ? "nothing" : "searched";
 });
 
-const emptyTitle = computed(() =>
-  emptiness.value === "narrowed" ? "Nothing matches this view" : "Nothing in your inbox",
-);
+const emptyTitle = computed(() => {
+  switch (emptiness.value) {
+    case "narrowed":
+      return "Nothing matches this view";
+    case "searched":
+      return "Nothing matches those words";
+    default:
+      return "Nothing in your inbox";
+  }
+});
 
-// The address is worth saying out loud exactly here. An inbox that is empty
-// because the tree spells somebody's name a second way looks identical to one
-// that is empty because there is nothing to do, and this is the only place the
-// difference can be noticed.
+/** What is not being looked at, which is worth saying before anything else. */
+const unfinished = computed(() => (finished.value ? "" : " Finished work is not shown."));
+
 const emptyDescription = computed(() => {
   if (emptiness.value === "narrowed") return "Widen the rail, or search for less.";
-  const who = inbox.email.value ?? "you";
-  return `Nothing is assigned to ${who}, opened by them, or waiting on their review.${
-    finished.value ? "" : " Finished work is not shown."
-  }`;
+  if (emptiness.value === "searched") {
+    return `No issue or pull request of yours has those words in its title, body or comments.${unfinished.value}`;
+  }
+  // The address is worth saying out loud exactly here. An inbox that is empty
+  // because the tree spells somebody's name a second way looks identical to one
+  // that is empty because there is nothing to do, and this is the only place
+  // the difference can be noticed.
+  const who = inbox.email.value;
+  return who === null
+    ? `Nothing is assigned to you, opened by you, or waiting on your review.${unfinished.value}`
+    : `Nothing is assigned to ${who}, opened by them, or waiting on their review.${unfinished.value}`;
 });
 </script>
 
