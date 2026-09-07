@@ -62,7 +62,14 @@ export function isEmptyFilter(filter: FilterState): boolean {
 type QueryValue = string | null | undefined | (string | null)[];
 export type RouteQuery = Record<string, QueryValue>;
 
-function values(raw: QueryValue): string[] {
+/**
+ * The strings a query-string key holds: one value, several, or none.
+ *
+ * Blanks are dropped rather than kept, so `?label=` and no `label` at all are
+ * the same filter — which is what makes a round trip through the address bar
+ * stable.
+ */
+export function queryValues(raw: QueryValue): string[] {
   const list = Array.isArray(raw) ? raw : [raw];
   return list
     .filter((item): item is string => typeof item === "string")
@@ -71,7 +78,7 @@ function values(raw: QueryValue): string[] {
 }
 
 function statuses(raw: QueryValue, allowed: readonly Status[]): Status[] {
-  const wanted = values(raw).map((item) => item.toUpperCase());
+  const wanted = queryValues(raw).map((item) => item.toUpperCase());
   // Unknown or inapplicable statuses are dropped rather than refused: a URL is
   // typed by hand and shared, and a stale `status=merged` on the issue list
   // should show the issue list, not an error.
@@ -115,13 +122,13 @@ export function joinTerms(terms: readonly string[]): string {
 export function queryToFilter(query: RouteQuery, allowed: readonly Status[]): FilterState {
   return {
     status: statuses(query.status, allowed),
-    labels: values(query.label),
-    assignees: values(query.assignee),
-    authors: values(query.author),
-    milestones: values(query.milestone),
-    features: values(query.feature),
-    reviewers: values(query.reviewer),
-    text: joinTerms(values(query.q).flatMap(splitTerms)),
+    labels: queryValues(query.label),
+    assignees: queryValues(query.assignee),
+    authors: queryValues(query.author),
+    milestones: queryValues(query.milestone),
+    features: queryValues(query.feature),
+    reviewers: queryValues(query.reviewer),
+    text: joinTerms(queryValues(query.q).flatMap(splitTerms)),
   };
 }
 

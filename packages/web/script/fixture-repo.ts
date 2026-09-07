@@ -395,10 +395,13 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     author: "Someone Else <someone@example.invalid>",
   });
 
+  // Assigned, and then closed: the one piece of finished work with somebody's
+  // name still on it, which is what an inbox asked for finished work must find.
   issue("2026-07-20T08:00:00Z", IDS.closed, {
     title: "Timestamps render in the wrong timezone",
     body: "Everything was an hour out for anyone not on UTC.",
     labels: ["bug"],
+    assignee: ["A Person <person@example.invalid>"],
     milestone: "1.0",
   });
   closeEntity(
@@ -503,6 +506,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
       title: string;
       body: string;
       labels?: string[];
+      assignee?: string[];
       reviewers?: string[];
       draft?: boolean;
     },
@@ -529,6 +533,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
           source: draft.source,
           revisions: [draft.revision],
           ...(input.labels ? { labels: input.labels } : {}),
+          ...(input.assignee ? { assignee: input.assignee } : {}),
           ...(input.reviewers ? { reviewers: input.reviewers } : {}),
           ...(input.draft ? { draft: true } : {}),
         }),
@@ -539,10 +544,14 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     git(dir, ["checkout", "--quiet", "main"]);
   };
 
+  // Two assignees, which is the only place the fixture writes a person key as
+  // a list rather than a scalar (spec 02 §2.5) — and the only pull request
+  // anybody's inbox holds for having been given it rather than written.
   openPrOn("2026-08-04T10:00:00Z", IDS.servedPr, SERVED_BRANCH, {
     title: "Raise the sign-in deadline",
     body: "Thirty seconds, and configurable. Closes the subtask under #aaaa0001.",
     labels: ["bug"],
+    assignee: ["A Person <person@example.invalid>", `${COMMITTER.name} <${COMMITTER.email}>`],
     reviewers: ["someone@example.invalid"],
   });
 
