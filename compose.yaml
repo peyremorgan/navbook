@@ -1,0 +1,90 @@
+# Navbook as two containers, behind a Traefik that is already running.
+#
+#   cp .env.example .env   # then edit it
+#   docker compose up -d --build
+#
+# `.env.example` is the reference for everything below: this file only maps
+# those keys onto the variables the two images actually read, so that the
+# server's own configuration keeps the names its README documents.
+#
+# There is no database and no third container. The API's state is a git clone
+# in a named volume, which it makes itself and which can be thrown away; the
+# client is static files. The two never talk to each other — the browser talks
+# to both — so neither is on a network with the other.
+
+name: navbook
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: packages/server/Dockerfile
+    image: navbook-server:${NAVBOOK_IMAGE_TAG:-local}
+    restart: unless-stopped
+    volumes:
+      # The clone. One server per clone: operations are serialised against a
+      # single working tree, so this service does not scale by replica.
+      - clone:/srv/navbook
+    environment:
+      NAV_SERVER_REPO: /srv/navbook
+      NAV_SERVER_PORT: "4000"
+      NAV_SERVER_OIDC_ISSUER: ${NAVBOOK_OIDC_ISSUER:?set NAVBOOK_OIDC_ISSUER in .env}
+      NAV_SERVER_OIDC_AUDIENCE: ${NAVBOOK_OIDC_AUDIENCE:?set NAVBOOK_OIDC_AUDIENCE in .env}
+      NAV_SERVER_OIDC_JWKS_URL: ${NAVBOOK_OIDC_JWKS_URL:-}
+      NAV_SERVER_REMOTE: ${NAVBOOK_REMOTE:-origin}
+      NAV_SERVER_PULL_INTERVAL_MS: ${NAVBOOK_PULL_INTERVAL_MS:-10000}
+      NAV_SERVER_GRAPHIQL: ${NAVBOOK_GRAPHIQL:-false}
+      NAV_ROOT: ${NAVBOOK_ROOT:-}
+      # What the entrypoint needs to make the clone in the first place.
+      NAVBOOK_REPO_URL: ${NAVBOOK_REPO_URL:?set NAVBOOK_REPO_URL in .env}
+      NAVBOOK_BRANCH: ${NAVBOOK_BRANCH:-}
+      NAVBOOK_GIT_NAME: ${NAVBOOK_GIT_NAME:?set NAVBOOK_GIT_NAME in .env}
+      NAVBOOK_GIT_EMAIL: ${NAVBOOK_GIT_EMAIL:?set NAVBOOK_GIT_EMAIL in .env}
+      NAVBOOK_GIT_USERNAME: ${NAVBOOK_GIT_USERNAME:-x-access-token}
+      NAVBOOK_GIT_TOKEN: ${NAVBOOK_GIT_TOKEN:-}
+    networks:
+      - traefik
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${NAVBOOK_TRAEFIK_NETWORK:-traefik}
+      traefik.http.routers.navbook-api.rule: 'Host(`${NAVBOOK_API_HOST:?set NAVBOOK_API_HOST in .env}`)'
+      traefik.http.routers.navbook-api.entrypoints: ${NAVBOOK_TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.navbook-api.tls: "true"
+      traefik.http.routers.navbook-api.tls.certresolver: ${NAVBOOK_TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.routers.navbook-api.service: navbook-api
+      traefik.http.services.navbook-api.loadbalancer.server.port: "4000"
+
+  web:
+    build:
+      context: .
+      dockerfile: packages/web/Dockerfile
+    image: navbook-web:${NAVBOOK_IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      # Derived from the API's hostname, because that is where it is: set
+      # NAVBOOK_GRAPHQL_URL only when something else stands in front of it.
+      NAVBOOK_GRAPHQL_URL: ${NAVBOOK_GRAPHQL_URL:-https://${NAVBOOK_API_HOST:?set NAVBOOK_API_HOST in .env}/graphql}
+      NAVBOOK_OIDC_ISSUER: ${NAVBOOK_OIDC_ISSUER:?set NAVBOOK_OIDC_ISSUER in .env}
+      NAVBOOK_OIDC_CLIENT_ID: ${NAVBOOK_OIDC_CLIENT_ID:?set NAVBOOK_OIDC_CLIENT_ID in .env}
+      NAVBOOK_OIDC_AUDIENCE: ${NAVBOOK_OIDC_AUDIENCE:?set NAVBOOK_OIDC_AUDIENCE in .env}
+    networks:
+      - traefik
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${NAVBOOK_TRAEFIK_NETWORK:-traefik}
+      traefik.http.routers.navbook-web.rule: 'Host(`${NAVBOOK_WEB_HOST:?set NAVBOOK_WEB_HOST in .env}`)'
+      traefik.http.routers.navbook-web.entrypoints: ${NAVBOOK_TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.navbook-web.tls: "true"
+      traefik.http.routers.navbook-web.tls.certresolver: ${NAVBOOK_TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.routers.navbook-web.service: navbook-web
+      traefik.http.services.navbook-web.loadbalancer.server.port: "80"
+
+volumes:
+  clone:
+
+networks:
+  # Traefik's, not this project's: it is what makes the containers reachable,
+  # and it has to exist already. `docker network create traefik` makes it.
+  traefik:
+    external: true
+    name: ${NAVBOOK_TRAEFIK_NETWORK:-traefik}

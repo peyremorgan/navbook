@@ -23,6 +23,9 @@
 set -eu
 
 repo=${NAV_SERVER_REPO:-/srv/navbook}
+# The server's own variable, not a second one: the remote this makes is the
+# remote it synchronises with, and two names for that could disagree.
+remote=${NAV_SERVER_REMOTE:-origin}
 
 fail() {
   echo "navbook-entrypoint: $1" >&2
@@ -80,13 +83,13 @@ else
   else
     git -C "$repo" init -q -b "$branch"
   fi
-  if git -C "$repo" remote get-url origin >/dev/null 2>&1; then
-    git -C "$repo" remote set-url origin "$NAVBOOK_REPO_URL"
+  if git -C "$repo" remote get-url "$remote" >/dev/null 2>&1; then
+    git -C "$repo" remote set-url "$remote" "$NAVBOOK_REPO_URL"
   else
-    git -C "$repo" remote add origin "$NAVBOOK_REPO_URL"
+    git -C "$repo" remote add "$remote" "$NAVBOOK_REPO_URL"
   fi
-  git -C "$repo" fetch -q origin
-  git -C "$repo" checkout -q -B "$branch" "origin/$branch"
+  git -C "$repo" fetch -q "$remote"
+  git -C "$repo" checkout -q -B "$branch" "$remote/$branch"
 fi
 
 cd "$repo"

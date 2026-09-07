@@ -176,6 +176,15 @@ describe("the API container's entrypoint", () => {
     });
   }
 
+  it("makes the remote under the name the server synchronises with", () => {
+    const fx = fixture();
+    const result = fx.run({ NAV_SERVER_REMOTE: "upstream" });
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(fx.git(["remote", "get-url", "upstream"]).stdout.trim(), fx.remoteUrl);
+    assert.equal(result.handover?.branch, "main");
+  });
+
   it("says which branch it cannot find rather than serving the wrong one", () => {
     const fx = fixture();
     const result = fx.run({ NAVBOOK_BRANCH: "not-a-branch" });
