@@ -4,6 +4,7 @@ author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-06T23:30:09Z
 labels: [enhancement]
 feature: web
+resolution: fixed
 ---
 
 Five full-width dropdowns take most of a phone screen; share one row above md, disclose below it.
