@@ -26,6 +26,12 @@ detail with its target, source, revisions and merge; comments or reviews bound
 to a revision; and who was asked to review, what each of them has said about
 the latest revision, and the decision that reading adds up to.
 
+**An inbox**, which is the one page about a person rather than about the
+repository: what is assigned to you, the pull requests you opened, and the
+reviews you still owe, in one list that says why each row is in it. Nothing is
+marked read — a request leaves it by being answered and an issue by being closed
+or reassigned, which the files already record.
+
 **Features**, read and written: the listing, and a page per feature holding its
 specification documents, the issues and pull requests that name it, and the
 commits that touched any of them, mixed into one timeline. A document is edited
