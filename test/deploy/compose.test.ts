@@ -45,6 +45,31 @@ function documentedKeys(): Map<string, string> {
   return keys;
 }
 
+/**
+ * The keys `.env.example` marks as required, by the comment above them.
+ *
+ * A comment block applies to every key that follows it without a blank line in
+ * between, which is how the two halves of an identity share one explanation.
+ */
+function keysDocumentedRequired(): Set<string> {
+  const required = new Set<string>();
+  let block = "";
+  for (const line of readFileSync(ENV_EXAMPLE, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("#")) {
+      block += ` ${trimmed}`;
+      continue;
+    }
+    const key = /^([A-Z][A-Z0-9_]*)=/.exec(trimmed)?.[1];
+    if (key !== undefined) {
+      if (/\brequired\b/.test(block)) required.add(key);
+      continue;
+    }
+    block = "";
+  }
+  return required;
+}
+
 /** Every `${NAVBOOK_…}` the compose file interpolates, and whether it is required. */
 function referencedKeys(): Map<string, { required: boolean }> {
   const keys = new Map<string, { required: boolean }>();
@@ -90,6 +115,19 @@ describe("the deployment descriptor", () => {
       .filter((key) => (documented.get(key) ?? "").trim() === "");
 
     assert.deepEqual(empty, [], "a key compose insists on is left empty in .env.example");
+  });
+
+  it("insists on exactly the keys it documents as required", () => {
+    const insisted = new Set(
+      [...referencedKeys()].filter(([, how]) => how.required).map(([key]) => key),
+    );
+    const documented = keysDocumentedRequired();
+
+    assert.deepEqual(
+      [...insisted].sort(),
+      [...documented].sort(),
+      "a key is required in one description of the deployment and optional in the other",
+    );
   });
 
   it("passes the API container everything its entrypoint reads", () => {

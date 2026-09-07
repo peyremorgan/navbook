@@ -33,6 +33,13 @@ required() {
   printf '%s' "$value" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
+[ -d "$root" ] || fail "$root is not there; nothing to configure"
+
+# The bundle ships the development one, and a start that cannot write a good
+# file must not leave a stale file behind: serving yesterday's addresses is a
+# worse failure than serving none, because nothing about it looks wrong.
+rm -f "$root/config.json"
+
 graphql_url=$(required NAVBOOK_GRAPHQL_URL "${NAVBOOK_GRAPHQL_URL:-}" \
   "the address the browser sends GraphQL to")
 oidc_issuer=$(required NAVBOOK_OIDC_ISSUER "${NAVBOOK_OIDC_ISSUER:-}" \
@@ -42,9 +49,6 @@ oidc_client_id=$(required NAVBOOK_OIDC_CLIENT_ID "${NAVBOOK_OIDC_CLIENT_ID:-}" \
 oidc_audience=$(required NAVBOOK_OIDC_AUDIENCE "${NAVBOOK_OIDC_AUDIENCE:-}" \
   "the audience tokens must carry")
 
-[ -d "$root" ] || fail "$root is not there; nothing to configure"
-
-# The bundle ships the development one. Overwriting it is what a deployment is.
 cat > "$root/config.json" <<JSON
 {
   "graphqlUrl": "$graphql_url",

@@ -57,11 +57,24 @@ if [ -n "${NAVBOOK_GIT_TOKEN:-}" ]; then
     '!f() { [ "$1" = get ] || exit 0; printf "username=%s\npassword=%s\n" "$NAVBOOK_GIT_USERNAME" "$NAVBOOK_GIT_TOKEN"; }; f'
 fi
 
+# Where the deployment points, on every start rather than only the first: the
+# volume should not be the thing that outranks the configuration.
+point_at_remote() {
+  if git -C "$repo" remote get-url "$remote" > /dev/null 2>&1; then
+    git -C "$repo" remote set-url "$remote" "$NAVBOOK_REPO_URL"
+  else
+    git -C "$repo" remote add "$remote" "$NAVBOOK_REPO_URL"
+  fi
+}
+
+mkdir -p "$repo"
+
 # A commit is the completed unit here, so "has a commit" is what makes a clone
-# usable — and what makes a seed interrupted halfway one that should be made
-# again rather than served.
-if git -C "$repo" rev-parse --verify -q HEAD >/dev/null 2>&1; then
+# usable — and what makes a seed interrupted halfway one to make again rather
+# than one to serve.
+if git -C "$repo" rev-parse --verify -q HEAD > /dev/null 2>&1; then
   echo "navbook-entrypoint: serving the clone already in $repo"
+  point_at_remote
 else
   branch=${NAVBOOK_BRANCH:-}
   if [ -z "$branch" ]; then
@@ -72,22 +85,12 @@ else
   fi
 
   echo "navbook-entrypoint: fetching $NAVBOOK_REPO_URL ($branch) into $repo"
-  mkdir -p "$repo"
-  # init, fetch and checkout rather than clone: this is the sequence that is
-  # willing to finish a seed the last start left half-made, and the one that
-  # does not mind a mount point something else has already put a file in.
-  if [ -d "$repo/.git" ]; then
-    # Finishing one the last start left half-made: it already has its branch,
-    # and re-passing --initial-branch only earns a warning.
-    git -C "$repo" init -q
-  else
-    git -C "$repo" init -q -b "$branch"
-  fi
-  if git -C "$repo" remote get-url "$remote" >/dev/null 2>&1; then
-    git -C "$repo" remote set-url "$remote" "$NAVBOOK_REPO_URL"
-  else
-    git -C "$repo" remote add "$remote" "$NAVBOOK_REPO_URL"
-  fi
+  # init, fetch and checkout rather than clone: this is the sequence willing to
+  # finish a seed the last start left half-made, and the one that does not mind
+  # a mount point something else has already put a file in. A half-made one
+  # already has its branch, and re-passing --initial-branch only earns a warning.
+  [ -d "$repo/.git" ] || git -C "$repo" init -q -b "$branch"
+  point_at_remote
   git -C "$repo" fetch -q "$remote"
   git -C "$repo" checkout -q -B "$branch" "$remote/$branch"
 fi

@@ -95,6 +95,20 @@ describe("the web container's configuration", () => {
       assert.equal(existsSync(join(root, "config.json")), false);
     });
 
+    it(`leaves no stale config behind when ${missing} is not set`, () => {
+      const root = bundle();
+      writeFileSync(join(root, "config.json"), '{"graphqlUrl":"http://localhost:4000/graphql"}');
+
+      const result = runWebConfig(root, { ...COMPLETE, [missing]: undefined });
+
+      assert.notEqual(result.code, 0);
+      assert.equal(
+        existsSync(join(root, "config.json")),
+        false,
+        "yesterday's addresses were left in place, and nothing about that looks wrong",
+      );
+    });
+
     it(`stops the container when ${missing} is empty`, () => {
       const root = bundle();
       const result = runWebConfig(root, { ...COMPLETE, [missing]: "" });

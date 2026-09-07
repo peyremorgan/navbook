@@ -64,6 +64,22 @@ describe("the API container's entrypoint", () => {
     assert.notEqual(second, first);
   });
 
+  it("points a clone it already has at the repository it is now told to serve", () => {
+    const fx = fixture();
+    assert.equal(fx.run().code, 0);
+    fx.git(["remote", "set-url", "origin", "https://moved-away.invalid/x.git"]);
+
+    const result = fx.run();
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /serving the clone already in/);
+    assert.equal(
+      fx.git(["remote", "get-url", "origin"]).stdout.trim(),
+      fx.remoteUrl,
+      "the volume outranked the configuration",
+    );
+  });
+
   it("finishes a seed a previous start left half-made", () => {
     const fx = fixture();
     // `git init` ran and nothing else: a directory with a .git and no commit,
