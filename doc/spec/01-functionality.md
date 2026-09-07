@@ -43,6 +43,9 @@ Three properties define it:
   *merged*, or *closed* (declined/abandoned).
 - **Comment** — a Markdown file inside an issue's or PR's `comments/` directory.
   Review verdicts and inline code comments are comments with extra metadata.
+- **Review** — a comment carrying a `verdict` bound to one of a PR's pinned
+  revisions. Who was *asked* for one is `reviewer:` on the PR; who still owes
+  one is derived from the reviews, never stored.
 - **ID** — an 8-character random identifier minted at creation
   (e.g. `bqlybac0`). It never changes, is unique within the repository, and is
   the way issues, PRs, and comments are referenced from prose and commit
@@ -116,12 +119,26 @@ Created .navbook/prs/open/dk3mp2x9-auth-refactor/  (#dk3mp2x9)
 
 ### Review
 
+Ask for a review by naming people in `reviewer:` on `pr.md` — that key is the
+whole request, and `nav pr request` writes it.
+
 Reviewers commit comment files to the PR's `comments/` directory on the source
 branch. A review verdict is a comment whose frontmatter carries
-`verdict: approve` (or `request-changes`) bound to the revision SHA it judged.
-Inline code comments carry file/line anchors and quote the code they discuss.
-The git commit that adds an approval is authored — and may be signed — by the
-approver: git itself is the attestation chain.
+`verdict: approve` (or `request-changes`, or `comment` for a review that judges
+nothing) bound to the revision SHA it judged. Inline code comments carry
+file/line anchors and quote the code they discuss. The git commit that adds an
+approval is authored — and may be signed — by the approver: git itself is the
+attestation chain.
+
+Nothing records that a request has been answered, because nothing needs to:
+who still owes a review is worked out from the reviews themselves, against the
+latest revision. A new revision therefore asks everybody again, and no
+reviewer's commit ever has to edit the file the author is working in.
+
+```
+$ nav pr request dk3m alice@example.com
+$ nav pr review dk3m --approve -m "Reads well."
+```
 
 ### Merge
 
@@ -177,4 +194,7 @@ merged branch. This read-only rendering is Navbook's zero-install adoption path.
   operations `nav` runs.
 - **Not an approval enforcement system.** Navbook records reviews; branch
   protection and merge policy remain the responsibility of the forge or of team
-  convention.
+  convention. A pull request's review decision ([02 §2.7](02-data-model.md)) is
+  a reading of the files, never a gate: `nav pr merge` merges a pull request
+  nobody has approved, because whether that is acceptable is not the tracker's
+  question to answer.

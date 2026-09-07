@@ -129,7 +129,7 @@ Everything is noun-verb, with one verb vocabulary shared by both entity kinds.
 
 ```
 nav {issue|pr} {open|list|show|edit|comment|close|reopen|delete}
-nav pr {update|review|merge}
+nav pr {update|request|review|merge}
 nav feature {open|list|show|edit}
 nav feature spec {add|edit|list}
 nav {init|id|doctor|install|uninstall}
@@ -147,7 +147,9 @@ usually enough. A full directory name works too.
 | `nav issue show <id> [--depth N]` | Render it, with the title and status of its parent and of the subtasks beneath it. |
 | `nav issue delete <id>` | Remove its directory entirely — for the duplicate you filed twice. Its subtasks survive as top-level issues unless you pass `--recursive`. Asks first if it holds uncommitted changes; `--force` skips that. |
 | `nav pr open [--target BRANCH]` | Open a PR from the current branch, pinning the exact head and merge base under review. |
-| `nav pr review <id> --approve` | Record a verdict bound to a specific revision. |
+| `nav pr request <id> <email>` | Ask someone to review it. Being listed is the request; nothing records it answered, and a new revision asks again. |
+| `nav pr review <id> --approve` | Record a verdict bound to a specific revision. Without a flag the verdict is `comment`: a review that judges nothing. |
+| `nav pr list awaiting:me@example.com` | Pull requests waiting on one person. `reviewer:` and `review:approved` filter the same listing. |
 | `nav pr list --all-refs` | Find PRs on branches you have fetched but not checked out. |
 | `nav pr merge <id>` | Merge into the checked-out target, archiving the discussion into its history. |
 | `nav feature open <title>` | Create a feature under `specs/`. `--slug` names its directory; the title otherwise. |

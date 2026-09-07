@@ -94,18 +94,22 @@ editor started from, and a save whose file has moved on since is refused rather
 than landed on top of somebody else's paragraph. That is the rule above applied
 to a document instead of a push: conflicts surface, they are not resolved.
 
-**The checkout-centric verbs are not exposed.** Opening, updating and merging a
-pull request, deleting an entity, `init`, and `doctor --fix` need a branch and a
-working tree rather than a request, and a gateway performing them would be
-making decisions on somebody's behalf that they could not see. `doctor` is
-read-only over the API.
+**The checkout-centric verbs are not exposed.** Opening a pull request,
+appending a revision to one, merging it, deleting an entity, `init`, and
+`doctor --fix` need a branch and a working tree rather than a request, and a
+gateway performing them would be making decisions on somebody's behalf that
+they could not see. `doctor` is read-only over the API. Editing a pull
+request's *metadata* is not on that list: asking somebody to review, or
+relabelling, is a patch to one file and nothing else, so it is exposed exactly
+as an issue's is.
 
-**A pull request can be visible and still not commentable.** Its files live on
+**A pull request can be visible and still not writable.** Its files live on
 the branch it proposes to merge ([03 §3.5](03-merge-and-branches.md)), so a
 cross-ref scan finds ones the serving checkout does not hold. Writing a comment
 beside a `pr.md` that is not there would produce the stranded comment of
-[03 §3.3.1](03-merge-and-branches.md), so the server refuses and names the
-branch that would have to be served instead.
+[03 §3.3.1](03-merge-and-branches.md) — and there is no `pr.md` there to patch
+either — so the server refuses and names the branch that would have to be
+served instead.
 
 ## 6.4 Cryptographic attestation
 

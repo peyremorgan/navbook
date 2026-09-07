@@ -56,6 +56,7 @@ The format is designed so that the *frequency* of conflicts tracks the
 | Two new issues/PRs | Distinct directories | Merges clean, always (random IDs) |
 | Two comments, same entity | Distinct files | Merges clean, always |
 | Comment + metadata edit, same issue | Distinct files (`comments/*` vs `issue.md`) | Merges clean |
+| Review + metadata edit, same PR | Distinct files (`comments/*` vs `pr.md`) | Merges clean. This is why answering a review request writes no key ([02 §2.7](02-data-model.md)): a review that cleared one would land in `pr.md` and take the row below instead |
 | Two edits of the same `issue.md`/`pr.md` | Textual conflict in a small YAML+Markdown file | Resolve by hand; both intents usually compose (e.g. keep both labels) |
 | Two edits of the same specification document | Textual conflict in a Markdown file | Resolve by hand, as for any prose the two of you both changed |
 | Two new features, or two documents added to one feature | Distinct files | Merges clean, always |
@@ -172,7 +173,10 @@ spec-level facts, not bugs:
 1. **The reviewed SHA can never contain its own review.** Approvals are commits
    *after* the `revision.head` they approve. Verifiers MUST check that a
    verdict's `revision` matches a recorded revision entry, not the commit
-   containing the verdict.
+   containing the verdict. The request that preceded the review is on `pr.md`
+   and so *is* inside the reviewed state — which is why being asked is a key on
+   the PR and being answered is not ([02 §2.7](02-data-model.md)): only one of
+   the two can ever be recorded where the reviewer is writing.
 2. **The target branch does not show open PRs.** Open PRs are discovered by
    enumerating branches (`nav pr list` scans
    `.navbook/prs/open/` across local and fetched remote branches). This is

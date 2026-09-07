@@ -43,7 +43,7 @@ both entity kinds:
 nav {issue | pr} {open | list | show | edit | comment | close | reopen | delete}
 ```
 
-plus three PR-only verbs (`update`, `review`, `merge`), the `nav feature`
+plus four PR-only verbs (`update`, `request`, `review`, `merge`), the `nav feature`
 family below, and repository-level utilities at the root of the command tree
 (`nav id`, `nav doctor`, and the setup commands). A verb given an ID of the
 other kind MUST fail with a pointer to the right noun (e.g.
@@ -147,9 +147,9 @@ other kind MUST fail with a pointer to the right noun (e.g.
 
 ### Pull requests — `nav pr <verb>`
 
-The eight shared verbs, plus `update`, `review`, and `merge`:
+The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
 
-- `nav pr open [--target BRANCH] [--title T] [--draft] [--feature SLUG]...` — on the current
+- `nav pr open [--target BRANCH] [--title T] [--draft] [--reviewer EMAIL]... [--feature SLUG]...` — on the current
   branch: mint an ID, create `prs/open/<id>-<slug>/pr.md` with `source` = the
   current branch, `target` (default: the default branch), and one revision
   entry pinning `head` = current `HEAD` SHA and `base` = `git merge-base HEAD
@@ -174,9 +174,29 @@ The eight shared verbs, plus `update`, `review`, and `merge`:
   request on the branch that holds it.
 - `nav pr update <id>` — append a revision entry for the current `HEAD`
   (refuses if `HEAD` equals the last recorded head).
-- `nav pr review <id> [--approve | --request-changes] [-m TEXT | --edit] [--file PATH --line N[-M]]`
+- `nav pr request <id> <email>... [--remove]` — add the named people to
+  `reviewer:` on `pr.md` ([02 §2.7](02-data-model.md)), or take them off with
+  `--remove`. Addresses are matched as identities, not as text: a person
+  already listed is not listed twice under another spelling of the same
+  address, and `--remove` takes off whichever spelling the file carries. It
+  MUST refuse to request a review from the pull request's own author, and it
+  MUST exit 1 when it would change nothing — every name already listed, or
+  none of them listed for `--remove` — naming what it found. The commit
+  subjects are `docs(pr): request review #<id>` and
+  `docs(pr): remove reviewer #<id>`.
+- `nav pr review <id> [--approve | --request-changes | --comment] [-m TEXT | --edit] [--file PATH --line N[-M]]`
   — create a review comment bound to the PR's latest revision (`revision:` set
-  automatically; `--revision SHA` to bind an older one).
+  automatically; `--revision SHA` to bind an older one). With no verdict flag
+  the verdict is `comment` ([02 §2.6](02-data-model.md)): this verb files
+  reviews, and a review that judges nothing is still a review, recording that
+  its author read the revision it names. To say something without reading a
+  revision, use `nav pr comment`, which binds to nothing and carries no
+  verdict.
+
+  The one exception is `--file` without a verdict flag, which anchors a comment
+  to a line without judging anything: an inline note is discussion about a
+  place in the diff, and turning every one of them into a review would say its
+  author had read the whole revision.
 - `nav pr merge <id> [--no-ff]` — from the target branch: `git merge` the
   source branch with the PR directory moved to `prs/merged/` inside the merge
   commit, then record the `merged:` block in a follow-up commit
@@ -234,6 +254,9 @@ kind. Terms AND together:
 | `label:L` | `L` ∈ `labels` |
 | `assignee:EMAIL` | Assignee address (case-insensitive; substring after `@` allowed) |
 | `author:EMAIL` | Author address (same matching) |
+| `reviewer:EMAIL` | `EMAIL` ∈ the PR's `reviewer` ([02 §2.7](02-data-model.md)); same matching. PRs only |
+| `review:pending\|approved\|changes-requested` | The PR's derived decision ([02 §2.7](02-data-model.md)). PRs only |
+| `awaiting:EMAIL` | `EMAIL` is asked to review and is `pending` on the latest revision. PRs only |
 | `milestone:M` | Exact milestone |
 | `feature:SLUG` | `SLUG` ∈ the entity's `feature` ([02 §2.11](02-data-model.md)) |
 | bare word / quoted string | Case-insensitive substring of title, description, or any comment body |
@@ -242,6 +265,15 @@ A query naming no status matches every status. The `status:open` default above
 is one the `list` commands supply for themselves, not a property of the
 grammar: other front ends over the same query — the API of
 [06 §6.3](06-future.md) among them — list every status until asked to narrow.
+
+`reviewer`, `review` and `awaiting` describe something only a pull request has,
+so `nav issue list` MUST reject them the way it rejects `status:merged`, rather
+than matching nothing. The last two read the comment files, as a bare-word
+search does, since that is where the verdicts they judge live.
+
+`nav pr list` shows a `reviewer` column when any pull request listed names one,
+as it does for `assignee`, and a `review` column carrying the derived decision.
+`nav pr show` renders each person's state under the reviewers it lists.
 
 ### Root utilities
 

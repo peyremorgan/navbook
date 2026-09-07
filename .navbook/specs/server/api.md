@@ -8,11 +8,11 @@ title: API
 
 - **Identity** comes from an OIDC bearer token whose `email` claim becomes `author:`; the machine account is the committer. There is no authorization: any token the issuer signs for the audience may write.
 - **Reads** — `issues`, `issue`, `prs` (with `allRefs` for the cross-branch scan), `pr`, `features`, `feature`, `doctor`, `viewer`. A listing is the whole matching set; there is no pagination.
-- **Writes** — `openIssue`, `updateIssue`, `closeIssue`, `reopenIssue`, `addComment`, `linkIssue`, `unlinkIssue`, `createFeature`, `updateFeature`, `addSpec`, `updateSpec`. Every payload returns `commit { committed subject pushed }`, and a client is expected to say so when `pushed` is false.
+- **Writes** — `openIssue`, `updateIssue`, `closeIssue`, `reopenIssue`, `updatePr`, `addComment`, `linkIssue`, `unlinkIssue`, `createFeature`, `updateFeature`, `addSpec`, `updateSpec`. Every payload returns `commit { committed subject pushed }`, and a client is expected to say so when `pushed` is false.
 - **Composing** stays on the server: a client sends fields, the server builds the file with core's constructors and validates it before anything is written.
 - **Patches** distinguish absent from `null`; unknown frontmatter keys always survive.
-- **Refusals** — `REPARENT_REQUIRED` for a link that would move a subtask, `PRECONDITION` for a comment on a branch this clone does not serve, `STALE_CONTENT` for a document save made against a version somebody has replaced.
-- **Not exposed** — opening, updating and merging pull requests; deleting anything; `init`; `doctor --fix`; renaming or removing a feature or document.
+- **Refusals** — `REPARENT_REQUIRED` for a link that would move a subtask, `PRECONDITION` for a comment or a patch on a pull-request branch this clone does not serve, `STALE_CONTENT` for a document save made against a version somebody has replaced.
+- **Not exposed** — opening a pull request, appending a revision to one, merging it; deleting anything; `init`; `doctor --fix`; renaming or removing a feature or document. A pull request's metadata is patchable, `reviewers` included.
 
 ## Where it lives
 

@@ -21,8 +21,10 @@ resolution, reopening, commenting and replying, and linking or unlinking
 subtasks.
 
 **Pull requests**, read and reviewed: the listing, with a toggle for the
-branches this checkout does not hold; the detail with its target, source,
-revisions and merge; and comments or reviews bound to a revision.
+branches this checkout does not hold and one for the reviews you owe; the
+detail with its target, source, revisions and merge; comments or reviews bound
+to a revision; and who was asked to review, what each of them has said about
+the latest revision, and the decision that reading adds up to.
 
 **Features**, read and written: the listing, and a page per feature holding its
 specification documents, the issues and pull requests that name it, and the

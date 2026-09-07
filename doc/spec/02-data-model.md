@@ -208,7 +208,7 @@ A comment on a PR MAY additionally carry:
 
 | Key | Req. | Type | Meaning |
 |-----|------|------|---------|
-| `verdict` | MAY | `approve` \| `request-changes` | Makes this comment a review |
+| `verdict` | MAY | `approve` \| `request-changes` \| `comment` | Makes this comment a review |
 | `revision` | MUST if `verdict` or `file` present | 40-hex SHA | The revision `head` ([2.7](#27-prmd)) this review or anchor refers to |
 | `file` | MAY | repo-relative path | Inline comment anchor |
 | `line` | MAY | integer or `start-end` range | Line(s) in `file` at commit `revision` |
@@ -218,6 +218,23 @@ approvals until re-reviewed — this rule is what prevents a force-push from
 inheriting a stale approval. Inline comments SHOULD quote the code they discuss
 in the body (blockquote), so they remain meaningful to humans even after the
 anchor drifts.
+
+`approve` and `request-changes` are **opinionated**: they judge the revision.
+`comment` judges nothing and says only that its author read the revision named
+— it is what a reviewer files when they have looked and have nothing to
+withhold or demand. It is still a review, and it still binds to a revision, so
+it satisfies a request for review ([2.7](#27-prmd)) exactly as the other two
+do; it is simply never counted for or against the change.
+
+A `comment` verdict is not the same as a comment with no verdict at all. The
+latter is discussion, bound to nothing, and a tool that recorded it as a review
+would be claiming its author had read a revision they may never have opened.
+
+**A tool that predates this key's third value will reject a `comment` verdict
+as malformed.** Nothing else about such a file is new, so this is the only
+compatibility cost of the addition, and it is why `comment` is a value of an
+existing key rather than a key of its own: the alternative would have older
+tools silently reading a review as discussion.
 
 ```markdown
 ---
@@ -242,6 +259,7 @@ author: ked@example.com
 created: 2026-08-04T16:40:00Z
 target: main
 source: feat/auth-refactor
+reviewer: alice@example.com
 revisions:
   - head: 4f2c9d1e8a7b3c5d9e0f1a2b3c4d5e6f7a8b9c0d
     base: 91d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0
@@ -261,6 +279,7 @@ Closes: bqlybac0
 | `source` | SHOULD | string | Branch the PR rides on (informative; the PR directory itself lives on that branch) |
 | `revisions` | MUST, ≥ 1 entry | list | Append-only history of reviewable states |
 | `draft` | MAY | boolean | Not yet requesting review |
+| `reviewer` | MAY | person or list of persons | Who is asked to review (below) |
 | `labels`, `assignee`, `milestone`, `feature` | MAY | as issues | |
 | `merged` | MAY | map | Added at/after merge: `date`, `by` (person), `commit` (40-hex merge commit, added in a follow-up commit since it cannot be known inside the merge itself) |
 | `resolution` | MAY | string | For `prs/closed/`: `declined`, `superseded`, `abandoned` RECOMMENDED |
@@ -276,12 +295,55 @@ Entries MUST only be appended, never edited or removed. Amending or
 force-pushing the source branch is represented by appending a new entry. The
 branch name in `source` is intent; the SHAs are truth.
 
+### Review requests
+
+`reviewer` names the people a pull request asks to review it. It takes the
+shape `assignee` takes (§2.5) — one person written as a scalar, several as a
+list — and it is the whole of the request: **being listed is being asked.**
+
+There is deliberately no second key recording whether a request is still
+outstanding. Such a key would have to be cleared by the reviewer's own commit,
+so every review would rewrite `pr.md` and race whatever the author was editing
+there (§3.3) — a conflict manufactured by the format, in the one file two
+people are most likely to touch at once. A review is a new file, and it stays
+one.
+
+What is outstanding is therefore **derived**, not stored, and the reviews
+themselves are what it is derived from:
+
+- A person's **state** on a revision is their latest opinionated verdict
+  (§2.6) among the reviews they bound to it; failing that, `commented` if they
+  bound a `comment` verdict to it; failing that, `pending`.
+- A pull request's state is read on its **latest revision**, so appending a
+  revision returns every reviewer to `pending` — the same rule that stops a
+  verdict carrying forward, seen from the other side. Re-requesting a review
+  after a force-push is thus not an action anyone has to remember to take.
+- A **decision** for the whole pull request is `changes-requested` when any
+  person's state is `request-changes`, otherwise `approved` when any person's
+  state is `approve`, otherwise `pending`.
+- The people considered are those `reviewer` names **and** anyone else who has
+  bound a verdict to that revision: a review nobody asked for is still a
+  review. The pull request's own `author` is excluded throughout, from the
+  listing and from the decision alike.
+
+Nothing here is a gate. A decision of `pending` does not make a merge wrong,
+and `approved` does not make one right; both are readings of what the files
+say, and merge policy belongs to the forge or to team convention ([01
+§1.7](01-functionality.md)). A tool MUST NOT refuse an operation on the
+strength of a derived review state, and MUST NOT write any of these states
+into a file.
+
+`draft` and `reviewer` are independent: a draft may name the people it will
+ask, and one that does is still not asking.
+
 ## 2.8 PR lifecycle
 
 1. **Open** — the author commits `.navbook/prs/open/<id>-<slug>/` on the source
    branch, with one revision entry. Publishing the branch publishes the PR.
 2. **Iterate** — new reviewable states append revisions; discussion and reviews
-   accumulate as comment files, all on the source branch.
+   accumulate as comment files, all on the source branch. Asking someone to
+   review is an edit to `reviewer` on `pr.md`; answering is a comment file, and
+   never an edit to `pr.md` (§2.7).
 3. **Merge** — the source branch is merged into `target`; the PR directory is
    moved to `prs/merged/` either inside the merge commit or in an immediate
    follow-up on the target branch. The full discussion is thereby archived in
