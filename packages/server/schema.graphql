@@ -134,6 +134,41 @@ type Pr implements Entity {
   merged: MergedInfo
   "Branches the cross-ref scan found it on; empty for a working-tree read."
   refs: [String!]!
+
+  "Who it asks to review, as `reviewer:` records them (spec 02 §2.7)."
+  reviewers: [String!]!
+  """
+  Everyone asked, plus anyone else who reviewed the latest revision, minus the
+  author. Derived from the reviews and stored nowhere.
+  """
+  reviews: [ReviewerState!]!
+  "What those reviews add up to. Never a gate: policy is the forge's (spec 01 §1.7)."
+  reviewDecision: ReviewDecision!
+}
+
+"What one person has said about a pull request's latest revision."
+type ReviewerState {
+  person: String!
+  state: ReviewState!
+  "True when nobody asked them; their review counts all the same."
+  volunteer: Boolean!
+  "The review this was read from, absent while they have not answered."
+  comment: ID
+}
+
+enum ReviewState {
+  APPROVE
+  REQUEST_CHANGES
+  "They read the revision and judged nothing."
+  COMMENTED
+  "They were asked and have not answered this revision."
+  PENDING
+}
+
+enum ReviewDecision {
+  APPROVED
+  CHANGES_REQUESTED
+  PENDING
 }
 
 "A comment or a review (spec 02 §2.6)."
@@ -210,6 +245,17 @@ input EntityFilter {
   milestones: [String!]
   "Feature slugs; an entity must name every one of them."
   features: [String!]
+  """
+  Asked to review it; a pull request must name every one of them.
+
+  This and the two below describe something only a pull request has, so
+  `issues` rejects them rather than matching nothing.
+  """
+  reviewers: [String!]
+  "The pull request's derived decision; any one of them matches."
+  reviews: [ReviewDecision!]
+  "Asked to review it and has not answered the latest revision."
+  awaiting: [String!]
   "Free text, matched against title, body and comments."
   text: [String!]
 }
@@ -347,6 +393,30 @@ input UpdateIssueInput {
 
 type UpdateIssuePayload {
   issue: Issue!
+  commit: CommitInfo!
+}
+
+"""
+Fields to change on a pull request.
+
+The twin of `UpdateIssueInput`, with the same absent-versus-null rules, plus
+the people it asks to review. What a pull request *is* — its revisions, its
+target, whether it merged — is not patchable here: those need a branch and a
+working tree, and the checkout-centric verbs are not exposed (spec 06 §6.3).
+"""
+input UpdatePrInput {
+  ref: ID!
+  title: String
+  body: String
+  labels: [String!]
+  assignees: [String!]
+  reviewers: [String!]
+  milestone: String
+  features: [String!]
+}
+
+type UpdatePrPayload {
+  pr: Pr!
   commit: CommitInfo!
 }
 
@@ -501,6 +571,14 @@ type UpdateSpecPayload {
 type Mutation {
   openIssue(input: OpenIssueInput!): OpenIssuePayload!
   updateIssue(input: UpdateIssueInput!): UpdateIssuePayload!
+  """
+  Patch a pull request's metadata, `reviewers` included.
+
+  Refused with `PRECONDITION` when this checkout does not hold the branch the
+  pull request lives on, for the reason `addComment` is: there is no `pr.md`
+  here to patch, and the answer is to serve that branch.
+  """
+  updatePr(input: UpdatePrInput!): UpdatePrPayload!
   closeIssue(input: CloseIssueInput!): CloseIssuePayload!
   reopenIssue(ref: ID!): ReopenIssuePayload!
   addComment(input: AddCommentInput!): AddCommentPayload!

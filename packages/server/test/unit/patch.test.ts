@@ -10,14 +10,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseFile, readFeatures } from "@navbook/core";
 import {
+  applyEntityPatch,
   applyFeaturePatch,
-  applyIssuePatch,
   applySpecPatch,
   isEmptyPatch,
   isEmptySpecPatch,
 } from "../../src/patch.ts";
 
-// Repository-relative: `applyIssuePatch` reports the path it is given rather
+// Repository-relative: `applyEntityPatch` reports the path it is given rather
 // than prefixing one, so the Navbook directory's name stays the caller's business.
 const PATH = ".navbook/issues/open/aa111111-x/issue.md";
 
@@ -34,9 +34,31 @@ The body.
 `;
 
 const patch = (input: Record<string, unknown>): string =>
-  applyIssuePatch(ORIGINAL, { ref: "aa111111", ...input }, PATH);
+  applyEntityPatch(ORIGINAL, { ref: "aa111111", ...input }, PATH);
 
-describe("applyIssuePatch", () => {
+describe("applyEntityPatch — reviewers", () => {
+  // The pull-request half of the same patch: `reviewer` is singular on disk and
+  // takes a scalar or a list, exactly as `assignee` does (spec 02 §2.7).
+  const reviewer = (value: readonly string[] | null | undefined, from = ORIGINAL): string =>
+    applyEntityPatch(from, { ref: "aa111111", reviewers: value }, PATH);
+
+  it("writes one as a scalar and several as a flow list", () => {
+    assert.match(reviewer(["alice@example.com"]), /^reviewer: alice@example\.com$/m);
+    assert.match(
+      reviewer(["alice@example.com", "bo@example.com"]),
+      /^reviewer: \[alice@example\.com, bo@example\.com\]$/m,
+    );
+  });
+
+  it("clears the key for an empty list or a null, and leaves it alone when absent", () => {
+    const asked = reviewer(["alice@example.com"]);
+    assert.equal(reviewer([], asked).includes("reviewer"), false);
+    assert.equal(reviewer(null, asked).includes("reviewer"), false);
+    assert.match(reviewer(undefined, asked), /^reviewer: alice@example\.com$/m);
+  });
+});
+
+describe("applyEntityPatch", () => {
   it("leaves a file it was asked to change nothing about byte-identical", () => {
     assert.equal(patch({}), ORIGINAL);
   });
@@ -89,7 +111,7 @@ describe("applyIssuePatch", () => {
   it("reports frontmatter it cannot rewrite, naming the file", () => {
     const broken = "---\ntitle: [unclosed\n---\n\nBody.\n";
     assert.throws(
-      () => applyIssuePatch(broken, { ref: "aa111111", title: "New" }, PATH),
+      () => applyEntityPatch(broken, { ref: "aa111111", title: "New" }, PATH),
       (error: unknown) => {
         const extensions = (error as { extensions?: Record<string, unknown> }).extensions ?? {};
         assert.equal(extensions.code, "FRONTMATTER");
@@ -141,17 +163,17 @@ describe("the feature key on an issue patch", () => {
   });
 
   it("clears the key on an explicit null and on an empty list", () => {
-    const attached = applyIssuePatch(ORIGINAL, { ref: "aa111111", features: ["auth"] }, PATH);
+    const attached = applyEntityPatch(ORIGINAL, { ref: "aa111111", features: ["auth"] }, PATH);
     for (const features of [null, []]) {
-      const cleared = applyIssuePatch(attached, { ref: "aa111111", features }, PATH);
+      const cleared = applyEntityPatch(attached, { ref: "aa111111", features }, PATH);
       assert.deepEqual(readFeatures(parseFile(cleared).fm), []);
       assert.doesNotMatch(cleared, /^feature:/m);
     }
   });
 
   it("leaves the key alone when the patch does not name it", () => {
-    const attached = applyIssuePatch(ORIGINAL, { ref: "aa111111", features: ["auth"] }, PATH);
-    const renamed = applyIssuePatch(attached, { ref: "aa111111", title: "Renamed" }, PATH);
+    const attached = applyEntityPatch(ORIGINAL, { ref: "aa111111", features: ["auth"] }, PATH);
+    const renamed = applyEntityPatch(attached, { ref: "aa111111", title: "Renamed" }, PATH);
     assert.deepEqual(readFeatures(parseFile(renamed).fm), ["auth"]);
   });
 

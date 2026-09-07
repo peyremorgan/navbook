@@ -15,7 +15,9 @@ import {
   readFeatures,
   readLabels,
   readMerged,
+  readReviewers,
   readRevisions,
+  reviewSummary,
   subtaskTree,
 } from "@navbook/core";
 import type { GraphQLCtx } from "../context.ts";
@@ -29,7 +31,14 @@ import type {
   PrResolvers,
 } from "../generated/resolver-types.ts";
 import { type EntityParent, type IssueParent, type PrParent, recordOf } from "../mappers.ts";
-import { toGqlKind, toGqlLevel, toGqlStatus, toGqlVerdict } from "./map.ts";
+import {
+  toGqlDecision,
+  toGqlKind,
+  toGqlLevel,
+  toGqlReviewState,
+  toGqlStatus,
+  toGqlVerdict,
+} from "./map.ts";
 
 /** A frontmatter value when it is a non-empty string, and null otherwise. */
 function text(fm: Record<string, unknown>, key: string): string | null {
@@ -89,6 +98,18 @@ export const Pr: PrResolvers = {
     return { date: text(merged, "date"), by: text(merged, "by"), commit: text(merged, "commit") };
   },
   refs: (pr) => [...pr.refs],
+  reviewers: (pr) => readReviewers(pr.entity.fm),
+  // Derived on demand (spec 02 §2.7); the summary is computed once for both
+  // fields, since a client asking for the states almost always wants the
+  // decision they add up to.
+  reviews: (pr) =>
+    reviewSummary(pr.entity).reviewers.map((entry) => ({
+      person: entry.person,
+      state: toGqlReviewState(entry.state),
+      volunteer: entry.volunteer,
+      comment: entry.commentId ?? null,
+    })),
+  reviewDecision: (pr) => toGqlDecision(reviewSummary(pr.entity).decision),
 };
 
 export const Entity: EntityResolvers = {

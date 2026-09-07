@@ -1,5 +1,5 @@
 /**
- * Editing an issue's frontmatter and body from structured fields.
+ * Editing an entity's frontmatter and body from structured fields.
  *
  * The CLI's `edit` opens the file in `$EDITOR` and records whatever comes back;
  * a server has no editor, so this plays the same part — it rewrites the file on
@@ -20,13 +20,18 @@ import {
   patchDoc,
   serializeDoc,
   setFlowList,
+  writeScalarOrList,
 } from "@navbook/core";
 import { apiError, invalidInput } from "./errors.ts";
 import type {
   UpdateFeatureInput,
   UpdateIssueInput,
+  UpdatePrInput,
   UpdateSpecInput,
 } from "./generated/resolver-types.ts";
+
+/** What both kinds' patches carry; a pull request adds `reviewers` (§2.7). */
+type EntityPatch = UpdateIssueInput & { reviewers?: readonly string[] | null };
 
 /**
  * An optional list field.
@@ -46,12 +51,30 @@ function applyList(nav: NavDoc, key: string, value: readonly string[] | null | u
 }
 
 /**
- * Apply a patch to an issue file's text, returning the new text.
+ * A key the format spells singular and accepts as a scalar or a list —
+ * `assignee` (§2.5), `feature` (§2.11), `reviewer` (§2.7).
+ *
+ * Absent leaves it alone; null or empty removes it; one value is written as a
+ * scalar and several as a flow list, which is what core's own constructors do.
+ */
+function applyScalarOrList(
+  nav: NavDoc,
+  key: string,
+  value: readonly string[] | null | undefined,
+): void {
+  if (value === undefined) return;
+  writeScalarOrList(nav, key, value ?? []);
+}
+
+/**
+ * Apply a patch to an entity file's text, returning the new text.
  *
  * `path` is repository-relative and names the file only so a failure can say
- * which one it was.
+ * which one it was. Both kinds take the same patch: what differs between an
+ * issue and a pull request is what else the file holds, and this rewrites only
+ * the keys it was given.
  */
-export function applyIssuePatch(content: string, input: UpdateIssueInput, path: string): string {
+export function applyEntityPatch(content: string, input: EntityPatch, path: string): string {
   const nav = parseDoc(content);
 
   if (input.title !== undefined && input.title !== null) {
@@ -60,33 +83,12 @@ export function applyIssuePatch(content: string, input: UpdateIssueInput, path: 
   }
 
   applyList(nav, "labels", input.labels);
-  // `assignee` is singular on disk and may be a scalar or a list (spec 02
-  // §2.5); one name is written as a scalar, matching what `newIssueFile` does.
-  if (input.assignees !== undefined) {
-    if (input.assignees === null || input.assignees.length === 0) {
-      patchDoc(nav, { assignee: undefined });
-    } else if (input.assignees.length === 1) {
-      patchDoc(nav, { assignee: input.assignees[0] });
-    } else {
-      setFlowList(nav, "assignee", [...input.assignees]);
-    }
-  }
+  applyScalarOrList(nav, "assignee", input.assignees);
+  applyScalarOrList(nav, "reviewer", input.reviewers);
+  applyScalarOrList(nav, "feature", input.features);
 
   if (input.milestone !== undefined) {
     patchDoc(nav, { milestone: input.milestone === null ? undefined : input.milestone });
-  }
-
-  // `feature` is singular on disk and, like `assignee`, may be a scalar or a
-  // list (spec 02 §2.11); one feature is written as a scalar, which is what
-  // `newIssueFile` does and what nearly every entity carries.
-  if (input.features !== undefined) {
-    if (input.features === null || input.features.length === 0) {
-      patchDoc(nav, { feature: undefined });
-    } else if (input.features.length === 1) {
-      patchDoc(nav, { feature: input.features[0] });
-    } else {
-      setFlowList(nav, "feature", [...input.features]);
-    }
   }
 
   if (input.body !== undefined && input.body !== null) {
@@ -110,14 +112,15 @@ export function applyIssuePatch(content: string, input: UpdateIssueInput, path: 
 }
 
 /** True when a patch names nothing to change. */
-export function isEmptyPatch(input: UpdateIssueInput): boolean {
+export function isEmptyPatch(input: UpdateIssueInput | UpdatePrInput): boolean {
   return (
     input.title === undefined &&
     input.body === undefined &&
     input.labels === undefined &&
     input.assignees === undefined &&
     input.milestone === undefined &&
-    input.features === undefined
+    input.features === undefined &&
+    ("reviewers" in input ? input.reviewers === undefined : true)
   );
 }
 

@@ -48,7 +48,6 @@ import {
   repoPath,
   resolveComment,
   resolveEntity,
-  resolveEntityForEdit,
   resolveFeature,
   resolveSpec,
   specFileName,
@@ -56,6 +55,7 @@ import {
   validateComment,
   validateFeature,
   validateIssue,
+  validatePr,
   validateSpec,
   WorkspaceError,
 } from "@navbook/core";
@@ -66,11 +66,13 @@ import type {
   AddCommentInput,
   CommitInfo,
   MutationResolvers,
+  UpdateIssueInput,
+  UpdatePrInput,
 } from "../generated/resolver-types.ts";
 import type { FeatureParent, SpecParent } from "../mappers.ts";
 import {
+  applyEntityPatch,
   applyFeaturePatch,
-  applyIssuePatch,
   applySpecPatch,
   isEmptyPatch,
   isEmptySpecPatch,
@@ -164,38 +166,15 @@ export const Mutation: MutationResolvers = {
 
   updateIssue: (_parent, { input }, ctx) =>
     run(async () => {
-      if (isEmptyPatch(input)) throw invalidInput("the patch names no field to change");
+      const { result, pushed } = await patchEntity(ctx, "issue", input);
+      return { issue: result.entity, commit: commitInfo(result.run, pushed) };
+    }),
 
-      const { result, pushed } = await ctx.sync.write(
-        () => {
-          const { entity, path } = resolveEntityForEdit(ctx.ws, "issue", input.ref);
-          const before = readFileSync(path, "utf8");
-          const patched = applyIssuePatch(before, input, repoPath(ctx.ws.navDir, entity.filePath));
-          // Validated before the file is touched, so a rejected patch leaves
-          // the tree exactly as it was.
-          checkComposed(patched, validateIssue, "issue");
-
-          // Editing in place is what `applyEntityEdit` records — it reads the
-          // file back, which is what puts the edit in the plan and so under the
-          // --commit guard. Every other operation writes nothing until it is
-          // sure it can commit (core's guard runs first, by design); this one
-          // cannot, so it undoes its own write instead. A patched file left
-          // behind by a failure would become the base of the next edit, and be
-          // committed under somebody else's request.
-          writeFileSync(path, patched, "utf8");
-          let edit: RunPlanResult;
-          try {
-            edit = applyEntityEdit(ctx.ws, entity, COMMIT);
-          } catch (error) {
-            writeFileSync(path, before, "utf8");
-            throw error;
-          }
-          return { run: edit, issue: from(afterWrite(ctx), "issue", entity.id) };
-        },
-        (edit) => edit.run.committed,
-      );
-
-      return { issue: result.issue, commit: commitInfo(result.run, pushed) };
+  updatePr: (_parent, { input }, ctx) =>
+    run(async () => {
+      const { result, pushed } = await patchEntity(ctx, "pr", input);
+      // A working-tree read, so it was found on no ref in particular.
+      return { pr: { entity: result.entity, refs: [] }, commit: commitInfo(result.run, pushed) };
     }),
 
   closeIssue: (_parent, { input }, ctx) =>
@@ -257,7 +236,7 @@ export const Mutation: MutationResolvers = {
 
       const { result, pushed } = await ctx.sync.write(
         () => {
-          const entity = commentTarget(ctx, kind, input.ref);
+          const entity = writeTarget(ctx, kind, input.ref);
           const replyTo =
             input.replyTo === undefined || input.replyTo === null
               ? undefined
@@ -500,16 +479,17 @@ function specAfter(
 }
 
 /**
- * The entity a comment is to be added to, in the branch the server serves.
+ * The entity a write is to be made to, in the branch the server serves.
  *
  * A pull request's files live on the branch it proposes to merge (spec 03
- * §3.5), so one this checkout does not hold cannot be commented on here: the
- * comment would land in a directory with no `pr.md` beside it, which is the
- * stranded-comment fault of spec 03 §3.3.1 rather than a review. The cross-ref
- * scan can still see it, so the refusal says where it actually lives instead of
- * repeating that it was not found.
+ * §3.5), so one this checkout does not hold can be neither commented on nor
+ * patched here: a comment would land in a directory with no `pr.md` beside it,
+ * which is the stranded-comment fault of spec 03 §3.3.1 rather than a review,
+ * and there is no `pr.md` here to patch at all. The cross-ref scan can still
+ * see it, so the refusal says where it actually lives instead of repeating that
+ * it was not found.
  */
-function commentTarget(ctx: GraphQLCtx, kind: EntityKind, ref: string): EntityRecord {
+function writeTarget(ctx: GraphQLCtx, kind: EntityKind, ref: string): EntityRecord {
   try {
     return findEntity(ctx.ws, kind, ref);
   } catch (error) {
@@ -523,12 +503,57 @@ function commentTarget(ctx: GraphQLCtx, kind: EntityKind, ref: string): EntityRe
       {
         sourceRef: located.sourceRef,
         details: [
-          "a comment must be written beside the pull request it belongs to",
-          `serve a checkout of '${located.sourceRef}' to review it`,
+          "a pull request is written beside the files it proposes to change",
+          `serve a checkout of '${located.sourceRef}' to write to it`,
         ],
       },
     );
   }
+}
+
+/**
+ * Rewrite an entity's file from a patch, and record the edit as an edit.
+ *
+ * Both kinds go through here: the difference between them is which validator
+ * the result must satisfy and, for a pull request, that its file may not be on
+ * this branch at all — the refusal `writeTarget` raises.
+ */
+async function patchEntity(
+  ctx: GraphQLCtx,
+  kind: EntityKind,
+  input: UpdateIssueInput | UpdatePrInput,
+): Promise<{ result: { entity: EntityRecord; run: RunPlanResult }; pushed: boolean }> {
+  if (isEmptyPatch(input)) throw invalidInput("the patch names no field to change");
+
+  return ctx.sync.write(
+    () => {
+      const entity = writeTarget(ctx, kind, input.ref);
+      const path = absPath(ctx.ws, entity.filePath);
+      const before = readFileSync(path, "utf8");
+      const patched = applyEntityPatch(before, input, repoPath(ctx.ws.navDir, entity.filePath));
+      // Validated before the file is touched, so a rejected patch leaves the
+      // tree exactly as it was.
+      checkComposed(patched, kind === "issue" ? validateIssue : validatePr, kind);
+
+      // Editing in place is what `applyEntityEdit` records — it reads the file
+      // back, which is what puts the edit in the plan and so under the --commit
+      // guard. Every other operation writes nothing until it is sure it can
+      // commit (core's guard runs first, by design); this one cannot, so it
+      // undoes its own write instead. A patched file left behind by a failure
+      // would become the base of the next edit, and be committed under somebody
+      // else's request.
+      writeFileSync(path, patched, "utf8");
+      let edit: RunPlanResult;
+      try {
+        edit = applyEntityEdit(ctx.ws, entity, COMMIT);
+      } catch (error) {
+        writeFileSync(path, before, "utf8");
+        throw error;
+      }
+      return { run: edit, entity: from(afterWrite(ctx), kind, entity.id) };
+    },
+    (edit) => edit.run.committed,
+  );
 }
 
 type ReviewFields = Pick<NewCommentInput, "verdict" | "revision" | "file" | "line">;

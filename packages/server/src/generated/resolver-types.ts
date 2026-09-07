@@ -191,10 +191,21 @@ export type Entity = {
 export type EntityFilter = {
   assignees?: InputMaybe<Array<Scalars['String']['input']>>;
   authors?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** Asked to review it and has not answered the latest revision. */
+  awaiting?: InputMaybe<Array<Scalars['String']['input']>>;
   /** Feature slugs; an entity must name every one of them. */
   features?: InputMaybe<Array<Scalars['String']['input']>>;
   labels?: InputMaybe<Array<Scalars['String']['input']>>;
   milestones?: InputMaybe<Array<Scalars['String']['input']>>;
+  /**
+   * Asked to review it; a pull request must name every one of them.
+   *
+   * This and the two below describe something only a pull request has, so
+   * `issues` rejects them rather than matching nothing.
+   */
+  reviewers?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** The pull request's derived decision; any one of them matches. */
+  reviews?: InputMaybe<Array<ReviewDecision>>;
   /** Absent or empty means any status; the listing is not narrowed by one. */
   status?: InputMaybe<Array<Status>>;
   /** Free text, matched against title, body and comments. */
@@ -353,6 +364,14 @@ export type Mutation = {
   unlinkIssue: UnlinkIssuePayload;
   updateFeature: UpdateFeaturePayload;
   updateIssue: UpdateIssuePayload;
+  /**
+   * Patch a pull request's metadata, `reviewers` included.
+   *
+   * Refused with `PRECONDITION` when this checkout does not hold the branch the
+   * pull request lives on, for the reason `addComment` is: there is no `pr.md`
+   * here to patch, and the answer is to serve that branch.
+   */
+  updatePr: UpdatePrPayload;
   updateSpec: UpdateSpecPayload;
 };
 
@@ -407,6 +426,11 @@ export type MutationUpdateIssueArgs = {
 };
 
 
+export type MutationUpdatePrArgs = {
+  input: UpdatePrInput;
+};
+
+
 export type MutationUpdateSpecArgs = {
   input: UpdateSpecInput;
 };
@@ -449,6 +473,15 @@ export type Pr = Entity & {
   path: Scalars['String']['output'];
   /** Branches the cross-ref scan found it on; empty for a working-tree read. */
   refs: Array<Scalars['String']['output']>;
+  /** What those reviews add up to. Never a gate: policy is the forge's (spec 01 §1.7). */
+  reviewDecision: ReviewDecision;
+  /** Who it asks to review, as `reviewer:` records them (spec 02 §2.7). */
+  reviewers: Array<Scalars['String']['output']>;
+  /**
+   * Everyone asked, plus anyone else who reviewed the latest revision, minus the
+   * author. Derived from the reviews and stored nowhere.
+   */
+  reviews: Array<ReviewerState>;
   revisions: Array<Revision>;
   slug: Scalars['String']['output'];
   /** Branch carrying its commits, when the file records one. */
@@ -513,6 +546,30 @@ export type ReopenIssuePayload = {
   commit: CommitInfo;
   destination: Scalars['String']['output'];
   issue: Issue;
+};
+
+export type ReviewDecision =
+  | 'APPROVED'
+  | 'CHANGES_REQUESTED'
+  | 'PENDING';
+
+export type ReviewState =
+  | 'APPROVE'
+  /** They read the revision and judged nothing. */
+  | 'COMMENTED'
+  /** They were asked and have not answered this revision. */
+  | 'PENDING'
+  | 'REQUEST_CHANGES';
+
+/** What one person has said about a pull request's latest revision. */
+export type ReviewerState = {
+  __typename?: 'ReviewerState';
+  /** The review this was read from, absent while they have not answered. */
+  comment?: Maybe<Scalars['ID']['output']>;
+  person: Scalars['String']['output'];
+  state: ReviewState;
+  /** True when nobody asked them; their review counts all the same. */
+  volunteer: Scalars['Boolean']['output'];
 };
 
 /** One state of a pull request's branch (spec 02 §2.7). */
@@ -598,6 +655,31 @@ export type UpdateIssuePayload = {
   __typename?: 'UpdateIssuePayload';
   commit: CommitInfo;
   issue: Issue;
+};
+
+/**
+ * Fields to change on a pull request.
+ *
+ * The twin of `UpdateIssueInput`, with the same absent-versus-null rules, plus
+ * the people it asks to review. What a pull request *is* — its revisions, its
+ * target, whether it merged — is not patchable here: those need a branch and a
+ * working tree, and the checkout-centric verbs are not exposed (spec 06 §6.3).
+ */
+export type UpdatePrInput = {
+  assignees?: InputMaybe<Array<Scalars['String']['input']>>;
+  body?: InputMaybe<Scalars['String']['input']>;
+  features?: InputMaybe<Array<Scalars['String']['input']>>;
+  labels?: InputMaybe<Array<Scalars['String']['input']>>;
+  milestone?: InputMaybe<Scalars['String']['input']>;
+  ref: Scalars['ID']['input'];
+  reviewers?: InputMaybe<Array<Scalars['String']['input']>>;
+  title?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type UpdatePrPayload = {
+  __typename?: 'UpdatePrPayload';
+  commit: CommitInfo;
+  pr: Pr;
 };
 
 /** Fields to change on a document; `title` and `body` are replaced, never cleared. */
@@ -741,6 +823,9 @@ export type ResolversTypes = {
   Pr: ResolverTypeWrapper<PrParent>;
   Query: ResolverTypeWrapper<Record<PropertyKey, never>>;
   ReopenIssuePayload: ResolverTypeWrapper<Omit<ReopenIssuePayload, 'issue'> & { issue: ResolversTypes['Issue'] }>;
+  ReviewDecision: ReviewDecision;
+  ReviewState: ReviewState;
+  ReviewerState: ResolverTypeWrapper<ReviewerState>;
   Revision: ResolverTypeWrapper<Revision>;
   Spec: ResolverTypeWrapper<SpecParent>;
   Status: Status;
@@ -750,6 +835,8 @@ export type ResolversTypes = {
   UpdateFeaturePayload: ResolverTypeWrapper<Omit<UpdateFeaturePayload, 'feature'> & { feature: ResolversTypes['Feature'] }>;
   UpdateIssueInput: UpdateIssueInput;
   UpdateIssuePayload: ResolverTypeWrapper<Omit<UpdateIssuePayload, 'issue'> & { issue: ResolversTypes['Issue'] }>;
+  UpdatePrInput: UpdatePrInput;
+  UpdatePrPayload: ResolverTypeWrapper<Omit<UpdatePrPayload, 'pr'> & { pr: ResolversTypes['Pr'] }>;
   UpdateSpecInput: UpdateSpecInput;
   UpdateSpecPayload: ResolverTypeWrapper<Omit<UpdateSpecPayload, 'feature' | 'spec'> & { feature: ResolversTypes['Feature'], spec: ResolversTypes['Spec'] }>;
   Verdict: Verdict;
@@ -788,6 +875,7 @@ export type ResolversParentTypes = {
   Pr: PrParent;
   Query: Record<PropertyKey, never>;
   ReopenIssuePayload: Omit<ReopenIssuePayload, 'issue'> & { issue: ResolversParentTypes['Issue'] };
+  ReviewerState: ReviewerState;
   Revision: Revision;
   Spec: SpecParent;
   String: Scalars['String']['output'];
@@ -796,6 +884,8 @@ export type ResolversParentTypes = {
   UpdateFeaturePayload: Omit<UpdateFeaturePayload, 'feature'> & { feature: ResolversParentTypes['Feature'] };
   UpdateIssueInput: UpdateIssueInput;
   UpdateIssuePayload: Omit<UpdateIssuePayload, 'issue'> & { issue: ResolversParentTypes['Issue'] };
+  UpdatePrInput: UpdatePrInput;
+  UpdatePrPayload: Omit<UpdatePrPayload, 'pr'> & { pr: ResolversParentTypes['Pr'] };
   UpdateSpecInput: UpdateSpecInput;
   UpdateSpecPayload: Omit<UpdateSpecPayload, 'feature' | 'spec'> & { feature: ResolversParentTypes['Feature'], spec: ResolversParentTypes['Spec'] };
   Viewer: Viewer;
@@ -936,6 +1026,7 @@ export type MutationResolvers<ContextType = GraphQLCtx, ParentType extends Resol
   unlinkIssue?: Resolver<ResolversTypes['UnlinkIssuePayload'], ParentType, ContextType, RequireFields<MutationUnlinkIssueArgs, 'ref'>>;
   updateFeature?: Resolver<ResolversTypes['UpdateFeaturePayload'], ParentType, ContextType, RequireFields<MutationUpdateFeatureArgs, 'input'>>;
   updateIssue?: Resolver<ResolversTypes['UpdateIssuePayload'], ParentType, ContextType, RequireFields<MutationUpdateIssueArgs, 'input'>>;
+  updatePr?: Resolver<ResolversTypes['UpdatePrPayload'], ParentType, ContextType, RequireFields<MutationUpdatePrArgs, 'input'>>;
   updateSpec?: Resolver<ResolversTypes['UpdateSpecPayload'], ParentType, ContextType, RequireFields<MutationUpdateSpecArgs, 'input'>>;
 };
 
@@ -961,6 +1052,9 @@ export type PrResolvers<ContextType = GraphQLCtx, ParentType extends ResolversPa
   milestone?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   path?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   refs?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
+  reviewDecision?: Resolver<ResolversTypes['ReviewDecision'], ParentType, ContextType>;
+  reviewers?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
+  reviews?: Resolver<Array<ResolversTypes['ReviewerState']>, ParentType, ContextType>;
   revisions?: Resolver<Array<ResolversTypes['Revision']>, ParentType, ContextType>;
   slug?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   source?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
@@ -985,6 +1079,13 @@ export type ReopenIssuePayloadResolvers<ContextType = GraphQLCtx, ParentType ext
   commit?: Resolver<ResolversTypes['CommitInfo'], ParentType, ContextType>;
   destination?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   issue?: Resolver<ResolversTypes['Issue'], ParentType, ContextType>;
+};
+
+export type ReviewerStateResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['ReviewerState'] = ResolversParentTypes['ReviewerState']> = {
+  comment?: Resolver<Maybe<ResolversTypes['ID']>, ParentType, ContextType>;
+  person?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  state?: Resolver<ResolversTypes['ReviewState'], ParentType, ContextType>;
+  volunteer?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
 };
 
 export type RevisionResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['Revision'] = ResolversParentTypes['Revision']> = {
@@ -1015,6 +1116,11 @@ export type UpdateFeaturePayloadResolvers<ContextType = GraphQLCtx, ParentType e
 export type UpdateIssuePayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['UpdateIssuePayload'] = ResolversParentTypes['UpdateIssuePayload']> = {
   commit?: Resolver<ResolversTypes['CommitInfo'], ParentType, ContextType>;
   issue?: Resolver<ResolversTypes['Issue'], ParentType, ContextType>;
+};
+
+export type UpdatePrPayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['UpdatePrPayload'] = ResolversParentTypes['UpdatePrPayload']> = {
+  commit?: Resolver<ResolversTypes['CommitInfo'], ParentType, ContextType>;
+  pr?: Resolver<ResolversTypes['Pr'], ParentType, ContextType>;
 };
 
 export type UpdateSpecPayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['UpdateSpecPayload'] = ResolversParentTypes['UpdateSpecPayload']> = {
@@ -1049,11 +1155,13 @@ export type Resolvers<ContextType = GraphQLCtx> = {
   Pr?: PrResolvers<ContextType>;
   Query?: QueryResolvers<ContextType>;
   ReopenIssuePayload?: ReopenIssuePayloadResolvers<ContextType>;
+  ReviewerState?: ReviewerStateResolvers<ContextType>;
   Revision?: RevisionResolvers<ContextType>;
   Spec?: SpecResolvers<ContextType>;
   UnlinkIssuePayload?: UnlinkIssuePayloadResolvers<ContextType>;
   UpdateFeaturePayload?: UpdateFeaturePayloadResolvers<ContextType>;
   UpdateIssuePayload?: UpdateIssuePayloadResolvers<ContextType>;
+  UpdatePrPayload?: UpdatePrPayloadResolvers<ContextType>;
   UpdateSpecPayload?: UpdateSpecPayloadResolvers<ContextType>;
   Viewer?: ViewerResolvers<ContextType>;
 };

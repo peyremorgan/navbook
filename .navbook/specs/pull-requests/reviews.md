@@ -18,7 +18,7 @@ Everything about "who still owes a look" is computed from the comments, against 
 
 Appending a revision returns everybody to `pending`, which is the rule that a verdict binds to one revision, seen from the request's side: nobody has to remember to re-request after a force-push.
 
-Ordering within one revision is by comment filename, which is a UTC timestamp — the same order the thread renders in. Two reviews by one person on one revision are not a contradiction to resolve; the later one is simply what they now say.
+Ordering within one revision is by comment filename — a UTC timestamp to the second, then the comment's ID — which is the order the thread renders in. Two reviews by one person on one revision are not a contradiction to resolve; the later one is simply what they now say, and two written inside the same second are ordered by their IDs, so the state and the thread always agree even where the clock cannot separate them.
 
 ## The third verdict
 
