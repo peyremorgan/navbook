@@ -182,6 +182,10 @@ test("refuses to change the reviewers of a branch it does not serve", async ({
   const alert = signedIn.getByTestId("unserved-branch");
   await expect(alert).toBeVisible();
   await expect(alert).toContainText("feat/unserved");
+
+  // And it stops offering, as the comment form does: a second attempt would be
+  // refused the same way, and typing into one is worse than not being asked.
+  await expect(signedIn.getByTestId("edit-reviewers")).toHaveCount(0);
 });
 
 test("says so when there is no such pull request", async ({ signedIn, stack }) => {

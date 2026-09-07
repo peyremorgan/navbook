@@ -254,6 +254,7 @@ const branchHint = computed(() => refusedOn.value);
             :values="pr.reviewers"
             :suggestions="pr.reviewers"
             :saving="patching"
+            :disabled="branchHint !== null"
             @save="saveReviewers"
           >
             <template #display>

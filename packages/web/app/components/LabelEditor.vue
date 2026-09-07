@@ -10,6 +10,11 @@
 
   What it shows when it is not being edited can be replaced through the
   `display` slot, for a field whose reading is richer than its list of values.
+
+  `disabled` withdraws the offer to edit, for the one case where the server has
+  already said it cannot take the write: a pull request whose branch this
+  checkout does not hold. Letting somebody type a second thing that will be
+  refused the same way is not better than not offering.
 -->
 <script setup lang="ts">
 const props = defineProps<{
@@ -22,6 +27,8 @@ const props = defineProps<{
   linkTo?: string;
   testid: string;
   saving?: boolean;
+  /** Set when this cannot be written at all; the field reads but does not offer. */
+  disabled?: boolean;
 }>();
 
 const emit = defineEmits<{ save: [string[]] }>();
@@ -65,7 +72,7 @@ function save(): void {
         <UIcon :name="props.icon" class="size-3.5" />{{ props.title }}
       </h3>
       <UButton
-        v-if="!editing"
+        v-if="!editing && !props.disabled"
         size="xs"
         color="neutral"
         variant="ghost"

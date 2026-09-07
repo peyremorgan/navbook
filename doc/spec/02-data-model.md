@@ -313,7 +313,11 @@ themselves are what it is derived from:
 
 - A person's **state** on a revision is their latest opinionated verdict
   (§2.6) among the reviews they bound to it; failing that, `commented` if they
-  bound a `comment` verdict to it; failing that, `pending`.
+  bound a `comment` verdict to it; failing that, `pending`. "Latest" is by
+  comment filename (§2.6), which is the order the thread itself renders in, so
+  what a reader sees and what a tool computes can never disagree — including
+  for two reviews written inside the same second, which the timestamp cannot
+  separate and the ID therefore orders.
 - A pull request's state is read on its **latest revision**, so appending a
   revision returns every reviewer to `pending` — the same rule that stops a
   verdict carrying forward, seen from the other side. Re-requesting a review
