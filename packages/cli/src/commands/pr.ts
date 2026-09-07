@@ -28,6 +28,7 @@ import {
   parseListQuery,
   planPrMerge,
   preparePrOpen,
+  type ReviewSummary,
   readReviewers,
   requestReview,
   reviewSummary,
@@ -212,6 +213,17 @@ export interface PrListOptions extends ListOptions {
 }
 
 export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void {
+  // Read once per entity: the decision decides both whether the column appears
+  // and what every row of it says, and each reading walks the comment files.
+  const summaries = new Map<string, ReviewSummary>();
+  const summaryOf = (entity: EntityRecord): ReviewSummary => {
+    const cached = summaries.get(entity.id);
+    if (cached) return cached;
+    const summary = reviewSummary(entity);
+    summaries.set(entity.id, summary);
+    return summary;
+  };
+
   const extraColumns: ExtraColumn[] = [
     { header: "target", value: (entity: EntityRecord) => stringField(entity, "target") },
     // Derived rather than stored (spec 02 §2.7), and shown only where there is
@@ -225,8 +237,8 @@ export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void 
     },
     {
       header: "review",
-      value: (entity) => reviewSummary(entity).decision,
-      when: (entities) => entities.some((entity) => reviewSummary(entity).reviewers.length > 0),
+      value: (entity) => summaryOf(entity).decision,
+      when: (entities) => entities.some((entity) => summaryOf(entity).reviewers.length > 0),
     },
   ];
   const query = parseListQuery(terms, "pr");

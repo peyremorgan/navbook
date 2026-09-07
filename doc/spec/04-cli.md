@@ -30,7 +30,11 @@ with the user's confirmation).
 - Author identity is taken from `git config user.name` / `user.email`.
 - Machine output: every listing command accepts `--json` (one JSON object per
   entity, schema mirroring the frontmatter plus `id`, `slug`, `status`,
-  `path`).
+  `path`). `nav pr show --json` additionally carries `review`, the derived
+  state of [02 §2.7](02-data-model.md), so a script need not re-derive it. It
+  is on `show` and not on `list` because `show` has already read every comment
+  it is computed from, and a listing that read them all to fill in one column
+  would pay for it on every entity in the tree.
 - Exit codes: `0` success; `1` operational error (not found, ambiguous,
   malformed input); `2` format violation detected (doctor errors).
 

@@ -67,6 +67,11 @@ function verdictOn(comment: CommentRecord, revision: string): string | undefined
  * verdict to the latest revision — a review nobody asked for is still a review
  * — minus the pull request's own author, whose verdicts are recorded like any
  * other comment and count for nothing.
+ *
+ * The entity's comments must have been read: they are where every answer lives,
+ * so a tree loaded without them reports everybody as pending rather than
+ * failing. `loadRepoForQuery` reads a pull request's own comments for exactly
+ * this reason, and `loadRepo` reads them all.
  */
 export function reviewSummary(entity: EntityRecord): ReviewSummary {
   const revision = latestRevision(entity.fm);
