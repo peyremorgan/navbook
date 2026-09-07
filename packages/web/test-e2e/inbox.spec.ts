@@ -76,6 +76,11 @@ test("holds an entity once, however many answers it came back in", async ({ page
   // Issues this person merely filed are not somebody's inbox, and it filed
   // every issue in the fixture.
   await expect(page.getByTestId("inbox-row-aaaa0001")).toHaveCount(0);
+
+  // And the one it wrote that is over is found by asking for finished work.
+  await page.goto(`${stack.appUrl}/inbox?status=all`);
+  const over = page.getByTestId("inbox-row-bbbb0003");
+  await expect(over.getByTestId("inbox-reason-author")).toBeVisible();
 });
 
 test("shows finished work only when asked, and says so in the URL", async ({ signedIn, stack }) => {
@@ -84,14 +89,40 @@ test("shows finished work only when asked, and says so in the URL", async ({ sig
 
   await signedIn.getByTestId("inbox-finished").click();
   await expect(signedIn).toHaveURL(/status=all/);
-  // Assigned, and then closed.
+  // Assigned, and then closed — one issue and one pull request of each.
   await expect(signedIn.getByTestId("inbox-row-aaaa0006")).toBeVisible();
+  await expect(signedIn.getByTestId("inbox-row-bbbb0003")).toBeVisible();
   // The open ones are still there: this widens, it does not swap.
   await expect(signedIn.getByTestId("inbox-row-aaaa0001")).toBeVisible();
 
   await signedIn.getByTestId("inbox-finished").click();
   await expect(signedIn).not.toHaveURL(/status=/);
   await expect(signedIn.getByTestId("inbox-row-aaaa0006")).toHaveCount(0);
+});
+
+test("finds a finished pull request where finished pull requests live", async ({
+  signedIn,
+  stack,
+}) => {
+  // The cross-branch scan the inbox leans on for open pull requests reports
+  // open ones only, so this one can only arrive from the working tree — which
+  // is the half of the query that would fail silently if it asked the scan.
+  await signedIn.goto(`${stack.appUrl}/inbox?status=all`);
+  const over = signedIn.getByTestId("inbox-row-bbbb0003");
+  await expect(over).toBeVisible();
+  await expect(over.getByTestId("inbox-reason-assigned")).toBeVisible();
+  await expect(over).toContainText("Closed pull request");
+
+  await signedIn.goto(`${stack.appUrl}/inbox`);
+  await expect(signedIn.getByTestId("inbox-row-bbbb0003")).toHaveCount(0);
+});
+
+test("says what a row's colour says, in words", async ({ signedIn, stack }) => {
+  // The status is the icon's colour and nothing else, so it has to be readable
+  // by somebody who is not being shown a colour.
+  await signedIn.goto(`${stack.appUrl}/inbox`);
+  await expect(signedIn.getByTestId("inbox-row-aaaa0001")).toContainText("Open issue");
+  await expect(signedIn.getByTestId("inbox-row-bbbb0002")).toContainText("Draft pull request");
 });
 
 test("arrives with finished work shown when the URL says so", async ({ signedIn, stack }) => {

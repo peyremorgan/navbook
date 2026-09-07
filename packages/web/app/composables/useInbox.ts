@@ -30,9 +30,11 @@ export interface InboxHandle {
 export function useInbox(scope: ComputedRef<Pick<InboxParams, "finished" | "text">>): InboxHandle {
   // The layout asks this too, and the cache is normalised, so this costs a
   // cache read rather than a request.
-  const { result: viewerResult, error: viewerError } = useQuery(VIEWER_QUERY, null, {
-    fetchPolicy: "cache-first",
-  });
+  const {
+    result: viewerResult,
+    error: viewerError,
+    refetch: refetchViewer,
+  } = useQuery(VIEWER_QUERY, null, { fetchPolicy: "cache-first" });
   const email = computed(() => viewerResult.value?.viewer.email ?? null);
 
   const { result, loading, error, refetch } = useQuery(
@@ -67,6 +69,9 @@ export function useInbox(scope: ComputedRef<Pick<InboxParams, "finished" | "text
     loading: computed(() => (email.value === null && viewerError.value === null) || loading.value),
     error: computed(() => viewerError.value ?? error.value),
     refetch: () => {
+      // The address first. When it is what failed, the inbox query was never
+      // asked at all, and asking a disabled query again would do nothing.
+      void refetchViewer();
       void refetch();
     },
   };

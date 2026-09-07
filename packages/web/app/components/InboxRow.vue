@@ -19,7 +19,7 @@
   do with one. Same shape, and same reason, as `IssueRow`.
 -->
 <script setup lang="ts">
-import { statusColor } from "~/utils/entities";
+import { statusColor, statusLabel } from "~/utils/entities";
 import type { InboxItem, InboxReason } from "~/utils/inbox";
 import { displayPerson } from "~/utils/people";
 
@@ -57,6 +57,20 @@ const tone = computed(() =>
 const href = computed(() =>
   props.item.kind === "issue" ? `/issues/${props.item.id}` : `/prs/${props.item.id}`,
 );
+
+/**
+ * What the icon says, for a reader who is not being shown a colour.
+ *
+ * The colour is the whole of the status here, so without this the difference
+ * between an open row and a closed one would reach nobody using a screen
+ * reader — and telling them apart is the entire point of the switch that puts
+ * finished work on the page.
+ */
+const described = computed(() => {
+  const noun = props.item.kind === "issue" ? "issue" : "pull request";
+  const state = draft.value ? "Draft" : statusLabel(props.item.entity.status);
+  return `${state} ${noun}`;
+});
 </script>
 
 <template>
@@ -65,12 +79,8 @@ const href = computed(() =>
     :data-testid="`inbox-row-${props.item.id}`"
   >
     <NuxtLink :to="href" class="flex items-center gap-2.5">
-      <UIcon
-        :name="icon"
-        class="size-4 shrink-0"
-        :class="tone"
-        :aria-label="props.item.kind === 'issue' ? 'Issue' : 'Pull request'"
-      />
+      <UIcon :name="icon" class="size-4 shrink-0" :class="tone" aria-hidden="true" />
+      <span class="sr-only">{{ described }}</span>
       <code class="shrink-0 text-xs text-muted">#{{ props.item.id }}</code>
       <span class="min-w-0 flex-1 truncate font-medium">{{ entity.title }}</span>
 
@@ -98,7 +108,8 @@ const href = computed(() =>
           :icon="REASONS[reason].icon"
           :data-testid="`inbox-reason-${reason}`"
         >
-          <span class="hidden sm:inline">{{ REASONS[reason].label }}</span>
+          <!-- Narrow, the badge is its icon; the word is still read out. -->
+          <span class="sr-only sm:not-sr-only">{{ REASONS[reason].label }}</span>
         </UBadge>
         <UAvatar
           :alt="displayPerson(entity.author).label"
