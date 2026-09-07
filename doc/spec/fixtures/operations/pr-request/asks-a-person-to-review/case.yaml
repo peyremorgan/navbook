@@ -1,0 +1,24 @@
+spec-version: 1
+description: being listed in `reviewer:` is the whole request, and asking twice adds only what was missing
+history:
+  - {id: base, branch: main, apply: history/00-base, message: "feat: initial code", date: 2026-08-01T10:00:00Z}
+  - {id: feat, branch: feat/auth, from: base, apply: history/01-feat, message: "feat: rework auth tokens", date: 2026-08-04T16:00:00Z}
+run:
+  checkout: feat/auth
+  before:
+    - nav: [pr, open, --title, "Refactor auth token handling", -m, "Replaces the ad-hoc token cache.", --commit]
+      env: {NAV_IDS: "dk3mp2x9", NAV_NOW: "2026-08-04T16:40:00Z"}
+    - nav: [pr, request, dk3m, "alice@example.com", --commit]
+      env: {NAV_NOW: "2026-08-05T09:00:00Z"}
+  command: [pr, request, dk3m, "alice@example.com", "Bo <bo@example.com>", --commit]
+  env: {NAV_NOW: "2026-08-05T10:14:33Z"}
+expect:
+  exit: 0
+  stdout: expected/stdout.txt
+  tree: expected/tree
+  # Every commit since the fixture's history, newest first: the second request
+  # is a commit of its own, and it refers to the pull request it changed.
+  commits:
+    - "docs(pr): request review #dk3mp2x9\n\nRefs: dk3mp2x9\n"
+    - "docs(pr): request review #dk3mp2x9\n\nRefs: dk3mp2x9\n"
+    - "docs(pr): open #dk3mp2x9\n"

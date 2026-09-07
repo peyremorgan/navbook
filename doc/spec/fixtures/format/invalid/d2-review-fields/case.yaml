@@ -1,0 +1,9 @@
+spec-version: 1
+description: D2 rejects a reviewer who is not a person, and a verdict outside the three the format defines
+init: {from: tree, date: 2026-08-05T12:00:00Z}
+run: {command: [doctor, --json]}
+expect:
+  exit: 2
+  diagnostics:
+    - {check: D2, level: error, path: .navbook/prs/open/dk3mp2x9-bad-reviewer/comments/2026-08-05T101433Z-q8zm3vp1.md}
+    - {check: D2, level: error, path: .navbook/prs/open/dk3mp2x9-bad-reviewer/pr.md}

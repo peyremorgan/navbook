@@ -1,0 +1,17 @@
+spec-version: 1
+description: a pull request's author is not among its reviewers, so asking them is refused and nothing is written
+history:
+  - {id: base, branch: main, apply: history/00-base, message: "feat: initial code", date: 2026-08-01T10:00:00Z}
+  - {id: feat, branch: feat/auth, from: base, apply: history/01-feat, message: "feat: rework auth tokens", date: 2026-08-04T16:00:00Z}
+run:
+  checkout: feat/auth
+  before:
+    - nav: [pr, open, --title, "Refactor auth token handling", -m, "Replaces the ad-hoc token cache.", --commit]
+      env: {NAV_IDS: "dk3mp2x9", NAV_NOW: "2026-08-04T16:40:00Z"}
+  command: [pr, request, dk3m, "nav@test.invalid"]
+  env: {NAV_NOW: "2026-08-05T10:14:33Z"}
+expect:
+  exit: 1
+  stdout: ""
+  stderr-contains: ["own pull request"]
+  tree: expected/tree
