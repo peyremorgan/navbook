@@ -37,6 +37,7 @@ import {
   cmdPrList,
   cmdPrMerge,
   cmdPrOpen,
+  cmdPrRequest,
   cmdPrReview,
   cmdPrUpdate,
 } from "./commands/pr.ts";
@@ -64,11 +65,14 @@ const QUERY_HELP = `Query terms AND together. Terms:
   author:EMAIL                author address, same matching
   milestone:M                 exact milestone
   feature:SLUG                SLUG is among the entity's features (repeatable, ANDs)
+  reviewer:EMAIL              asked to review it; PRs only, same matching
+  review:DECISION             pending, approved or changes-requested; PRs only
+  awaiting:EMAIL              asked to review it and has not yet; PRs only
   WORD or "some phrase"       case-insensitive substring of the title,
                               description, or any comment body
-Same-key terms OR for single-valued fields (status, author, milestone) and AND
-for multi-valued ones (label, assignee, feature). The default query is
-status:open.`;
+Same-key terms OR for single-valued fields (status, author, milestone, review)
+and AND for multi-valued ones (label, assignee, feature, reviewer, awaiting).
+The default query is status:open.`;
 
 /**
  * Help for `--commit`, naming the subject the verb commits under (spec 03 §3.2).
@@ -165,6 +169,7 @@ function buildPrCommand(getCtx: () => Ctx): Command {
     .option("--draft", "not yet requesting review")
     .option("--label <label>", "add a label (repeatable)", collect, [])
     .option("--assignee <email>", "assign to a person (repeatable)", collect, [])
+    .option("--reviewer <email>", "ask a person to review it (repeatable)", collect, [])
     .option("--milestone <name>", "milestone")
     .option("--feature <slug>", "attach it to a feature (repeatable)", collect, [])
     .option("--commit", commitHelp("pr"))
@@ -176,11 +181,20 @@ function buildPrCommand(getCtx: () => Ctx): Command {
     .option("--commit", commitHelp("pr"))
     .action((id: string, opts) => cmdPrUpdate(getCtx(), id, opts));
 
+  pr.command("request")
+    .argument("<id>", "ID or unambiguous prefix")
+    .argument("<email...>", "who to ask")
+    .description("ask people to review a pull request")
+    .option("--remove", "take them off the reviewers instead")
+    .option("--commit", commitHelp("pr"))
+    .action((id: string, people: string[], opts) => cmdPrRequest(getCtx(), id, people, opts));
+
   pr.command("review")
     .argument("<id>", "ID or unambiguous prefix")
     .description("review a pull request, bound to a specific revision")
     .option("--approve", "record an approving verdict")
     .option("--request-changes", "record a request-changes verdict")
+    .option("--comment", "record a verdict that judges nothing (the default)")
     .option("-m, --message <text>", "review text; without it $EDITOR is opened")
     .option("--revision <sha>", "bind to this revision instead of the latest")
     .option("--file <path>", "anchor the comment to a file")

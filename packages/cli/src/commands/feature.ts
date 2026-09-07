@@ -78,7 +78,7 @@ export function cmdFeatureOpen(ctx: Ctx, title: string, opts: FeatureOpenOptions
 /* --------------------------------------------------------------------- list */
 
 export function cmdFeatureList(ctx: Ctx, opts: GlobalFlags): void {
-  const repo = loadRepo(ctx, { includeComments: false });
+  const repo = loadRepo(ctx, { comments: "none" });
   const rows = repo.features.map((feature) => {
     const attached = featureMembers(repo, feature.slug);
     return { feature, entities: [...attached.issues, ...attached.prs] };
@@ -137,7 +137,7 @@ export interface FeatureShowOptions extends GlobalFlags {
 }
 
 export function cmdFeatureShow(ctx: Ctx, slug: string, opts: FeatureShowOptions): void {
-  const repo = loadRepo(ctx, { includeComments: false });
+  const repo = loadRepo(ctx, { comments: "none" });
   const feature = resolveFeature(repo, slug);
   const attached = featureMembers(repo, feature.slug);
 
@@ -286,7 +286,7 @@ function terminalWidth(ctx: Ctx): number | undefined {
  */
 export function featureSlugs(ctx: Ctx): string[] {
   try {
-    return referencedFeatures(loadRepo(ctx, { includeComments: false }));
+    return referencedFeatures(loadRepo(ctx, { comments: "none" }));
   } catch {
     return [];
   }

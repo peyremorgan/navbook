@@ -13,10 +13,12 @@ import { featureSlugs } from "./feature.ts";
 const ROOT_COMMANDS = ["issue", "pr", "feature", "init", "id", "doctor", "install", "uninstall"];
 const SHARED_VERBS = ["open", "list", "show", "edit", "comment", "close", "reopen", "delete"];
 const ISSUE_VERBS = [...SHARED_VERBS, "link", "unlink"];
-const PR_VERBS = [...SHARED_VERBS, "update", "review", "merge"];
+const PR_VERBS = [...SHARED_VERBS, "update", "request", "review", "merge"];
 const FEATURE_VERBS = ["open", "list", "show", "edit", "spec"];
 const SPEC_VERBS = ["add", "edit", "list"];
 const QUERY_KEYS = ["status:", "label:", "assignee:", "author:", "milestone:", "feature:"];
+/** Terms only a pull request has (spec 04 §4.3), offered only where they work. */
+const PR_QUERY_KEYS = ["reviewer:", "review:", "awaiting:"];
 
 export function cmdComplete(ctx: Ctx, words: string[]): void {
   for (const candidate of completionsFor(ctx, words)) ctx.stdout.write(`${candidate}\n`);
@@ -35,7 +37,10 @@ function completionsFor(ctx: Ctx, words: string[]): string[] {
   if (verb === undefined) return verbs;
   if (!verbs.includes(verb)) return [];
 
-  if (verb === "list") return [...QUERY_KEYS, ...labels(ctx), ...features(ctx)];
+  if (verb === "list") {
+    const keys = kind === "pr" ? [...QUERY_KEYS, ...PR_QUERY_KEYS] : QUERY_KEYS;
+    return [...keys, ...labels(ctx), ...features(ctx)];
+  }
   if (verb === "open") return [];
   // Every other verb takes an ID as its first argument.
   return words.length === 2 ? entityCandidates(ctx, kind) : [];
@@ -68,7 +73,7 @@ function featureCompletions(ctx: Ctx, words: string[]): string[] {
 
 function specNames(ctx: Ctx, slug: string): string[] {
   try {
-    const feature = loadRepo(ctx, { includeComments: false }).featureBySlug.get(slug);
+    const feature = loadRepo(ctx, { comments: "none" }).featureBySlug.get(slug);
     return feature ? feature.specs.map((spec) => spec.fileName) : [];
   } catch {
     return [];
@@ -85,7 +90,7 @@ function features(ctx: Ctx): string[] {
  */
 function entityCandidates(ctx: Ctx, kind: EntityKind): string[] {
   try {
-    const repo = loadRepo(ctx, { includeComments: false });
+    const repo = loadRepo(ctx, { comments: "none" });
     return allEntities(repo)
       .filter((entity) => entity.kind === kind)
       .flatMap((entity) => [entity.id, entity.dirName])
@@ -97,7 +102,7 @@ function entityCandidates(ctx: Ctx, kind: EntityKind): string[] {
 
 function labels(ctx: Ctx): string[] {
   try {
-    const repo = loadRepo(ctx, { includeComments: false });
+    const repo = loadRepo(ctx, { comments: "none" });
     const found = new Set<string>();
     for (const entity of allEntities(repo)) {
       const values = entity.fm.labels;

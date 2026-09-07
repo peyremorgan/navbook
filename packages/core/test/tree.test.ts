@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { allIds, type NavTree, parseTree, statusDir } from "../src/core/tree.ts";
+import { allIds, type CommentScope, type NavTree, parseTree, statusDir } from "../src/core/tree.ts";
+import { readNavTree } from "../src/workspace/workspace.ts";
 
 const SHA_A = "4f2c9d1e8a7b3c5d9e0f1a2b3c4d5e6f7a8b9c0d";
 const SHA_B = "91d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0";
@@ -182,11 +186,11 @@ describe("parseTree", () => {
     );
   });
 
-  it("records that comments were deliberately not loaded", () => {
-    const repo = parseTree(tree({ "issues/open/bqlybac0-x/issue.md": issue() }), {
-      commentsLoaded: false,
-    });
-    assert.equal(repo.commentsLoaded, false);
+  it("records whose comments were deliberately not loaded", () => {
+    const files = tree({ "issues/open/bqlybac0-x/issue.md": issue() });
+    assert.equal(parseTree(files, { commentsLoaded: "none" }).commentsLoaded, "none");
+    assert.equal(parseTree(files, { commentsLoaded: "prs" }).commentsLoaded, "prs");
+    assert.equal(parseTree(files).commentsLoaded, "all");
   });
 
   it("is insensitive to the order paths arrive in", () => {
@@ -205,5 +209,35 @@ describe("statusDir", () => {
   it("maps kinds to their directory names", () => {
     assert.equal(statusDir("issue", "open"), "issues/open");
     assert.equal(statusDir("pr", "merged"), "prs/merged");
+  });
+});
+
+describe("readNavTree comment scope", () => {
+  const root = mkdtempSync(join(tmpdir(), "navbook-scope-"));
+  const write = (rel: string, text: string): void => {
+    const abs = join(root, ...rel.split("/"));
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, text, "utf8");
+  };
+  write("issues/open/bqlybac0-x/issue.md", "---\n---\n\nb\n");
+  write("issues/open/bqlybac0-x/comments/2026-08-03T141207Z-t5kr1gq6.md", "---\n---\n\nc\n");
+  write("prs/open/dk3mp2x9-y/pr.md", "---\n---\n\nb\n");
+  write("prs/open/dk3mp2x9-y/comments/2026-08-03T141207Z-q8zm3vp1.md", "---\n---\n\nc\n");
+
+  const paths = (comments: CommentScope): string[] =>
+    [...readNavTree(root, { comments }).keys()].filter((p) => p.includes("comments/")).sort();
+
+  it("reads every comment by default", () => {
+    assert.equal(paths("all").length, 2);
+  });
+
+  it("reads none when asked for none", () => {
+    assert.deepEqual(paths("none"), []);
+  });
+
+  it("reads a pull request's comments without opening an issue's", () => {
+    // What a pull-request listing needs to derive a review state, without
+    // paying for the issue comments beside it (spec 05 §5.2's budget).
+    assert.deepEqual(paths("prs"), ["prs/open/dk3mp2x9-y/comments/2026-08-03T141207Z-q8zm3vp1.md"]);
   });
 });

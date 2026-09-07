@@ -6,10 +6,12 @@ import {
   type CommentRecord,
   type EntityRecord,
   type LinkNode,
+  type ReviewState,
   readAssignees,
   readLabels,
   readMerged,
   readRevisions,
+  reviewSummary,
   threadOrder,
   toIsoSeconds,
 } from "@navbook/core";
@@ -91,6 +93,7 @@ function metadataRows(
       if (typeof merged.commit === "string")
         rows.push(["", `commit ${merged.commit.slice(0, 12)}`]);
     }
+    rows.push(...reviewRows(entity, c));
   }
 
   const labels = readLabels(entity.fm);
@@ -104,6 +107,38 @@ function metadataRows(
   rows.push(...linkRows(links, c));
   rows.push(["path", `${navDir}/${entity.dirPath}/`]);
   return rows;
+}
+
+/**
+ * Who was asked to review, what each of them said, and what that adds up to.
+ *
+ * All of it is derived from the reviews against the latest revision (spec 02
+ * §2.7) and none of it is in the file, which is why the rows appear only when
+ * there is something to say: a pull request nobody was asked to review and
+ * nobody reviewed shows no reviewer rows at all.
+ */
+function reviewRows(entity: EntityRecord, c: Colors): [string, string][] {
+  const summary = reviewSummary(entity);
+  if (summary.reviewers.length === 0) return [];
+
+  const rows: [string, string][] = [["review", paintDecision(summary.decision, c)]];
+  summary.reviewers.forEach((entry, index) => {
+    const state = paintState(entry.state, c);
+    const asked = entry.volunteer ? c.dim(" (not asked)") : "";
+    rows.push([index === 0 ? "reviewers" : "", `${entry.person}  ${state}${asked}`]);
+  });
+  return rows;
+}
+
+function paintDecision(decision: string, c: Colors): string {
+  if (decision === "approved") return c.green(decision);
+  return decision === "changes-requested" ? c.yellow(decision) : c.dim(decision);
+}
+
+function paintState(state: ReviewState, c: Colors): string {
+  if (state === "approve") return c.green(`[${state}]`);
+  if (state === "request-changes") return c.yellow(`[${state}]`);
+  return c.dim(`[${state}]`);
 }
 
 /**
@@ -152,7 +187,8 @@ function renderComment(comment: CommentRecord, depth: number, c: Colors): string
   const head: string[] = [c.bold(`#${comment.id}`), comment.author, toIsoSeconds(comment.date)];
   const verdict = comment.parsed.fm.verdict;
   if (typeof verdict === "string") {
-    const paint = verdict === "approve" ? c.green : c.yellow;
+    // The third verdict judges nothing, so it is not painted as though it did.
+    const paint = verdict === "approve" ? c.green : verdict === "comment" ? c.dim : c.yellow;
     head.push(paint(`[${verdict}]`));
   }
   const revision = comment.parsed.fm.revision;

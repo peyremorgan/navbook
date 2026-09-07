@@ -31,6 +31,12 @@ export const PR_STATUSES: readonly Status[] = ["open", "merged", "closed"];
 /** The directory holding one subdirectory per feature (spec 02 §2.11). */
 export const SPECS_DIR = "specs";
 
+/** The directory each entity kind lives under, at the top of the Navbook root. */
+export const ENTITY_DIR: Record<EntityKind, string> = { issue: "issues", pr: "prs" };
+
+/** Whose `comments/` directories a tree read opened (see `readNavTree`). */
+export type CommentScope = "all" | "prs" | "none";
+
 export interface CommentRecord {
   id: string;
   fileName: string;
@@ -135,8 +141,8 @@ export interface Repo {
   featureProblems: StructuralProblem[];
   /** Well-named directories that hold no entity file (spec 03 §3.3.1). */
   orphans: OrphanDirectory[];
-  /** False when the caller deliberately skipped reading comment files. */
-  commentsLoaded: boolean;
+  /** Whose comment files the caller read; the rest were never opened. */
+  commentsLoaded: CommentScope;
   /** Paths that were tolerated but not interpreted (reserved names, §2.10). */
   reserved: string[];
 }
@@ -162,7 +168,7 @@ interface EntityDraft {
 }
 
 /** Build a {@link Repo} from a flat path→content map. */
-export function parseTree(files: NavTree, opts: { commentsLoaded?: boolean } = {}): Repo {
+export function parseTree(files: NavTree, opts: { commentsLoaded?: CommentScope } = {}): Repo {
   const problems: StructuralProblem[] = [];
   const featureProblems: StructuralProblem[] = [];
   const reserved: string[] = [];
@@ -203,7 +209,7 @@ export function parseTree(files: NavTree, opts: { commentsLoaded?: boolean } = {
     problems,
     featureProblems,
     orphans,
-    commentsLoaded: opts.commentsLoaded !== false,
+    commentsLoaded: opts.commentsLoaded ?? "all",
     reserved,
   };
 }
@@ -241,7 +247,7 @@ function classify(
     classifyFeature(path, rest, featureDrafts, featureProblems);
     return;
   }
-  if (root !== "issues" && root !== "prs") {
+  if (root !== ENTITY_DIR.issue && root !== ENTITY_DIR.pr) {
     // Reserved and unknown names are tolerated and preserved untouched (§2.10).
     reserved.push(path);
     return;
@@ -512,7 +518,7 @@ export function allIds(repo: Repo): { id: string; path: string }[] {
 
 /** Directory path for an entity of the given kind, status and directory name. */
 export function statusDir(kind: EntityKind, status: Status): string {
-  return `${kind === "issue" ? "issues" : "prs"}/${status}`;
+  return `${ENTITY_DIR[kind]}/${status}`;
 }
 
 /** Locate an entity by exact ID across both kinds. */

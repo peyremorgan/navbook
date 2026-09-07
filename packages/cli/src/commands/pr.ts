@@ -1,10 +1,10 @@
 /**
  * `nav pr <verb>` — spec 04 §4.3.
  *
- * The eight shared verbs come from `entity.ts`; this module adds the three that
- * only pull requests have (`update`, `review`, `merge`) and the parts of the
- * shared verbs that must reach across branches, because a PR's files live on
- * the branch it proposes to merge (spec 03 §3.5).
+ * The eight shared verbs come from `entity.ts`; this module adds the four that
+ * only pull requests have (`update`, `request`, `review`, `merge`) and the
+ * parts of the shared verbs that must reach across branches, because a PR's
+ * files live on the branch it proposes to merge (spec 03 §3.5).
  */
 
 import {
@@ -28,6 +28,9 @@ import {
   parseListQuery,
   planPrMerge,
   preparePrOpen,
+  readReviewers,
+  requestReview,
+  reviewSummary,
   stringField,
   toNdjson,
   updatePr,
@@ -41,6 +44,7 @@ import { composeFile } from "./compose.ts";
 import {
   type CloseOptions,
   cmdClose,
+  type ExtraColumn,
   type GlobalFlags,
   type ListOptions,
   reportList,
@@ -55,6 +59,7 @@ export interface PrOpenOptions extends GlobalFlags {
   draft?: boolean;
   label?: string[];
   assignee?: string[];
+  reviewer?: string[];
   milestone?: string;
   feature?: string[];
 }
@@ -76,6 +81,7 @@ export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
         revisions: [draft.revision],
         body,
         draft: opts.draft,
+        reviewers: opts.reviewer,
         labels: opts.label,
         assignee: opts.assignee,
         milestone: opts.milestone,
@@ -105,11 +111,41 @@ export function cmdPrUpdate(ctx: Ctx, prefix: string, opts: GlobalFlags): void {
   if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
 
+/* ------------------------------------------------------------------ request */
+
+export interface RequestOptions extends GlobalFlags {
+  remove?: boolean;
+}
+
+export function cmdPrRequest(
+  ctx: Ctx,
+  prefix: string,
+  people: string[],
+  opts: RequestOptions,
+): void {
+  const { entity, changed, unchanged, run } = requestReview(ctx, prefix, people, {
+    commit: opts.commit,
+    remove: opts.remove,
+  });
+
+  const verb = opts.remove ? "No longer reviewing" : "Asked to review";
+  ctx.stdout.write(`${verb} #${entity.id}: ${changed.join(", ")}\n`);
+  // Naming who was already there matters most when only some of a list moved:
+  // the count alone would leave the caller counting names themselves.
+  for (const person of unchanged) {
+    ctx.stdout.write(
+      `${ctx.colors.dim(opts.remove ? "not listed:" : "already listed:")} ${person}\n`,
+    );
+  }
+  if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
+}
+
 /* ------------------------------------------------------------------- review */
 
 export interface ReviewOptions extends GlobalFlags {
   approve?: boolean;
   requestChanges?: boolean;
+  comment?: boolean;
   message?: string;
   revision?: string;
   file?: string;
@@ -118,18 +154,25 @@ export interface ReviewOptions extends GlobalFlags {
 
 export function cmdPrReview(ctx: Ctx, prefix: string, opts: ReviewOptions): void {
   const entity = findEntity(ctx, "pr", prefix);
-  if (opts.approve && opts.requestChanges) {
-    fail("choose either --approve or --request-changes, not both");
+  const chosen = [opts.approve, opts.requestChanges, opts.comment].filter(Boolean).length;
+  if (chosen > 1) {
+    fail("choose one of --approve, --request-changes or --comment, not several");
   }
 
   const revision = bindReviewRevision(entity, opts.revision);
   if (opts.line && !opts.file) fail("--line needs --file");
 
+  // This verb files reviews, so with no flag the verdict is the one that judges
+  // nothing (spec 04 §4.3). The exception is an inline anchor: a note about one
+  // line is discussion, and recording it as a review would say its author had
+  // read the whole revision. `nav pr comment` remains the unbound comment.
   const verdict: Verdict | undefined = opts.approve
     ? "approve"
     : opts.requestChanges
       ? "request-changes"
-      : undefined;
+      : opts.file === undefined || opts.comment
+        ? "comment"
+        : undefined;
   const isReview = verdict !== undefined || opts.file !== undefined;
 
   const base: NewCommentInput = {
@@ -169,8 +212,22 @@ export interface PrListOptions extends ListOptions {
 }
 
 export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void {
-  const extraColumns = [
+  const extraColumns: ExtraColumn[] = [
     { header: "target", value: (entity: EntityRecord) => stringField(entity, "target") },
+    // Derived rather than stored (spec 02 §2.7), and shown only where there is
+    // something to show: a listing of pull requests nobody was asked to review
+    // says nothing about reviews.
+    {
+      header: "reviewer",
+      value: (entity) => readReviewers(entity.fm).join(","),
+      when: (entities) => entities.some((entity) => readReviewers(entity.fm).length > 0),
+      flexible: true,
+    },
+    {
+      header: "review",
+      value: (entity) => reviewSummary(entity).decision,
+      when: (entities) => entities.some((entity) => reviewSummary(entity).reviewers.length > 0),
+    },
   ];
   const query = parseListQuery(terms, "pr");
 

@@ -55,12 +55,12 @@ import { sortEntities } from "./entity.ts";
 
 /** Every feature in the working tree, in slug order. */
 export function listFeatures(ws: WsCtx): FeatureRecord[] {
-  return loadRepo(ws, { includeComments: false }).features;
+  return loadRepo(ws, { comments: "none" }).features;
 }
 
 /** Resolve a feature by slug against the working tree. */
 export function findFeature(ws: WsCtx, slug: string): FeatureRecord {
-  return resolveFeature(loadRepo(ws, { includeComments: false }), slug);
+  return resolveFeature(loadRepo(ws, { comments: "none" }), slug);
 }
 
 /** The issues and pull requests that name a feature, newest first. */
@@ -184,7 +184,7 @@ export function createFeature(
 ): CreateFeatureResult {
   requireNavbook(ws);
   const slug = requireSlug(input.slug ?? slugify(titleOf(input.content) ?? input.fallbackTitle));
-  const repo = loadRepo(ws, { includeComments: false });
+  const repo = loadRepo(ws, { comments: "none" });
   if (repo.featureBySlug.has(slug)) {
     wsFail("already-exists", `feature '${slug}' already exists at ${SPECS_DIR}/${slug}/`);
   }

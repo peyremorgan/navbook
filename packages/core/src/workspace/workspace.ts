@@ -22,23 +22,37 @@ import { parseCommentFileName } from "../core/comments.ts";
 import type { FileOp } from "../core/ops.ts";
 import { needsComments, type Query } from "../core/query.ts";
 import { parseDirName } from "../core/slug.ts";
-import { type NavTree, parseTree, type Repo } from "../core/tree.ts";
+import {
+  type CommentScope,
+  ENTITY_DIR,
+  type EntityKind,
+  type NavTree,
+  parseTree,
+  type Repo,
+} from "../core/tree.ts";
 import { gitMaybe } from "../git/exec.ts";
 import { add } from "../git/index-ops.ts";
 import type { WsCtx } from "./ctx.ts";
 import { wsFail } from "./errors.ts";
 
 export interface ReadTreeOptions {
-  /** Skip `comments/` directories when the command cannot need them. */
-  includeComments?: boolean;
+  /**
+   * Whose `comments/` directories to read; the others are never opened.
+   *
+   * Reading them all is what a text search and `show` need, and what the 1000-
+   * issue budget of spec 05 §5.2 cannot afford for a listing that does not.
+   * `prs` is the middle case a pull-request listing wants: it derives a review
+   * state from the verdicts (spec 02 §2.7), and there are only ever a handful
+   * of open pull requests, while the issue comments beside them are the bulk.
+   */
+  comments?: CommentScope;
 }
 
 /** Read the Navbook directory into a flat path→content map. */
 export function readNavTree(navRoot: string, opts: ReadTreeOptions = {}): NavTree {
-  const includeComments = opts.includeComments !== false;
   const files = new Map<string, string>();
   if (!existsSync(navRoot)) return files;
-  walk(navRoot, "", files, includeComments);
+  walk(navRoot, "", files, opts.comments ?? "all");
   return files;
 }
 
@@ -46,7 +60,7 @@ function walk(
   absolute: string,
   rel: string,
   files: Map<string, string>,
-  includeComments: boolean,
+  comments: CommentScope,
 ): void {
   let entries: Dirent<string>[];
   try {
@@ -58,25 +72,38 @@ function walk(
     const childRel = rel === "" ? entry.name : `${rel}/${entry.name}`;
     const childAbs = join(absolute, entry.name);
     if (entry.isDirectory()) {
-      if (!includeComments && entry.name === "comments") continue;
-      walk(childAbs, childRel, files, includeComments);
+      if (entry.name === "comments" && !wanted(rel, comments)) continue;
+      walk(childAbs, childRel, files, comments);
     } else if (entry.isFile()) {
       files.set(childRel, readFileSync(childAbs, "utf8"));
     }
   }
 }
 
+/** Whether the `comments/` directory of the entity at `rel` is in scope. */
+function wanted(rel: string, comments: CommentScope): boolean {
+  if (comments === "all") return true;
+  return comments === "prs" && rel.startsWith(`${ENTITY_DIR.pr}/`);
+}
+
 /** Load the repository model from the working tree. */
 export function loadRepo(ws: WsCtx, opts: ReadTreeOptions = {}): Repo {
   requireNavbook(ws);
-  const includeComments = opts.includeComments !== false;
-  const files = readNavTree(ws.navRoot, { includeComments });
-  return parseTree(files, { commentsLoaded: includeComments });
+  const comments = opts.comments ?? "all";
+  return parseTree(readNavTree(ws.navRoot, { comments }), { commentsLoaded: comments });
 }
 
-/** Load the repository, reading comment bodies only when the query needs them. */
-export function loadRepoForQuery(ws: WsCtx, query: Query): Repo {
-  return loadRepo(ws, { includeComments: needsComments(query) });
+/**
+ * Load the repository for a listing of `kind`, reading the comments it needs.
+ *
+ * A listing only ever examines entities of its own kind, so nothing else's
+ * comments can change its answer. A pull-request listing always needs its own,
+ * since it reports a derived review state (spec 02 §2.7); an issue listing
+ * needs them only to search their text.
+ */
+export function loadRepoForQuery(ws: WsCtx, query: Query, kind: EntityKind): Repo {
+  if (kind === "pr") return loadRepo(ws, { comments: "prs" });
+  return loadRepo(ws, { comments: needsComments(query) ? "all" : "none" });
 }
 
 /** Fail with a helpful message when the repository has no Navbook directory yet. */

@@ -375,7 +375,7 @@ describe("what belongs to a feature", () => {
       const both = fileIssue(ws, "Bill by seat", ["auth", "billing"]);
       fileIssue(ws, "Unrelated");
 
-      const repo = loadRepo(ws, { includeComments: false });
+      const repo = loadRepo(ws, { comments: "none" });
       assert.deepEqual(
         featureMembers(repo, "auth")
           .issues.map((i) => i.id)
@@ -395,10 +395,7 @@ describe("what belongs to a feature", () => {
     inWorkspace((ws) => {
       create(ws, "Authentication", "auth");
       fileIssue(ws, "Add TOTP", ["auth", "bilng"]);
-      assert.deepEqual(referencedFeatures(loadRepo(ws, { includeComments: false })), [
-        "auth",
-        "bilng",
-      ]);
+      assert.deepEqual(referencedFeatures(loadRepo(ws, { comments: "none" })), ["auth", "bilng"]);
     });
   });
 
@@ -441,7 +438,7 @@ describe("the commits that touched a feature", () => {
         cwd: dir,
       });
 
-      const repo = loadRepo(ws, { includeComments: false });
+      const repo = loadRepo(ws, { comments: "none" });
       const feature = findFeature(ws, "auth");
       const found = featureCommits(ws, feature, featureMembers(repo, "auth"));
       const found_subjects = found.map((c) => c.subject);
@@ -476,7 +473,7 @@ describe("the commits that touched a feature", () => {
         cwd: dir,
       });
 
-      const repo = loadRepo(ws, { includeComments: false });
+      const repo = loadRepo(ws, { comments: "none" });
       const found = featureCommits(ws, findFeature(ws, "auth"), featureMembers(repo, "auth"));
       assert.ok(!found.map((c) => c.subject).some((s) => s.startsWith("chore: mentions")));
     });
@@ -500,7 +497,7 @@ describe("the commits that touched a feature", () => {
         { commit: true },
       );
 
-      const repo = loadRepo(ws, { includeComments: false });
+      const repo = loadRepo(ws, { comments: "none" });
       const found = featureCommits(ws, findFeature(ws, "auth"), featureMembers(repo, "auth"));
       assert.deepEqual(
         found.map((commit) => commit.subject),
@@ -528,7 +525,7 @@ describe("the commits that touched a feature", () => {
           { commit: true },
         );
       }
-      const repo = loadRepo(ws, { includeComments: false });
+      const repo = loadRepo(ws, { comments: "none" });
       const members = featureMembers(repo, "auth");
       const feature = findFeature(ws, "auth");
       assert.equal(featureCommits(ws, feature, members).length, 4);

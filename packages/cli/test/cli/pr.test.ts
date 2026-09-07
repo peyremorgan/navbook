@@ -42,6 +42,14 @@ function withOpenPr(opts: { advanceMain?: boolean; commitPr?: boolean } = {}): S
   return { repo, head };
 }
 
+/** One comment file of the fixture pull request, by its `<stamp>-<id>` name. */
+function commentFile(repo: TempRepo, name: string): string {
+  return readFileSync(
+    join(repo.dir, `.navbook/prs/open/dk3mp2x9-refactor-auth/comments/${name}.md`),
+    "utf8",
+  );
+}
+
 function prFile(repo: TempRepo, status: string): string {
   return readFileSync(
     join(repo.dir, `.navbook/prs/${status}/dk3mp2x9-refactor-auth/pr.md`),
@@ -181,7 +189,344 @@ describe("nav pr review", () => {
         "x",
       ]);
       assert.equal(result.code, 1);
-      assert.match(result.stderr, /not both/);
+      assert.match(result.stderr, /not several/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("records the verdict that judges nothing when no flag names one", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      const result = repo.nav(["pr", "review", "dk3m", "-m", "Read it.", "--commit"], {
+        NAV_IDS: "ccc33333",
+        NAV_NOW: "2026-08-06T10:00:00Z",
+      });
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /Reviewed \(comment\)/);
+      assert.match(commentFile(repo, "2026-08-06T100000Z-ccc33333"), /^verdict: comment$/m);
+      assert.equal(repo.nav(["doctor"]).code, 0, "the third verdict is well-formed");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("leaves an inline anchor unjudged, since it reads one line and not a revision", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      repo.nav(
+        ["pr", "review", "dk3m", "--file", "auth.txt", "--line", "1", "-m", "> x", "--commit"],
+        { NAV_IDS: "ddd44444", NAV_NOW: "2026-08-06T10:00:00Z" },
+      );
+      const text = commentFile(repo, "2026-08-06T100000Z-ddd44444");
+      assert.equal(text.includes("verdict:"), false);
+      assert.match(text, /^file: auth\.txt$/m, "but it is still anchored and bound");
+      assert.match(text, /^revision: /m);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("judges an anchored comment when a flag says to", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      repo.nav(
+        [
+          "pr",
+          "review",
+          "dk3m",
+          "--request-changes",
+          "--file",
+          "auth.txt",
+          "--line",
+          "1-2",
+          "-m",
+          "Off by one.",
+          "--commit",
+        ],
+        { NAV_IDS: "eee55555", NAV_NOW: "2026-08-06T10:00:00Z" },
+      );
+      const text = commentFile(repo, "2026-08-06T100000Z-eee55555");
+      assert.match(text, /^verdict: request-changes$/m);
+      assert.match(text, /^line: 1-2$/m);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+describe("nav pr request", () => {
+  it("asks one person, and says so in the file and the commit", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      const result = repo.nav(["pr", "request", "dk3m", "alice@example.com", "--commit"]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /Asked to review #dk3mp2x9: alice@example\.com/);
+      assert.match(prFile(repo, "open"), /^reviewer: alice@example\.com$/m);
+      assert.match(
+        repo.git(["log", "-1", "--pretty=%s"]).stdout,
+        /docs\(pr\): request review #dk3mp2x9/,
+      );
+      assert.equal(repo.nav(["doctor"]).code, 0);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("asks several at once, and adds to a list that exists", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      repo.nav(["pr", "request", "dk3m", "alice@example.com", "--commit"]);
+      const result = repo.nav([
+        "pr",
+        "request",
+        "dk3m",
+        "bo@example.com",
+        "cy@example.com",
+        "--commit",
+      ]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(
+        prFile(repo, "open"),
+        /^reviewer: \[alice@example\.com, bo@example\.com, cy@example\.com\]$/m,
+      );
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("takes somebody off, naming the commit for what it did", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      repo.nav(["pr", "request", "dk3m", "alice@example.com", "bo@example.com", "--commit"]);
+      const result = repo.nav([
+        "pr",
+        "request",
+        "dk3m",
+        "alice@example.com",
+        "--remove",
+        "--commit",
+      ]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /No longer reviewing #dk3mp2x9: alice@example\.com/);
+      assert.match(prFile(repo, "open"), /^reviewer: bo@example\.com$/m);
+      assert.match(repo.git(["log", "-1", "--pretty=%s"]).stdout, /docs\(pr\): remove reviewer/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("removes the key when the last reviewer goes", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      repo.nav(["pr", "request", "dk3m", "alice@example.com", "--commit"]);
+      repo.nav(["pr", "request", "dk3m", "alice@example.com", "--remove", "--commit"]);
+      assert.equal(prFile(repo, "open").includes("reviewer"), false);
+      assert.equal(repo.nav(["doctor"]).code, 0);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses to ask the pull request's own author", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      const author = repo.git(["config", "user.email"]).stdout.trim();
+      const result = repo.nav(["pr", "request", "dk3m", author]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /own pull request/);
+      assert.equal(prFile(repo, "open").includes("reviewer"), false, "and writes nothing");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses a request that would change nothing, without committing", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      repo.nav(["pr", "request", "dk3m", "alice@example.com", "--commit"]);
+      const before = repo.git(["rev-parse", "HEAD"]).stdout.trim();
+
+      const again = repo.nav(["pr", "request", "dk3m", "ALICE@example.com", "--commit"]);
+      assert.equal(again.code, 1);
+      assert.match(again.stderr, /is already asked to review/);
+
+      const absent = repo.nav(["pr", "request", "dk3m", "zoe@example.com", "--remove", "--commit"]);
+      assert.equal(absent.code, 1);
+      assert.match(absent.stderr, /is not asked to review/);
+
+      assert.equal(repo.git(["rev-parse", "HEAD"]).stdout.trim(), before, "nothing was committed");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("adds only the people who were missing, naming the rest", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      repo.nav(["pr", "request", "dk3m", "alice@example.com", "--commit"]);
+      const result = repo.nav(["pr", "request", "dk3m", "alice@example.com", "bo@example.com"]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /Asked to review #dk3mp2x9: bo@example\.com/);
+      assert.match(result.stdout, /already listed: alice@example\.com/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses an issue, naming the right noun", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.nav(["issue", "open", "An issue", "-m", "Body."], { NAV_IDS: "bqlybac0" });
+      const result = repo.nav(["pr", "request", "bqly", "alice@example.com"]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /is an issue/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+describe("the derived review state", () => {
+  /** A pull request with two reviewers asked, on its own branch. */
+  function withReviewers(): TempRepo {
+    const { repo } = withOpenPr();
+    repo.git(["checkout", "--quiet", "feat/auth"]);
+    repo.nav(["pr", "request", "dk3m", "alice@example.com", "bo@example.com", "--commit"]);
+    return repo;
+  }
+
+  /** Review as somebody else: the author is excluded from the state by design. */
+  function reviewAs(repo: TempRepo, who: string, args: string[], ids: string): void {
+    repo.git(["config", "user.email", who]);
+    const result = repo.nav(["pr", "review", "dk3m", ...args, "--commit"], {
+      NAV_IDS: ids,
+      NAV_NOW: "2026-08-06T10:00:00Z",
+    });
+    assert.equal(result.code, 0, result.stderr);
+    repo.git(["config", "user.email", "nav@test.invalid"]);
+  }
+
+  it("shows everyone asked, and what each of them said", () => {
+    const repo = withReviewers();
+    try {
+      reviewAs(repo, "alice@example.com", ["--approve", "-m", "Good."], "aaa11111");
+      const shown = repo.nav(["pr", "show", "dk3m"]).stdout;
+      assert.match(shown, /review: +approved/);
+      assert.match(shown, /reviewers: +alice@example\.com +\[approve\]/);
+      assert.match(shown, /bo@example\.com +\[pending\]/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("lets a block outrank an approval", () => {
+    const repo = withReviewers();
+    try {
+      reviewAs(repo, "alice@example.com", ["--approve", "-m", "Good."], "aaa11111");
+      reviewAs(repo, "bo@example.com", ["--request-changes", "-m", "No."], "bbb22222");
+      assert.match(repo.nav(["pr", "show", "dk3m"]).stdout, /review: +changes-requested/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("marks a review nobody asked for", () => {
+    const repo = withReviewers();
+    try {
+      reviewAs(repo, "zoe@example.com", ["--approve", "-m", "Passing by."], "zzz11111");
+      assert.match(repo.nav(["pr", "show", "dk3m"]).stdout, /zoe@example\.com.*\(not asked\)/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("ignores the author's own verdict", () => {
+    const repo = withReviewers();
+    try {
+      // The author is `nav@test.invalid`, which `reviewAs` restores.
+      repo.nav(["pr", "review", "dk3m", "--approve", "-m", "Mine."], { NAV_IDS: "sss11111" });
+      const shown = repo.nav(["pr", "show", "dk3m"]).stdout;
+      assert.match(shown, /review: +pending/);
+      assert.equal(shown.includes("nav@test.invalid  ["), false);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("returns everybody to pending when a revision is appended", () => {
+    const repo = withReviewers();
+    try {
+      reviewAs(repo, "alice@example.com", ["--approve", "-m", "Good."], "aaa11111");
+      assert.match(repo.nav(["pr", "show", "dk3m"]).stdout, /review: +approved/);
+
+      repo.write("auth.txt", "token handling\nmore\n");
+      repo.commitAll("fix: more work");
+      repo.nav(["pr", "update", "dk3m", "--commit"], { NAV_NOW: "2026-08-07T09:00:00Z" });
+
+      const shown = repo.nav(["pr", "show", "dk3m"]).stdout;
+      assert.match(shown, /review: +pending/);
+      assert.match(shown, /alice@example\.com +\[pending\]/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("filters a listing by who was asked, by decision, and by what is owed", () => {
+    const repo = withReviewers();
+    try {
+      reviewAs(repo, "alice@example.com", ["--approve", "-m", "Good."], "aaa11111");
+      const has = (...terms: string[]): boolean =>
+        repo.nav(["pr", "list", ...terms]).stdout.includes("#dk3mp2x9");
+
+      assert.equal(has("reviewer:alice@example.com"), true);
+      assert.equal(has("reviewer:nobody@example.com"), false);
+      assert.equal(has("review:approved"), true);
+      assert.equal(has("review:pending"), false);
+      assert.equal(has("awaiting:bo@example.com"), true);
+      assert.equal(has("awaiting:alice@example.com"), false, "she has answered");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("carries the derived state into show --json, where the comments are read", () => {
+    const repo = withReviewers();
+    try {
+      reviewAs(repo, "alice@example.com", ["--approve", "-m", "Good."], "aaa11111");
+      const shown = JSON.parse(repo.nav(["pr", "show", "dk3m", "--json"]).stdout) as {
+        reviewer: string[];
+        review: { decision: string; reviewers: { person: string; state: string }[] };
+      };
+      assert.deepEqual(shown.reviewer, ["alice@example.com", "bo@example.com"]);
+      assert.equal(shown.review.decision, "approved");
+      assert.deepEqual(
+        shown.review.reviewers.map((entry) => `${entry.person} ${entry.state}`),
+        ["alice@example.com approve", "bo@example.com pending"],
+      );
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("says nothing about reviews for a pull request that has none", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      const shown = repo.nav(["pr", "show", "dk3m"]).stdout;
+      assert.equal(shown.includes("reviewers:"), false);
+      assert.equal(shown.includes("review:"), false);
+      assert.equal(repo.nav(["pr", "list"]).stdout.includes("REVIEW"), false);
     } finally {
       repo.cleanup();
     }
