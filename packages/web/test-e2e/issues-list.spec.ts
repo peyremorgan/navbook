@@ -4,9 +4,16 @@
  * What is asserted is that the query string and what the server returns agree,
  * starting with the empty case: a filter naming no status means any status, so
  * an unfiltered listing holds closed issues too.
+ *
+ * The last few are about the bar rather than the answer: which of its controls
+ * a screen is wide enough to hold, which is the one thing here that a URL
+ * cannot say.
  */
 
-import { expect, test } from "./helpers/fixtures.ts";
+import { chooseOrCreate, expect, test } from "./helpers/fixtures.ts";
+
+/** The five menus, which are the controls that fold away on a narrow screen. */
+const MENUS = ["labels", "assignees", "authors", "milestones", "features"] as const;
 
 test("lists issues of every status, newest first", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/issues`);
@@ -134,4 +141,104 @@ test("opens an issue from the list", async ({ signedIn, stack }) => {
   await signedIn.getByTestId("issue-row-aaaa0001").click();
   await expect(signedIn).toHaveURL(/\/issues\/aaaa0001/);
   await expect(signedIn.getByTestId("issue-title")).toContainText("Sign-in is unreliable");
+});
+
+test("puts every menu on one line on a wide screen, with nothing to unfold", async ({
+  signedIn,
+  stack,
+}) => {
+  // A status is named so that Clear is on screen and the third row exists.
+  await signedIn.goto(`${stack.appUrl}/issues?status=open`);
+  for (const key of MENUS) {
+    await expect(signedIn.getByTestId(`filter-${key}`)).toBeVisible();
+  }
+  await expect(signedIn.getByTestId("filter-advanced")).toBeHidden();
+
+  // Three rows: the box beside the chips, the five menus, then Clear. Polled
+  // rather than read once, because a rect read while the page is still
+  // settling is a rect from a layout that no longer holds.
+  const top = async (testid: string): Promise<number> =>
+    (await signedIn.getByTestId(testid).boundingBox())?.y ?? Number.NaN;
+
+  await expect
+    .poll(async () => {
+      const menus: number[] = [];
+      for (const key of MENUS) menus.push(await top(`filter-${key}`));
+      return {
+        lines: new Set(menus).size,
+        chipsAbove: (await top("filter-status-open")) < Math.min(...menus),
+        clearBelow: (await top("filter-clear")) > Math.max(...menus),
+      };
+    })
+    .toEqual({ lines: 1, chipsAbove: true, clearBelow: true });
+});
+
+test("keeps a menu in view when the window narrows after it was used", async ({
+  signedIn,
+  stack,
+}) => {
+  // The menus are always on screen above `md`, so one can be chosen without the
+  // panel ever having been unfolded. Narrowing the window then must not hide
+  // the filter now narrowing the listing.
+  await signedIn.goto(`${stack.appUrl}/issues`);
+  await chooseOrCreate(signedIn, "filter-labels", "bug");
+  await expect(signedIn).toHaveURL(/[?&]label=bug/);
+
+  await signedIn.setViewportSize({ width: 390, height: 844 });
+  await expect(signedIn.getByTestId("filter-advanced")).toHaveAttribute("aria-expanded", "true");
+  await expect(signedIn.getByTestId("filter-labels")).toBeVisible();
+});
+
+test.describe("on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test("folds the menus away until they are asked for", async ({ signedIn, stack }) => {
+    await signedIn.goto(`${stack.appUrl}/issues`);
+    // What is reached for on a phone stays on screen; the menus do not.
+    await expect(signedIn.getByTestId("filter-text")).toBeVisible();
+    await expect(signedIn.getByTestId("filter-status-open")).toBeVisible();
+
+    const toggle = signedIn.getByTestId("filter-advanced");
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    for (const key of MENUS) {
+      await expect(signedIn.getByTestId(`filter-${key}`)).toBeHidden();
+    }
+    // Nothing is narrowing by a menu, so there is nothing to count.
+    await expect(signedIn.getByTestId("filter-advanced-count")).toHaveCount(0);
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    for (const key of MENUS) {
+      await expect(signedIn.getByTestId(`filter-${key}`)).toBeVisible();
+    }
+
+    // And folds away again, since it is a disclosure and not a one-way door.
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(signedIn.getByTestId("filter-labels")).toBeHidden();
+  });
+
+  test("unfolds itself when the URL already names a menu filter", async ({ signedIn, stack }) => {
+    // A filter you cannot see is one you cannot take off.
+    await signedIn.goto(`${stack.appUrl}/issues?label=bug`);
+    const toggle = signedIn.getByTestId("filter-advanced");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(signedIn.getByTestId("filter-labels")).toBeVisible();
+    await expect(signedIn.getByTestId("filter-advanced-count")).toHaveText("1");
+    await expect(signedIn.getByTestId("issue-row-aaaa0001")).toBeVisible();
+  });
+
+  test("counts values rather than menus, and only the menus", async ({ signedIn, stack }) => {
+    // Two labels are two things chosen, though they are one menu.
+    await signedIn.goto(`${stack.appUrl}/issues?label=bug&label=auth`);
+    await expect(signedIn.getByTestId("filter-advanced-count")).toHaveText("2");
+
+    // The box and the chips are on screen already, so they are not counted and
+    // they do not unfold anything — but they are still a filter to clear.
+    await signedIn.goto(`${stack.appUrl}/issues?q=deadline&status=open`);
+    await expect(signedIn.getByTestId("filter-advanced")).toHaveAttribute("aria-expanded", "false");
+    await expect(signedIn.getByTestId("filter-advanced-count")).toHaveCount(0);
+    await expect(signedIn.getByTestId("filter-clear")).toBeVisible();
+  });
 });
