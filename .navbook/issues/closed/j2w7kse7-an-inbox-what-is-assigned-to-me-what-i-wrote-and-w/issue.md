@@ -5,6 +5,7 @@ created: 2026-09-07T21:36:34Z
 labels: [enhancement]
 assignee: admin@brickcode.tech
 feature: web
+resolution: fixed
 ---
 
 The listings answer "what is there"; nothing answers "what is mine". Add /inbox, one unified list of everything that concerns the signed-in person, so the next thing to work on is one page rather than three filters.
