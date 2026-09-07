@@ -4,6 +4,7 @@
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
 import { VIEWER_QUERY } from "~/graphql/queries";
+import { HOME } from "~/utils/navigation";
 
 const auth = useAuth();
 // Who the *server* thinks is acting, which is the thing worth showing: it is
@@ -24,7 +25,12 @@ const links = [
   <div class="min-h-screen bg-default text-default">
     <header class="border-b border-default bg-elevated/40">
       <div class="mx-auto flex max-w-6xl items-center gap-6 px-4 py-3">
-        <NuxtLink to="/issues" class="flex items-center gap-2 font-semibold">
+        <!--
+          The wordmark is the way home, so it goes where the root goes: the
+          open issues. The button beside it is not — "Issues" means the
+          listing, all of it, which is the way back out of the filter.
+        -->
+        <NuxtLink :to="HOME" class="flex items-center gap-2 font-semibold">
           <UIcon name="i-lucide-notebook-text" class="size-5 text-primary" />
           Navbook
         </NuxtLink>

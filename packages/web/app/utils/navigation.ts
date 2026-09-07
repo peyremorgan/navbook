@@ -12,8 +12,16 @@
  * convincing phishing page gets its link.
  */
 
-/** The default when what came back cannot be trusted. */
-export const HOME = "/issues";
+/**
+ * Where somebody with no destination in mind is sent, and the default when what
+ * came back cannot be trusted.
+ *
+ * It names a status because a listing naming none means any status, and the
+ * front page of an issue tracker is about the ones still open. The root route
+ * redirects to the same place; see `pages/index.vue` for why that one spells
+ * the string out instead of importing it.
+ */
+export const HOME = "/issues?status=open";
 
 /**
  * A same-app path, or `HOME`.
