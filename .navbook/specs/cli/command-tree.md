@@ -4,12 +4,12 @@ title: Command tree
 
 ## What exists
 
-Everything is noun-verb (spec 04 §4.3). `issue` and `pr` share `open list show edit comment close reopen delete`; `issue` adds `link` and `unlink`; `pr` adds `update review merge`; `feature` has `open list show edit` and the `spec add edit list` group. Root utilities are `init`, `id`, `doctor`, `install` and `uninstall`.
+Everything is noun-verb (spec 04 §4.3). `issue` and `pr` share `open list show edit comment close reopen delete`; `issue` adds `link` and `unlink`; `pr` adds `update request review merge`; `feature` has `open list show edit` and the `spec add edit list` group. Root utilities are `init`, `id`, `doctor`, `install` and `uninstall`.
 
 - **IDs** accept any unambiguous prefix of four characters or more, and a whole `<id>-<slug>` directory name.
 - **`--commit`** on any mutating verb wraps the change in a `docs(<scope>):` commit, and refuses to run with unrelated changes already staged. A no-op lands as "Nothing to commit" rather than a git error.
-- **`--json`** on every listing and `show`: one object per entity, identity keys first, frontmatter in file order, then the body. `list` and `show` never change a key's type.
-- **Query grammar** — `status:`, `label:`, `assignee:`, `author:`, `milestone:`, `feature:` and bare words. Single-valued keys OR their terms; multi-valued keys AND them. The `status:open` default belongs to the CLI's `list` verbs alone.
+- **`--json`** on every listing and `show`: one object per entity, identity keys first, frontmatter in file order, then the body. `list` and `show` never change a key's type. `pr show` adds one key that is not frontmatter, `review`, because it has already read the comments that state is derived from.
+- **Query grammar** — `status:`, `label:`, `assignee:`, `author:`, `milestone:`, `feature:` and bare words, plus `reviewer:`, `review:` and `awaiting:` on pull requests, which `nav issue list` rejects rather than matching nothing. Single-valued keys OR their terms; multi-valued keys AND them. The `status:open` default belongs to the CLI's `list` verbs alone.
 - **`$EDITOR`** opens whenever `-m` is absent; the buffer is the whole file, frontmatter included, and an abort leaves nothing behind.
 - **Completions** for bash, zsh and fish, with IDs, directory names, feature slugs, document names and query keys supplied by `nav __complete`.
 - **`nav install`** sets up the `git nav` alias, the pre-commit hook, `merge.directoryRenames=true` and completions, printing what it will do and asking first; `-y` skips the question; `nav uninstall` removes exactly what it added.
