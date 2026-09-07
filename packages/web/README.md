@@ -123,6 +123,11 @@ What the identity provider has to do:
 Authorization is out of scope here as it is on the server: any token the issuer
 signs for this audience may write. Put the policy you need in front.
 
+[`compose.yaml`](../../compose.yaml) does both of the host's jobs in a
+container: nginx over the generated bundle, with `config.json` written from the
+environment every time it starts, so one image serves every deployment. The
+[root README](../../README.md#deploying) describes it.
+
 ## Development
 
 ```sh

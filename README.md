@@ -195,6 +195,50 @@ Developed and tested on Linux and macOS. Windows is not guaranteed; use
 [Git Bash](https://gitforwindows.org/) or WSL, where Navbook works because both
 provide the POSIX shell the hooks and completions expect.
 
+## Deploying
+
+The API and the web client ship as two containers, described by
+[`compose.yaml`](compose.yaml) and configured by one file:
+
+```sh
+cp .env.example .env      # then edit it
+docker compose up -d --build
+```
+
+[`.env.example`](.env.example) names every key with the value it takes when you
+leave it alone, and is the reference for what each one does. Four things have
+to exist first:
+
+- **A Traefik** with its Docker provider watching a network the containers can
+  join (`docker network create traefik`). Nothing about Traefik itself is
+  configured here — the containers carry host rules and it does the rest.
+- **Two hostnames**, one for the client and one for the API. They need not
+  share a domain: the API answers any origin that brings an `Authorization`
+  header.
+- **An identity provider**, because authentication has no off switch. What it
+  has to mint is in the [web client's README](packages/web/README.md#deploying-it).
+- **A repository, and a token that may push to it.** The token is what commits
+  reach the remote as; the person a commit is *for* comes from their own token
+  and is recorded as `author:`.
+
+The API container makes its own clone on the first start and keeps it in a
+volume. That volume is not a database — it can be deleted, and the next start
+fetches the repository again. Changing any value in `.env` is an edit and a
+restart, because both containers read their configuration when they start:
+nothing is baked into an image, including which API the client talks to.
+
+Two things worth knowing when something goes wrong. A push the server cannot
+land is reported as `SYNC_CONFLICT` and **left committed in the clone** for a
+person to reconcile — `docker compose exec api sh` puts you in it, and the
+container will not throw that work away on the next restart. And the server
+refuses to start on a clone with a dirty tree or a detached HEAD, which is the
+same thing said earlier: it would otherwise surface as a puzzling failure on
+somebody's first mutation.
+
+The details of each half — every server option, and what the client reads at
+boot — are in [`packages/server`](packages/server/README.md#deploying-it) and
+[`packages/web`](packages/web/README.md#deploying-it).
+
 ## Documentation
 
 The [specification](doc/spec/README.md) is the normative definition of the file

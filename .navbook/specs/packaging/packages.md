@@ -11,6 +11,8 @@ A pnpm workspace of four packages, published in lockstep under the `@navbook` sc
 - `@navbook/server` — the GraphQL API; installs `nav-server`. A leaf: its dependencies constrain nothing else.
 - `@navbook/web` — the browser client, built to static files and not published.
 
+The two front ends are also shipped as container images, which is a separate story: see [docker.md](docker.md).
+
 Node 24 runs the TypeScript sources directly, so development has no build step outside the web client. Each published package ships a compiled `dist/`, and the test suites honour `$NAV_BIN` and `$NAV_SERVER_BIN` so the same tests run against sources and builds. Releases pack all three, publish core first, and sign with provenance. Generated types — the server's resolver types and the client's documents — are committed, and CI checks they match the schema.
 
 ## Where it lives

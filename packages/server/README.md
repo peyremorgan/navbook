@@ -87,6 +87,11 @@ off if reaching it at all is more than you want to offer.
   that lets somebody set an unverified email lets them author as that person.
   Tokens must carry an expiry; ones without are refused.
 
+[`compose.yaml`](../../compose.yaml) arranges all of that in a container: it
+makes the clone on the first start, gives it an identity through the
+environment rather than the volume, and pushes with a token. The
+[root README](../../README.md#deploying) describes it.
+
 ## The API
 
 `schema.graphql` is the contract, and it ships with the package. The types
