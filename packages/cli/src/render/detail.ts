@@ -4,8 +4,11 @@
 
 import {
   type CommentRecord,
+  describeReviewPolicy,
   type EntityRecord,
   type LinkNode,
+  NO_REVIEW_POLICY,
+  type ReviewPolicyReading,
   type ReviewState,
   readAssignees,
   readLabels,
@@ -30,6 +33,8 @@ export interface DetailOptions {
   navDir: string;
   /** Resolved decomposition links; absent for pull requests (§2.5). */
   links?: DetailLinks;
+  /** The review policy to count by; the defaults when none is given (§2.10). */
+  reviewPolicy?: ReviewPolicyReading;
 }
 
 /** Render one entity with its full comment thread. */
@@ -39,7 +44,7 @@ export function renderDetail(entity: EntityRecord, opts: DetailOptions): string 
   lines.push(`${c.bold(`#${entity.id}`)} ${entity.title}`);
 
   const labelWidth = 11;
-  for (const [label, value] of metadataRows(entity, opts.navDir, opts.links, c)) {
+  for (const [label, value] of metadataRows(entity, opts, c)) {
     // A continuation row (empty label) is indented to line up under the value.
     const cell = label === "" ? " ".repeat(labelWidth) : c.dim(`${label}:`.padEnd(labelWidth));
     lines.push(`${cell}${value}`);
@@ -64,12 +69,8 @@ export function renderDetail(entity: EntityRecord, opts: DetailOptions): string 
   return lines.join("\n");
 }
 
-function metadataRows(
-  entity: EntityRecord,
-  navDir: string,
-  links: DetailLinks | undefined,
-  c: Colors,
-): [string, string][] {
+function metadataRows(entity: EntityRecord, opts: DetailOptions, c: Colors): [string, string][] {
+  const { navDir, links } = opts;
   const rows: [string, string][] = [];
   rows.push(["status", entity.archived ? `${entity.status} (archived)` : entity.status]);
   rows.push(["author", stringField(entity, "author")]);
@@ -93,7 +94,7 @@ function metadataRows(
       if (typeof merged.commit === "string")
         rows.push(["", `commit ${merged.commit.slice(0, 12)}`]);
     }
-    rows.push(...reviewRows(entity, c));
+    rows.push(...reviewRows(entity, opts.reviewPolicy ?? NO_REVIEW_POLICY, c));
   }
 
   const labels = readLabels(entity.fm);
@@ -117,17 +118,29 @@ function metadataRows(
  * there is something to say: a pull request nobody was asked to review and
  * nobody reviewed shows no reviewer rows at all.
  */
-function reviewRows(entity: EntityRecord, c: Colors): [string, string][] {
-  const summary = reviewSummary(entity);
-  if (summary.reviewers.length === 0) return [];
+function reviewRows(
+  entity: EntityRecord,
+  reading: ReviewPolicyReading,
+  c: Colors,
+): [string, string][] {
+  const summary = reviewSummary(entity, reading.policy);
+  // The policy is worth stating even where nobody has reviewed: it is what
+  // this pull request will be read against, and a reader who has to guess
+  // whether one approval is enough has been told half of it.
+  const policy = reading.declared ? [["policy", c.dim(describeReviewPolicy(reading.policy))]] : [];
+  if (summary.reviewers.length === 0) return policy as [string, string][];
 
-  const rows: [string, string][] = [["review", paintDecision(summary.decision, c)]];
+  // The count only earns its place where more than one approval is wanted;
+  // "1 of 1" beside every decision is a fact nobody was missing.
+  const { given, required } = summary.approvals;
+  const counted = required > 1 ? c.dim(`  (${given} of ${required} approvals)`) : "";
+  const rows: [string, string][] = [["review", `${paintDecision(summary.decision, c)}${counted}`]];
   summary.reviewers.forEach((entry, index) => {
     const state = paintState(entry.state, c);
     const asked = entry.volunteer ? c.dim(" (not asked)") : "";
     rows.push([index === 0 ? "reviewers" : "", `${entry.person}  ${state}${asked}`]);
   });
-  return rows;
+  return [...rows, ...(policy as [string, string][])];
 }
 
 function paintDecision(decision: string, c: Colors): string {

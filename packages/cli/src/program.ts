@@ -207,6 +207,7 @@ function buildPrCommand(getCtx: () => Ctx): Command {
     .description("merge a pull request into the checked-out target branch")
     .option("--no-ff", "always create a merge commit")
     .option("--continue", "finish a merge that stopped for conflict resolution")
+    .option("-y, --yes", "merge without asking when the review policy is not met")
     // Commander models `--no-ff` as the negation of an implicit `--ff`.
     .action((id: string | undefined, opts) =>
       cmdPrMerge(getCtx(), id, { ...opts, noFf: opts.ff === false }),
