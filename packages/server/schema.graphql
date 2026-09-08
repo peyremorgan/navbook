@@ -142,8 +142,40 @@ type Pr implements Entity {
   author. Derived from the reviews and stored nowhere.
   """
   reviews: [ReviewerState!]!
-  "What those reviews add up to. Never a gate: policy is the forge's (spec 01 §1.7)."
+  """
+  What those reviews add up to, counted by `reviewPolicy`. Never a gate: it is
+  a reading of the files, and no operation is refused on it (spec 01 §1.7).
+  """
   reviewDecision: ReviewDecision!
+  "How many approvals stand, against how many the policy asks for."
+  approvals: Approvals!
+}
+
+"Approvals counted against the number the review policy asks for."
+type Approvals {
+  given: Int!
+  required: Int!
+}
+
+"""
+How this repository counts reviews, as its marker declares it (spec 02 §2.10).
+
+Advisory throughout: it changes what the decision counts and what a client may
+say about it, never what any operation will do.
+"""
+type ReviewPolicy {
+  "Whether a pull request's own author is counted among its reviewers."
+  selfReview: Boolean!
+  "How many approvals a decision of APPROVED takes; at least 1."
+  minApprovals: Int!
+  "False when the marker declares no policy, and these are the defaults."
+  declared: Boolean!
+  """
+  What could not be read, one message per fault; empty when there is nothing
+  wrong. A malformed policy defaults rather than failing, so a client showing
+  these is showing why the numbers beside them are the defaults (check D15).
+  """
+  problems: [String!]!
 }
 
 "What one person has said about a pull request's latest revision."
@@ -343,6 +375,8 @@ type Query {
   feature(slug: String!): Feature!
   doctor: DoctorReport!
   viewer: Viewer!
+  "How this repository counts reviews (spec 02 §2.10)."
+  reviewPolicy: ReviewPolicy!
 }
 
 "What a mutation committed, and whether it reached the remote."

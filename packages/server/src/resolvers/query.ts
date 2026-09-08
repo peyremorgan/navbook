@@ -13,6 +13,7 @@ import {
   listFeatures,
   listPrsAcrossRefs,
   locatePr,
+  readReviewPolicy,
   runDoctor,
   WorkspaceError,
 } from "@navbook/core";
@@ -67,4 +68,21 @@ export const Query: QueryResolvers = {
     run(() => ctx.sync.read(() => ({ diagnostics: runDoctor(ctx.ws).diagnostics }))),
 
   viewer: (_parent, _args, ctx) => ({ name: ctx.viewer.name ?? null, email: ctx.viewer.email }),
+
+  // Read rather than validated: a malformed policy is reported through
+  // `problems` and defaults on every field beside them, so a client can say
+  // why the numbers are what they are (spec 02 §2.10, check D15).
+  //
+  // Read from the tree rather than through `ctx.reviewPolicy()`, which is the
+  // memo the field resolvers share: that one takes the lock itself, and the
+  // mutex is a queue rather than a reentrant lock, so asking for it from
+  // inside `read` would wait on a transaction that cannot finish until it
+  // returns. A top-level query pulls first, as every other one here does.
+  reviewPolicy: (_parent, _args, ctx) =>
+    run(() =>
+      ctx.sync.read(() => {
+        const { policy, declared, problems } = readReviewPolicy(ctx.ws);
+        return { ...policy, declared, problems: [...problems] };
+      }),
+    ),
 };

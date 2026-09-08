@@ -11,7 +11,15 @@
  * carries the signed-in person's identity into `author:` (spec 06 §6.2).
  */
 
-import { type Identity, loadRepo, makeWsCtx, type Repo, type WsCtx } from "@navbook/core";
+import {
+  type Identity,
+  loadRepo,
+  makeWsCtx,
+  type Repo,
+  type ReviewPolicyReading,
+  readReviewPolicy,
+  type WsCtx,
+} from "@navbook/core";
 import type { Config } from "./config.ts";
 import type { RepoSync } from "./sync.ts";
 
@@ -30,6 +38,14 @@ export interface GraphQLCtx {
    * parent's transaction has already released it.
    */
   repo(): Promise<Repo>;
+  /**
+   * How this repository counts reviews (spec 02 §2.10), read at most once.
+   *
+   * Separate from `repo()` because most requests that need the policy do not
+   * need the tree: a pull request read from a ref carries its own records, and
+   * the policy is still the working tree's.
+   */
+  reviewPolicy(): Promise<ReviewPolicyReading>;
   /** Drops the memo after a write, so a payload reads the tree it just made. */
   invalidateRepo(): void;
   sync: RepoSync;
@@ -63,12 +79,16 @@ export function makeGraphQLCtx(opts: MakeContextOptions): GraphQLCtx {
   // The promise is what is memoized, so several field resolvers asking at once
   // share one load rather than queueing one apiece behind the lock.
   let memo: Promise<Repo> | null = null;
+  let policyMemo: Promise<ReviewPolicyReading> | null = null;
   return {
     viewer: opts.viewer,
     ws,
     repo: () => (memo ??= opts.sync.locked(() => loadRepo(ws))),
+    reviewPolicy: () => (policyMemo ??= opts.sync.locked(() => readReviewPolicy(ws))),
     invalidateRepo: () => {
       memo = null;
+      // The marker is a file like any other, so a write may have changed it.
+      policyMemo = null;
     },
     sync: opts.sync,
     config: opts.config,

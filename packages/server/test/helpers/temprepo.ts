@@ -109,6 +109,13 @@ export interface FixtureOptions {
    * repository that renamed it.
    */
   withoutNavRootEnv?: boolean;
+  /**
+   * The marker to seed, replacing the one `nav init` would write.
+   *
+   * For a fixture that declares a review policy (spec 02 §2.10), or one whose
+   * marker is deliberately unreadable.
+   */
+  marker?: string;
 }
 
 export function makeFixture(opts: FixtureOptions = {}): Fixture {
@@ -206,7 +213,7 @@ export function makeFixture(opts: FixtureOptions = {}): Fixture {
   // goes in too, exactly as `nav init` writes it, so a fixture with a renamed
   // root is findable without `NAV_ROOT` just as a real repository would be.
   const seed = makeClone("seed");
-  seed.write(`${navDir}/navbook.json`, '{\n  "version": 1\n}\n');
+  seed.write(`${navDir}/navbook.json`, opts.marker ?? '{\n  "version": 1\n}\n');
   seed.write(`${navDir}/issues/open/.gitkeep`, "");
   seed.write(`${navDir}/issues/closed/.gitkeep`, "");
   seed.write(`${navDir}/prs/open/.gitkeep`, "");

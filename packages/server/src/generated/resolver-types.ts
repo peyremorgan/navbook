@@ -61,6 +61,13 @@ export type AddSpecPayload = {
   spec: Spec;
 };
 
+/** Approvals counted against the number the review policy asks for. */
+export type Approvals = {
+  __typename?: 'Approvals';
+  given: Scalars['Int']['output'];
+  required: Scalars['Int']['output'];
+};
+
 export type CloseIssueInput = {
   /** ID or prefix of the issue this one duplicates. */
   duplicateOf?: InputMaybe<Scalars['ID']['input']>;
@@ -133,7 +140,7 @@ export type CreateFeaturePayload = {
 /** One finding of the `doctor` check (spec 04 §4.3). */
 export type Diagnostic = {
   __typename?: 'Diagnostic';
-  /** The check that produced it, D1 through D12. */
+  /** The check that produced it, D1 through D15. */
   check: Scalars['String']['output'];
   /** Whether `nav doctor --fix` could mend it. The server never applies fixes. */
   fixable: Scalars['Boolean']['output'];
@@ -457,6 +464,8 @@ export type OpenIssuePayload = {
 
 export type Pr = Entity & {
   __typename?: 'Pr';
+  /** How many approvals stand, against how many the policy asks for. */
+  approvals: Approvals;
   archived: Scalars['Boolean']['output'];
   assignees: Array<Scalars['String']['output']>;
   author: Scalars['String']['output'];
@@ -473,7 +482,10 @@ export type Pr = Entity & {
   path: Scalars['String']['output'];
   /** Branches the cross-ref scan found it on; empty for a working-tree read. */
   refs: Array<Scalars['String']['output']>;
-  /** What those reviews add up to. Never a gate: policy is the forge's (spec 01 §1.7). */
+  /**
+   * What those reviews add up to, counted by `reviewPolicy`. Never a gate: it is
+   * a reading of the files, and no operation is refused on it (spec 01 §1.7).
+   */
   reviewDecision: ReviewDecision;
   /** Who it asks to review, as `reviewer:` records them (spec 02 §2.7). */
   reviewers: Array<Scalars['String']['output']>;
@@ -512,6 +524,8 @@ export type Query = {
    * `allRefs` narrows the statuses on offer no matter what `filter` names.
    */
   prs: Array<Pr>;
+  /** How this repository counts reviews (spec 02 §2.10). */
+  reviewPolicy: ReviewPolicy;
   viewer: Viewer;
 };
 
@@ -552,6 +566,28 @@ export type ReviewDecision =
   | 'APPROVED'
   | 'CHANGES_REQUESTED'
   | 'PENDING';
+
+/**
+ * How this repository counts reviews, as its marker declares it (spec 02 §2.10).
+ *
+ * Advisory throughout: it changes what the decision counts and what a client may
+ * say about it, never what any operation will do.
+ */
+export type ReviewPolicy = {
+  __typename?: 'ReviewPolicy';
+  /** False when the marker declares no policy, and these are the defaults. */
+  declared: Scalars['Boolean']['output'];
+  /** How many approvals a decision of APPROVED takes; at least 1. */
+  minApprovals: Scalars['Int']['output'];
+  /**
+   * What could not be read, one message per fault; empty when there is nothing
+   * wrong. A malformed policy defaults rather than failing, so a client showing
+   * these is showing why the numbers beside them are the defaults (check D15).
+   */
+  problems: Array<Scalars['String']['output']>;
+  /** Whether a pull request's own author is counted among its reviewers. */
+  selfReview: Scalars['Boolean']['output'];
+};
 
 export type ReviewState =
   | 'APPROVE'
@@ -795,6 +831,7 @@ export type ResolversTypes = {
   AddCommentPayload: ResolverTypeWrapper<Omit<AddCommentPayload, 'comment' | 'entity'> & { comment: ResolversTypes['Comment'], entity: ResolversTypes['Entity'] }>;
   AddSpecInput: AddSpecInput;
   AddSpecPayload: ResolverTypeWrapper<Omit<AddSpecPayload, 'feature' | 'spec'> & { feature: ResolversTypes['Feature'], spec: ResolversTypes['Spec'] }>;
+  Approvals: ResolverTypeWrapper<Approvals>;
   Boolean: ResolverTypeWrapper<Scalars['Boolean']['output']>;
   CloseIssueInput: CloseIssueInput;
   CloseIssuePayload: ResolverTypeWrapper<Omit<CloseIssuePayload, 'issue'> & { issue: ResolversTypes['Issue'] }>;
@@ -824,6 +861,7 @@ export type ResolversTypes = {
   Query: ResolverTypeWrapper<Record<PropertyKey, never>>;
   ReopenIssuePayload: ResolverTypeWrapper<Omit<ReopenIssuePayload, 'issue'> & { issue: ResolversTypes['Issue'] }>;
   ReviewDecision: ReviewDecision;
+  ReviewPolicy: ResolverTypeWrapper<ReviewPolicy>;
   ReviewState: ReviewState;
   ReviewerState: ResolverTypeWrapper<ReviewerState>;
   Revision: ResolverTypeWrapper<Revision>;
@@ -849,6 +887,7 @@ export type ResolversParentTypes = {
   AddCommentPayload: Omit<AddCommentPayload, 'comment' | 'entity'> & { comment: ResolversParentTypes['Comment'], entity: ResolversParentTypes['Entity'] };
   AddSpecInput: AddSpecInput;
   AddSpecPayload: Omit<AddSpecPayload, 'feature' | 'spec'> & { feature: ResolversParentTypes['Feature'], spec: ResolversParentTypes['Spec'] };
+  Approvals: Approvals;
   Boolean: Scalars['Boolean']['output'];
   CloseIssueInput: CloseIssueInput;
   CloseIssuePayload: Omit<CloseIssuePayload, 'issue'> & { issue: ResolversParentTypes['Issue'] };
@@ -875,6 +914,7 @@ export type ResolversParentTypes = {
   Pr: PrParent;
   Query: Record<PropertyKey, never>;
   ReopenIssuePayload: Omit<ReopenIssuePayload, 'issue'> & { issue: ResolversParentTypes['Issue'] };
+  ReviewPolicy: ReviewPolicy;
   ReviewerState: ReviewerState;
   Revision: Revision;
   Spec: SpecParent;
@@ -901,6 +941,11 @@ export type AddSpecPayloadResolvers<ContextType = GraphQLCtx, ParentType extends
   commit?: Resolver<ResolversTypes['CommitInfo'], ParentType, ContextType>;
   feature?: Resolver<ResolversTypes['Feature'], ParentType, ContextType>;
   spec?: Resolver<ResolversTypes['Spec'], ParentType, ContextType>;
+};
+
+export type ApprovalsResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['Approvals'] = ResolversParentTypes['Approvals']> = {
+  given?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  required?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
 };
 
 export type CloseIssuePayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['CloseIssuePayload'] = ResolversParentTypes['CloseIssuePayload']> = {
@@ -1037,6 +1082,7 @@ export type OpenIssuePayloadResolvers<ContextType = GraphQLCtx, ParentType exten
 };
 
 export type PrResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['Pr'] = ResolversParentTypes['Pr']> = {
+  approvals?: Resolver<ResolversTypes['Approvals'], ParentType, ContextType>;
   archived?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   assignees?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
   author?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
@@ -1072,6 +1118,7 @@ export type QueryResolvers<ContextType = GraphQLCtx, ParentType extends Resolver
   issues?: Resolver<Array<ResolversTypes['Issue']>, ParentType, ContextType, Partial<QueryIssuesArgs>>;
   pr?: Resolver<ResolversTypes['Pr'], ParentType, ContextType, RequireFields<QueryPrArgs, 'ref'>>;
   prs?: Resolver<Array<ResolversTypes['Pr']>, ParentType, ContextType, RequireFields<QueryPrsArgs, 'allRefs'>>;
+  reviewPolicy?: Resolver<ResolversTypes['ReviewPolicy'], ParentType, ContextType>;
   viewer?: Resolver<ResolversTypes['Viewer'], ParentType, ContextType>;
 };
 
@@ -1079,6 +1126,13 @@ export type ReopenIssuePayloadResolvers<ContextType = GraphQLCtx, ParentType ext
   commit?: Resolver<ResolversTypes['CommitInfo'], ParentType, ContextType>;
   destination?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   issue?: Resolver<ResolversTypes['Issue'], ParentType, ContextType>;
+};
+
+export type ReviewPolicyResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['ReviewPolicy'] = ResolversParentTypes['ReviewPolicy']> = {
+  declared?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
+  minApprovals?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  problems?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
+  selfReview?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
 };
 
 export type ReviewerStateResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['ReviewerState'] = ResolversParentTypes['ReviewerState']> = {
@@ -1137,6 +1191,7 @@ export type ViewerResolvers<ContextType = GraphQLCtx, ParentType extends Resolve
 export type Resolvers<ContextType = GraphQLCtx> = {
   AddCommentPayload?: AddCommentPayloadResolvers<ContextType>;
   AddSpecPayload?: AddSpecPayloadResolvers<ContextType>;
+  Approvals?: ApprovalsResolvers<ContextType>;
   CloseIssuePayload?: CloseIssuePayloadResolvers<ContextType>;
   Comment?: CommentResolvers<ContextType>;
   Commit?: CommitResolvers<ContextType>;
@@ -1155,6 +1210,7 @@ export type Resolvers<ContextType = GraphQLCtx> = {
   Pr?: PrResolvers<ContextType>;
   Query?: QueryResolvers<ContextType>;
   ReopenIssuePayload?: ReopenIssuePayloadResolvers<ContextType>;
+  ReviewPolicy?: ReviewPolicyResolvers<ContextType>;
   ReviewerState?: ReviewerStateResolvers<ContextType>;
   Revision?: RevisionResolvers<ContextType>;
   Spec?: SpecResolvers<ContextType>;
