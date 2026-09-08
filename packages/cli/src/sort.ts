@@ -11,7 +11,7 @@
  * so an ordering is total and two tools sorting one listing agree about it.
  */
 
-import { type EntityRecord, readDeadline, readRank } from "@navbook/core";
+import { compareNewest, type EntityRecord, readDeadline, readRank } from "@navbook/core";
 import { fail } from "./errors.ts";
 
 export const SORT_ORDERS = ["priority", "deadline", "newest"] as const;
@@ -57,14 +57,6 @@ const byDeadline: Comparator = (a, b) =>
   // chosen: no parse, and no way for a parse to disagree with a comparison.
   nullsLast(readDeadline(a.fm), readDeadline(b.fm), (x, y) => (x < y ? -1 : x > y ? 1 : 0));
 
-/** Newest first, ties broken by ID — core's own order (spec 04 §4.2). */
-const byNewest: Comparator = (a, b) => {
-  const aCreated = typeof a.fm.created === "string" ? a.fm.created : "";
-  const bCreated = typeof b.fm.created === "string" ? b.fm.created : "";
-  if (aCreated !== bCreated) return aCreated < bCreated ? 1 : -1;
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-};
-
 /** Try each comparison in turn; the first that has an opinion decides. */
 function chain(...comparators: Comparator[]): Comparator {
   return (a, b) => {
@@ -76,10 +68,15 @@ function chain(...comparators: Comparator[]): Comparator {
   };
 }
 
+/**
+ * Each order ends on `compareNewest`, which is core's own and cannot tie: the
+ * ordering is therefore total, and "newest first" has one spelling rather than
+ * two that could drift.
+ */
 const COMPARATORS: Record<SortOrder, Comparator> = {
-  priority: chain(byRank, byDeadline, byNewest),
-  deadline: chain(byDeadline, byRank, byNewest),
-  newest: byNewest,
+  priority: chain(byRank, byDeadline, compareNewest),
+  deadline: chain(byDeadline, byRank, compareNewest),
+  newest: compareNewest,
 };
 
 /** A listing in one of the orders of spec 02 §2.5. */
