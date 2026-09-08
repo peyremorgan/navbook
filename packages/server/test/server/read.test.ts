@@ -230,3 +230,126 @@ describe("reads", () => {
     assert.ok(errorCode(response) !== null);
   });
 });
+
+/**
+ * Rank and deadline over HTTP, and the day the server judges `OVERDUE` against.
+ *
+ * The fixture pins `NAV_NOW` to the first of August, so the deadlines here are
+ * chosen around that day: one before it, one on it, and one after. The one on
+ * it is the assertion worth having — the comparison is strict, and work wanted
+ * today is not yet late.
+ */
+describe("rank and deadline", () => {
+  let h: Harness;
+  const ids: Record<string, string> = {};
+
+  before(async () => {
+    h = await startHarness();
+    const open = async (key: string, input: Record<string, unknown>): Promise<void> => {
+      ids[key] = ok<{ openIssue: { issue: { id: string } } }>(
+        await h.gql(OPEN, { input: { body: "Body.", ...input } }),
+      ).openIssue.issue.id;
+    };
+    await open("late", { title: "Late", rank: 10, deadline: "2026-07-30" });
+    await open("today", { title: "Due today", deadline: "2026-08-01" });
+    await open("soon", { title: "Soon", rank: 20, deadline: "2026-09-01" });
+    await open("unplaced", { title: "Unplaced" });
+  });
+
+  after(async () => {
+    await h.stop();
+  });
+
+  const titles = async (filter: string): Promise<string[]> =>
+    ok<{ issues: { title: string }[] }>(
+      await h.gql(`query { issues(filter: ${filter}) { title } }`),
+    ).issues.map((issue) => issue.title);
+
+  it("projects both keys, a rank as a number and a deadline as a date", async () => {
+    const data = ok<{ issue: { rank: number | null; deadline: string | null } }>(
+      await h.gql(`query Show($ref: ID!) { issue(ref: $ref) { rank deadline } }`, {
+        ref: ids.late as string,
+      }),
+    );
+    assert.equal(data.issue.rank, 10);
+    assert.equal(data.issue.deadline, "2026-07-30");
+  });
+
+  it("leaves both null on an issue carrying neither", async () => {
+    const data = ok<{ issue: { rank: number | null; deadline: string | null } }>(
+      await h.gql(`query Show($ref: ID!) { issue(ref: $ref) { rank deadline } }`, {
+        ref: ids.unplaced as string,
+      }),
+    );
+    assert.deepEqual(data.issue, { rank: null, deadline: null });
+  });
+
+  it("writes a rank of zero, which is a position rather than an absence", async () => {
+    const id = ok<{ openIssue: { issue: { id: string } } }>(
+      await h.gql(OPEN, { input: { title: "First of all", body: "Body.", rank: 0 } }),
+    ).openIssue.issue.id;
+    const data = ok<{ issue: { rank: number | null } }>(
+      await h.gql(`query Show($ref: ID!) { issue(ref: $ref) { rank } }`, { ref: id }),
+    );
+    assert.equal(data.issue.rank, 0);
+  });
+
+  it("filters by OVERDUE against its own day, counting today as not yet late", async () => {
+    assert.deepEqual(await titles("{ deadline: [OVERDUE] }"), ["Late"]);
+  });
+
+  it("filters by NONE, and ORs the two", async () => {
+    assert.deepEqual((await titles("{ deadline: [NONE] }")).sort(), ["First of all", "Unplaced"]);
+    assert.deepEqual((await titles("{ deadline: [OVERDUE, NONE] }")).sort(), [
+      "First of all",
+      "Late",
+      "Unplaced",
+    ]);
+  });
+
+  it("ANDs the deadline with the rest of the filter, as every key does", async () => {
+    assert.deepEqual(await titles('{ deadline: [NONE], text: ["Unplaced"] }'), ["Unplaced"]);
+  });
+
+  it("lists in the API's own order, which the ranks do not change", async () => {
+    // Newest first, ties broken by id — and every issue here was filed at the
+    // same pinned instant, so the whole listing is in id order. That an issue
+    // ranked 10 does not come first is the assertion: an order the server owned
+    // would be the index spec 06 §6.6 refuses, so sorting is the client's
+    // reading of what it was handed.
+    const listed = ok<{ issues: { id: string }[] }>(
+      await h.gql(`query { issues { id } }`),
+    ).issues.map((issue) => issue.id);
+    assert.deepEqual(listed, [...listed].sort());
+    assert.equal(listed.length, 5);
+  });
+
+  it("refuses the deadline filter on pull requests, which are not scheduled", async () => {
+    const response = await h.gql(`query { prs(filter: { deadline: [OVERDUE] }) { id } }`);
+    assert.equal(errorCode(response), "INVALID_INPUT");
+    assert.match(response.errors[0]?.message ?? "", /describes an issue/);
+  });
+
+  it("refuses a deadline that is not a day, before anything is written", async () => {
+    const response = await h.gql(OPEN, {
+      input: { title: "Bad", body: "Body.", deadline: "2026-02-30" },
+    });
+    assert.equal(errorCode(response), "INVALID_INPUT");
+    assert.deepEqual(await titles('{ text: ["Bad"] }'), []);
+  });
+
+  it("refuses a deadline state that does not exist", async () => {
+    const response = await h.gql(`query { issues(filter: { deadline: [SOON] }) { id } }`);
+    assert.ok(response.errors.length > 0);
+  });
+
+  it("refuses a rank that is not a number, at coercion", async () => {
+    // `Float` is what refuses this, not a check of ours: a rank that is not a
+    // number never reaches a resolver, which is the point of naming the type.
+    const response = await h.gql(OPEN, {
+      input: { title: "Bad rank", body: "Body.", rank: "soon" },
+    });
+    assert.ok(response.errors.length > 0);
+    assert.deepEqual(await titles('{ text: ["Bad rank"] }'), []);
+  });
+});

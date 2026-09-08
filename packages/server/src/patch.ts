@@ -14,6 +14,7 @@
 
 import {
   FrontmatterError,
+  isCalendarDate,
   type NavDoc,
   normalizeBody,
   parseDoc,
@@ -91,6 +92,20 @@ export function applyEntityPatch(content: string, input: EntityPatch, path: stri
     patchDoc(nav, { milestone: input.milestone === null ? undefined : input.milestone });
   }
 
+  if (input.rank !== undefined) {
+    patchDoc(nav, { rank: input.rank === null ? undefined : input.rank });
+  }
+
+  if (input.deadline !== undefined) {
+    // Checked here rather than left to the file's own validation: this rewrites
+    // a file that was already well formed, and a patch that made it invalid
+    // would be reported against the file rather than against the request.
+    if (input.deadline !== null && !isCalendarDate(input.deadline)) {
+      throw invalidInput("deadline must be a calendar date, as YYYY-MM-DD");
+    }
+    patchDoc(nav, { deadline: input.deadline === null ? undefined : input.deadline });
+  }
+
   if (input.body !== undefined && input.body !== null) {
     if (input.body.trim() === "") throw invalidInput("body must not be empty");
     // Deliberately not marking the document dirty: the body is serialized
@@ -120,6 +135,8 @@ export function isEmptyPatch(input: UpdateIssueInput | UpdatePrInput): boolean {
     input.assignees === undefined &&
     input.milestone === undefined &&
     input.features === undefined &&
+    ("rank" in input ? input.rank === undefined : true) &&
+    ("deadline" in input ? input.deadline === undefined : true) &&
     ("reviewers" in input ? input.reviewers === undefined : true)
   );
 }

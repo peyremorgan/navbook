@@ -7,7 +7,7 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { errorCode, type Harness, ok, startHarness } from "../helpers/harness.ts";
@@ -187,6 +187,92 @@ describe("updateIssue", () => {
     // Nothing was committed, so nothing was pushed — and saying otherwise
     // would be a lie the client could act on.
     assert.equal(result.commit.pushed, false);
+  });
+
+  /*
+   * Rank and deadline through the same three states as every other field, and
+   * the reason they are worth their own cases: unplacing an issue is an
+   * explicit null, and a rank of zero must not be mistaken for one.
+   */
+
+  const placed = `mutation Update($input: UpdateIssueInput!) {
+    updateIssue(input: $input) { issue { id rank deadline } commit { committed } }
+  }`;
+
+  const place = async (
+    input: Record<string, unknown>,
+  ): Promise<{ rank: number | null; deadline: string | null }> => {
+    const { rank, deadline } = ok<{
+      updateIssue: { issue: { rank: number | null; deadline: string | null } };
+    }>(await h.gql(placed, { input })).updateIssue.issue;
+    return { rank, deadline };
+  };
+
+  it("places and dates an issue that was neither", async () => {
+    const issue = await open({ title: "Place me", body: "x" });
+    assert.deepEqual(await place({ ref: issue.id, rank: 15, deadline: "2026-10-01" }), {
+      rank: 15,
+      deadline: "2026-10-01",
+    });
+    const file = fileOf(`${issue.path}/issue.md`);
+    assert.match(file, /^rank: 15$/m);
+    assert.match(file, /^deadline: 2026-10-01$/m);
+  });
+
+  it("takes a rank of zero as a position, not as an absence", async () => {
+    const issue = await open({ title: "Top of the list", body: "x" });
+    assert.equal((await place({ ref: issue.id, rank: 0 })).rank, 0);
+    assert.match(fileOf(`${issue.path}/issue.md`), /^rank: 0$/m);
+  });
+
+  it("unplaces and undates on an explicit null, one key at a time", async () => {
+    const issue = await open({ title: "Unplace me", body: "x", rank: 10, deadline: "2026-10-01" });
+    // Naming one leaves the other exactly where it was.
+    assert.deepEqual(await place({ ref: issue.id, rank: null }), {
+      rank: null,
+      deadline: "2026-10-01",
+    });
+    assert.deepEqual(await place({ ref: issue.id, deadline: null }), {
+      rank: null,
+      deadline: null,
+    });
+    const file = fileOf(`${issue.path}/issue.md`);
+    assert.doesNotMatch(file, /^rank:/m);
+    assert.doesNotMatch(file, /^deadline:/m);
+  });
+
+  it("counts unplacing as a change, so the patch is not refused as empty", async () => {
+    const issue = await open({ title: "Not empty", body: "x", rank: 10 });
+    const result = ok<{ updateIssue: { commit: { committed: boolean } } }>(
+      await h.gql(placed, { input: { ref: issue.id, rank: null } }),
+    );
+    assert.equal(result.updateIssue.commit.committed, true);
+  });
+
+  it("refuses a deadline that is not a day, leaving the file as it was", async () => {
+    const issue = await open({ title: "Keep it", body: "x", deadline: "2026-10-01" });
+    const response = await h.gql(placed, { input: { ref: issue.id, deadline: "2026-02-30" } });
+    assert.equal(errorCode(response), "INVALID_INPUT");
+    assert.match(fileOf(`${issue.path}/issue.md`), /^deadline: 2026-10-01$/m);
+  });
+
+  it("leaves an unknown key alone while placing an issue", async () => {
+    // The reason a patch goes through the YAML document rather than rebuilding
+    // the file from known fields (spec 02 §2.4).
+    const issue = await open({ title: "Imported", body: "x" });
+    const path = join(h.fixture.server.dir, `${issue.path}/issue.md`);
+    const original = readFileSync(path, "utf8");
+    writeFileSync(
+      path,
+      original.replace("created:", "imported-from: github:acme/repo#12\ncreated:"),
+      "utf8",
+    );
+    h.fixture.server.commitAll("hand edit");
+
+    await place({ ref: issue.id, rank: 5 });
+    const file = fileOf(`${issue.path}/issue.md`);
+    assert.match(file, /^imported-from: github:acme\/repo#12$/m);
+    assert.match(file, /^rank: 5$/m);
   });
 });
 

@@ -12,12 +12,14 @@ import {
   type ReviewDecision as CoreReviewDecision,
   type ReviewState as CoreReviewState,
   type Verdict as CoreVerdict,
+  type DeadlineTerm,
   type EntityKind,
   emptyQuery,
   type Query,
   type Status,
 } from "@navbook/core";
 import type {
+  DeadlineState,
   DiagnosticLevel,
   EntityFilter,
   Status as GqlStatus,
@@ -37,6 +39,8 @@ const STATUS_IN: Record<GqlStatus, Status> = {
   CLOSED: "closed",
   MERGED: "merged",
 };
+
+const DEADLINE_IN: Record<DeadlineState, DeadlineTerm> = { OVERDUE: "overdue", NONE: "none" };
 
 const KIND_OUT: Record<EntityKind, Kind> = { issue: "ISSUE", pr: "PR" };
 const KIND_IN: Record<Kind, EntityKind> = { ISSUE: "issue", PR: "pr" };
@@ -99,9 +103,14 @@ export function toGqlVerdict(value: unknown): Verdict | null {
  * Built directly rather than through `parseQuery`, whose job is to interpret
  * `label:bug` typed at a shell. A GraphQL client has structure already, and
  * round-tripping it through a string could only lose some.
+ *
+ * `today` is the day `OVERDUE` is judged against, and it is always supplied:
+ * core has no clock, and a filter that asked which work is late without saying
+ * when would be a question with no answer.
  */
-export function toQuery(filter: EntityFilter | null | undefined): Query {
+export function toQuery(filter: EntityFilter | null | undefined, today: string): Query {
   const query = emptyQuery();
+  query.today = today;
   if (!filter) return query;
   if (filter.status) query.status = filter.status.map(toCoreStatus);
   if (filter.labels) query.labels = [...filter.labels];
@@ -112,6 +121,7 @@ export function toQuery(filter: EntityFilter | null | undefined): Query {
   if (filter.reviewers) query.reviewers = [...filter.reviewers];
   if (filter.reviews) query.reviews = filter.reviews.map((decision) => DECISION_IN[decision]);
   if (filter.awaiting) query.awaiting = [...filter.awaiting];
+  if (filter.deadline) query.deadline = filter.deadline.map((state) => DEADLINE_IN[state]);
   if (filter.text) query.text = [...filter.text];
   return query;
 }

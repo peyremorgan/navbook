@@ -137,6 +137,13 @@ export type CreateFeaturePayload = {
   feature: Feature;
 };
 
+/** Where an issue stands against its deadline (spec 02 §2.5). */
+export type DeadlineState =
+  /** Wanted on no particular day. */
+  | 'NONE'
+  /** Wanted on a day now past. Strict: work wanted today is not yet late. */
+  | 'OVERDUE';
+
 /** One finding of the `doctor` check (spec 04 §4.3). */
 export type Diagnostic = {
   __typename?: 'Diagnostic';
@@ -200,6 +207,14 @@ export type EntityFilter = {
   authors?: InputMaybe<Array<Scalars['String']['input']>>;
   /** Asked to review it and has not answered the latest revision. */
   awaiting?: InputMaybe<Array<Scalars['String']['input']>>;
+  /**
+   * Where the issue stands against its deadline; any one of them matches.
+   *
+   * Judged against the server's own day, in UTC. This describes something only
+   * an issue has, so `prs` rejects it rather than matching nothing — the mirror
+   * of what `issues` does with the three above.
+   */
+  deadline?: InputMaybe<Array<DeadlineState>>;
   /** Feature slugs; an entity must name every one of them. */
   features?: InputMaybe<Array<Scalars['String']['input']>>;
   labels?: InputMaybe<Array<Scalars['String']['input']>>;
@@ -279,6 +294,8 @@ export type Issue = Entity & {
   body: Scalars['String']['output'];
   comments: Array<Comment>;
   created: Scalars['String']['output'];
+  /** When the work is wanted, `YYYY-MM-DD`. A date, so it carries no zone. */
+  deadline?: Maybe<Scalars['String']['output']>;
   /** The issue this one duplicates. */
   duplicateOf?: Maybe<Scalars['ID']['output']>;
   features: Array<Scalars['String']['output']>;
@@ -289,6 +306,13 @@ export type Issue = Entity & {
   /** The issue this one is filed under, when its frontmatter names one. */
   parent?: Maybe<LinkNode>;
   path: Scalars['String']['output'];
+  /**
+   * Where the issue sits in the queue; lower first (spec 02 §2.5).
+   *
+   * A position rather than a grade, so the values mean nothing beyond their
+   * order: any finite number is one, negative and fractional included.
+   */
+  rank?: Maybe<Scalars['Float']['output']>;
   /** Why the issue was closed, when it is closed and recorded one. */
   resolution?: Maybe<Scalars['String']['output']>;
   slug: Scalars['String']['output'];
@@ -445,12 +469,16 @@ export type MutationUpdateSpecArgs = {
 export type OpenIssueInput = {
   assignees?: InputMaybe<Array<Scalars['String']['input']>>;
   body: Scalars['String']['input'];
+  /** When the work is wanted, `YYYY-MM-DD`. */
+  deadline?: InputMaybe<Scalars['String']['input']>;
   /** Slugs of features to attach it to (spec 02 §2.11). */
   features?: InputMaybe<Array<Scalars['String']['input']>>;
   labels?: InputMaybe<Array<Scalars['String']['input']>>;
   milestone?: InputMaybe<Scalars['String']['input']>;
   /** ID or prefix of the issue to file this one under. */
   parent?: InputMaybe<Scalars['ID']['input']>;
+  /** Where it sits in the queue; lower first (spec 02 §2.5). */
+  rank?: InputMaybe<Scalars['Float']['input']>;
   title: Scalars['String']['input'];
 };
 
@@ -680,9 +708,13 @@ export type UpdateFeaturePayload = {
 export type UpdateIssueInput = {
   assignees?: InputMaybe<Array<Scalars['String']['input']>>;
   body?: InputMaybe<Scalars['String']['input']>;
+  /** When the work is wanted, `YYYY-MM-DD`; an explicit null undates it. */
+  deadline?: InputMaybe<Scalars['String']['input']>;
   features?: InputMaybe<Array<Scalars['String']['input']>>;
   labels?: InputMaybe<Array<Scalars['String']['input']>>;
   milestone?: InputMaybe<Scalars['String']['input']>;
+  /** Where it sits in the queue; an explicit null unplaces it (spec 02 §2.5). */
+  rank?: InputMaybe<Scalars['Float']['input']>;
   ref: Scalars['ID']['input'];
   title?: InputMaybe<Scalars['String']['input']>;
 };
@@ -840,12 +872,14 @@ export type ResolversTypes = {
   CommitInfo: ResolverTypeWrapper<CommitInfo>;
   CreateFeatureInput: CreateFeatureInput;
   CreateFeaturePayload: ResolverTypeWrapper<Omit<CreateFeaturePayload, 'feature'> & { feature: ResolversTypes['Feature'] }>;
+  DeadlineState: DeadlineState;
   Diagnostic: ResolverTypeWrapper<DiagnosticParent>;
   DiagnosticLevel: DiagnosticLevel;
   DoctorReport: ResolverTypeWrapper<Omit<DoctorReport, 'diagnostics'> & { diagnostics: Array<ResolversTypes['Diagnostic']> }>;
   Entity: ResolverTypeWrapper<EntityParent>;
   EntityFilter: EntityFilter;
   Feature: ResolverTypeWrapper<FeatureParent>;
+  Float: ResolverTypeWrapper<Scalars['Float']['output']>;
   ID: ResolverTypeWrapper<Scalars['ID']['output']>;
   Int: ResolverTypeWrapper<Scalars['Int']['output']>;
   Issue: ResolverTypeWrapper<IssueParent>;
@@ -901,6 +935,7 @@ export type ResolversParentTypes = {
   Entity: EntityParent;
   EntityFilter: EntityFilter;
   Feature: FeatureParent;
+  Float: Scalars['Float']['output'];
   ID: Scalars['ID']['output'];
   Int: Scalars['Int']['output'];
   Issue: IssueParent;
@@ -1022,6 +1057,7 @@ export type IssueResolvers<ContextType = GraphQLCtx, ParentType extends Resolver
   body?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   comments?: Resolver<Array<ResolversTypes['Comment']>, ParentType, ContextType>;
   created?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  deadline?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   duplicateOf?: Resolver<Maybe<ResolversTypes['ID']>, ParentType, ContextType>;
   features?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
   id?: Resolver<ResolversTypes['ID'], ParentType, ContextType>;
@@ -1030,6 +1066,7 @@ export type IssueResolvers<ContextType = GraphQLCtx, ParentType extends Resolver
   milestone?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   parent?: Resolver<Maybe<ResolversTypes['LinkNode']>, ParentType, ContextType>;
   path?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  rank?: Resolver<Maybe<ResolversTypes['Float']>, ParentType, ContextType>;
   resolution?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   slug?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   status?: Resolver<ResolversTypes['Status'], ParentType, ContextType>;
