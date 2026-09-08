@@ -85,7 +85,7 @@ other kind MUST fail with a pointer to the right noun (e.g.
 
 ### Issues — `nav issue <verb>`
 
-- `nav issue open <title> [--label L]... [--assignee EMAIL] [--milestone M] [--feature SLUG]... [--parent <id>] [-m DESC | --edit]`
+- `nav issue open <title> [--label L]... [--assignee EMAIL] [--milestone M] [--feature SLUG]... [--rank N] [--deadline YYYY-MM-DD] [--parent <id>] [-m DESC | --edit]`
   — mint an ID, create `issues/open/<id>-<slug>/issue.md`. Prints path and
   `#id`. `--edit` (default when no `-m`) opens `$EDITOR` on the new file.
   `--parent` files it as a subtask, writing both sides of the link ([2.5](02-data-model.md))
@@ -94,8 +94,13 @@ other kind MUST fail with a pointer to the right noun (e.g.
   the title, what the composed file says is what counts: `--parent` seeds the
   buffer, and an author who edits or removes the `parent:` key in `$EDITOR`
   MUST get the link that file describes, not the one the flag asked for.
-- `nav issue list [query]...` — issues matching all query terms (AND), as a
-  table (`--json` for machines). Default query: `status:open`. Grammar below.
+- `nav issue list [query]... [--sort priority|deadline|newest]` — issues
+  matching all query terms (AND), as a table (`--json` for machines). Default
+  query: `status:open`. Grammar below. `--sort` names one of the orders of
+  [02 §2.5](02-data-model.md) and defaults to `newest`, which is §4.2's order;
+  it orders `--json` as it orders the table, since a caller that pipes a
+  listing wants the order it asked for. A `rank` column and a `deadline` column
+  appear when any issue listed carries one, as the `labels` column does.
 - `nav issue show <id> [--depth N]` — render `issue.md` plus its comments
   (sorted by filename, `reply-to` chains indented) to the terminal. The parent
   and the subtasks are shown with their titles and statuses; `--depth`
@@ -291,6 +296,7 @@ kind. Terms AND together:
 | `awaiting:EMAIL` | `EMAIL` is asked to review and is `pending` on the latest revision. PRs only |
 | `milestone:M` | Exact milestone |
 | `feature:SLUG` | `SLUG` ∈ the entity's `feature` ([02 §2.11](02-data-model.md)) |
+| `deadline:overdue\|none` | `overdue`: a `deadline` strictly before today; `none`: no `deadline` at all. Issues only |
 | bare word / quoted string | Case-insensitive substring of title, description, or any comment body |
 
 A query naming no status matches every status. The `status:open` default above
@@ -302,6 +308,11 @@ grammar: other front ends over the same query — the API of
 so `nav issue list` MUST reject them the way it rejects `status:merged`, rather
 than matching nothing. The last two read the comment files, as a bare-word
 search does, since that is where the verdicts they judge live.
+
+`deadline` runs the other way: it describes something only an issue has
+([02 §2.5](02-data-model.md)), so `nav pr list` MUST reject it for the same
+reason and in the same words. Today is the day the command runs, in UTC, and
+the comparison is strict — an issue due today is not yet overdue.
 
 `nav pr list` shows a `reviewer` column when any pull request listed names one,
 as it does for `assignee`, and a `review` column carrying the derived decision.

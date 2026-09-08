@@ -134,6 +134,8 @@ The server never sees the request.
 | `assignee` | MAY | person or list of persons | Who owns the work |
 | `milestone` | MAY | string | Free-form grouping |
 | `feature` | MAY | slug or list of slugs | The feature(s) this issue belongs to (§2.11) |
+| `rank` | MAY | number | Relative priority; lower sorts first |
+| `deadline` | MAY | date | When the work is wanted, `YYYY-MM-DD` |
 | `resolution` | MAY | string | Meaningful for closed issues: `fixed`, `wontfix`, `duplicate`, `invalid` RECOMMENDED; free-form allowed |
 | `duplicate-of` | MAY | ID | With `resolution: duplicate` |
 | `parent` | MAY | ID | The issue this one is a subtask of |
@@ -142,6 +144,43 @@ The server never sees the request.
 The Markdown body after the frontmatter is the description. It MUST NOT be
 empty. There is no `id` key (the directory name is authoritative — a copied
 file cannot carry a stale ID) and no status key (the path is authoritative).
+
+### Priority and deadline
+
+`rank` and `deadline` say where work sits in a queue and when it is wanted.
+
+- `rank` is a number, and lower sorts first. It is a position rather than a
+  grade: what it records is that one issue comes before another, so the values
+  mean nothing beyond their order and the gaps between them, and any finite
+  decimal is one — negative values included. A whole value SHOULD be written as
+  an integer.
+- Placing an issue MUST rewrite only the issue that moved. A value between two
+  neighbours' puts it between them, and one clear of either end puts it past
+  that end; halving the gap is the obvious way to find the first. Renumbering a
+  listing to keep the values tidy is the central index of §6.6 spread over
+  every file instead of gathered into one, and is exactly as much of a conflict
+  magnet.
+- `deadline` is a calendar date written `YYYY-MM-DD`, with no time and no zone.
+  A day is what a due date means, and it is the one spelling that two readers
+  in different places cannot disagree about. It MAY be in the past: a deadline
+  that was missed is information rather than a fault.
+- Both keys are issue-only, for the reason the two below are. A pull request is
+  a proposed change rather than a unit of work to schedule, and what orders a
+  review queue is the state of §2.7; carrying either key on `pr.md` is a schema
+  fault.
+
+Ordering remains a reading of the files and never a stored order. The listing
+order of [04 §4.2](04-cli.md) is newest first and stays so. A front end MAY
+offer to sort by what these keys say, and the orders it offers are then:
+
+| Order | Reads |
+|-------|-------|
+| `priority` | `rank` ascending, unranked last; then `deadline` ascending, undated last; then newest first |
+| `deadline` | `deadline` ascending, undated last; then `rank` ascending, unranked last; then newest first |
+| `newest` | `created` descending — §4.2's order |
+
+Each of them breaks a remaining tie on the ID, so the ordering is total and two
+tools sorting one listing agree about it.
 
 ### Decomposition
 
