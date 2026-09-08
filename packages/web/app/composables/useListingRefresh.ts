@@ -12,12 +12,16 @@
  * the browser, which is exactly the thing this client does not do. Evicting the
  * listings and letting the server answer again is both correct and cheap: the
  * API has no pagination, so a listing is one request.
+ *
+ * `people` is forgotten for the same reason rather than a different one: a
+ * write is how somebody first gets assigned or asked to review, and the answer
+ * that already named everybody cannot know it now names one more.
  */
 
 import type { ApolloClient, NormalizedCacheObject } from "@apollo/client/core";
 
 /** Root fields whose cached answers a write can invalidate. */
-const LISTINGS = ["issues", "prs", "features"] as const;
+const LISTINGS = ["issues", "prs", "features", "people"] as const;
 
 export function evictListings(client: ApolloClient<NormalizedCacheObject>): void {
   for (const fieldName of LISTINGS) {

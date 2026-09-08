@@ -75,8 +75,11 @@ export function toasts(page: Page) {
 
 /**
  * Pick a value from a creatable menu, inventing it if the list has never seen
- * it. Labels, assignees and milestones are free text with no registry behind
- * them, so inventing one is the ordinary case rather than the exception.
+ * it. Labels and milestones are free text with no registry behind them, so
+ * inventing one is the ordinary case rather than the exception. A person the
+ * server already knows of is offered instead, and picking the first option is
+ * then picking them — under the name the repository has for them, which is not
+ * always the spelling that was typed.
  */
 export async function chooseOrCreate(page: Page, testid: string, value: string): Promise<void> {
   await page.getByTestId(testid).click();

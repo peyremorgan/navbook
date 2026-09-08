@@ -33,18 +33,19 @@ function featureFromQuery(raw: unknown): string[] {
   return list.filter((item): item is string => typeof item === "string" && item.trim() !== "");
 }
 
-/* The only source of suggestions there is; see the detail page for why. */
+/* For labels, the only source of suggestions there is; see the detail page. */
 const { result: listing } = useQuery(ISSUES_QUERY, { filter: {} }, { fetchPolicy: "cache-first" });
 const { result: featureList } = useQuery(FEATURES_QUERY, undefined, {
   fetchPolicy: "cache-first",
 });
+/* Asked of the server, which knows who is around; the listing does not. */
+const people = usePeople();
 const known = computed(() => {
   const issues = listing.value?.issues ?? [];
   return {
     labels: distinctValues(issues, (item) => item.labels),
-    assignees: distinctValues(issues, (item) => item.assignees),
     milestones: distinctValues(issues, (item) => (item.milestone ? [item.milestone] : [])),
-    // A real registry, unlike the three above.
+    // A real registry, unlike the labels above.
     features: (featureList.value?.features ?? []).map((feature) => feature.slug),
   };
 });
@@ -105,7 +106,7 @@ async function submit(): Promise<void> {
       <UFormField label="Assignees">
         <CreatableSelect
           v-model="assignees"
-          :suggestions="known.assignees"
+          :suggestions="people"
           testid="new-assignees"
         />
       </UFormField>

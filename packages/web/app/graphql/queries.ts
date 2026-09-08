@@ -5,10 +5,15 @@
  * matching set, newest first. That is a deliberate property of the server
  * (spec 06 §6.6 rejects anything index-like), so paging and sorting are the
  * client's job — see `app/utils/paging.ts`. It also means a listing already
- * holds every label, assignee and milestone in play, which is where the filter
- * bar's suggestions come from; there is no registry to query. Features are the
- * exception: `FEATURES_QUERY` is a real registry, because a feature exists
- * whether or not any issue names it yet.
+ * holds every label and milestone in play, which is where those suggestions
+ * come from; the format keeps no registry of either and the server introduces
+ * none.
+ *
+ * Two things are not guessed that way. `FEATURES_QUERY` is a real registry,
+ * because a feature exists whether or not any issue names it yet; and
+ * `PEOPLE_QUERY` is the repository's own reading of who is around, which no
+ * listing could answer — somebody nobody has assigned anything to yet is
+ * nowhere in one.
  */
 
 import { graphql } from "~~/src/generated/gql";
@@ -38,6 +43,21 @@ export const REVIEW_POLICY_QUERY = graphql(`
       declared
       problems
     }
+  }
+`);
+
+/**
+ * Everyone the repository knows of, for the fields that name a person.
+ *
+ * Derived by the server from its history, its tree and the token, and kept
+ * nowhere — so it is a suggestion rather than a registry, and every menu it
+ * feeds still takes an address that is not in it. Asked for once and shared:
+ * it changes when somebody commits, which is far less often than a listing
+ * changes, and every page with a person on it wants the same answer.
+ */
+export const PEOPLE_QUERY = graphql(`
+  query People {
+    people
   }
 `);
 

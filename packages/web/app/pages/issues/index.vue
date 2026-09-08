@@ -56,14 +56,17 @@ const { result: featureList } = useQuery(FEATURES_QUERY, undefined, {
   fetchPolicy: "cache-first",
 });
 
+const people = usePeople();
+
 const suggestions = computed(() => ({
   labels: distinctValues(issues.value, (issue) => issue.labels),
-  assignees: distinctValues(issues.value, (issue) => issue.assignees),
-  authors: distinctValues(issues.value, (issue) => [issue.author]),
   milestones: distinctValues(issues.value, (issue) => (issue.milestone ? [issue.milestone] : [])),
-  // Features are real directories, so the registry is the registry rather than
-  // whatever the listing on screen happens to mention.
+  // Features are real directories and people are read from the repository, so
+  // both are the registry itself rather than whatever the listing on screen
+  // happens to mention.
   features: (featureList.value?.features ?? []).map((feature) => feature.slug),
+  assignees: people.value,
+  authors: people.value,
 }));
 </script>
 

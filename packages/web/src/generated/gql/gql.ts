@@ -39,6 +39,7 @@ type Documents = {
     "\n  mutation UpdateSpec($input: UpdateSpecInput!) {\n    updateSpec(input: $input) {\n      feature {\n        ...FeatureDetail\n      }\n      spec {\n        ...SpecDetail\n      }\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n": typeof types.UpdateSpecDocument,
     "\n  query Viewer {\n    viewer {\n      name\n      email\n    }\n  }\n": typeof types.ViewerDocument,
     "\n  query ReviewPolicy {\n    reviewPolicy {\n      selfReview\n      minApprovals\n      declared\n      problems\n    }\n  }\n": typeof types.ReviewPolicyDocument,
+    "\n  query People {\n    people\n  }\n": typeof types.PeopleDocument,
     "\n  query Issues($filter: EntityFilter) {\n    issues(filter: $filter) {\n      ...IssueListItem\n    }\n  }\n": typeof types.IssuesDocument,
     "\n  query Issue($ref: ID!) {\n    issue(ref: $ref) {\n      ...IssueDetail\n    }\n  }\n": typeof types.IssueDocument,
     "\n  query Prs($filter: EntityFilter, $allRefs: Boolean!) {\n    prs(filter: $filter, allRefs: $allRefs) {\n      ...PrListItem\n    }\n  }\n": typeof types.PrsDocument,
@@ -73,6 +74,7 @@ const documents: Documents = {
     "\n  mutation UpdateSpec($input: UpdateSpecInput!) {\n    updateSpec(input: $input) {\n      feature {\n        ...FeatureDetail\n      }\n      spec {\n        ...SpecDetail\n      }\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n": types.UpdateSpecDocument,
     "\n  query Viewer {\n    viewer {\n      name\n      email\n    }\n  }\n": types.ViewerDocument,
     "\n  query ReviewPolicy {\n    reviewPolicy {\n      selfReview\n      minApprovals\n      declared\n      problems\n    }\n  }\n": types.ReviewPolicyDocument,
+    "\n  query People {\n    people\n  }\n": types.PeopleDocument,
     "\n  query Issues($filter: EntityFilter) {\n    issues(filter: $filter) {\n      ...IssueListItem\n    }\n  }\n": types.IssuesDocument,
     "\n  query Issue($ref: ID!) {\n    issue(ref: $ref) {\n      ...IssueDetail\n    }\n  }\n": types.IssueDocument,
     "\n  query Prs($filter: EntityFilter, $allRefs: Boolean!) {\n    prs(filter: $filter, allRefs: $allRefs) {\n      ...PrListItem\n    }\n  }\n": types.PrsDocument,
@@ -196,6 +198,10 @@ export function graphql(source: "\n  query Viewer {\n    viewer {\n      name\n 
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
 export function graphql(source: "\n  query ReviewPolicy {\n    reviewPolicy {\n      selfReview\n      minApprovals\n      declared\n      problems\n    }\n  }\n"): (typeof documents)["\n  query ReviewPolicy {\n    reviewPolicy {\n      selfReview\n      minApprovals\n      declared\n      problems\n    }\n  }\n"];
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query People {\n    people\n  }\n"): (typeof documents)["\n  query People {\n    people\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */

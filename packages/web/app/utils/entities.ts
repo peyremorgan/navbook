@@ -94,10 +94,12 @@ export function absoluteTime(iso: string): string {
 /**
  * Every distinct value of one repeated field across a listing, sorted.
  *
- * There is no query that enumerates labels, assignees or milestones — the
- * format has no registry of them and the server introduces none (spec 06
- * §6.6). What is in play is therefore whatever the current listing shows, and
- * that is what the filter bar offers as suggestions.
+ * There is no query that enumerates labels or milestones — the format has no
+ * registry of them and the server introduces none (spec 06 §6.6). What is in
+ * play is therefore whatever the current listing shows, and that is what the
+ * filter bar offers as suggestions for those two. The fields naming a person
+ * are not among them any more: `people` answers that one, and it can name
+ * somebody no listing mentions.
  */
 export function distinctValues<T>(
   items: readonly T[],

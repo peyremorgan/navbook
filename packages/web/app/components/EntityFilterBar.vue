@@ -1,13 +1,14 @@
 <!--
   The filter, as controls.
 
-  Suggestions come from the listing currently on screen, because there is
-  nowhere else they could come from: the format keeps no registry of labels,
-  assignees or milestones, and the server introduces none (spec 06 §6.6). So
-  the menus are creatable — you can filter by a label no visible entity carries
-  — and what they offer is what is in play right now. Features are the one
-  exception: they are real directories, so their menu is offered the actual
-  list and a caller passes it in.
+  What the menus offer is passed in, and comes from one of two places. Labels
+  and milestones are read off the listing currently on screen, because there is
+  nowhere else they could come from: the format keeps no registry of them and
+  the server introduces none (spec 06 §6.6). Features and people are registries
+  the server can answer — real directories in one case, its own reading of its
+  history and tree in the other — so those menus are offered the actual list.
+  Every menu is creatable either way: you can filter by a label no visible
+  entity carries, or by somebody the repository has not heard of.
 
   Status is chips rather than a menu because there are only ever two or three to
   choose from and it is the filter reached for most. Like every other control

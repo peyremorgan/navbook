@@ -38,23 +38,27 @@ const issue = computed(() => result.value?.issue ?? null);
 /*
  * Suggestions for the sidebar's menus.
  *
- * There is no query that enumerates labels, assignees or milestones, so an
- * open listing is read alongside the issue purely to have something to offer.
- * It is one request, the answer is shared with the list page's cache entry,
- * and a suggestion list that is merely incomplete costs nothing — every menu
- * accepts a value that is not in it.
+ * There is no query that enumerates labels or milestones, so an open listing
+ * is read alongside the issue purely to have something to offer. It is one
+ * request, the answer is shared with the list page's cache entry, and a
+ * suggestion list that is merely incomplete costs nothing — every menu accepts
+ * a value that is not in it.
  */
 const { result: listing } = useQuery(ISSUES_QUERY, { filter: {} }, { fetchPolicy: "cache-first" });
-// Features are the exception: they are real directories, so their list is the
+// Features are one exception: they are real directories, so their list is the
 // registry rather than a guess made from whatever the listing mentions.
 const { result: featureList } = useQuery(FEATURES_QUERY, undefined, {
   fetchPolicy: "cache-first",
 });
+// People are the other, and a stronger one: a listing can only ever name
+// somebody already written down somewhere, so the person nobody has assigned
+// anything to yet — the one you most need to pick — is exactly the one it
+// could never offer. The server reads them from its history and its tree.
+const people = usePeople();
 const known = computed(() => {
   const issues = listing.value?.issues ?? [];
   return {
     labels: distinctValues(issues, (item) => item.labels),
-    assignees: distinctValues(issues, (item) => item.assignees),
     milestones: distinctValues(issues, (item) => (item.milestone ? [item.milestone] : [])),
     features: (featureList.value?.features ?? []).map((feature) => feature.slug),
   };
@@ -303,7 +307,7 @@ async function unlink(child: string): Promise<void> {
             icon="i-lucide-user"
             testid="assignees"
             :values="issue.assignees"
-            :suggestions="known.assignees"
+            :suggestions="people"
             :saving="mutations.busy.value"
             @save="(assignees: string[]) => save({ assignees })"
           />

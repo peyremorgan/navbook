@@ -41,6 +41,11 @@ const pr = computed(() => result.value?.pr ?? null);
 const { result: policyResult } = useQuery(REVIEW_POLICY_QUERY);
 const reviewPolicy = computed(() => policyResult.value?.reviewPolicy ?? null);
 
+// Asking somebody to review means naming somebody who is not on the list yet,
+// which is precisely what offering only the people already asked cannot help
+// with. The repository knows who is around; this asks it.
+const people = usePeople();
+
 const comments = computed(() => buildCommentTree(pr.value?.comments ?? []));
 const commentCount = computed(() => countComments(comments.value));
 
@@ -106,6 +111,9 @@ async function submit(input: {
 const { mutate: patch, loading: patching } = useMutation(UPDATE_PR, {
   context: { handledCodes: ["PRECONDITION"] },
 });
+// Asking somebody new to review is how they become somebody the repository
+// knows of, and the answer that listed everybody was fetched before they were.
+const refreshListings = useListingRefresh();
 
 /**
  * Ask somebody to review, or take them off the list.
@@ -134,6 +142,7 @@ async function saveReviewers(reviewers: string[]): Promise<void> {
     const payload = written?.data?.updatePr;
     if (payload) {
       commitToast.report(payload.commit, "Reviewers updated");
+      refreshListings();
       refusedOn.value = null;
     }
   } catch (failure) {
@@ -262,7 +271,7 @@ const branchHint = computed(() => refusedOn.value);
             icon="i-lucide-eye"
             testid="reviewers"
             :values="pr.reviewers"
-            :suggestions="pr.reviewers"
+            :suggestions="people"
             :saving="patching"
             :disabled="branchHint !== null"
             @save="saveReviewers"

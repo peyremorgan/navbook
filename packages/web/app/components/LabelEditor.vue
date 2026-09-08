@@ -1,12 +1,15 @@
 <!--
   Labels, assignees, a milestone, or the features an entity belongs to.
 
-  Creatable, and offering whatever the listing had in it, because for most of
-  these there is no registry to offer instead: the format keeps none and the
-  server introduces none (spec 06 §6.6). Anything you type is a valid value.
+  Creatable whatever it is offering. For labels and milestones there is no
+  registry to offer instead — the format keeps none and the server introduces
+  none (spec 06 §6.6) — so the suggestions are whatever the listing had in it.
+  For a field naming a person the server does answer, from its history and its
+  tree, but that reading is derived rather than authoritative and an address it
+  has never seen is still a valid one. Anything you type is a valid value.
 
-  Features are the exception, and `linkTo` is how that shows: they are real
-  directories with a page of their own, so their chips lead somewhere.
+  Features are the exception that shows: they are real directories with a page
+  of their own, which is what `linkTo` is for — their chips lead somewhere.
 
   What it shows when it is not being edited can be replaced through the
   `display` slot, for a field whose reading is richer than its list of values.
