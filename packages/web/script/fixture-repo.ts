@@ -93,6 +93,7 @@ export const IDS = {
   edgeCases: "aaaa0007",
   servedPr: "bbbb0001",
   unservedPr: "bbbb0002",
+  declinedPr: "bbbb0003",
 } as const;
 
 function envFor(home: string): NodeJS.ProcessEnv {
@@ -395,10 +396,13 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     author: "Someone Else <someone@example.invalid>",
   });
 
+  // Assigned, and then closed: the one piece of finished work with somebody's
+  // name still on it, which is what an inbox asked for finished work must find.
   issue("2026-07-20T08:00:00Z", IDS.closed, {
     title: "Timestamps render in the wrong timezone",
     body: "Everything was an hour out for anyone not on UTC.",
     labels: ["bug"],
+    assignee: ["A Person <person@example.invalid>"],
     milestone: "1.0",
   });
   closeEntity(
@@ -495,26 +499,17 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     return head;
   };
 
-  const openPrOn = (
-    date: string,
-    id: string,
-    branch: string,
-    input: {
-      title: string;
-      body: string;
-      labels?: string[];
-      reviewers?: string[];
-      draft?: boolean;
-    },
-  ): void => {
-    git(dir, ["checkout", "--quiet", "-b", branch]);
-    write(`${branch.replaceAll("/", "-")}.txt`, `work on ${branch}\n`);
-    git(dir, ["add", "-A"]);
-    git(dir, ["commit", "--quiet", "-m", `feat: ${input.title}`], {
-      GIT_AUTHOR_DATE: date,
-      GIT_COMMITTER_DATE: date,
-    });
+  interface PrInput {
+    title: string;
+    body: string;
+    labels?: string[];
+    assignee?: string[];
+    reviewers?: string[];
+    draft?: boolean;
+  }
 
+  /** Open a pull request for the branch this is standing on. */
+  const openPrHere = (date: string, id: string, input: PrInput): void => {
     const context = ws(date, [id]);
     const draft = preparePrOpen(context, { title: input.title });
     openPr(
@@ -529,6 +524,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
           source: draft.source,
           revisions: [draft.revision],
           ...(input.labels ? { labels: input.labels } : {}),
+          ...(input.assignee ? { assignee: input.assignee } : {}),
           ...(input.reviewers ? { reviewers: input.reviewers } : {}),
           ...(input.draft ? { draft: true } : {}),
         }),
@@ -536,13 +532,29 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
       },
       { commit: true },
     );
+  };
+
+  /** The same, on a branch of its own with a commit for it to propose. */
+  const openPrOn = (date: string, id: string, branch: string, input: PrInput): void => {
+    git(dir, ["checkout", "--quiet", "-b", branch]);
+    write(`${branch.replaceAll("/", "-")}.txt`, `work on ${branch}\n`);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "--quiet", "-m", `feat: ${input.title}`], {
+      GIT_AUTHOR_DATE: date,
+      GIT_COMMITTER_DATE: date,
+    });
+    openPrHere(date, id, input);
     git(dir, ["checkout", "--quiet", "main"]);
   };
 
+  // Two assignees, which is the only place the fixture writes a person key as
+  // a list rather than a scalar (spec 02 §2.5) — and the only pull request
+  // anybody's inbox holds for having been given it rather than written.
   openPrOn("2026-08-04T10:00:00Z", IDS.servedPr, SERVED_BRANCH, {
     title: "Raise the sign-in deadline",
     body: "Thirty seconds, and configurable. Closes the subtask under #aaaa0001.",
     labels: ["bug"],
+    assignee: ["A Person <person@example.invalid>", `${COMMITTER.name} <${COMMITTER.email}>`],
     reviewers: ["someone@example.invalid"],
   });
 
@@ -576,5 +588,23 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     file: "app/auth/session.ts",
     line: "42-48",
   });
+
+  // A pull request that is over, opened and closed on the branch the server
+  // serves so the working tree is where it ends up. The cross-branch scan
+  // finds open pull requests only, so this is the one that proves a finished
+  // pull request is looked for somewhere else entirely.
+  openPrHere("2026-08-06T09:00:00Z", IDS.declinedPr, {
+    title: "An approach to the deadline that was not taken",
+    body: "Kept because a road not travelled is worth being able to find.",
+    assignee: ["A Person <person@example.invalid>"],
+  });
+  closeEntity(
+    ws("2026-08-06T15:00:00Z", []),
+    "pr",
+    IDS.declinedPr,
+    { resolution: "declined" },
+    { commit: true },
+  );
+
   git(dir, ["checkout", "--quiet", "main"]);
 }

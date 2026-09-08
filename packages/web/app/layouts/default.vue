@@ -58,14 +58,26 @@ const links = [
           -->
           <UColorModeButton data-testid="theme-toggle" size="sm" />
 
+          <!--
+            The inbox is here rather than beside the other three, because it is
+            not another listing: those are the repository, this is one person's
+            reading of it. It belongs with the name it is about.
+          -->
           <UDropdownMenu
             v-if="viewer"
-            :items="[[
-              { label: viewer.email, type: 'label' as const },
-              { label: 'Sign out', icon: 'i-lucide-log-out', onSelect: () => auth.logout() },
-            ]]"
+            :items="[
+              [{ label: viewer.email, type: 'label' as const }],
+              [{ label: 'Inbox', icon: 'i-lucide-inbox', to: '/inbox' }],
+              [{ label: 'Sign out', icon: 'i-lucide-log-out', onSelect: () => auth.logout() }],
+            ]"
           >
-            <UButton color="neutral" variant="ghost" size="sm" trailing-icon="i-lucide-chevron-down">
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              trailing-icon="i-lucide-chevron-down"
+              data-testid="account-menu"
+            >
               <UAvatar :alt="viewer.name ?? viewer.email" size="2xs" />
               <span class="hidden sm:inline">{{ viewer.name ?? viewer.email }}</span>
             </UButton>

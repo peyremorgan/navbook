@@ -69,3 +69,55 @@ export const FEATURE_QUERY = graphql(`
     }
   }
 `);
+
+/**
+ * Everything that concerns the signed-in person, in one round trip.
+ *
+ * Four questions are asked of the same address, and which one an entity came
+ * back in is the whole of why it is in the inbox — the client never compares an
+ * address with another (`app/utils/people.ts`), so the field it arrived in is
+ * what a row says about itself.
+ *
+ * Pull requests are asked for across every fetched branch, because a pull
+ * request's files live on the branch it proposes to merge (spec 03 §3.5) and
+ * the person's own are exactly the ones the serving checkout is least likely to
+ * hold. That scan finds open pull requests only, so the finished half asks the
+ * working tree instead — a different question, and the reason these are two
+ * fields rather than one with a wider status.
+ *
+ * Finished work is asked for only when somebody asks for it, and no review
+ * request is asked for there at all: a request on a pull request that has since
+ * merged is not work waiting for anybody.
+ */
+export const INBOX_QUERY = graphql(`
+  query Inbox($me: String!, $text: [String!], $finished: Boolean!) {
+    assignedIssues: issues(filter: { assignees: [$me], status: [OPEN], text: $text }) {
+      ...IssueListItem
+    }
+    assignedPrs: prs(filter: { assignees: [$me], status: [OPEN], text: $text }, allRefs: true) {
+      ...PrListItem
+    }
+    authoredPrs: prs(filter: { authors: [$me], status: [OPEN], text: $text }, allRefs: true) {
+      ...PrListItem
+    }
+    awaitingPrs: prs(filter: { awaiting: [$me], status: [OPEN], text: $text }, allRefs: true) {
+      ...PrListItem
+    }
+    finishedAssignedIssues: issues(filter: { assignees: [$me], status: [CLOSED], text: $text })
+      @include(if: $finished) {
+      ...IssueListItem
+    }
+    finishedAssignedPrs: prs(
+      filter: { assignees: [$me], status: [CLOSED, MERGED], text: $text }
+      allRefs: false
+    ) @include(if: $finished) {
+      ...PrListItem
+    }
+    finishedAuthoredPrs: prs(
+      filter: { authors: [$me], status: [CLOSED, MERGED], text: $text }
+      allRefs: false
+    ) @include(if: $finished) {
+      ...PrListItem
+    }
+  }
+`);
