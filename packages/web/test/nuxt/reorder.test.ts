@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
-import { rankForPosition } from "../../app/composables/useInboxReorder";
+import { placeableIndex, rankForPosition } from "../../app/composables/useInboxReorder";
 import type { InboxItem } from "../../app/utils/inbox";
 import type { IssueListItemFragment, PrListItemFragment } from "../../src/generated/gql/graphql";
 
@@ -114,5 +114,53 @@ describe("rankForPosition", () => {
       assert.ok(next > low && next < high, `step ${step}: ${next}`);
       low = next;
     }
+  });
+});
+
+/**
+ * A rank places a row among the ranked rows and nowhere else, so a preview
+ * that followed the pointer past them would be promising a position the sort
+ * cannot produce. This is what keeps the two in step.
+ */
+describe("placeableIndex", () => {
+  it("allows every position among the ranked rows, and one past the last", () => {
+    const rest = queue(10, 20, 30);
+    for (const index of [0, 1, 2, 3]) {
+      assert.equal(placeableIndex(rest, index), index, String(index));
+    }
+  });
+
+  it("stops at the end of the queue rather than entering the tail", () => {
+    const rest = queue(10, 20, null, null, null);
+    assert.equal(placeableIndex(rest, 2), 2, "just after the last ranked row");
+    assert.equal(placeableIndex(rest, 3), 2);
+    assert.equal(placeableIndex(rest, 5), 2);
+  });
+
+  it("puts the first placed row at the front when nothing is ranked", () => {
+    assert.equal(placeableIndex(queue(null, null), 1), 0);
+    assert.equal(placeableIndex([], 3), 0);
+  });
+
+  it("never returns a negative position", () => {
+    assert.equal(placeableIndex(queue(10, 20), -1), 0);
+    assert.equal(placeableIndex(queue(10, 20), -99), 0);
+  });
+
+  it("counts a pull request as unranked, so it belongs to the tail", () => {
+    const rest = [issue("aaaa0001", 10), pr("bbbb0001"), pr("bbbb0002")];
+    assert.equal(placeableIndex(rest, 3), 1);
+  });
+
+  it("agrees with the rank it is paired with, which is the whole point", () => {
+    // Clamped index `i` and the rank computed for it must sort the row to `i`.
+    const rest = queue(10, 20, null, null);
+    const at = placeableIndex(rest, 4);
+    const rank = rankForPosition(rest, at);
+    const ranks = rest.map((row) => (row.kind === "issue" ? row.entity.rank : null));
+    const placed = [...ranks.slice(0, at), rank, ...ranks.slice(at)];
+    // Everything before it is ranked and lower; everything after is unranked.
+    assert.deepEqual(placed.slice(0, at + 1), [10, 20, 30]);
+    assert.deepEqual(placed.slice(at + 1), [null, null]);
   });
 });

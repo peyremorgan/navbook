@@ -70,13 +70,20 @@ export function normalizeOptional(value: string | null | undefined): string | nu
 }
 
 /**
- * What a number field means: blank is no rank, and anything else is a number.
+ * What a rank field means: blank is no rank, and anything else is a number.
+ *
+ * A number arrives as often as a string does — a `type="number"` input hands
+ * back whichever its component chose — so both are read here rather than one
+ * being assumed. Getting that wrong is a silent failure and not a loud one:
+ * Vue swallows what a save handler throws, so the form closes on an edit that
+ * was never sent.
  *
  * NaN comes back rather than null for text that is not a number, so that
  * "unplace it" and "that is not a rank" stay different answers — the second is
  * refused by the builder below, the first is an ordinary edit.
  */
-export function parseRankInput(value: string | null | undefined): number | null {
+export function parseRankInput(value: string | number | null | undefined): number | null {
+  if (typeof value === "number") return value;
   const trimmed = (value ?? "").trim();
   if (trimmed === "") return null;
   return Number(trimmed);

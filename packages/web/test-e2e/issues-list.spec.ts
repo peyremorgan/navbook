@@ -321,3 +321,120 @@ test.describe("on a phone", () => {
     await expect(signedIn.getByTestId("filter-clear")).toBeVisible();
   });
 });
+
+/**
+ * Rank, deadline and the orders they can be read in — spec 02 §2.5.
+ *
+ * The listing keeps newest first unless somebody asks otherwise, so every
+ * assertion about an order starts by asking for it. The three fixture issues
+ * that carry these keys were filed in the opposite order to their ranks, which
+ * is what makes an assertion about priority able to fail.
+ */
+
+/** The ids a listing shows, in the order it shows them. */
+const listed = async (page: import("@playwright/test").Page): Promise<string[]> =>
+  page
+    // The rank chip inside a row is `issue-row-rank`, so it is excluded rather
+    // than read as a row of its own.
+    .locator("[data-testid^=issue-row-]:not([data-testid=issue-row-rank])")
+    .evaluateAll((rows) =>
+      rows.map((row) => (row.getAttribute("data-testid") ?? "").replace("issue-row-", "")),
+    );
+
+/**
+ * The named ids appear in the listing, in the order given.
+ *
+ * Polled rather than read once: a listing is fetched after the page loads and
+ * refetched when it is revisited, so reading the DOM the moment a navigation
+ * settles can catch it empty. Everything not named is filtered out, so what is
+ * asserted is relative order and not what else happens to be listed.
+ */
+async function expectOrder(page: import("@playwright/test").Page, ...ids: string[]): Promise<void> {
+  await expect.poll(async () => (await listed(page)).filter((id) => ids.includes(id))).toEqual(ids);
+}
+
+test("shows a rank and a deadline on the rows that carry them", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/issues?status=open`);
+  const urgent = signedIn.getByTestId("issue-row-aaaa0008");
+  await expect(urgent.getByTestId("issue-row-rank")).toHaveText("10");
+  // Its day is long past, so the badge reads as overdue rather than as a date.
+  await expect(urgent.getByTestId("due-date-overdue")).toContainText("overdue");
+
+  // And an issue carrying neither shows neither.
+  const plain = signedIn.getByTestId("issue-row-cafe0005");
+  await expect(plain.getByTestId("issue-row-rank")).toHaveCount(0);
+  await expect(plain.getByTestId("due-date")).toHaveCount(0);
+});
+
+test("reads the listing newest first until an order is asked for", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/issues?status=open`);
+  await expect(signedIn.getByTestId("sort-newest")).toHaveAttribute("aria-checked", "true");
+  // Filed in the opposite order to their ranks, so newest-first is the reverse
+  // of what priority reads — which is what lets either assertion fail.
+  await expectOrder(signedIn, "aaaa0010", "aaaa0009", "aaaa0008");
+});
+
+test("puts the ranked first under priority, and says so in the URL", async ({
+  signedIn,
+  stack,
+}) => {
+  await signedIn.goto(`${stack.appUrl}/issues?status=open`);
+  await signedIn.getByTestId("sort-priority").click();
+  await expect(signedIn).toHaveURL(/sort=priority/);
+  await expect(signedIn.getByTestId("sort-priority")).toHaveAttribute("aria-checked", "true");
+
+  // Ranked 10, ranked 20, then the one with only a day — and an issue carrying
+  // neither key after all three.
+  await expectOrder(signedIn, "aaaa0008", "aaaa0009", "aaaa0010", "cafe0005");
+});
+
+test("puts the soonest first under deadline", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/issues?status=open&sort=deadline`);
+  // Due 2026-08-01, then 2099-12-31, then the placed-but-undated one — the
+  // second tier of the chain putting it above the row with neither key.
+  await expectOrder(signedIn, "aaaa0008", "aaaa0010", "aaaa0009", "cafe0005");
+});
+
+test("keeps the order when the filter changes and when it is cleared", async ({
+  signedIn,
+  stack,
+}) => {
+  // Clearing a filter is about which rows are listed, not about the order they
+  // are read in, so `sort` outlives it — as `refs` does on the other listing.
+  await signedIn.goto(`${stack.appUrl}/issues?status=open&sort=priority`);
+  await signedIn.getByTestId("filter-status-closed").click();
+  await expect(signedIn).toHaveURL(/sort=priority/);
+  await signedIn.getByTestId("filter-clear").click();
+  await expect(signedIn).toHaveURL(/sort=priority/);
+  await expect(signedIn).not.toHaveURL(/status=/);
+});
+
+test("reads an order it does not know as the default, rather than failing", async ({
+  signedIn,
+  stack,
+}) => {
+  await signedIn.goto(`${stack.appUrl}/issues?status=open&sort=priorty`);
+  await expect(signedIn.getByTestId("issue-list")).toBeVisible();
+  await expect(signedIn.getByTestId("sort-newest")).toHaveAttribute("aria-checked", "true");
+});
+
+test("narrows to what is overdue, and to what has no day at all", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/issues?status=open`);
+  await signedIn.getByTestId("filter-deadline-overdue").click();
+  await expect(signedIn).toHaveURL(/deadline=overdue/);
+  await expect(signedIn.getByTestId("issue-row-aaaa0008")).toBeVisible();
+  // Due in 2099: dated, and not late.
+  await expect(signedIn.getByTestId("issue-row-aaaa0010")).toHaveCount(0);
+
+  await signedIn.goto(`${stack.appUrl}/issues?status=open&deadline=none`);
+  await expect(signedIn.getByTestId("issue-row-aaaa0009")).toBeVisible();
+  await expect(signedIn.getByTestId("issue-row-aaaa0008")).toHaveCount(0);
+});
+
+test("does not offer a deadline filter on the pull requests", async ({ signedIn, stack }) => {
+  // Only an issue is scheduled (spec 02 §2.5), so the chips are absent rather
+  // than present and inert — and a URL naming one is read as no narrowing.
+  await signedIn.goto(`${stack.appUrl}/prs?deadline=overdue`);
+  await expect(signedIn.getByTestId("filter-deadline-overdue")).toHaveCount(0);
+  await expect(signedIn.getByTestId("pr-row-bbbb0001")).toBeVisible();
+});

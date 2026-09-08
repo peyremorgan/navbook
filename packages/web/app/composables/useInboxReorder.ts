@@ -8,10 +8,12 @@
  * index of spec 06 §6.6, spread out rather than gathered up, and exactly as
  * much of a conflict magnet.
  *
- * The unranked tail cannot be reordered among itself: those rows are in the
- * order they arrived, and there is nothing to place one between. Dropping into
- * it places the row last of everything that has been ranked, which is the only
- * reading that means anything.
+ * The unranked tail cannot be entered. Those rows are in the order they
+ * arrived rather than one anybody chose, and a ranked row always sorts above
+ * an unranked one — so a row dropped into the tail lands immediately after the
+ * last ranked row, and the preview stops there while it is being dragged. A
+ * preview that followed the pointer into the tail would be promising a place
+ * the sort cannot produce.
  *
  * Dragging is native, on a handle that is also a button, so the same move is
  * Space, arrow keys, Space. That is not decoration: a listing you can only
@@ -93,6 +95,18 @@ export function rankForPosition(rest: readonly InboxItem[], index: number): numb
   if (previous !== null) return previous + STEP;
   if (next !== null) return next - STEP;
   return STEP;
+}
+
+/**
+ * The furthest a row can actually be placed: just after the last ranked one.
+ *
+ * A rank puts a row among the ranked rows and nowhere else, so this is what
+ * keeps every preview honest — the index it clamps to is the index the sort
+ * will produce once the new rank lands.
+ */
+export function placeableIndex(rest: readonly InboxItem[], index: number): number {
+  const ranked = rest.reduce((count, row) => (rankOf(row) === null ? count : count + 1), 0);
+  return Math.min(Math.max(index, 0), ranked);
 }
 
 type Mode =
@@ -182,7 +196,7 @@ export function useInboxReorder(
     if (item === undefined || item.kind !== "issue") return;
 
     const rest = rows.filter((row) => keyOf(row) !== key);
-    const target = Math.min(Math.max(index, 0), rest.length);
+    const target = placeableIndex(rest, index);
     if (target === from) return;
 
     const rank = rankForPosition(rest, target);
@@ -201,8 +215,8 @@ export function useInboxReorder(
     const held = mode.value;
     const rest = rows.filter((row) => held.kind === "idle" || keyOf(row) !== held.key);
     const at = rest.findIndex((row) => keyOf(row) === keyOf(item));
-    if (at === -1) return rest.length;
-    return edge === "before" ? at : at + 1;
+    if (at === -1) return placeableIndex(rest, rest.length);
+    return placeableIndex(rest, edge === "before" ? at : at + 1);
   };
 
   const onDragStart = (item: InboxItem, event: DragEvent): void => {
@@ -236,6 +250,12 @@ export function useInboxReorder(
     const held = mode.value;
     const marker = over.value;
     if (held.kind !== "pointer") return;
+    // A row dropped on itself has not moved, and asking where it would go
+    // would find it missing from the list it is being placed into.
+    if (keyOf(item) === held.key) {
+      reset();
+      return;
+    }
     const index = indexFor(item, marker?.edge ?? "before");
     void place(held.key, index);
   };
@@ -282,10 +302,10 @@ export function useInboxReorder(
     if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
     if (held.kind !== "keyboard" || held.key !== key) return;
     event.preventDefault();
-    const next = Math.min(
-      Math.max(held.index + (event.key === "ArrowUp" ? -1 : 1), 0),
-      rows.length - 1,
-    );
+    // Clamped to where a rank can actually put it, so the row stops at the end
+    // of the queue rather than walking into a tail it cannot reach.
+    const rest = rows.filter((row) => keyOf(row) !== key);
+    const next = placeableIndex(rest, held.index + (event.key === "ArrowUp" ? -1 : 1));
     if (next === held.index) return;
     mode.value = { kind: "keyboard", key, index: next };
     announcement.value = `${item.entity.title}, position ${next + 1} of ${rows.length}.`;

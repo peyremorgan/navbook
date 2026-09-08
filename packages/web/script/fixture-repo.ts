@@ -91,6 +91,11 @@ export const IDS = {
   plain: "cafe0005",
   closed: "aaaa0006",
   edgeCases: "aaaa0007",
+  // Three assigned issues that say where they sit and when they are wanted,
+  // so the inbox has a queue to sort and to reorder.
+  urgent: "aaaa0008",
+  next: "aaaa0009",
+  someday: "aaaa0010",
   servedPr: "bbbb0001",
   unservedPr: "bbbb0002",
   declinedPr: "bbbb0003",
@@ -210,6 +215,8 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
       assignee?: string[];
       milestone?: string;
       features?: string[];
+      rank?: number;
+      deadline?: string;
       parent?: string;
       author?: string;
     },
@@ -227,6 +234,9 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
           ...(input.assignee ? { assignee: input.assignee } : {}),
           ...(input.milestone ? { milestone: input.milestone } : {}),
           ...(input.features ? { features: input.features } : {}),
+          // Absence rather than falsehood: a rank of zero is a position.
+          ...(input.rank === undefined ? {} : { rank: input.rank }),
+          ...(input.deadline ? { deadline: input.deadline } : {}),
           ...(input.parent ? { parent: input.parent } : {}),
         }),
         fallbackTitle: input.title,
@@ -418,6 +428,40 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     { resolution: "fixed" },
     { commit: true },
   );
+
+  /*
+   * Three placed and dated issues, all assigned to the person the suite signs
+   * in as, so the inbox has a queue to sort and to reorder.
+   *
+   * Their ranks are ten apart, which is the gap a drop between two of them
+   * halves. Their deadlines run the other way from their ranks and they are
+   * filed newest last, so that no assertion about one order can pass by
+   * accident under another.
+   */
+  issue("2026-08-05T09:00:00Z", IDS.urgent, {
+    title: "Rotate the signing keys",
+    body: "Overdue, and first in the queue.",
+    labels: ["security"],
+    assignee: ["A Person <person@example.invalid>"],
+    rank: 10,
+    // Long past by the time anybody runs this, which is the point: an overdue
+    // badge and an overdue filter both need something reliably late.
+    deadline: "2026-08-01",
+  });
+
+  issue("2026-08-06T09:00:00Z", IDS.next, {
+    title: "Write the migration guide",
+    body: "Placed, and wanted on no particular day.",
+    assignee: ["A Person <person@example.invalid>"],
+    rank: 20,
+  });
+
+  issue("2026-08-07T09:00:00Z", IDS.someday, {
+    title: "Replace the colour picker",
+    body: "Wanted one day, and not placed at all.",
+    assignee: ["A Person <person@example.invalid>"],
+    deadline: "2099-12-31",
+  });
 
   // Every state a decomposition link can be in, in one place. Four of the five
   // cannot be reached by clicking — a link to a pull request, a dangling id, a

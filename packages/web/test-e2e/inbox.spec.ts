@@ -18,7 +18,8 @@
  * branch nothing can write to.
  */
 
-import { chooseOrCreate, expect, signIn, test } from "./helpers/fixtures.ts";
+import assert from "node:assert/strict";
+import { chooseOrCreate, expect, signIn, test, toasts } from "./helpers/fixtures.ts";
 
 /** The rail's count for one entry, which is what clicking it would show. */
 const count = (page: import("@playwright/test").Page, testid: string) =>
@@ -135,20 +136,21 @@ test("counts each rail entry as what choosing it would show", async ({ signedIn,
   await signedIn.goto(`${stack.appUrl}/inbox`);
   await expect(signedIn.getByTestId("inbox-list")).toBeVisible();
 
-  await expect(count(signedIn, "inbox-view-everything")).toHaveText("3");
-  await expect(count(signedIn, "inbox-view-assigned")).toHaveText("2");
+  // Four issues assigned and two pull requests: one assigned, one to review.
+  await expect(count(signedIn, "inbox-view-everything")).toHaveText("6");
+  await expect(count(signedIn, "inbox-view-assigned")).toHaveText("5");
   await expect(count(signedIn, "inbox-view-authored")).toHaveText("0");
   await expect(count(signedIn, "inbox-view-reviews")).toHaveText("1");
-  await expect(count(signedIn, "inbox-kind-issue")).toHaveText("1");
+  await expect(count(signedIn, "inbox-kind-issue")).toHaveText("4");
   await expect(count(signedIn, "inbox-kind-pr")).toHaveText("2");
 
   // Faceted: with only issues in play, the reasons count only issues.
   await signedIn.getByTestId("inbox-kind-issue").click();
-  await expect(count(signedIn, "inbox-view-everything")).toHaveText("1");
+  await expect(count(signedIn, "inbox-view-everything")).toHaveText("4");
   await expect(count(signedIn, "inbox-view-reviews")).toHaveText("0");
   // And the kind group still counts as though it were the one being chosen,
   // which is what makes "Anything" the way back.
-  await expect(count(signedIn, "inbox-kind-any")).toHaveText("3");
+  await expect(count(signedIn, "inbox-kind-any")).toHaveText("6");
 });
 
 test("puts the rail in the address bar, and reads it back", async ({ signedIn, stack }) => {
@@ -288,4 +290,172 @@ test.describe("on a phone", () => {
     await expect(signedIn.getByTestId("inbox-row-bbbb0002")).toBeVisible();
     await expect(signedIn.getByTestId("inbox-row-aaaa0001")).toHaveCount(0);
   });
+});
+
+/**
+ * Placing an issue, by pointer and by keyboard — spec 02 §2.5.
+ *
+ * The three fixture issues assigned to this person are ranked 10, 20 and
+ * unranked, and were filed in the opposite order to their ranks, so an
+ * assertion about priority cannot pass against a list nobody sorted.
+ *
+ * Each of these tests reorders the shared fixture, so each puts the ranks back
+ * where it found them. They would otherwise pass or fail depending on what ran
+ * before them, which is the one thing a suite against a real repository has to
+ * be careful about.
+ */
+
+/**
+ * The ids the inbox shows, in the order it shows them.
+ *
+ * The feature chips inside a row are `inbox-row-feature-…`, so they are
+ * excluded rather than read as rows of their own.
+ */
+const inboxOrder = async (page: import("@playwright/test").Page): Promise<string[]> =>
+  page
+    .locator("[data-testid^=inbox-row-]:not([data-testid^=inbox-row-feature-])")
+    .evaluateAll((rows) =>
+      rows.map((row) => (row.getAttribute("data-testid") ?? "").replace("inbox-row-", "")),
+    );
+
+/**
+ * The named ids appear in the inbox, in the order given.
+ *
+ * Polled, because the list is four answers fetched after the page loads and a
+ * reorder waits on a commit: reading the DOM once would race both. Everything
+ * not named is filtered out, so what is asserted is relative order.
+ */
+async function expectInboxOrder(
+  page: import("@playwright/test").Page,
+  ...ids: string[]
+): Promise<void> {
+  await expect
+    .poll(async () => (await inboxOrder(page)).filter((id) => ids.includes(id)))
+    .toEqual(ids);
+}
+
+/** Set one issue's rank back through the detail page, as a person would. */
+async function setRank(
+  page: import("@playwright/test").Page,
+  appUrl: string,
+  id: string,
+  rank: string,
+): Promise<void> {
+  await page.goto(`${appUrl}/issues/${id}`);
+  await page.getByTestId("edit-rank").click();
+  await page.getByTestId("input-rank").fill(rank);
+  await page.getByTestId("save-rank").click();
+  await expect(page.getByTestId("sidebar-rank")).toContainText(rank);
+}
+
+test("reads the inbox by priority, and says so only when it is not", async ({
+  signedIn,
+  stack,
+}) => {
+  await signedIn.goto(`${stack.appUrl}/inbox`);
+  await expect(signedIn.getByTestId("inbox-list")).toBeVisible();
+  // The default, so it is not in the URL — but it is the one chosen.
+  await expect(signedIn).not.toHaveURL(/sort=/);
+  await expect(signedIn.getByTestId("sort-priority")).toHaveAttribute("aria-checked", "true");
+  await expectInboxOrder(signedIn, "aaaa0008", "aaaa0009", "aaaa0010");
+
+  await signedIn.getByTestId("sort-newest").click();
+  await expect(signedIn).toHaveURL(/sort=newest/);
+  // The reverse, because the three were filed in the opposite order to their
+  // ranks — so neither assertion could pass against an unsorted list.
+  await expectInboxOrder(signedIn, "aaaa0010", "aaaa0009", "aaaa0008");
+});
+
+test("offers a handle only in the order a row can be placed in", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/inbox`);
+  await expect(signedIn.getByTestId("inbox-grip-aaaa0008")).toBeEnabled();
+  // A pull request is neither ranked nor dated, so its handle is inert.
+  await expect(signedIn.getByTestId("inbox-grip-bbbb0001")).toBeDisabled();
+
+  // Under an order that reads the files rather than what somebody chose, a
+  // drop would mean nothing and springs back — so it is not offered.
+  await signedIn.goto(`${stack.appUrl}/inbox?sort=newest`);
+  await expect(signedIn.getByTestId("inbox-grip-aaaa0008")).toHaveCount(0);
+});
+
+test("places an issue by dragging it, and the file remembers", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/inbox`);
+  await expectInboxOrder(signedIn, "aaaa0008", "aaaa0009");
+
+  // Onto the top half of the row above it, so the drop line lands before it.
+  await signedIn
+    .getByTestId("inbox-grip-aaaa0009")
+    .dragTo(signedIn.getByTestId("inbox-row-aaaa0008"), { targetPosition: { x: 40, y: 2 } });
+
+  await expect(toasts(signedIn)).toContainText("Saved");
+  await expectInboxOrder(signedIn, "aaaa0009", "aaaa0008");
+
+  // Above the first ranked row means a step clear of it: 10 - 10.
+  await signedIn.goto(`${stack.appUrl}/issues/aaaa0009`);
+  await expect(signedIn.getByTestId("sidebar-rank")).toContainText("0");
+
+  // And it survives a reload, which is what says the file changed rather than
+  // the page.
+  await signedIn.goto(`${stack.appUrl}/inbox`);
+  await expectInboxOrder(signedIn, "aaaa0009", "aaaa0008");
+
+  await setRank(signedIn, stack.appUrl, "aaaa0009", "20");
+});
+
+test("places an issue from the keyboard, in one write", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/inbox`);
+  await expectInboxOrder(signedIn, "aaaa0008", "aaaa0009", "aaaa0010");
+
+  const grip = signedIn.getByTestId("inbox-grip-aaaa0008");
+  await grip.focus();
+
+  await signedIn.keyboard.press("Space");
+  await expect(grip).toHaveAttribute("aria-pressed", "true");
+  await expect(signedIn.getByTestId("inbox-reorder-status")).toContainText("Picked up");
+
+  // Two presses, one write. The second stops at the end of the queue: past the
+  // last ranked row is the unranked tail, and a rank cannot put a row there —
+  // so the preview refuses to promise a place the sort will not produce.
+  await signedIn.keyboard.press("ArrowDown");
+  await signedIn.keyboard.press("ArrowDown");
+  await signedIn.keyboard.press("Space");
+
+  await expect(toasts(signedIn)).toContainText("Saved");
+  await expectInboxOrder(signedIn, "aaaa0009", "aaaa0008", "aaaa0010");
+
+  await signedIn.goto(`${stack.appUrl}/inbox`);
+  await expectInboxOrder(signedIn, "aaaa0009", "aaaa0008", "aaaa0010");
+
+  await setRank(signedIn, stack.appUrl, "aaaa0008", "10");
+});
+
+test("leaves a row where it was when the move is cancelled", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/inbox`);
+  await expectInboxOrder(signedIn, "aaaa0008", "aaaa0009", "aaaa0010");
+  const before = await inboxOrder(signedIn);
+
+  const grip = signedIn.getByTestId("inbox-grip-aaaa0008");
+  await grip.focus();
+  await signedIn.keyboard.press("Space");
+  await signedIn.keyboard.press("ArrowDown");
+  await signedIn.keyboard.press("Escape");
+
+  await expect(grip).toHaveAttribute("aria-pressed", "false");
+  await expect(signedIn.getByTestId("inbox-reorder-status")).toContainText("where it was");
+  assert.deepEqual(await inboxOrder(signedIn), before);
+  // Nothing was written, so nothing was said about a commit.
+  await expect(toasts(signedIn)).not.toContainText("Saved");
+});
+
+test("writes nothing when a row is dropped where it already was", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/inbox`);
+  await expectInboxOrder(signedIn, "aaaa0008", "aaaa0009", "aaaa0010");
+  const before = await inboxOrder(signedIn);
+
+  await signedIn
+    .getByTestId("inbox-grip-aaaa0008")
+    .dragTo(signedIn.getByTestId("inbox-row-aaaa0008"), { targetPosition: { x: 40, y: 2 } });
+
+  assert.deepEqual(await inboxOrder(signedIn), before);
+  await expect(toasts(signedIn)).not.toContainText("Saved");
 });

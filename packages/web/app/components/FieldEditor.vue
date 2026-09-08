@@ -42,8 +42,17 @@ function open(): void {
   editing.value = true;
 }
 
+/**
+ * Emit what was typed, as text.
+ *
+ * The conversion looks redundant against the input's declared type and is not:
+ * a `type="number"` field hands its component back a *number* at runtime, and
+ * a caller that assumed a string would throw inside this emit — where Vue
+ * swallows it, closing the form on an edit that was never sent.
+ */
 function save(): void {
-  emit("save", draft.value);
+  const typed: unknown = draft.value;
+  emit("save", typed === null || typed === undefined ? "" : String(typed));
   editing.value = false;
 }
 </script>
