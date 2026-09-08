@@ -8,6 +8,7 @@
 
 import { parseCommentFileName } from "./comments.ts";
 import { FEATURE_FILE, type ParsedFile, parseFile } from "./files.ts";
+import { parseReviewPolicy, type ReviewPolicyReading } from "./policy.ts";
 import { parseDirName, SLUG_PATTERN } from "./slug.ts";
 
 export type NavTree = ReadonlyMap<string, string>;
@@ -19,9 +20,9 @@ export type Status = "open" | "closed" | "merged";
  * The file that marks a directory as the Navbook root (spec 02 §2.10).
  *
  * It lives at the top of the Navbook directory and is what makes the directory
- * findable when it is not called `.navbook`. `parseTree` does not interpret it:
- * like any other reserved name it is preserved untouched, and it is the *file
- * system* layer that reads meaning into its location.
+ * findable when it is not called `.navbook`. Its location is what the *file
+ * system* layer reads meaning into; its content carries the review policy
+ * (§2.10), which is the only part of it `parseTree` interprets.
  */
 export const NAV_MARKER = "navbook.json";
 
@@ -145,6 +146,8 @@ export interface Repo {
   commentsLoaded: CommentScope;
   /** Paths that were tolerated but not interpreted (reserved names, §2.10). */
   reserved: string[];
+  /** The review policy the marker declares, and what was wrong with it (§2.10). */
+  reviewPolicy: ReviewPolicyReading;
 }
 
 interface FeatureDraft {
@@ -211,6 +214,7 @@ export function parseTree(files: NavTree, opts: { commentsLoaded?: CommentScope 
     orphans,
     commentsLoaded: opts.commentsLoaded ?? "all",
     reserved,
+    reviewPolicy: parseReviewPolicy(files.get(NAV_MARKER)),
   };
 }
 
@@ -249,7 +253,9 @@ function classify(
   }
   if (root !== ENTITY_DIR.issue && root !== ENTITY_DIR.pr) {
     // Reserved and unknown names are tolerated and preserved untouched (§2.10).
-    reserved.push(path);
+    // The marker is not among them: it is read for its review policy, and
+    // listing it as uninterpreted would say the opposite of what happens.
+    if (path !== NAV_MARKER) reserved.push(path);
     return;
   }
 

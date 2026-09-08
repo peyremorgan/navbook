@@ -1,7 +1,7 @@
 /**
  * Format validation — the `nav doctor` checks of spec 04 §4.3.
  *
- * Checks D1–D6, D8 and D13–D14 are decidable from the tree alone and live here.
+ * Checks D1–D6, D8 and D13–D15 are decidable from the tree alone and live here.
  * D7, D9 and D10 need git archaeology; their tree-side halves live here and the
  * history queries are supplied by the CLI.
  */
@@ -36,6 +36,7 @@ import { parseDirName } from "./slug.ts";
 import {
   allEntities,
   type EntityRecord,
+  NAV_MARKER,
   type NavTree,
   parseTree,
   type Repo,
@@ -58,6 +59,7 @@ export const CHECKS = [
   "D12",
   "D13",
   "D14",
+  "D15",
 ] as const;
 export type Check = (typeof CHECKS)[number];
 
@@ -88,6 +90,7 @@ export const CHECK_LEVEL: Record<Check, Level> = {
   D12: "error",
   D13: "error",
   D14: "warning",
+  D15: "error",
 };
 
 export interface LinkRepairOptions {
@@ -131,6 +134,7 @@ export function validateRepo(repo: Repo, opts: ValidateOptions = {}): Diagnostic
   out.push(...checkLinkLoops(repo));
   out.push(...checkFeatures(repo));
   out.push(...checkFeatureRefs(repo));
+  out.push(...checkReviewPolicy(repo));
   return sortDiagnostics(out);
 }
 
@@ -690,4 +694,24 @@ function checkFeatureRefs(repo: Repo): Diagnostic[] {
     }
   }
   return out;
+}
+
+/* ---------------------------------------------- D15 : the review policy */
+
+/**
+ * A marker whose review policy cannot be read (spec 02 §2.10).
+ *
+ * One diagnostic per fault, so a marker that mistypes both keys names both.
+ * An error, because a policy nobody can read is a policy nobody is following,
+ * and the file is small enough that whoever wrote it can see what is wrong —
+ * but nothing stops for it: every reader has already fallen back to the
+ * defaults by the time this reports what it found.
+ */
+function checkReviewPolicy(repo: Repo): Diagnostic[] {
+  return repo.reviewPolicy.problems.map((problem) => ({
+    check: "D15" as const,
+    level: "error" as const,
+    path: NAV_MARKER,
+    message: problem,
+  }));
 }

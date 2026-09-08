@@ -9,6 +9,7 @@
 
 import { readAssignees, readFeatures, readLabels, readReviewers } from "./files.ts";
 import { personMatches } from "./person.ts";
+import { DEFAULT_REVIEW_POLICY, type ReviewPolicy } from "./policy.ts";
 import { isAwaiting, REVIEW_DECISIONS, type ReviewDecision, reviewSummary } from "./review.ts";
 import type { EntityKind, EntityRecord, Status } from "./tree.ts";
 
@@ -141,8 +142,18 @@ export function needsComments(query: Query): boolean {
   return query.text.length > 0 || query.reviews.length > 0 || query.awaiting.length > 0;
 }
 
-/** Evaluate a query against one entity. */
-export function matchesQuery(query: Query, entity: EntityRecord): boolean {
+/**
+ * Evaluate a query against one entity.
+ *
+ * `policy` is only consulted by the derived terms (`review:` and `awaiting:`),
+ * which read the same summary every other surface reads, so a listing and a
+ * `show` of the same pull request can never disagree about it (spec 02 §2.10).
+ */
+export function matchesQuery(
+  query: Query,
+  entity: EntityRecord,
+  policy: ReviewPolicy = DEFAULT_REVIEW_POLICY,
+): boolean {
   if (query.status.length > 0 && !query.status.includes(entity.status)) return false;
 
   const labels = readLabels(entity.fm).map((l) => l.toLowerCase());
@@ -175,7 +186,7 @@ export function matchesQuery(query: Query, entity: EntityRecord): boolean {
   // Derived, so it costs a read of the comments — which is why `needsComments`
   // names these two terms alongside a text search.
   if (query.reviews.length > 0 || query.awaiting.length > 0) {
-    const summary = reviewSummary(entity);
+    const summary = reviewSummary(entity, policy);
     if (query.reviews.length > 0 && !query.reviews.includes(summary.decision)) return false;
     for (const wanted of query.awaiting) {
       if (!isAwaiting(summary, wanted)) return false;

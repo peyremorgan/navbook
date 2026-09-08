@@ -20,12 +20,14 @@ import {
 import { dirname, join, posix, relative, sep } from "node:path";
 import { parseCommentFileName } from "../core/comments.ts";
 import type { FileOp } from "../core/ops.ts";
+import { parseReviewPolicy, type ReviewPolicyReading } from "../core/policy.ts";
 import { needsComments, type Query } from "../core/query.ts";
 import { parseDirName } from "../core/slug.ts";
 import {
   type CommentScope,
   ENTITY_DIR,
   type EntityKind,
+  NAV_MARKER,
   type NavTree,
   parseTree,
   type Repo,
@@ -104,6 +106,23 @@ export function loadRepo(ws: WsCtx, opts: ReadTreeOptions = {}): Repo {
 export function loadRepoForQuery(ws: WsCtx, query: Query, kind: EntityKind): Repo {
   if (kind === "pr") return loadRepo(ws, { comments: "prs" });
   return loadRepo(ws, { comments: needsComments(query) ? "all" : "none" });
+}
+
+/**
+ * Read the review policy the marker declares (spec 02 §2.10).
+ *
+ * For the callers that need the policy without needing the tree: merging,
+ * reviewing, and any listing whose records came from a ref rather than from
+ * here. A repository with no marker declares nothing, which is not a fault.
+ *
+ * The policy is always the working tree's, including for records read out of
+ * other branches: it is how *this* checkout counts, and a pull request read
+ * from a ref would otherwise be counted by whatever its own branch happened to
+ * say, which is a second answer to a question that has one.
+ */
+export function readReviewPolicy(ws: WsCtx): ReviewPolicyReading {
+  const path = join(ws.navRoot, NAV_MARKER);
+  return parseReviewPolicy(existsSync(path) ? readFileSync(path, "utf8") : undefined);
 }
 
 /** Fail with a helpful message when the repository has no Navbook directory yet. */

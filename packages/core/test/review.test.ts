@@ -8,6 +8,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { ReviewPolicy } from "../src/core/policy.ts";
 import { decide, isAwaiting, latestRevision, reviewSummary } from "../src/core/review.ts";
 import { type EntityRecord, type NavTree, parseTree } from "../src/core/tree.ts";
 
@@ -68,10 +69,15 @@ function build(spec: PrSpec): EntityRecord {
 }
 
 /** The summary as a comparable shape: who, what they said, and whether they were asked. */
-const rows = (entity: EntityRecord): string[] =>
-  reviewSummary(entity).reviewers.map(
+const rows = (entity: EntityRecord, policy?: ReviewPolicy): string[] =>
+  reviewSummary(entity, policy).reviewers.map(
     (entry) => `${entry.person} ${entry.state}${entry.volunteer ? " (volunteer)" : ""}`,
   );
+
+/** A policy asking for `minApprovals` approvals and nothing else unusual. */
+const needs = (minApprovals: number): ReviewPolicy => ({ selfReview: false, minApprovals });
+
+const SELF_REVIEW: ReviewPolicy = { selfReview: true, minApprovals: 1 };
 
 describe("latestRevision", () => {
   it("is the last entry, since the list is append-only", () => {
@@ -309,6 +315,7 @@ describe("reviewSummary", () => {
     assert.deepEqual(reviewSummary(pr), {
       reviewers: [{ person: "alice@example.com", state: "pending", volunteer: false }],
       decision: "pending",
+      approvals: { given: 0, required: 1 },
     });
   });
 
@@ -317,6 +324,7 @@ describe("reviewSummary", () => {
       revision: HEAD_1,
       reviewers: [],
       decision: "pending",
+      approvals: { given: 0, required: 1 },
     });
   });
 
@@ -328,6 +336,130 @@ describe("reviewSummary", () => {
   });
 });
 
+describe("reviewSummary under a declared policy", () => {
+  const approvals = (n: number) =>
+    Array.from({ length: n }, (_unused, i) => ({
+      who: `r${i}@example.com`,
+      verdict: "approve",
+      revision: HEAD_1,
+      at: `2026-08-05T1${i}0000Z`,
+    }));
+
+  it("counts one approval as short of two", () => {
+    const summary = reviewSummary(build({ reviews: approvals(1) }), needs(2));
+    assert.equal(summary.decision, "pending");
+    assert.deepEqual(summary.approvals, { given: 1, required: 2 });
+  });
+
+  it("counts two approvals as enough for two", () => {
+    const summary = reviewSummary(build({ reviews: approvals(2) }), needs(2));
+    assert.equal(summary.decision, "approved");
+    assert.deepEqual(summary.approvals, { given: 2, required: 2 });
+  });
+
+  it("counts more approvals than asked for without complaint", () => {
+    const summary = reviewSummary(build({ reviews: approvals(3) }), needs(2));
+    assert.equal(summary.decision, "approved");
+    assert.deepEqual(summary.approvals, { given: 3, required: 2 });
+  });
+
+  it("lets one block outrank every approval, however many are required", () => {
+    const pr = build({
+      reviews: [
+        ...approvals(2),
+        {
+          who: "zoe@example.com",
+          verdict: "request-changes",
+          revision: HEAD_1,
+          at: "2026-08-05T190000Z",
+        },
+      ],
+    });
+    assert.equal(reviewSummary(pr, needs(2)).decision, "changes-requested");
+  });
+
+  it("counts one person's two approvals as one, since a state is per person", () => {
+    // The same reviewer approving twice is one opinion restated, and a repository
+    // asking for two approvals is asking for two people.
+    const pr = build({
+      reviews: [
+        {
+          who: "alice@example.com",
+          verdict: "approve",
+          revision: HEAD_1,
+          at: "2026-08-05T100000Z",
+        },
+        {
+          who: "Alice <alice@example.com>",
+          verdict: "approve",
+          revision: HEAD_1,
+          at: "2026-08-05T110000Z",
+        },
+      ],
+    });
+    const summary = reviewSummary(pr, needs(2));
+    assert.deepEqual(summary.approvals, { given: 1, required: 2 });
+    assert.equal(summary.decision, "pending");
+  });
+
+  it("reports the approvals it counted even when the default is in force", () => {
+    const summary = reviewSummary(build({ reviews: approvals(1) }));
+    assert.deepEqual(summary.approvals, { given: 1, required: 1 });
+    assert.equal(summary.decision, "approved");
+  });
+
+  it("counts nothing towards approval from a comment verdict", () => {
+    const pr = build({
+      reviewer: "alice@example.com",
+      reviews: [{ who: "alice@example.com", verdict: "comment", revision: HEAD_1 }],
+    });
+    assert.deepEqual(reviewSummary(pr, needs(1)).approvals, { given: 0, required: 1 });
+  });
+
+  describe("self-review", () => {
+    const own = {
+      author: "ked@example.com",
+      reviews: [{ who: "ked@example.com", verdict: "approve", revision: HEAD_1 }],
+    };
+
+    it("counts the author's own approval when the policy allows it", () => {
+      const summary = reviewSummary(build(own), SELF_REVIEW);
+      assert.deepEqual(rows(build(own), SELF_REVIEW), ["ked@example.com approve (volunteer)"]);
+      assert.equal(summary.decision, "approved");
+      assert.deepEqual(summary.approvals, { given: 1, required: 1 });
+    });
+
+    it("still ignores it under the default, which is what every repository had", () => {
+      assert.deepEqual(rows(build(own)), []);
+      assert.equal(reviewSummary(build(own)).decision, "pending");
+    });
+
+    it("lists an author who was asked, rather than dropping the request", () => {
+      const pr = build({ author: "Ked <ked@example.com>", reviewer: "ked@example.com" });
+      assert.deepEqual(rows(pr, SELF_REVIEW), ["ked@example.com pending"]);
+      assert.equal(rows(pr, SELF_REVIEW).length, 1, "and not twice, under two spellings");
+    });
+
+    it("lets the author block their own pull request", () => {
+      const pr = build({
+        author: "ked@example.com",
+        reviews: [{ who: "ked@example.com", verdict: "request-changes", revision: HEAD_1 }],
+      });
+      assert.equal(reviewSummary(pr, SELF_REVIEW).decision, "changes-requested");
+    });
+
+    it("does not let the author alone satisfy a policy asking for two", () => {
+      const pr = build({
+        author: "ked@example.com",
+        reviews: [{ who: "ked@example.com", verdict: "approve", revision: HEAD_1 }],
+      });
+      const summary = reviewSummary(pr, { selfReview: true, minApprovals: 2 });
+      assert.deepEqual(summary.approvals, { given: 1, required: 2 });
+      assert.equal(summary.decision, "pending");
+    });
+  });
+});
+
 describe("decide", () => {
   it("prefers a block to an approval, and an approval to silence", () => {
     const state = (...states: string[]) =>
@@ -336,6 +468,25 @@ describe("decide", () => {
     assert.equal(state("pending", "commented"), "pending");
     assert.equal(state("commented", "approve"), "approved");
     assert.equal(state("approve", "request-changes"), "changes-requested");
+  });
+
+  it("counts approvals against the minimum it is given", () => {
+    const approvers = (n: number) =>
+      Array.from({ length: n }, () => ({
+        person: "x@y.zz",
+        state: "approve" as const,
+        volunteer: false,
+      }));
+    assert.equal(decide(approvers(1), 2), "pending");
+    assert.equal(decide(approvers(2), 2), "approved");
+    assert.equal(decide(approvers(2), 3), "pending");
+  });
+
+  it("never reads as approved with nobody approving, whatever it is asked", () => {
+    // A marker cannot ask for fewer than one (§2.10), but the function is
+    // exported and a caller can hand it anything.
+    assert.equal(decide([], 0), "pending");
+    assert.equal(decide([], -1), "pending");
   });
 });
 

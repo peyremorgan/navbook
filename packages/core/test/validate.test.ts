@@ -596,6 +596,66 @@ describe("D12 loops in the tree", () => {
   });
 });
 
+describe("D15 the review policy", () => {
+  const marker = (value: unknown): Record<string, string> => ({
+    "navbook.json": JSON.stringify(value),
+  });
+
+  it("passes a marker with no policy, which is what `nav init` writes", () => {
+    assert.deepEqual(codes(marker({ version: 1 })), []);
+  });
+
+  it("passes a well-formed policy", () => {
+    assert.deepEqual(
+      codes(marker({ version: 1, review: { selfReview: true, minApprovals: 2 } })),
+      [],
+    );
+  });
+
+  it("passes a tree with no marker at all", () => {
+    assert.deepEqual(codes({ "issues/open/bqlybac0-x/issue.md": issue() }), []);
+  });
+
+  it("flags a marker that is not JSON", () => {
+    assert.deepEqual(codes({ "navbook.json": "{ oops" }), ["D15"]);
+  });
+
+  it("flags a marker that is not an object", () => {
+    assert.deepEqual(codes({ "navbook.json": "[]" }), ["D15"]);
+  });
+
+  it("flags a `review` that is not an object", () => {
+    assert.deepEqual(codes(marker({ review: "strict" })), ["D15"]);
+  });
+
+  it("flags each bad key on its own, so one fix does not uncover the next", () => {
+    const diagnostics = validateTree(
+      tree(marker({ review: { selfReview: "yes", minApprovals: 0 } })),
+    );
+    assert.deepEqual(
+      diagnostics.map((d) => d.check),
+      ["D15", "D15"],
+    );
+    assert.deepEqual(
+      diagnostics.map((d) => d.path),
+      ["navbook.json", "navbook.json"],
+    );
+  });
+
+  it("is an error, so the pre-commit hook stops a marker nobody can read", () => {
+    assert.equal(hasErrors(validateTree(tree({ "navbook.json": "nope" }))), true);
+  });
+
+  it("names the key at fault, since that is the whole of the fix", () => {
+    const [diagnostic] = validateTree(tree(marker({ review: { minApprovals: 1.5 } })));
+    assert.match(String(diagnostic?.message), /minApprovals/);
+  });
+
+  it("says nothing about an archived marker, which marks nothing", () => {
+    assert.deepEqual(codes({ "archive/2024/navbook.json": "{ oops" }), []);
+  });
+});
+
 describe("diagnostic ordering", () => {
   it("sorts by check, then path, then message", () => {
     const diagnostics = validateTree(

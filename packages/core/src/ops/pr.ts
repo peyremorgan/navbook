@@ -19,7 +19,9 @@ import {
   RevisionUnchangedError,
 } from "../core/ops.ts";
 import { parsePerson, sameEmail } from "../core/person.ts";
+import type { ReviewPolicyReading } from "../core/policy.ts";
 import { matchesQuery, type Query } from "../core/query.ts";
+import { type ReviewSummary, reviewSummary } from "../core/review.ts";
 import { allEntities, type EntityRecord, parseTree } from "../core/tree.ts";
 import { gitMaybe } from "../git/exec.ts";
 import { isAncestor, mergeBase, objectExists } from "../git/history.ts";
@@ -54,6 +56,7 @@ import {
   loadRepo,
   nowIso,
   type RunPlanResult,
+  readReviewPolicy,
   repoPath,
   requireNavbook,
   runPlan,
@@ -313,7 +316,10 @@ export interface FoundPr {
 
 /** Open pull requests on any fetched branch, matching a query. */
 export function listPrsAcrossRefs(ws: WsCtx, query: Query): FoundPr[] {
-  return scanRefsForOpenPrs(ws).filter((entry) => matchesQuery(query, entry.entity));
+  // Read once for the whole scan, and from here rather than from each ref: a
+  // pull request is counted by how this checkout counts (spec 02 §2.10).
+  const { policy } = readReviewPolicy(ws);
+  return scanRefsForOpenPrs(ws).filter((entry) => matchesQuery(query, entry.entity, policy));
 }
 
 /**
@@ -375,6 +381,22 @@ export function stringField(entity: EntityRecord, key: string): string {
 
 export type MergeStrategy = "fast-forward" | "merge-commit";
 
+/**
+ * Where the pull request stands against the policy this repository declares.
+ *
+ * Carried on the plan rather than left for the caller to work out, because the
+ * reviews live on the source branch and by the time a front end holds a result
+ * the pull request has been archived. It is reported, never acted on: spec 02
+ * §2.7 forbids refusing a merge on the strength of a review state, and spec 02
+ * §2.10 keeps a declared policy within that.
+ */
+export interface MergeReview {
+  /** The policy the marker declares, and any fault found reading it. */
+  reading: ReviewPolicyReading;
+  /** The pull request's review state, counted by that policy. */
+  summary: ReviewSummary;
+}
+
 export interface MergePlan {
   entity: EntityRecord;
   /** The branch carrying the pull request's commits. */
@@ -384,6 +406,8 @@ export interface MergePlan {
   strategy: MergeStrategy;
   /** The merge commit message, unused by a fast-forward. */
   message: string;
+  /** What the reviews say, for a caller that wants to mention it. */
+  review: MergeReview;
 }
 
 export interface MergeResult {
@@ -392,6 +416,14 @@ export interface MergeResult {
   mergeSha: string | null;
   /** Where the pull request now lives, relative to the Navbook directory. */
   dirPath: string;
+  /** What the reviews said when the merge was made. */
+  review: MergeReview;
+}
+
+/** Read a pull request's review state against the working tree's policy. */
+function mergeReview(ws: WsCtx, entity: EntityRecord): MergeReview {
+  const reading = readReviewPolicy(ws);
+  return { reading, summary: reviewSummary(entity, reading.policy) };
 }
 
 /** Check a merge can proceed and decide how it would be performed. */
@@ -428,6 +460,7 @@ export function planPrMerge(ws: WsCtx, ref: string, opts: { noFf?: boolean } = {
     targetBranch: branch,
     strategy: fastForwardable ? "fast-forward" : "merge-commit",
     message: mergeMessage(entity),
+    review: mergeReview(ws, entity),
   };
 }
 
@@ -437,14 +470,14 @@ export function executePrMerge(ws: WsCtx, plan: MergePlan): MergeResult {
     // A fast-forward creates no commit to carry the move, so the archive
     // happens in the immediate follow-up commit that spec 02 §2.8 allows.
     fastForward(ws.repoRoot, plan.sourceRef);
-    return recordMergedBlock(ws, archiveIntoIndex(ws, plan.entity.id), null);
+    return recordMergedBlock(ws, archiveIntoIndex(ws, plan.entity.id), null, plan.review);
   }
 
   if (mergeNoCommit(ws.repoRoot, plan.sourceRef) === "conflict") conflictStop(ws, plan.entity.id);
   // The move is staged into the merge itself (04 §4.3), so the commit that
   // lands the branch is also the commit that files the discussion as merged.
   const archived = archiveIntoIndex(ws, plan.entity.id);
-  return recordMergedBlock(ws, archived, commitMerge(ws.repoRoot, plan.message));
+  return recordMergedBlock(ws, archived, commitMerge(ws.repoRoot, plan.message), plan.review);
 }
 
 /** Finish a merge that was interrupted by conflicts. */
@@ -460,12 +493,15 @@ export function continuePrMerge(ws: WsCtx, ref?: string): MergeResult {
   }
 
   const entity = pendingMergePr(ws, ref);
+  // Read before the archive moves the directory, so the reviews are still
+  // where the entity says they are.
+  const review = mergeReview(ws, entity);
   const inProgress = isMergeInProgress(ws.repoRoot);
   const archived = archiveIntoIndex(ws, entity.id);
   const mergeSha = inProgress
     ? commitMerge(ws.repoRoot, mergeMessage(entity))
     : (resolveSha(ws.repoRoot, "HEAD") ?? null);
-  return recordMergedBlock(ws, archived, mergeSha);
+  return recordMergedBlock(ws, archived, mergeSha, review);
 }
 
 function mergeMessage(entity: EntityRecord): string {
@@ -527,7 +563,12 @@ function archiveIntoIndex(ws: WsCtx, id: string): EntityRecord {
  * Record the `merged:` block in a follow-up commit. A merge commit cannot name
  * its own SHA, so this step is necessarily separate (spec 02 §2.7).
  */
-function recordMergedBlock(ws: WsCtx, entity: EntityRecord, mergeSha: string | null): MergeResult {
+function recordMergedBlock(
+  ws: WsCtx,
+  entity: EntityRecord,
+  mergeSha: string | null,
+  review: MergeReview,
+): MergeResult {
   const merged: MergedBlock = {
     date: nowIso(ws),
     by: currentAuthor(ws),
@@ -550,7 +591,7 @@ function recordMergedBlock(ws: WsCtx, entity: EntityRecord, mergeSha: string | n
   }
   applyOps(ws, plan.ops);
   commit(ws.repoRoot, composeMessage(plan.message, plan.trailers));
-  return { entity, mergeSha, dirPath: entity.dirPath };
+  return { entity, mergeSha, dirPath: entity.dirPath, review };
 }
 
 /**
