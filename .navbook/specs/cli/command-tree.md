@@ -8,7 +8,7 @@ Everything is noun-verb (spec 04 §4.3). `issue` and `pr` share `open list show 
 
 - **IDs** accept any unambiguous prefix of four characters or more, and a whole `<id>-<slug>` directory name.
 - **`--commit`** on any mutating verb wraps the change in a `docs(<scope>):` commit, and refuses to run with unrelated changes already staged. A no-op lands as "Nothing to commit" rather than a git error.
-- **`--json`** on every listing and `show`: one object per entity, identity keys first, frontmatter in file order, then the body. `list` and `show` never change a key's type. `pr show` adds one key that is not frontmatter, `review`, because it has already read the comments that state is derived from.
+- **`--json`** on every listing and `show`: one object per entity, identity keys first, frontmatter in file order, then the body. `list` and `show` never change a key's type. `pr show` adds two keys that are not frontmatter — `review`, because it has already read the comments that state is derived from, and `reviewPolicy`, the marker's policy it was counted against (spec 02 §2.10).
 - **Query grammar** — `status:`, `label:`, `assignee:`, `author:`, `milestone:`, `feature:` and bare words, plus `reviewer:`, `review:` and `awaiting:` on pull requests, which `nav issue list` rejects rather than matching nothing. Single-valued keys OR their terms; multi-valued keys AND them. The `status:open` default belongs to the CLI's `list` verbs alone.
 - **`$EDITOR`** opens whenever `-m` is absent; the buffer is the whole file, frontmatter included, and an abort leaves nothing behind.
 - **Completions** for bash, zsh and fish, with IDs, directory names, feature slugs, document names and query keys supplied by `nav __complete`.
