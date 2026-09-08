@@ -143,6 +143,27 @@ describe("D2 frontmatter", () => {
     );
   });
 
+  it("flags a rank that is not a number and a deadline that is not a day", () => {
+    assert.deepEqual(
+      codes({
+        "issues/open/bqlybac0-x/issue.md": issue("t", "rank: soon\ndeadline: 2026-02-30\n"),
+      }),
+      ["D2", "D2"],
+    );
+  });
+
+  it("flags a rank or a deadline on a pull request, which is scheduled by neither", () => {
+    assert.deepEqual(
+      codes({
+        "prs/open/bqlybac0-x/pr.md": pr().replace(
+          "target: main",
+          "target: main\nrank: 1\ndeadline: 2026-10-01",
+        ),
+      }),
+      ["D2", "D2"],
+    );
+  });
+
   it("flags review fields on an issue comment", () => {
     const codesFound = codes({
       "issues/open/bqlybac0-x/issue.md": issue(),

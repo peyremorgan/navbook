@@ -35,6 +35,7 @@ import {
   parseQuery,
   type Query,
 } from "../core/query.ts";
+import { calendarDateOf } from "../core/time.ts";
 import type { EntityKind, EntityRecord, Repo } from "../core/tree.ts";
 import { uncommittedPaths } from "../git/index-ops.ts";
 import {
@@ -82,11 +83,17 @@ export function sortEntities(entities: readonly EntityRecord[]): EntityRecord[] 
  * Naming no status here means the CLI's documented default of open only (spec
  * 04 §4.3), which is why the default is applied at parse time rather than in
  * `matchesQuery`: a query carrying no status filters by none.
+ *
+ * The day `deadline:overdue` is judged against comes from the workspace for
+ * the same reason every other stamp does: that is what `NAV_NOW` reaches, so a
+ * fixture asking what is overdue gets the same answer on any machine and on
+ * any day (spec 05 §5.4).
  */
-export function parseListQuery(terms: readonly string[], kind: EntityKind): Query {
+export function parseListQuery(ws: WsCtx, terms: readonly string[], kind: EntityKind): Query {
   const query = parseQuery([...terms], kind);
   if (isQueryError(query)) wsFail("invalid-input", query.message);
   if (query.status.length === 0) query.status = defaultStatuses();
+  query.today = calendarDateOf(ws.now());
   return query;
 }
 

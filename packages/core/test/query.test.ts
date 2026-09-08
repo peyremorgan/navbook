@@ -19,6 +19,7 @@ interface IssueSpec {
   author?: string;
   milestone?: string;
   features?: string[];
+  deadline?: string;
   status?: "open" | "closed";
   comments?: string[];
 }
@@ -37,6 +38,7 @@ function build(specs: IssueSpec[]): EntityRecord[] {
     if (spec.assignee) lines.push(`assignee: ${spec.assignee}`);
     if (spec.milestone) lines.push(`milestone: ${spec.milestone}`);
     if (spec.features) lines.push(`feature: [${spec.features.join(", ")}]`);
+    if (spec.deadline) lines.push(`deadline: ${spec.deadline}`);
     lines.push("---", "", spec.body ?? "Body text.", "");
     entries[`${dir}/issue.md`] = lines.join("\n");
     (spec.comments ?? []).forEach((body, index) => {
@@ -366,5 +368,97 @@ describe("the review query terms", () => {
     for (const term of ["reviewer:", "review:", "awaiting:"]) {
       assert.equal(isQueryError(parseQuery([term], "pr")), true, term);
     }
+  });
+});
+
+/**
+ * `deadline:` — the one term an issue has and a pull request does not.
+ *
+ * The day it is judged against is the caller's, so every case here says which
+ * day it means; that is the same thing the CLI does with `NAV_NOW` and the
+ * server with its own clock, and it is what makes the answers repeatable.
+ */
+describe("the deadline query term", () => {
+  const TODAY = "2026-09-08";
+
+  const entities = build([
+    { id: "aaaaaaa1", deadline: "2026-09-06" },
+    { id: "bbbbbbb2", deadline: TODAY },
+    { id: "ccccccc3", deadline: "2026-09-09" },
+    { id: "ddddddd4" },
+  ]);
+
+  const dueMatching = (...terms: string[]): string[] =>
+    entities
+      .filter((e) => matchesQuery({ ...query(...terms), today: TODAY }, e))
+      .map((e) => e.id)
+      .sort();
+
+  it("finds what is past its day, and counts today as not yet late", () => {
+    assert.deepEqual(dueMatching("deadline:overdue"), ["aaaaaaa1"]);
+  });
+
+  it("finds what has no day at all", () => {
+    assert.deepEqual(dueMatching("deadline:none"), ["ddddddd4"]);
+  });
+
+  it("ORs its terms, as every single-valued key does", () => {
+    assert.deepEqual(dueMatching("deadline:overdue", "deadline:none"), ["aaaaaaa1", "ddddddd4"]);
+  });
+
+  it("ANDs with other keys, as every term does", () => {
+    const mixed = build([
+      { id: "aaaaaaa1", deadline: "2026-09-06", labels: ["bug"] },
+      { id: "bbbbbbb2", deadline: "2026-09-06" },
+    ]);
+    assert.deepEqual(
+      mixed
+        .filter((e) => matchesQuery({ ...query("deadline:overdue", "label:bug"), today: TODAY }, e))
+        .map((e) => e.id),
+      ["aaaaaaa1"],
+    );
+  });
+
+  it("treats a deadline it cannot read as none, so a bad line never hides work", () => {
+    const broken = build([{ id: "aaaaaaa1", deadline: "someday" }]);
+    assert.deepEqual(
+      broken
+        .filter((e) => matchesQuery({ ...query("deadline:none"), today: TODAY }, e))
+        .map((e) => e.id),
+      ["aaaaaaa1"],
+    );
+  });
+
+  it("says so rather than matching nothing when no day was supplied", () => {
+    // A caller that forgot, not a query somebody typed: a listing that looks
+    // answered and is not would be the worse of the two failures.
+    assert.throws(
+      () => matchesQuery(query("deadline:overdue"), entities[0] as EntityRecord),
+      /needs the day to judge it against/,
+    );
+  });
+
+  it("needs no day for `none`, which asks nothing about today", () => {
+    assert.equal(matchesQuery(query("deadline:none"), entities[3] as EntityRecord), true);
+  });
+
+  it("costs no reading of the comments, unlike the derived terms", () => {
+    assert.equal(needsComments(query("deadline:overdue")), false);
+  });
+
+  it("rejects the term on pull requests, which are not scheduled", () => {
+    const result = parseQuery(["deadline:overdue"], "pr");
+    assert.equal(isQueryError(result), true);
+    assert.match((result as { message: string }).message, /describes an issue/);
+  });
+
+  it("rejects a term that is neither overdue nor none", () => {
+    const result = parseQuery(["deadline:soon"], "issue");
+    assert.equal(isQueryError(result), true);
+    assert.match((result as { message: string }).message, /unknown deadline term 'soon'/);
+  });
+
+  it("rejects the term with no value, as every keyed term does", () => {
+    assert.equal(isQueryError(parseQuery(["deadline:"], "issue")), true);
   });
 });

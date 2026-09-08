@@ -7,8 +7,10 @@ import {
   normalizeBody,
   parseFile,
   readAssignees,
+  readDeadline,
   readLabels,
   readParent,
+  readRank,
   readReviewers,
   readRevisions,
   readSubtasks,
@@ -130,6 +132,98 @@ Login POST aborts after 5 s.
       /missing required key 'title'/,
     );
   });
+
+  /* ------------------------------------------------------- rank and deadline */
+
+  /** An `issue.md` carrying one extra frontmatter line. */
+  const withKey = (line: string): string =>
+    `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\n${line}\n---\n\nbody\n`;
+
+  it("accepts any finite rank, negative and fractional included", () => {
+    for (const [line, expected] of [
+      ["rank: 10", 10],
+      ["rank: 2.5", 2.5],
+      ["rank: 0", 0],
+      ["rank: -3", -3],
+      ["rank: 1e3", 1000],
+    ] as const) {
+      const parsed = parseFile(withKey(line));
+      assert.deepEqual(validateIssue(parsed), [], line);
+      assert.equal(readRank(parsed.fm), expected, line);
+    }
+  });
+
+  it("reads a quoted rank as the number it means", () => {
+    // The mirror of what `STRING_KEYS` does for a SHA YAML made an integer of:
+    // a hand-written file should be usable and not merely diagnosable.
+    const parsed = parseFile(withKey('rank: "10"'));
+    assert.deepEqual(validateIssue(parsed), []);
+    assert.equal(readRank(parsed.fm), 10);
+  });
+
+  it("folds a negative zero into zero, since the two order identically", () => {
+    assert.equal(Object.is(readRank(parseFile(withKey("rank: -0")).fm), 0), true);
+  });
+
+  it("rejects a rank that is not a finite number", () => {
+    for (const line of [
+      "rank: abc",
+      "rank: .nan",
+      "rank: .inf",
+      "rank: -.inf",
+      "rank: true",
+      "rank: [1]",
+      'rank: ""',
+    ]) {
+      assert.match(
+        messages(validateIssue(parseFile(withKey(line)))),
+        /'rank' must be a number/,
+        line,
+      );
+      assert.equal(readRank(parseFile(withKey(line)).fm), null, line);
+    }
+  });
+
+  it("accepts a deadline that is a real calendar day", () => {
+    for (const day of ["2026-10-01", "2024-02-29", "0001-01-01"]) {
+      const parsed = parseFile(withKey(`deadline: ${day}`));
+      assert.deepEqual(validateIssue(parsed), [], day);
+      assert.equal(readDeadline(parsed.fm), day, day);
+    }
+  });
+
+  it("accepts a deadline in the past, which is information rather than a fault", () => {
+    assert.deepEqual(validateIssue(parseFile(withKey("deadline: 1999-01-01"))), []);
+  });
+
+  it("rejects a deadline that carries a time, a zone or a day that does not exist", () => {
+    for (const line of [
+      "deadline: 2026-10-01T09:00:00Z",
+      "deadline: 2026-10-01 09:00",
+      "deadline: 2026-02-30",
+      "deadline: 2023-02-29",
+      "deadline: 2026-13-01",
+      'deadline: "2026-1-1"',
+      'deadline: " 2026-10-01"',
+      "deadline: 20261001",
+      "deadline: someday",
+    ]) {
+      assert.match(
+        messages(validateIssue(parseFile(withKey(line)))),
+        /'deadline' must be a calendar date as YYYY-MM-DD/,
+        line,
+      );
+      assert.equal(readDeadline(parseFile(withKey(line)).fm), null, line);
+    }
+  });
+
+  it("reads a malformed rank or deadline as none at all, so a listing never trips", () => {
+    const { fm } = parseFile(
+      `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\nrank: soon\ndeadline: whenever\n---\n\nbody\n`,
+    );
+    assert.equal(readRank(fm), null);
+    assert.equal(readDeadline(fm), null);
+  });
 });
 
 describe("pr.md", () => {
@@ -157,6 +251,13 @@ Replaces the ad-hoc token cache.
     const problems = messages(validatePr(parseFile(text)));
     assert.match(problems, /missing required key 'target'/);
     assert.match(problems, /'revisions' must be a list with at least one entry/);
+  });
+
+  it("rejects a rank and a deadline, which schedule work rather than propose a change", () => {
+    const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\ntarget: main\nrank: 1\ndeadline: 2026-10-01\nrevisions:\n  - head: ${SHA_A}\n    base: ${SHA_B}\n    date: 2026-01-01\n---\n\nbody\n`;
+    const problems = messages(validatePr(parseFile(text)));
+    assert.match(problems, /'rank' is an issue-only key/);
+    assert.match(problems, /'deadline' is an issue-only key/);
   });
 
   it("rejects decomposition links, which relate issues only", () => {
@@ -343,6 +444,36 @@ describe("constructors", () => {
       assignee: ["a@b.co", "c@d.co"],
     });
     assert.match(text, /assignee: \[a@b\.co, c@d\.co\]/);
+  });
+
+  it("writes a rank and a deadline, and a rank of zero like any other", () => {
+    const render = (rank: number): string =>
+      newIssueFile({ title: "t", author: "a@b.co", created: "2026-01-01", body: "b", rank });
+    assert.match(render(10), /^rank: 10$/m);
+    assert.match(render(2.5), /^rank: 2\.5$/m);
+    // Absence is what decides whether the key is written, not truthiness: a
+    // rank of zero is a position like any other.
+    assert.match(render(0), /^rank: 0$/m);
+    assert.match(render(-10), /^rank: -10$/m);
+
+    const dated = newIssueFile({
+      title: "t",
+      author: "a@b.co",
+      created: "2026-01-01",
+      body: "b",
+      rank: 20,
+      deadline: "2026-10-01",
+    });
+    const parsed = parseFile(dated);
+    assert.deepEqual(validateIssue(parsed), []);
+    assert.equal(readRank(parsed.fm), 20);
+    assert.equal(readDeadline(parsed.fm), "2026-10-01");
+  });
+
+  it("leaves both keys out when neither was asked for", () => {
+    const text = newIssueFile({ title: "t", author: "a@b.co", created: "2026-01-01", body: "b" });
+    assert.doesNotMatch(text, /rank:/);
+    assert.doesNotMatch(text, /deadline:/);
   });
 
   it("records the parent of an issue opened as a subtask", () => {

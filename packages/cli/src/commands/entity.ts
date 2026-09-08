@@ -78,7 +78,7 @@ export interface ListOptions extends GlobalFlags {
 }
 
 export function cmdList(ctx: Ctx, kind: EntityKind, terms: string[], opts: ListOptions): void {
-  const query = parseListQuery(terms, kind);
+  const query = parseListQuery(ctx, terms, kind);
   const matched = listEntities(ctx, kind, query, {
     ...(opts.entities ? { entities: opts.entities } : {}),
   });
