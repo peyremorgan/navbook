@@ -10,6 +10,9 @@ revisions:
   - head: dccfb5095151872ba84fc4dd301152cf40d20f65
     base: 77041378c9307c8b4d9635a8709ada48910df5de
     date: 2026-09-08T10:41:46Z
+merged:
+  date: 2026-09-08T12:43:29Z
+  by: Morgan PEYRE <morgan.peyre@brickcode.tech>
 ---
 
 Everything on `dev` since `main` last moved: 169 commits, 742 files. Two new packages — a GraphQL server and a browser client — and the format grew four keys, a directory and a marker section to feed them.
