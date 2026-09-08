@@ -12,7 +12,7 @@ The marker is also read, not only found: its `review` object is the review polic
 - **IDs** are eight random characters with a leading letter and at least one digit, minted without coordination; the slug beside one is display-only.
 - **Status is the path**; no file carries a status key.
 - **Priority and dates** — an issue may carry `rank`, a decimal saying where it sits in a queue, and `deadline`, a bare `YYYY-MM-DD` day. Both are issue-only and a schema fault on `pr.md`. A rank is a position rather than a grade, so placing one issue rewrites one file; a deadline is a day rather than an instant, so it has no zone for two readers to disagree about.
-- **People** are RFC 5322 addresses, compared case-insensitively on the address.
+- **People** are RFC 5322 addresses, compared case-insensitively on the address. `core` reads who a tree names — authors, assignees, reviewers, mergers and commenters — and who a history holds, and merges several such readings into one entry per address; the drift note below says how far `.mailmap` is honoured.
 - **References** are `#id` in prose and `Refs:`/`Closes:`/`Deletes:` trailers in commits. Trailers document intent and never change state.
 - **Commits** that only touch the tracker use `docs(<scope>): <action> …`; a tracker-wide change uses bare `docs:`.
 - **Merging** — distinct files for distinct actions is what keeps the common case conflict-free; `merge.directoryRenames=true` makes a comment racing a close merge clean; the first-comment race is repaired by doctor. Deletion is the one operation that does not compose.
@@ -26,4 +26,4 @@ The marker is also read, not only found: its `review` object is the review polic
 
 ## Drift from the specification
 
-- Spec 02 §2.4: tools comparing identities "SHOULD honor `.mailmap` if present". Nothing reads `.mailmap`; `personMatches` compares the address alone. A SHOULD left unimplemented rather than contradicted, but worth knowing for anyone whose address has changed.
+- Spec 02 §2.4: tools comparing identities "SHOULD honor `.mailmap` if present". Honoured on one path only. The server's people directory reads history through `%aN`/`%aE`, which is git applying the mailmap for it, so two addresses a mailmap joins are offered as one person. Everywhere a stored identity is *compared* — `personMatches`, and so every `assignee:` or `author:` query from the CLI and the API alike — the address is compared alone, and a mailmap does not make an old address match a new one. Worth knowing for anyone whose address has changed: the menu will name them once, and a filter will still need the address the file holds.

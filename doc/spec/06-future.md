@@ -69,7 +69,11 @@ what keeps the format from acquiring a second implementation by accident:
   only durable state; the clone is a working copy that can be thrown away and
   made again. Nothing index-like is introduced ([§6.6](#66-explicitly-rejected-directions)).
   The client inherits that: with no index there is no cursor, so a listing is
-  the whole matching set and paging is the browser's own affair.
+  the whole matching set and paging is the browser's own affair. What the
+  server does derive, it derives afresh: the list of people it offers for an
+  `assignee:` or a `reviewer:` is read from history and from the tree, held in
+  memory against the commit it was read at, and written down nowhere — the
+  disposable kind §6.6 permits, and a suggestion rather than a registry.
 - **Read *and* write.** This is the substantive change from a viewer: the
   server commits on a signed-in person's behalf, which is precisely the
   non-committer gateway of [§6.2](#62-non-committer-gateway) — `author:` records
