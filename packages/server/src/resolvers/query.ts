@@ -10,12 +10,17 @@ import {
   calendarDateOf,
   findEntity,
   findFeature,
+  formatPerson,
   listEntities,
   listFeatures,
   listPrsAcrossRefs,
+  loadRepo,
   locatePr,
+  mergePeople,
   readReviewPolicy,
+  resolveSha,
   runDoctor,
+  treePeople,
   WorkspaceError,
 } from "@navbook/core";
 import type { GraphQLCtx } from "../context.ts";
@@ -103,6 +108,28 @@ export const Query: QueryResolvers = {
       ctx.sync.read(() => {
         const { policy, declared, problems } = readReviewPolicy(ctx.ws);
         return { ...policy, declared, problems: [...problems] };
+      }),
+    ),
+
+  /*
+   * Three sources in precedence order, and only one of them is expensive.
+   *
+   * HEAD is resolved inside the transaction, after the pull, so the walk the
+   * cache keeps is keyed on the history this very request is reading. The tree
+   * is read here rather than through `ctx.repo()` for the reason `reviewPolicy`
+   * gives above: the lock is a queue, and asking for the memo from inside a
+   * read would wait on the transaction that has to finish first.
+   *
+   * The viewer is last and costs nothing, but it is what makes the list usable
+   * on the first day: somebody who has never committed and whom no file names
+   * can still assign the work to themselves.
+   */
+  people: (_parent, _args, ctx) =>
+    run(() =>
+      ctx.sync.read(() => {
+        const authored = ctx.authors.at(resolveSha(ctx.ws.repoRoot, "HEAD"));
+        const named = treePeople(loadRepo(ctx.ws));
+        return mergePeople(authored, named, [ctx.viewer]).map(formatPerson);
       }),
     ),
 };

@@ -78,7 +78,8 @@ export interface Clone {
   /** Close what this clone holds, as somebody working from a terminal would. */
   close(kind: EntityKind, ref: string, resolution: string): void;
   write(relativePath: string, content: string): void;
-  commitAll(message: string): void;
+  /** Commit everything staged and unstaged; `env` names an author other than the fixture's. */
+  commitAll(message: string, env?: NodeJS.ProcessEnv): void;
 }
 
 export interface Fixture {
@@ -164,9 +165,9 @@ export function makeFixture(opts: FixtureOptions = {}): Fixture {
         mkdirSync(dirname(target), { recursive: true });
         writeFileSync(target, content, "utf8");
       },
-      commitAll(message) {
+      commitAll(message, extra) {
         run(dir, ["add", "-A"]);
-        const result = run(dir, ["commit", "--quiet", "-m", message]);
+        const result = run(dir, ["commit", "--quiet", "-m", message], extra);
         if (result.code !== 0) throw new Error(`fixture commit failed: ${result.stderr}`);
       },
       fileIssue(title, body, ids) {

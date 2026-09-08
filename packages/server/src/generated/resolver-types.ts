@@ -542,6 +542,30 @@ export type Query = {
   /** `ref` is a full ID or an unambiguous prefix of at least four characters. */
   issue: Issue;
   issues: Array<Issue>;
+  /**
+   * Everyone this repository knows of, for the fields that name a person.
+   *
+   * Merged from three places and stored nowhere: the authors of the served
+   * checkout's history, with `.mailmap` honoured (spec 02 §2.4) and the clone's
+   * own committer left out, since it commits on everybody's behalf (§6.2);
+   * everyone the tree names as author, assignee, reviewer, merger or commenter,
+   * which is how somebody who has only ever worked through this API is known at
+   * all; and the signed-in viewer.
+   *
+   * One entry per address, compared case-insensitively, as RFC 5322 addresses
+   * sorted by what is shown — the display name, or the address where there is no
+   * name. A name comes from the first of those sources that has one, so the most
+   * recent commit names a person before a file does, and a file names one the
+   * history left bare.
+   *
+   * History is the served branch's alone: somebody whose only commits are on a
+   * branch this checkout does not hold is here through the tree, or not at all.
+   *
+   * Derived, disposable and never committed — the kind of index §6.6 permits —
+   * so it is a suggestion and not a registry: every person field still takes an
+   * address that is not in this list.
+   */
+  people: Array<Scalars['String']['output']>;
   pr: Pr;
   /**
    * Pull requests recorded in the working tree.
@@ -1153,6 +1177,7 @@ export type QueryResolvers<ContextType = GraphQLCtx, ParentType extends Resolver
   features?: Resolver<Array<ResolversTypes['Feature']>, ParentType, ContextType>;
   issue?: Resolver<ResolversTypes['Issue'], ParentType, ContextType, RequireFields<QueryIssueArgs, 'ref'>>;
   issues?: Resolver<Array<ResolversTypes['Issue']>, ParentType, ContextType, Partial<QueryIssuesArgs>>;
+  people?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
   pr?: Resolver<ResolversTypes['Pr'], ParentType, ContextType, RequireFields<QueryPrArgs, 'ref'>>;
   prs?: Resolver<Array<ResolversTypes['Pr']>, ParentType, ContextType, RequireFields<QueryPrsArgs, 'allRefs'>>;
   reviewPolicy?: Resolver<ResolversTypes['ReviewPolicy'], ParentType, ContextType>;

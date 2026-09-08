@@ -9,6 +9,7 @@ import { createServer } from "node:http";
 import {
   currentBranch,
   hasRemote,
+  type Identity,
   isTreeClean,
   makeWsCtx,
   userIdentity,
@@ -18,6 +19,7 @@ import { createYoga } from "graphql-yoga";
 import { type Authenticator, makeAuthenticator } from "./auth.ts";
 import type { Config } from "./config.ts";
 import { makeGraphQLCtx } from "./context.ts";
+import { AuthorCache } from "./people.ts";
 import { makeSchema } from "./schema.ts";
 import { RepoSync } from "./sync.ts";
 
@@ -49,7 +51,7 @@ export interface StartOptions {
 function checkRepo(
   config: Config,
   env: NodeJS.ProcessEnv,
-): { repoRoot: string; navDir: string; remote: string | null } {
+): { repoRoot: string; navDir: string; remote: string | null; identity: Identity } {
   let ws: ReturnType<typeof makeWsCtx>;
   try {
     ws = makeWsCtx({ cwd: config.repoPath, env });
@@ -67,8 +69,9 @@ function checkRepo(
   if (!isTreeClean(ws.repoRoot)) {
     throw new StartupError("the clone has uncommitted changes; the server needs a clean tree");
   }
+  let identity: Identity;
   try {
-    userIdentity(ws.repoRoot);
+    identity = userIdentity(ws.repoRoot);
   } catch (error) {
     throw new StartupError(
       `the clone has no committer identity: ${error instanceof Error ? error.message : String(error)}`,
@@ -78,6 +81,7 @@ function checkRepo(
     repoRoot: ws.repoRoot,
     navDir: ws.navDir,
     remote: hasRemote(ws.repoRoot, config.remote) ? config.remote : null,
+    identity,
   };
 }
 
@@ -86,7 +90,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
   const env = opts.env ?? process.env;
   const report = opts.report ?? (() => undefined);
 
-  const { repoRoot, navDir, remote } = checkRepo(config, env);
+  const { repoRoot, navDir, remote, identity } = checkRepo(config, env);
   if (remote === null) {
     report(`warning: no '${config.remote}' remote; running local-only, nothing will be pushed`);
   }
@@ -105,6 +109,10 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     pullIntervalMs: config.pullIntervalMs,
   });
 
+  // One per process, beside the clone it describes: the history it walks is
+  // this checkout's, and the committer it leaves out is this clone's own.
+  const authors = new AuthorCache({ repoRoot, exclude: identity });
+
   const yoga = createYoga({
     schema: makeSchema(),
     graphiql: config.graphiql,
@@ -113,7 +121,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     // covered, including ones added later.
     context: async ({ request }) => {
       const viewer = await auth.verify(request.headers.get("authorization"));
-      return makeGraphQLCtx({ viewer, config, sync, env, navDir });
+      return makeGraphQLCtx({ viewer, config, sync, authors, env, navDir });
     },
   });
 
