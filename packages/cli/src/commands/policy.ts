@@ -7,12 +7,7 @@
  * §2.10 keeps a declared policy inside that. These are sentences, not gates.
  */
 
-import {
-  describeReviewPolicy,
-  NAV_MARKER,
-  type ReviewPolicyReading,
-  type ReviewSummary,
-} from "@navbook/core";
+import { NAV_MARKER, type ReviewPolicyReading, type ReviewSummary } from "@navbook/core";
 import type { Ctx } from "../context.ts";
 
 /** Warn about a marker whose policy could not be read; D15 is the full report. */
@@ -22,11 +17,6 @@ export function warnPolicyProblems(ctx: Ctx, reading: ReviewPolicyReading): void
       `${ctx.colors.yellow("warning:")} ${ctx.navDir}/${NAV_MARKER}: ${problem}; using the default\n`,
     );
   }
-}
-
-/** The declared policy in one line, or nothing when none is declared. */
-export function policyRow(reading: ReviewPolicyReading): string | undefined {
-  return reading.declared ? describeReviewPolicy(reading.policy) : undefined;
 }
 
 /**
