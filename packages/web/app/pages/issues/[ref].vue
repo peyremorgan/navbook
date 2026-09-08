@@ -13,7 +13,13 @@ import { FEATURES_QUERY, ISSUE_QUERY, ISSUES_QUERY } from "~/graphql/queries";
 import { buildCommentTree, countComments } from "~/utils/comments";
 import { distinctValues, shortId } from "~/utils/entities";
 import { describeApiError, reparentConflict } from "~/utils/errors";
-import { buildEntityPatch, type EntityEdit, normalizeOptional, PatchError } from "~/utils/patch";
+import {
+  buildEntityPatch,
+  type EntityEdit,
+  normalizeOptional,
+  PatchError,
+  parseRankInput,
+} from "~/utils/patch";
 import { countSubtasks } from "~/utils/subtasks";
 
 const route = useRoute();
@@ -66,6 +72,8 @@ const current = computed<EntityEdit>(() => ({
   assignees: [...(issue.value?.assignees ?? [])],
   milestone: issue.value?.milestone ?? null,
   features: [...(issue.value?.features ?? [])],
+  rank: issue.value?.rank ?? null,
+  deadline: issue.value?.deadline ?? null,
 }));
 
 async function save(change: Partial<EntityEdit>): Promise<void> {
@@ -319,6 +327,33 @@ async function unlink(child: string): Promise<void> {
             :saving="mutations.busy.value"
             @save="(values: string[]) => save({ milestone: values[0] ?? null })"
           />
+          <!--
+            A number and a day, so neither is a menu of what the listing
+            happened to mention: what these two hold is not a word somebody
+            else has already used.
+          -->
+          <FieldEditor
+            title="Rank"
+            icon="i-lucide-list-ordered"
+            testid="rank"
+            type="number"
+            :value="issue.rank === null || issue.rank === undefined ? '' : String(issue.rank)"
+            :saving="mutations.busy.value"
+            @save="(text: string) => save({ rank: parseRankInput(text) })"
+          />
+          <FieldEditor
+            title="Deadline"
+            icon="i-lucide-calendar"
+            testid="deadline"
+            type="date"
+            :value="issue.deadline ?? ''"
+            :saving="mutations.busy.value"
+            @save="(text: string) => save({ deadline: normalizeOptional(text) })"
+          >
+            <template #display>
+              <DueDate v-if="issue.deadline" :deadline="issue.deadline" />
+            </template>
+          </FieldEditor>
 
           <section class="space-y-2 border-t border-default pt-4">
             <UButton

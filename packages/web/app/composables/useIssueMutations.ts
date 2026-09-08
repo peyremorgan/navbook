@@ -85,6 +85,8 @@ export function useIssueMutations() {
       assignees?: string[];
       milestone?: string | null;
       features?: string[];
+      rank?: number | null;
+      deadline?: string | null;
       parent?: string | null;
     }) {
       return reported(async () => {
@@ -102,7 +104,8 @@ export function useIssueMutations() {
         const payload = (await update.mutate({ input: { ref, ...patch } }))?.data?.updateIssue;
         if (payload) {
           commit.report(payload.commit, "Saved");
-          // A label, an assignee or a milestone decides which listings hold it.
+          // A label, an assignee or a milestone decides which listings hold it,
+          // and a rank or a deadline decides where in one it sits.
           refreshListings();
         }
         return payload;

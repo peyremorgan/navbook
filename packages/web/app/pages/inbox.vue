@@ -26,9 +26,11 @@
   would be missing the point rather than being fast.
 -->
 <script setup lang="ts">
-import { type InboxSelection, narrowInbox, railCounts } from "~/utils/inbox";
+import { type InboxSelection, narrowInbox, railCounts, sortInbox } from "~/utils/inbox";
+import type { SortOrder } from "~/utils/sort";
 
 const view = useInboxView();
+const mutations = useIssueMutations();
 
 const scope = computed(() => ({
   finished: view.params.value.finished,
@@ -42,9 +44,30 @@ const selection = computed<InboxSelection>(() => ({
   feature: view.params.value.feature,
 }));
 
-const shown = computed(() => narrowInbox(inbox.items.value, selection.value));
+const shown = computed(() =>
+  sortInbox(narrowInbox(inbox.items.value, selection.value), view.params.value.sort),
+);
 const counts = computed(() => railCounts(inbox.items.value, selection.value));
 const page = usePagedList(shown);
+
+/*
+ * Reordering, and only in the order that has somewhere to put a row.
+ *
+ * Under `newest` or `deadline` a drop would mean nothing: those read what the
+ * files say rather than what somebody chose, and a row moved in one of them
+ * would spring back on the next render. So the handles are only offered under
+ * priority, which is the order a rank exists to produce.
+ *
+ * The rows handed over are the page's own slice, so the arithmetic only ever
+ * sees neighbours that are actually on screen — dropping a row below the last
+ * one visible places it after that one, not after fifty rows nobody has asked
+ * to see.
+ */
+const reorder = useInboxReorder(
+  page.shown,
+  computed(() => view.params.value.sort === "priority"),
+  async (id, rank) => (await mutations.updateIssue(id, { rank })) !== null,
+);
 
 const finished = computed({
   get: () => view.params.value.finished,
@@ -99,6 +122,10 @@ const emptyDescription = computed(() => {
   <div class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-4">
       <h1 class="text-xl font-semibold">Inbox</h1>
+      <SortOrderChips
+        :value="view.params.value.sort"
+        @update="(sort: SortOrder) => view.patch({ sort })"
+      />
       <USwitch
         v-model="finished"
         label="Finished work too"
@@ -128,11 +155,27 @@ const emptyDescription = computed(() => {
         >
           <div class="rounded-lg border border-default" data-testid="inbox-list">
             <InboxRow
-              v-for="item in page.shown.value"
+              v-for="item in reorder.items.value"
               :key="`${item.kind}:${item.id}`"
               :item="item"
+              :reorder="view.params.value.sort === 'priority' ? reorder.rowState(item) : undefined"
+              @dragstart="(event: DragEvent) => reorder.onDragStart(item, event)"
+              @dragover="(event: DragEvent) => reorder.onDragOver(item, event)"
+              @dragleave="reorder.onDragLeave(item)"
+              @drop="(event: DragEvent) => reorder.onDrop(item, event)"
+              @dragend="reorder.onDragEnd()"
+              @handlekey="(event: KeyboardEvent) => reorder.onHandleKey(item, event)"
             />
           </div>
+
+          <!--
+            What a reorder is doing, for a reader who is not watching the rows
+            move. Polite rather than assertive: it is a running commentary on
+            something the reader started, not an interruption.
+          -->
+          <p aria-live="polite" class="sr-only" data-testid="inbox-reorder-status">
+            {{ reorder.announcement.value }}
+          </p>
           <div class="mt-3 flex items-center justify-between text-sm text-muted">
             <span data-testid="inbox-count">
               Showing {{ page.shown.value.length }} of {{ page.total.value }}

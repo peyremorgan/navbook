@@ -119,11 +119,16 @@ export const LINK_NODE_TREE = graphql(`
   }
 `);
 
+/**
+ * The detail view spreads the list row rather than repeating its fields, so a
+ * field added to a row cannot go missing from the page it links to — which is
+ * exactly what the normalised cache would otherwise hide until somebody
+ * navigated the wrong way round.
+ */
 export const ISSUE_DETAIL = graphql(`
   fragment IssueDetail on Issue {
-    ...EntityCore
+    ...IssueListItem
     body
-    resolution
     duplicateOf
     parent {
       ...LinkNodeCore

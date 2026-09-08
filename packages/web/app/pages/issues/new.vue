@@ -9,9 +9,10 @@
 import { useQuery } from "@vue/apollo-composable";
 import { FEATURES_QUERY, ISSUES_QUERY } from "~/graphql/queries";
 import { distinctValues } from "~/utils/entities";
-import { normalizeList, normalizeOptional } from "~/utils/patch";
+import { normalizeList, normalizeOptional, parseRankInput } from "~/utils/patch";
 
 const route = useRoute();
+const toast = useToast();
 const mutations = useIssueMutations();
 
 const title = ref("");
@@ -19,6 +20,8 @@ const body = ref("");
 const labels = ref<string[]>([]);
 const assignees = ref<string[]>([]);
 const milestone = ref("");
+const rank = ref("");
+const deadline = ref("");
 /** Pre-filled when the page was reached from a feature's "file an issue". */
 const features = ref<string[]>(featureFromQuery(route.query.feature));
 /** Pre-filled when the page was reached from an issue's "add subtask". */
@@ -50,6 +53,12 @@ const ready = computed(() => title.value.trim() !== "" && body.value.trim() !== 
 
 async function submit(): Promise<void> {
   if (!ready.value) return;
+  // The one field a browser will hand over as text it cannot make a number of.
+  const placed = parseRankInput(rank.value);
+  if (placed !== null && !Number.isFinite(placed)) {
+    toast.add({ title: "That will not do", description: "A rank is a number.", color: "error" });
+    return;
+  }
   const payload = await mutations.openIssue({
     title: title.value.trim(),
     body: body.value.trim(),
@@ -57,6 +66,8 @@ async function submit(): Promise<void> {
     assignees: normalizeList(assignees.value),
     milestone: normalizeOptional(milestone.value),
     features: normalizeList(features.value),
+    rank: placed,
+    deadline: normalizeOptional(deadline.value),
     parent: normalizeOptional(parent.value),
   });
   if (payload) await navigateTo(`/issues/${payload.issue.id}`);
@@ -100,6 +111,18 @@ async function submit(): Promise<void> {
       </UFormField>
       <UFormField label="Milestone">
         <UInput v-model="milestone" class="w-full" data-testid="new-milestone" />
+      </UFormField>
+      <UFormField label="Rank" description="Where it sits in the queue; lower comes first.">
+        <UInput
+          v-model="rank"
+          type="number"
+          step="any"
+          class="w-full"
+          data-testid="new-rank"
+        />
+      </UFormField>
+      <UFormField label="Deadline" description="The day the work is wanted.">
+        <UInput v-model="deadline" type="date" class="w-full" data-testid="new-deadline" />
       </UFormField>
       <UFormField label="Features" description="The concepts this work belongs to.">
         <CreatableSelect
