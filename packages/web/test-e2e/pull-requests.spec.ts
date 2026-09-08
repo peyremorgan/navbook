@@ -155,6 +155,23 @@ test("says a review is pending on one nobody has answered", async ({ signedIn, s
   await expect(signedIn.getByTestId("reviewer-person@example.invalid")).toContainText("Pending");
 });
 
+test("says how many approvals are still needed, and what asks for them", async ({
+  signedIn,
+  stack,
+}) => {
+  // The unserved pull request again, for the reason the header gives: the
+  // fixture asks for two approvals and nothing in this suite can add one here,
+  // so the count stays where the fixture put it however often this runs.
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0002`);
+  await expect(signedIn.getByTestId("review-decision")).toContainText("0 of 2 approvals");
+  await expect(signedIn.getByTestId("review-policy")).toContainText(
+    "Requires 2 approvals · self-review off",
+  );
+  // Nothing is disabled by any of it: the API exposes no merge, and a policy
+  // gates nothing anywhere (spec 01 §1.7).
+  await expect(signedIn.getByTestId("review-policy-problems")).toHaveCount(0);
+});
+
 test("finds the reviews this person still owes", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/prs?refs=all`);
   await signedIn.getByTestId("awaiting-me").click();

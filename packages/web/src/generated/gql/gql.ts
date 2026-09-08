@@ -17,7 +17,7 @@ type Documents = {
     "\n  fragment EntityCore on Entity {\n    id\n    slug\n    kind\n    status\n    path\n    archived\n    title\n    author\n    created\n    labels\n    assignees\n    milestone\n    features\n  }\n": typeof types.EntityCoreFragmentDoc,
     "\n  fragment CommentFields on Comment {\n    id\n    path\n    created\n    author\n    replyTo\n    verdict\n    revision\n    file\n    line\n    body\n  }\n": typeof types.CommentFieldsFragmentDoc,
     "\n  fragment IssueListItem on Issue {\n    ...EntityCore\n    resolution\n  }\n": typeof types.IssueListItemFragmentDoc,
-    "\n  fragment PrListItem on Pr {\n    ...EntityCore\n    target\n    source\n    draft\n    refs\n    reviewers\n    reviewDecision\n    merged {\n      date\n      by\n      commit\n    }\n  }\n": typeof types.PrListItemFragmentDoc,
+    "\n  fragment PrListItem on Pr {\n    ...EntityCore\n    target\n    source\n    draft\n    refs\n    reviewers\n    reviewDecision\n    approvals {\n      given\n      required\n    }\n    merged {\n      date\n      by\n      commit\n    }\n  }\n": typeof types.PrListItemFragmentDoc,
     "\n  fragment LinkNodeCore on LinkNode {\n    id\n    notAnIssue\n    cycle\n    repeated\n    issue {\n      id\n      title\n      status\n    }\n  }\n": typeof types.LinkNodeCoreFragmentDoc,
     "\n  fragment LinkNodeTree on LinkNode {\n    ...LinkNodeCore\n    children {\n      ...LinkNodeCore\n      children {\n        ...LinkNodeCore\n      }\n    }\n  }\n": typeof types.LinkNodeTreeFragmentDoc,
     "\n  fragment IssueDetail on Issue {\n    ...EntityCore\n    body\n    resolution\n    duplicateOf\n    parent {\n      ...LinkNodeCore\n    }\n    subtasks(depth: 3) {\n      ...LinkNodeTree\n    }\n    comments {\n      ...CommentFields\n    }\n  }\n": typeof types.IssueDetailFragmentDoc,
@@ -38,6 +38,7 @@ type Documents = {
     "\n  mutation AddSpec($input: AddSpecInput!) {\n    addSpec(input: $input) {\n      feature {\n        ...FeatureDetail\n      }\n      spec {\n        ...SpecDetail\n      }\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n": typeof types.AddSpecDocument,
     "\n  mutation UpdateSpec($input: UpdateSpecInput!) {\n    updateSpec(input: $input) {\n      feature {\n        ...FeatureDetail\n      }\n      spec {\n        ...SpecDetail\n      }\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n": typeof types.UpdateSpecDocument,
     "\n  query Viewer {\n    viewer {\n      name\n      email\n    }\n  }\n": typeof types.ViewerDocument,
+    "\n  query ReviewPolicy {\n    reviewPolicy {\n      selfReview\n      minApprovals\n      declared\n      problems\n    }\n  }\n": typeof types.ReviewPolicyDocument,
     "\n  query Issues($filter: EntityFilter) {\n    issues(filter: $filter) {\n      ...IssueListItem\n    }\n  }\n": typeof types.IssuesDocument,
     "\n  query Issue($ref: ID!) {\n    issue(ref: $ref) {\n      ...IssueDetail\n    }\n  }\n": typeof types.IssueDocument,
     "\n  query Prs($filter: EntityFilter, $allRefs: Boolean!) {\n    prs(filter: $filter, allRefs: $allRefs) {\n      ...PrListItem\n    }\n  }\n": typeof types.PrsDocument,
@@ -50,7 +51,7 @@ const documents: Documents = {
     "\n  fragment EntityCore on Entity {\n    id\n    slug\n    kind\n    status\n    path\n    archived\n    title\n    author\n    created\n    labels\n    assignees\n    milestone\n    features\n  }\n": types.EntityCoreFragmentDoc,
     "\n  fragment CommentFields on Comment {\n    id\n    path\n    created\n    author\n    replyTo\n    verdict\n    revision\n    file\n    line\n    body\n  }\n": types.CommentFieldsFragmentDoc,
     "\n  fragment IssueListItem on Issue {\n    ...EntityCore\n    resolution\n  }\n": types.IssueListItemFragmentDoc,
-    "\n  fragment PrListItem on Pr {\n    ...EntityCore\n    target\n    source\n    draft\n    refs\n    reviewers\n    reviewDecision\n    merged {\n      date\n      by\n      commit\n    }\n  }\n": types.PrListItemFragmentDoc,
+    "\n  fragment PrListItem on Pr {\n    ...EntityCore\n    target\n    source\n    draft\n    refs\n    reviewers\n    reviewDecision\n    approvals {\n      given\n      required\n    }\n    merged {\n      date\n      by\n      commit\n    }\n  }\n": types.PrListItemFragmentDoc,
     "\n  fragment LinkNodeCore on LinkNode {\n    id\n    notAnIssue\n    cycle\n    repeated\n    issue {\n      id\n      title\n      status\n    }\n  }\n": types.LinkNodeCoreFragmentDoc,
     "\n  fragment LinkNodeTree on LinkNode {\n    ...LinkNodeCore\n    children {\n      ...LinkNodeCore\n      children {\n        ...LinkNodeCore\n      }\n    }\n  }\n": types.LinkNodeTreeFragmentDoc,
     "\n  fragment IssueDetail on Issue {\n    ...EntityCore\n    body\n    resolution\n    duplicateOf\n    parent {\n      ...LinkNodeCore\n    }\n    subtasks(depth: 3) {\n      ...LinkNodeTree\n    }\n    comments {\n      ...CommentFields\n    }\n  }\n": types.IssueDetailFragmentDoc,
@@ -71,6 +72,7 @@ const documents: Documents = {
     "\n  mutation AddSpec($input: AddSpecInput!) {\n    addSpec(input: $input) {\n      feature {\n        ...FeatureDetail\n      }\n      spec {\n        ...SpecDetail\n      }\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n": types.AddSpecDocument,
     "\n  mutation UpdateSpec($input: UpdateSpecInput!) {\n    updateSpec(input: $input) {\n      feature {\n        ...FeatureDetail\n      }\n      spec {\n        ...SpecDetail\n      }\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n": types.UpdateSpecDocument,
     "\n  query Viewer {\n    viewer {\n      name\n      email\n    }\n  }\n": types.ViewerDocument,
+    "\n  query ReviewPolicy {\n    reviewPolicy {\n      selfReview\n      minApprovals\n      declared\n      problems\n    }\n  }\n": types.ReviewPolicyDocument,
     "\n  query Issues($filter: EntityFilter) {\n    issues(filter: $filter) {\n      ...IssueListItem\n    }\n  }\n": types.IssuesDocument,
     "\n  query Issue($ref: ID!) {\n    issue(ref: $ref) {\n      ...IssueDetail\n    }\n  }\n": types.IssueDocument,
     "\n  query Prs($filter: EntityFilter, $allRefs: Boolean!) {\n    prs(filter: $filter, allRefs: $allRefs) {\n      ...PrListItem\n    }\n  }\n": types.PrsDocument,
@@ -109,7 +111,7 @@ export function graphql(source: "\n  fragment IssueListItem on Issue {\n    ...E
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  fragment PrListItem on Pr {\n    ...EntityCore\n    target\n    source\n    draft\n    refs\n    reviewers\n    reviewDecision\n    merged {\n      date\n      by\n      commit\n    }\n  }\n"): (typeof documents)["\n  fragment PrListItem on Pr {\n    ...EntityCore\n    target\n    source\n    draft\n    refs\n    reviewers\n    reviewDecision\n    merged {\n      date\n      by\n      commit\n    }\n  }\n"];
+export function graphql(source: "\n  fragment PrListItem on Pr {\n    ...EntityCore\n    target\n    source\n    draft\n    refs\n    reviewers\n    reviewDecision\n    approvals {\n      given\n      required\n    }\n    merged {\n      date\n      by\n      commit\n    }\n  }\n"): (typeof documents)["\n  fragment PrListItem on Pr {\n    ...EntityCore\n    target\n    source\n    draft\n    refs\n    reviewers\n    reviewDecision\n    approvals {\n      given\n      required\n    }\n    merged {\n      date\n      by\n      commit\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
@@ -190,6 +192,10 @@ export function graphql(source: "\n  mutation UpdateSpec($input: UpdateSpecInput
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
 export function graphql(source: "\n  query Viewer {\n    viewer {\n      name\n      email\n    }\n  }\n"): (typeof documents)["\n  query Viewer {\n    viewer {\n      name\n      email\n    }\n  }\n"];
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query ReviewPolicy {\n    reviewPolicy {\n      selfReview\n      minApprovals\n      declared\n      problems\n    }\n  }\n"): (typeof documents)["\n  query ReviewPolicy {\n    reviewPolicy {\n      selfReview\n      minApprovals\n      declared\n      problems\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
