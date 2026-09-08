@@ -62,15 +62,22 @@ test("comes back to the listing from a page that is not one", async ({ signedIn,
   await expect(signedIn.getByTestId("issue-row-cafe0005")).toHaveCount(0);
 });
 
-test("takes the brand link back to the issues as they were left", async ({ signedIn, stack }) => {
+test("takes the brand link home rather than back to a filter", async ({ signedIn, stack }) => {
+  // The one link in the header that does not remember. The tab beside it comes
+  // back to the issues as they were left, and two adjacent links that did the
+  // same thing would be one link drawn twice.
   await signedIn.goto(`${stack.appUrl}/issues?label=bug`);
   await signedIn.getByTestId("nav-prs").click();
   await expect(signedIn).toHaveURL(`${stack.appUrl}/prs`);
 
   await signedIn.getByTestId("nav-brand").click();
-  await expect(signedIn).toHaveURL(`${stack.appUrl}/issues?label=bug`);
-  await expect(signedIn.getByTestId("issue-row-aaaa0001")).toBeVisible();
-  await expect(signedIn.getByTestId("issue-row-cafe0005")).toHaveCount(0);
+  await expect(signedIn).toHaveURL(`${stack.appUrl}/issues?status=open`);
+
+  // Home is now what the tab remembers, because it is where the listing was
+  // left — arriving by the wordmark is still arriving.
+  await signedIn.getByTestId("nav-prs").click();
+  await signedIn.getByTestId("nav-issues").click();
+  await expect(signedIn).toHaveURL(`${stack.appUrl}/issues?status=open`);
 });
 
 test("remembers the filter and not the branch toggle", async ({ signedIn, stack }) => {
@@ -102,11 +109,13 @@ test("leaves a bare address meaning the default listing", async ({ signedIn, sta
   await expect(signedIn).toHaveURL(/status=closed/);
 
   // Typed, bookmarked or sent by somebody else: it is the default listing, and
-  // nothing may redirect it to what this browser was last looking at.
+  // nothing may redirect it to what this browser was last looking at. A bare
+  // `/issues` filters by nothing at all, so the closed issue is in it.
   await signedIn.goto(`${stack.appUrl}/issues`);
   await expect(signedIn.getByTestId("issue-list")).toBeVisible();
   await expect(signedIn).toHaveURL(`${stack.appUrl}/issues`);
-  await expect(signedIn.getByTestId("issue-row-aaaa0006")).toHaveCount(0);
+  await expect(signedIn.getByTestId("issue-row-aaaa0006")).toBeVisible();
+  await expect(signedIn.getByTestId("issue-row-aaaa0001")).toBeVisible();
 
   // And it is now what the tab remembers, because it is what was left there.
   await signedIn.getByTestId("nav-prs").click();

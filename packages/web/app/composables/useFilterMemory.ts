@@ -29,14 +29,7 @@ const STORAGE_KEY = "navbook:filter-memory";
 export interface FilterMemory {
   /** Record what a listing is showing; an empty filter forgets it instead. */
   remember(path: string, query: RouteQuery): void;
-  /**
-   * Where a link to a listing should go: the listing as it was left.
-   *
-   * The target may carry a query of its own — `HOME` is `/issues?status=open`,
-   * the listing the front page lands on. That query is the fallback rather
-   * than an addition: it says what the listing means before this browser has
-   * left it anywhere, and a remembered filter replaces it whole.
-   */
+  /** Where a link to a listing should go: the listing as it was left. */
   target(path: string): RouteLocationRaw;
 }
 
@@ -69,16 +62,6 @@ export function readMemory(stored: string | null): Remembered {
     if (Object.keys(query).length > 0) remembered[path] = query;
   }
   return remembered;
-}
-
-/** A link target as its path and the query it carries, which may be empty. */
-function splitTarget(target: string): [string, Record<string, string[]>] {
-  const mark = target.indexOf("?");
-  if (mark === -1) return [target, {}];
-  const params = new URLSearchParams(target.slice(mark + 1));
-  const query: Record<string, string[]> = {};
-  for (const key of params.keys()) query[key] = params.getAll(key);
-  return [target.slice(0, mark), query];
 }
 
 function load(): Remembered {
@@ -117,8 +100,7 @@ export function useFilterMemory(): FilterMemory {
     },
 
     target(path) {
-      const [bare, search] = splitTarget(path);
-      return { path: bare, query: remembered.value[bare] ?? search };
+      return { path, query: remembered.value[path] ?? {} };
     },
   };
 }

@@ -46,15 +46,12 @@ watch(
       <div class="mx-auto flex max-w-6xl items-center gap-6 px-4 py-3">
         <!--
           The wordmark is the way home, so it goes where the root goes: the
-          open issues, or wherever that listing was left. The button beside it
-          is not — "Issues" means the listing, all of it, which is the way back
-          out of the filter.
+          open issues, every time. It is the one link in the header that does
+          not remember: the tab beside it comes back to the issues as they were
+          left, and two adjacent links that did the same thing would be one
+          link drawn twice.
         -->
-        <NuxtLink
-          :to="memory.target(HOME)"
-          class="flex items-center gap-2 font-semibold"
-          data-testid="nav-brand"
-        >
+        <NuxtLink :to="HOME" class="flex items-center gap-2 font-semibold" data-testid="nav-brand">
           <UIcon name="i-lucide-notebook-text" class="size-5 text-primary" />
           Navbook
         </NuxtLink>

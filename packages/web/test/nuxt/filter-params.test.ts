@@ -230,6 +230,9 @@ describe("filterQuery", () => {
       assignees: ["a@example.invalid"],
       authors: ["b@example.invalid"],
       milestones: ["1.0"],
+      features: ["auth"],
+      reviewers: ["c@example.invalid"],
+      deadline: ["OVERDUE"],
       text: "timeout",
     });
     assert.deepEqual(Object.keys(written).sort(), [...FILTER_KEYS].sort());
@@ -254,7 +257,7 @@ describe("withoutFilter", () => {
   it("partitions a query with filterQuery, losing nothing the filter reads", () => {
     const query = { status: "closed", label: ["bug", "auth"], q: '"slow link"', refs: "all" };
     const rejoined = { ...withoutFilter(query), ...filterQuery(query) };
-    assert.deepEqual(queryToFilter(rejoined, ISSUE_STATUSES), queryToFilter(query, ISSUE_STATUSES));
+    assert.deepEqual(queryToFilter(rejoined, ISSUES), queryToFilter(query, ISSUES));
     assert.equal(rejoined.refs, "all");
   });
 });
