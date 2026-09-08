@@ -29,7 +29,9 @@ import {
   parseListQuery,
   planEntityDelete,
   readAssignees,
+  readDeadline,
   readLabels,
+  readRank,
   reopenEntity,
   resolveComment,
   resolveEntity,
@@ -47,6 +49,7 @@ import { fail } from "../errors.ts";
 import { askYesNo } from "../prompt.ts";
 import { renderDetail } from "../render/detail.ts";
 import { type Column, renderTable } from "../render/table.ts";
+import { parseSortOrder, sortListing } from "../sort.ts";
 import { composeFile } from "./compose.ts";
 import { warnPolicyProblems } from "./policy.ts";
 
@@ -69,6 +72,8 @@ export interface ExtraColumn {
 }
 
 export interface ListOptions extends GlobalFlags {
+  /** One of the orders of spec 02 §2.5; `newest` when nobody asks (§4.2). */
+  sort?: string;
   /** Columns appended by PR-specific listings. */
   extraColumns?: ExtraColumn[];
   /** Pre-collected entities, used by `nav pr list --all-refs`. */
@@ -78,11 +83,22 @@ export interface ListOptions extends GlobalFlags {
 }
 
 export function cmdList(ctx: Ctx, kind: EntityKind, terms: string[], opts: ListOptions): void {
-  const query = parseListQuery(terms, kind);
+  const query = parseListQuery(ctx, terms, kind);
   const matched = listEntities(ctx, kind, query, {
     ...(opts.entities ? { entities: opts.entities } : {}),
   });
   reportList(ctx, kind, matched, opts);
+}
+
+/**
+ * Order a listing the way `--sort` asked, refusing an order that is not one.
+ *
+ * Applied here rather than in `core`, and to the JSON as well as the table: a
+ * caller that pipes a listing asked for the order it asked for, and `--json`
+ * that ignored `--sort` would be a second answer to the same question.
+ */
+function ordered(matched: readonly EntityRecord[], opts: ListOptions): EntityRecord[] {
+  return sortListing(matched, parseSortOrder(opts.sort));
 }
 
 /** Render a listing whose entities have already been collected. */
@@ -92,19 +108,20 @@ export function reportList(
   matched: readonly EntityRecord[],
   opts: ListOptions,
 ): void {
+  const listing = ordered(matched, opts);
   if (opts.json) {
-    if (matched.length === 0) return;
-    const objects = matched.map((entity) =>
+    if (listing.length === 0) return;
+    const objects = listing.map((entity) =>
       entityJson(ctx.navDir, entity, opts.jsonExtra?.(entity) ?? {}),
     );
     ctx.stdout.write(`${toNdjson(objects)}\n`);
     return;
   }
-  if (matched.length === 0) {
+  if (listing.length === 0) {
     ctx.stdout.write(`No ${PLURAL[kind]} match this query.\n`);
     return;
   }
-  ctx.stdout.write(`${renderList(ctx, matched, opts.extraColumns ?? [])}\n`);
+  ctx.stdout.write(`${renderList(ctx, listing, opts.extraColumns ?? [])}\n`);
 }
 
 function renderList(
@@ -131,6 +148,19 @@ function renderList(
   if (entities.some((e) => readAssignees(e.fm).length > 0)) {
     columns.push({ header: "assignee", flexible: true, minWidth: 6 });
     values.push((e) => readAssignees(e.fm).join(","));
+  }
+  // As with labels and assignees: a column nothing in this listing carries is
+  // a column of blanks, and the terminal is narrow enough already.
+  if (entities.some((e) => readRank(e.fm) !== null)) {
+    columns.push({ header: "rank" });
+    values.push((e) => {
+      const rank = readRank(e.fm);
+      return rank === null ? "" : String(rank);
+    });
+  }
+  if (entities.some((e) => readDeadline(e.fm) !== null)) {
+    columns.push({ header: "deadline" });
+    values.push((e) => readDeadline(e.fm) ?? "");
   }
   const rows = entities.map((entity) => values.map((value) => value(entity)));
   return renderTable(columns, rows, { colors: ctx.colors, width: terminalWidth(ctx) });

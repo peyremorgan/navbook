@@ -1,0 +1,5 @@
+ID         STATUS  TITLE                      RANK  DEADLINE
+#bqlybac0  open    Rotate the session keys    10    2026-08-05
+#t5kr1gq6  open    Rewrite the parser               2026-12-31
+#mz4kq1rv  open    Document the query syntax  20
+#w2rfk8na  open    Tidy the changelog

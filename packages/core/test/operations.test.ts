@@ -104,14 +104,14 @@ describe("ops: opening and listing", () => {
       openIssue(ws, { content: issueText(ws, "First", "One."), fallbackTitle: "First" }, {});
       openIssue(ws, { content: issueText(ws, "Second", "Two."), fallbackTitle: "Second" }, {});
 
-      const open = listEntities(ws, "issue", parseListQuery([], "issue"));
+      const open = listEntities(ws, "issue", parseListQuery(ws, [], "issue"));
       assert.deepEqual(
         open.map((entity) => entity.title).sort(),
         ["First", "Second"],
         "the default query is status:open",
       );
 
-      const matched = listEntities(ws, "issue", parseListQuery(["second"], "issue"));
+      const matched = listEntities(ws, "issue", parseListQuery(ws, ["second"], "issue"));
       assert.deepEqual(
         matched.map((entity) => entity.title),
         ["Second"],
@@ -130,7 +130,7 @@ describe("ops: opening and listing", () => {
       openIssue(ws, { content: issueText(ws, "Shut one", "Two."), fallbackTitle: "Shut one" }, {});
       closeEntity(ws, "issue", "bbb2", { resolution: "fixed" }, {});
 
-      const parsed = parseListQuery([], "issue");
+      const parsed = parseListQuery(ws, [], "issue");
       assert.deepEqual(parsed.status, ["open"]);
       assert.deepEqual(
         listEntities(ws, "issue", parsed).map((entity) => entity.title),
@@ -142,17 +142,21 @@ describe("ops: opening and listing", () => {
 
       // An explicit status still narrows, in either direction.
       assert.deepEqual(
-        listEntities(ws, "issue", parseListQuery(["status:closed"], "issue")).map((e) => e.title),
+        listEntities(ws, "issue", parseListQuery(ws, ["status:closed"], "issue")).map(
+          (e) => e.title,
+        ),
         ["Shut one"],
       );
     }, "aaa11111,bbb22222");
   });
 
   it("reports a malformed query as an input error", () => {
-    assert.throws(
-      () => parseListQuery(["status:nonsense"], "issue"),
-      (error: unknown) => error instanceof WorkspaceError && error.code === "invalid-input",
-    );
+    inWorkspace((ws) => {
+      assert.throws(
+        () => parseListQuery(ws, ["status:nonsense"], "issue"),
+        (error: unknown) => error instanceof WorkspaceError && error.code === "invalid-input",
+      );
+    });
   });
 
   it("refuses to open an entity outside a Navbook repository", () => {
@@ -511,7 +515,7 @@ describe("ops: updating and merging a pull request", () => {
   it("finds a pull request across refs, and reports one that is nowhere", () => {
     inPrWorkspace((ws, dir) => {
       git(["checkout", "-q", "main"], { cwd: dir });
-      const found = listPrsAcrossRefs(ws, parseListQuery([], "pr"));
+      const found = listPrsAcrossRefs(ws, parseListQuery(ws, [], "pr"));
       assert.deepEqual(
         found.map((entry) => entry.entity.id),
         ["ppp11111"],
@@ -553,9 +557,11 @@ describe("ops: updating and merging a pull request", () => {
         listEntities(ws, "pr", emptyQuery()).map((entity) => entity.id),
         ["ppp11111"],
       );
-      assert.deepEqual(listEntities(ws, "pr", parseListQuery([], "pr")), []);
+      assert.deepEqual(listEntities(ws, "pr", parseListQuery(ws, [], "pr")), []);
       assert.deepEqual(
-        listEntities(ws, "pr", parseListQuery(["status:closed"], "pr")).map((entity) => entity.id),
+        listEntities(ws, "pr", parseListQuery(ws, ["status:closed"], "pr")).map(
+          (entity) => entity.id,
+        ),
         ["ppp11111"],
       );
     });

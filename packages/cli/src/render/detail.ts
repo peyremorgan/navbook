@@ -13,6 +13,7 @@ import {
   readAssignees,
   readLabels,
   readMerged,
+  readRank,
   readRevisions,
   reviewSummary,
   threadOrder,
@@ -101,7 +102,14 @@ function metadataRows(entity: EntityRecord, opts: DetailOptions, c: Colors): [st
   if (labels.length > 0) rows.push(["labels", labels.join(", ")]);
   const assignees = readAssignees(entity.fm);
   if (assignees.length > 0) rows.push(["assignee", assignees.join(", ")]);
-  for (const key of ["milestone", "resolution", "duplicate-of", "superseded-by"]) {
+  // Not through `stringField` with the rest, because a rank is a number: what
+  // a reader wants to see for `rank: 0` is `0`, and not the blank an absent
+  // key leaves. Rendered whatever the noun is, as every row here is — the keys
+  // §2.5 keeps for an issue are a `doctor` fault on a pull request, and a
+  // reader looking at one needs to see what the file actually says.
+  const rank = readRank(entity.fm);
+  if (rank !== null) rows.push(["rank", String(rank)]);
+  for (const key of ["milestone", "deadline", "resolution", "duplicate-of", "superseded-by"]) {
     const value = stringField(entity, key);
     if (value !== "") rows.push([key, value]);
   }

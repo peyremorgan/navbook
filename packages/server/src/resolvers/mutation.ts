@@ -142,6 +142,12 @@ export const Mutation: MutationResolvers = {
             ...(input.assignees ? { assignee: [...input.assignees] } : {}),
             ...(input.milestone ? { milestone: input.milestone } : {}),
             ...(input.features ? { features: [...input.features] } : {}),
+            // Absence rather than falsehood, because a rank of zero is a
+            // position like any other. `Float` has already refused NaN and the
+            // infinities at coercion, and `checkComposed` refuses a deadline
+            // that is not a day before anything is written.
+            ...(input.rank === undefined || input.rank === null ? {} : { rank: input.rank }),
+            ...(input.deadline ? { deadline: input.deadline } : {}),
             ...(parent ? { parent: parent.id } : {}),
           });
           checkComposed(content, validateIssue, "issue");

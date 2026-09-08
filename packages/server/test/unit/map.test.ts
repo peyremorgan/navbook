@@ -59,22 +59,28 @@ describe("enum translation", () => {
 });
 
 describe("toQuery", () => {
-  it("is an empty query when no filter was given", () => {
-    assert.deepEqual(toQuery(null), emptyQuery());
-    assert.deepEqual(toQuery(undefined), emptyQuery());
+  const TODAY = "2026-09-08";
+
+  it("is an empty query but for the day, when no filter was given", () => {
+    assert.deepEqual(toQuery(null, TODAY), { ...emptyQuery(), today: TODAY });
+    assert.deepEqual(toQuery(undefined, TODAY), { ...emptyQuery(), today: TODAY });
   });
 
   it("carries every key across, translating the statuses", () => {
     assert.deepEqual(
-      toQuery({
-        status: ["OPEN", "CLOSED"],
-        labels: ["bug"],
-        assignees: ["a@x.invalid"],
-        authors: ["b@x.invalid"],
-        milestones: ["v1"],
-        features: ["auth"],
-        text: ["crash"],
-      }),
+      toQuery(
+        {
+          status: ["OPEN", "CLOSED"],
+          labels: ["bug"],
+          assignees: ["a@x.invalid"],
+          authors: ["b@x.invalid"],
+          milestones: ["v1"],
+          features: ["auth"],
+          deadline: ["OVERDUE", "NONE"],
+          text: ["crash"],
+        },
+        TODAY,
+      ),
       {
         status: ["open", "closed"],
         labels: ["bug"],
@@ -85,12 +91,19 @@ describe("toQuery", () => {
         reviewers: [],
         reviews: [],
         awaiting: [],
+        deadline: ["overdue", "none"],
+        today: TODAY,
         text: ["crash"],
       },
     );
   });
 
   it("leaves an unmentioned key empty, which filters by none of its values", () => {
-    assert.deepEqual(toQuery({ labels: ["bug"] }).status, []);
+    assert.deepEqual(toQuery({ labels: ["bug"] }, TODAY).status, []);
+    assert.deepEqual(toQuery({ labels: ["bug"] }, TODAY).deadline, []);
+  });
+
+  it("always carries the day, so `overdue` is never a question with no answer", () => {
+    assert.equal(toQuery({ deadline: ["OVERDUE"] }, TODAY).today, TODAY);
   });
 });

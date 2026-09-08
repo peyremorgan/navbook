@@ -1,0 +1,12 @@
+spec-version: 1
+description: D2 rejects a rank that is not a number, a deadline that is not a day, and either key on a pull request
+init: {from: tree, date: 2026-08-02T12:00:00Z}
+run: {command: [doctor, --json]}
+expect:
+  exit: 2
+  diagnostics:
+    - {check: D2, level: error, path: .navbook/issues/open/bqlybac0-bad-rank/issue.md}
+    - {check: D2, level: error, path: .navbook/issues/open/mz4kq1rv-bad-deadline/issue.md}
+    - {check: D2, level: error, path: .navbook/issues/open/t5kr1gq6-dated-deadline/issue.md}
+    - {check: D2, level: error, path: .navbook/prs/open/w2rfk8na-scheduled-pr/pr.md}
+    - {check: D2, level: error, path: .navbook/prs/open/w2rfk8na-scheduled-pr/pr.md}

@@ -122,6 +122,61 @@ describe("applyEntityPatch", () => {
   });
 });
 
+/**
+ * Rank and deadline through the same three-state contract as everything else:
+ * absent leaves the key alone, an explicit null clears it, a value replaces it.
+ */
+describe("applyEntityPatch — rank and deadline", () => {
+  it("adds both keys, keeping the ones the file already had", () => {
+    const written = patch({ rank: 20, deadline: "2026-10-01" });
+    assert.match(written, /^rank: 20$/m);
+    assert.match(written, /^deadline: 2026-10-01$/m);
+    assert.match(written, /^title: Original$/m);
+    assert.match(written, /^imported-from: github:acme\/repo#12$/m);
+  });
+
+  it("writes a rank of zero, which is a position like any other", () => {
+    assert.match(patch({ rank: 0 }), /^rank: 0$/m);
+    assert.match(patch({ rank: -2.5 }), /^rank: -2\.5$/m);
+  });
+
+  it("replaces a value that is already there", () => {
+    const placed = applyEntityPatch(
+      ORIGINAL.replace("milestone: v1", "milestone: v1\nrank: 10\ndeadline: 2026-10-01"),
+      { ref: "aa111111", rank: 15, deadline: "2026-11-01" },
+      PATH,
+    );
+    assert.match(placed, /^rank: 15$/m);
+    assert.match(placed, /^deadline: 2026-11-01$/m);
+  });
+
+  it("clears a key on an explicit null, and leaves it alone when absent", () => {
+    const placed = ORIGINAL.replace(
+      "milestone: v1",
+      "milestone: v1\nrank: 10\ndeadline: 2026-10-01",
+    );
+    const cleared = applyEntityPatch(placed, { ref: "aa111111", rank: null }, PATH);
+    assert.doesNotMatch(cleared, /^rank:/m);
+    assert.match(cleared, /^deadline: 2026-10-01$/m, "the key nobody named is untouched");
+
+    const undated = applyEntityPatch(placed, { ref: "aa111111", deadline: null }, PATH);
+    assert.doesNotMatch(undated, /^deadline:/m);
+    assert.match(undated, /^rank: 10$/m);
+  });
+
+  it("refuses a deadline that is not a day, rather than writing an invalid file", () => {
+    // This rewrites a file that was well formed a moment ago; a fault reported
+    // against the file would be pointing at the wrong thing.
+    for (const value of ["2026-02-30", "2026-10-01T09:00:00Z", "someday"]) {
+      assert.throws(() => patch({ deadline: value }), /calendar date/, value);
+    }
+  });
+
+  it("leaves the file byte for byte when neither key is named", () => {
+    assert.equal(patch({ title: "Original" }), ORIGINAL);
+  });
+});
+
 describe("isEmptyPatch", () => {
   it("is true only when no field was named", () => {
     assert.equal(isEmptyPatch({ ref: "aa111111" }), true);
@@ -129,6 +184,13 @@ describe("isEmptyPatch", () => {
     // An explicit null is a change: it clears the key.
     assert.equal(isEmptyPatch({ ref: "aa111111", milestone: null }), false);
     assert.equal(isEmptyPatch({ ref: "aa111111", labels: [] }), false);
+  });
+
+  it("counts rank and deadline, so unplacing one is not an empty request", () => {
+    assert.equal(isEmptyPatch({ ref: "aa111111", rank: null }), false);
+    assert.equal(isEmptyPatch({ ref: "aa111111", deadline: null }), false);
+    // Zero is a rank, not an absent one.
+    assert.equal(isEmptyPatch({ ref: "aa111111", rank: 0 }), false);
   });
 });
 

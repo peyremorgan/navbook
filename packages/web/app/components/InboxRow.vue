@@ -17,13 +17,33 @@
   The row is a link, so the feature chips are a sibling of it rather than part
   of it — a link inside a link is invalid, and browsers disagree about what to
   do with one. Same shape, and same reason, as `IssueRow`.
+
+  The grip is outside the link for a related reason: the link must not become
+  the drag source, or every attempt to reorder would race with following it.
+  It is a button as well as a drag handle, so the same move is available from
+  the keyboard — a listing only a pointer can reorder is one half the people
+  using it cannot reorder at all.
 -->
 <script setup lang="ts">
+import type { ReorderRow } from "~/composables/useInboxReorder";
 import { statusColor, statusLabel } from "~/utils/entities";
 import type { InboxItem, InboxReason } from "~/utils/inbox";
 import { displayPerson } from "~/utils/people";
 
-const props = defineProps<{ item: InboxItem }>();
+const props = defineProps<{
+  item: InboxItem;
+  /** Absent unless the listing is in an order a row can be placed in. */
+  reorder?: ReorderRow;
+}>();
+
+const emit = defineEmits<{
+  dragstart: [DragEvent];
+  dragover: [DragEvent];
+  dragleave: [];
+  drop: [DragEvent];
+  dragend: [];
+  handlekey: [KeyboardEvent];
+}>();
 
 /** What each reason says on the row, in the words the rail uses for it. */
 const REASONS: Record<InboxReason, { label: string; icon: string }> = {
@@ -75,9 +95,35 @@ const described = computed(() => {
 
 <template>
   <div
-    class="border-b border-default px-3 py-2.5 last:border-0 hover:bg-elevated/50"
+    class="flex items-start gap-1 border-b border-default px-3 py-2.5 last:border-0 hover:bg-elevated/50"
+    :class="[
+      props.reorder?.lifted ? 'opacity-40' : '',
+      props.reorder?.edge === 'before' ? 'border-t-2 border-t-primary' : '',
+      props.reorder?.edge === 'after' ? 'border-b-2 border-b-primary' : '',
+    ]"
     :data-testid="`inbox-row-${props.item.id}`"
+    @dragover="emit('dragover', $event)"
+    @dragleave="emit('dragleave')"
+    @drop="emit('drop', $event)"
   >
+    <UButton
+      v-if="props.reorder"
+      size="xs"
+      color="neutral"
+      variant="ghost"
+      icon="i-lucide-grip-vertical"
+      class="shrink-0 cursor-grab"
+      :draggable="props.reorder.draggable"
+      :disabled="!props.reorder.draggable"
+      :aria-pressed="props.reorder.lifted"
+      :aria-label="`Reorder ${entity.title}`"
+      :data-testid="`inbox-grip-${props.item.id}`"
+      @dragstart="emit('dragstart', $event)"
+      @dragend="emit('dragend')"
+      @keydown="emit('handlekey', $event)"
+    />
+
+    <div class="min-w-0 flex-1">
     <NuxtLink :to="href" class="flex items-center gap-2.5">
       <UIcon :name="icon" class="size-4 shrink-0" :class="tone" aria-hidden="true" />
       <span class="sr-only">{{ described }}</span>
@@ -117,6 +163,11 @@ const described = computed(() => {
           size="3xs"
           class="hidden sm:inline-flex"
         />
+        <DueDate
+          v-if="props.item.kind === 'issue' && props.item.entity.deadline"
+          :deadline="props.item.entity.deadline"
+          class="hidden shrink-0 sm:inline-flex"
+        />
         <TimeAgo :iso="entity.created" class="hidden text-xs text-muted sm:inline" />
       </span>
     </NuxtLink>
@@ -132,6 +183,7 @@ const described = computed(() => {
           <UIcon name="i-lucide-layers" class="me-1 size-3" />{{ feature }}
         </UBadge>
       </NuxtLink>
+    </div>
     </div>
   </div>
 </template>

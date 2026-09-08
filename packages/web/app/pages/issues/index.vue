@@ -1,17 +1,44 @@
 <!--
-  Every issue that matches the filter, newest first.
+  Every issue that matches the filter.
 
-  The whole matching set arrives in one answer — the API has no pagination —
-  so what is on screen is decided here, and the suggestions in the filter bar
-  are drawn from the same answer for want of anywhere else to get them.
+  The whole matching set arrives in one answer — the API has no pagination and
+  no sort argument — so both what is on screen and the order it is in are
+  decided here, and the suggestions in the filter bar are drawn from the same
+  answer for want of anywhere else to get them.
+
+  Newest first unless somebody asks otherwise. The listing answers "what is
+  there", where the order the work arrived in is the honest reading; the inbox
+  answers "what next", and defaults to priority for that reason.
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
 import { FEATURES_QUERY, ISSUES_QUERY } from "~/graphql/queries";
 import { distinctValues } from "~/utils/entities";
-import { ISSUE_STATUSES } from "~/utils/filter-params";
+import { DEADLINE_STATES, ISSUE_STATUSES } from "~/utils/filter-params";
+import { isSortOrder, type SortOrder, sortRows } from "~/utils/sort";
 
-const filter = useEntityFilter(ISSUE_STATUSES);
+const route = useRoute();
+const router = useRouter();
+const filter = useEntityFilter({ statuses: ISSUE_STATUSES, deadlines: DEADLINE_STATES });
+
+/*
+ * The order, in the query string beside the filter.
+ *
+ * Owned by this page rather than by `useEntityFilter`, exactly as `refs` is on
+ * the pull request listing — and deliberately so, because that is what makes
+ * an order survive Clear. Clearing a filter is about which rows are listed and
+ * not about the order they are read in.
+ */
+const sort = computed<SortOrder>(() =>
+  isSortOrder(route.query.sort) ? route.query.sort : "newest",
+);
+
+function setSort(next: SortOrder): void {
+  const query = { ...route.query };
+  if (next === "newest") delete query.sort;
+  else query.sort = next;
+  void router.replace({ query });
+}
 
 const { result, loading, error, refetch } = useQuery(
   ISSUES_QUERY,
@@ -19,7 +46,7 @@ const { result, loading, error, refetch } = useQuery(
   { fetchPolicy: "cache-and-network" },
 );
 
-const issues = computed(() => result.value?.issues ?? []);
+const issues = computed(() => sortRows(result.value?.issues ?? [], sort.value));
 const page = usePagedList(issues);
 
 // The feature registry, for the filter bar's menu. Cached: it changes far
@@ -42,14 +69,18 @@ const suggestions = computed(() => ({
 
 <template>
   <div class="space-y-4">
-    <div class="flex items-center justify-between gap-4">
+    <div class="flex flex-wrap items-center justify-between gap-4">
       <h1 class="text-xl font-semibold">Issues</h1>
-      <UButton to="/issues/new" icon="i-lucide-plus" data-testid="new-issue">New issue</UButton>
+      <div class="flex items-center gap-2">
+        <SortOrderChips :value="sort" @update="setSort" />
+        <UButton to="/issues/new" icon="i-lucide-plus" data-testid="new-issue">New issue</UButton>
+      </div>
     </div>
 
     <EntityFilterBar
       :filter="filter.filter.value"
       :statuses="ISSUE_STATUSES"
+      :deadlines="DEADLINE_STATES"
       :empty="filter.empty.value"
       v-bind="suggestions"
       @patch="filter.patch"

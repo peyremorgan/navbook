@@ -14,6 +14,7 @@
 import type { LocationQueryRaw } from "vue-router";
 import {
   emptyFilter,
+  type FilterKeys,
   type FilterState,
   filterToQuery,
   isEmptyFilter,
@@ -21,7 +22,7 @@ import {
   type RouteQuery,
   toEntityFilter,
 } from "~/utils/filter-params";
-import type { EntityFilter, Status } from "~~/src/generated/gql/graphql";
+import type { EntityFilter } from "~~/src/generated/gql/graphql";
 
 export interface EntityFilterHandle {
   /** The filter the current URL means. */
@@ -36,29 +37,34 @@ export interface EntityFilterHandle {
   clear(): void;
 }
 
-export function useEntityFilter(allowed: readonly Status[]): EntityFilterHandle {
+/** Every query-string key this filter owns; everything else is left alone. */
+const OWNED = [
+  "status",
+  "label",
+  "assignee",
+  "author",
+  "milestone",
+  "feature",
+  "reviewer",
+  "deadline",
+  "q",
+] as const;
+
+export function useEntityFilter(keys: FilterKeys): EntityFilterHandle {
   const route = useRoute();
   const router = useRouter();
 
-  const filter = computed(() => queryToFilter(route.query as RouteQuery, allowed));
+  const filter = computed(() => queryToFilter(route.query as RouteQuery, keys));
 
   const set = (next: FilterState): void => {
     // Parameters this filter does not own are kept, so a listing can carry
-    // something else in its URL — `allRefs` on the pull request list — without
-    // every filter change dropping it.
+    // something else in its URL — `allRefs` on the pull request list, `sort` on
+    // both — without every filter change dropping it. `sort` is deliberately
+    // not in the list below: an order somebody chose survives Clear, because
+    // clearing a filter is about which rows are listed and not about the order
+    // they are read in.
     const kept: LocationQueryRaw = { ...route.query };
-    for (const key of [
-      "status",
-      "label",
-      "assignee",
-      "author",
-      "milestone",
-      "feature",
-      "reviewer",
-      "q",
-    ]) {
-      delete kept[key];
-    }
+    for (const key of OWNED) delete kept[key];
     void router.replace({ query: { ...kept, ...filterToQuery(next) } });
   };
 

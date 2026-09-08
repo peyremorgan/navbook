@@ -100,3 +100,85 @@ test("says so when there is no such issue, once", async ({ signedIn, stack }) =>
   await expect(signedIn.getByText("Not found")).toBeVisible();
   await expect(signedIn.getByText("Not found")).toHaveCount(1);
 });
+
+/**
+ * Placing and dating an issue from its own page — spec 02 §2.5.
+ *
+ * A rank is a number and a deadline is a day, so both use the input the
+ * browser already has for them rather than the creatable menu the other fields
+ * share. A `type="number"` field hands its component back a number, and a save
+ * that assumed a string would throw where Vue swallows it — closing the form
+ * on an edit that was never sent. So what is asserted is the value coming back
+ * from the server, and not merely that the form closed.
+ */
+test("places and dates an issue, and takes both off again", async ({ signedIn, stack }) => {
+  // The issue with neither key, so nothing here depends on what ran before.
+  await signedIn.goto(`${stack.appUrl}/issues/cafe0005`);
+  await expect(signedIn.getByTestId("sidebar-rank")).toContainText("None");
+  await expect(signedIn.getByTestId("sidebar-deadline")).toContainText("None");
+
+  await signedIn.getByTestId("edit-rank").click();
+  await signedIn.getByTestId("input-rank").fill("42.5");
+  await signedIn.getByTestId("save-rank").click();
+  await expect(signedIn.getByTestId("sidebar-rank")).toContainText("42.5");
+
+  await signedIn.getByTestId("edit-deadline").click();
+  await signedIn.getByTestId("input-deadline").fill("2099-06-01");
+  await signedIn.getByTestId("save-deadline").click();
+  // Read back as time remaining rather than as the date, which is what a row
+  // wants to know; the date itself is the badge's title.
+  await expect(signedIn.getByTestId("sidebar-deadline").getByTestId("due-date")).toContainText(
+    "due",
+  );
+
+  // Both survive a reload, so the file holds them and not the page.
+  await signedIn.reload();
+  await expect(signedIn.getByTestId("sidebar-rank")).toContainText("42.5");
+  await expect(signedIn.getByTestId("sidebar-deadline")).toContainText("due");
+
+  // Blank is how a field is emptied, and it reaches the file as a removal.
+  await signedIn.getByTestId("edit-rank").click();
+  await signedIn.getByTestId("input-rank").fill("");
+  await signedIn.getByTestId("save-rank").click();
+  await expect(signedIn.getByTestId("sidebar-rank")).toContainText("None");
+
+  await signedIn.getByTestId("edit-deadline").click();
+  await signedIn.getByTestId("input-deadline").fill("");
+  await signedIn.getByTestId("save-deadline").click();
+  await expect(signedIn.getByTestId("sidebar-deadline")).toContainText("None");
+
+  await signedIn.reload();
+  await expect(signedIn.getByTestId("sidebar-rank")).toContainText("None");
+  await expect(signedIn.getByTestId("sidebar-deadline")).toContainText("None");
+});
+
+test("takes a rank of zero as a position rather than as an absence", async ({
+  signedIn,
+  stack,
+}) => {
+  await signedIn.goto(`${stack.appUrl}/issues/cafe0005`);
+  await signedIn.getByTestId("edit-rank").click();
+  await signedIn.getByTestId("input-rank").fill("0");
+  await signedIn.getByTestId("save-rank").click();
+  // "None" would mean the zero had been read as nothing at all.
+  await expect(signedIn.getByTestId("sidebar-rank")).toContainText("0");
+  await expect(signedIn.getByTestId("sidebar-rank")).not.toContainText("None");
+
+  await signedIn.getByTestId("edit-rank").click();
+  await signedIn.getByTestId("input-rank").fill("");
+  await signedIn.getByTestId("save-rank").click();
+  await expect(signedIn.getByTestId("sidebar-rank")).toContainText("None");
+});
+
+test("files an issue that is placed and dated from the start", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/issues/new`);
+  await signedIn.getByTestId("new-title").fill("Something to schedule");
+  await signedIn.getByTestId("new-body").fill("Filed with a place and a day.");
+  await signedIn.getByTestId("new-rank").fill("5");
+  await signedIn.getByTestId("new-deadline").fill("2099-01-01");
+  await signedIn.getByTestId("submit-issue").click();
+
+  await expect(signedIn.getByTestId("issue-detail")).toBeVisible();
+  await expect(signedIn.getByTestId("sidebar-rank")).toContainText("5");
+  await expect(signedIn.getByTestId("sidebar-deadline")).toContainText("due");
+});

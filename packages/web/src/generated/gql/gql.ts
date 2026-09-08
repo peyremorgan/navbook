@@ -16,11 +16,11 @@ import type { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-
 type Documents = {
     "\n  fragment EntityCore on Entity {\n    id\n    slug\n    kind\n    status\n    path\n    archived\n    title\n    author\n    created\n    labels\n    assignees\n    milestone\n    features\n  }\n": typeof types.EntityCoreFragmentDoc,
     "\n  fragment CommentFields on Comment {\n    id\n    path\n    created\n    author\n    replyTo\n    verdict\n    revision\n    file\n    line\n    body\n  }\n": typeof types.CommentFieldsFragmentDoc,
-    "\n  fragment IssueListItem on Issue {\n    ...EntityCore\n    resolution\n  }\n": typeof types.IssueListItemFragmentDoc,
+    "\n  fragment IssueListItem on Issue {\n    ...EntityCore\n    resolution\n    rank\n    deadline\n  }\n": typeof types.IssueListItemFragmentDoc,
     "\n  fragment PrListItem on Pr {\n    ...EntityCore\n    target\n    source\n    draft\n    refs\n    reviewers\n    reviewDecision\n    approvals {\n      given\n      required\n    }\n    merged {\n      date\n      by\n      commit\n    }\n  }\n": typeof types.PrListItemFragmentDoc,
     "\n  fragment LinkNodeCore on LinkNode {\n    id\n    notAnIssue\n    cycle\n    repeated\n    issue {\n      id\n      title\n      status\n    }\n  }\n": typeof types.LinkNodeCoreFragmentDoc,
     "\n  fragment LinkNodeTree on LinkNode {\n    ...LinkNodeCore\n    children {\n      ...LinkNodeCore\n      children {\n        ...LinkNodeCore\n      }\n    }\n  }\n": typeof types.LinkNodeTreeFragmentDoc,
-    "\n  fragment IssueDetail on Issue {\n    ...EntityCore\n    body\n    resolution\n    duplicateOf\n    parent {\n      ...LinkNodeCore\n    }\n    subtasks(depth: 3) {\n      ...LinkNodeTree\n    }\n    comments {\n      ...CommentFields\n    }\n  }\n": typeof types.IssueDetailFragmentDoc,
+    "\n  fragment IssueDetail on Issue {\n    ...IssueListItem\n    body\n    duplicateOf\n    parent {\n      ...LinkNodeCore\n    }\n    subtasks(depth: 3) {\n      ...LinkNodeTree\n    }\n    comments {\n      ...CommentFields\n    }\n  }\n": typeof types.IssueDetailFragmentDoc,
     "\n  fragment PrDetail on Pr {\n    ...PrListItem\n    body\n    revisions {\n      head\n      base\n      date\n    }\n    reviews {\n      person\n      state\n      volunteer\n      comment\n    }\n    comments {\n      ...CommentFields\n    }\n  }\n": typeof types.PrDetailFragmentDoc,
     "\n  fragment FeatureListItem on Feature {\n    slug\n    title\n    author\n    created\n    summary\n    specs {\n      path\n      fileName\n      title\n    }\n    issues {\n      id\n      status\n    }\n    prs {\n      id\n      status\n    }\n  }\n": typeof types.FeatureListItemFragmentDoc,
     "\n  fragment SpecDetail on Spec {\n    fileName\n    title\n    path\n    body\n    baseSha\n  }\n": typeof types.SpecDetailFragmentDoc,
@@ -50,11 +50,11 @@ type Documents = {
 const documents: Documents = {
     "\n  fragment EntityCore on Entity {\n    id\n    slug\n    kind\n    status\n    path\n    archived\n    title\n    author\n    created\n    labels\n    assignees\n    milestone\n    features\n  }\n": types.EntityCoreFragmentDoc,
     "\n  fragment CommentFields on Comment {\n    id\n    path\n    created\n    author\n    replyTo\n    verdict\n    revision\n    file\n    line\n    body\n  }\n": types.CommentFieldsFragmentDoc,
-    "\n  fragment IssueListItem on Issue {\n    ...EntityCore\n    resolution\n  }\n": types.IssueListItemFragmentDoc,
+    "\n  fragment IssueListItem on Issue {\n    ...EntityCore\n    resolution\n    rank\n    deadline\n  }\n": types.IssueListItemFragmentDoc,
     "\n  fragment PrListItem on Pr {\n    ...EntityCore\n    target\n    source\n    draft\n    refs\n    reviewers\n    reviewDecision\n    approvals {\n      given\n      required\n    }\n    merged {\n      date\n      by\n      commit\n    }\n  }\n": types.PrListItemFragmentDoc,
     "\n  fragment LinkNodeCore on LinkNode {\n    id\n    notAnIssue\n    cycle\n    repeated\n    issue {\n      id\n      title\n      status\n    }\n  }\n": types.LinkNodeCoreFragmentDoc,
     "\n  fragment LinkNodeTree on LinkNode {\n    ...LinkNodeCore\n    children {\n      ...LinkNodeCore\n      children {\n        ...LinkNodeCore\n      }\n    }\n  }\n": types.LinkNodeTreeFragmentDoc,
-    "\n  fragment IssueDetail on Issue {\n    ...EntityCore\n    body\n    resolution\n    duplicateOf\n    parent {\n      ...LinkNodeCore\n    }\n    subtasks(depth: 3) {\n      ...LinkNodeTree\n    }\n    comments {\n      ...CommentFields\n    }\n  }\n": types.IssueDetailFragmentDoc,
+    "\n  fragment IssueDetail on Issue {\n    ...IssueListItem\n    body\n    duplicateOf\n    parent {\n      ...LinkNodeCore\n    }\n    subtasks(depth: 3) {\n      ...LinkNodeTree\n    }\n    comments {\n      ...CommentFields\n    }\n  }\n": types.IssueDetailFragmentDoc,
     "\n  fragment PrDetail on Pr {\n    ...PrListItem\n    body\n    revisions {\n      head\n      base\n      date\n    }\n    reviews {\n      person\n      state\n      volunteer\n      comment\n    }\n    comments {\n      ...CommentFields\n    }\n  }\n": types.PrDetailFragmentDoc,
     "\n  fragment FeatureListItem on Feature {\n    slug\n    title\n    author\n    created\n    summary\n    specs {\n      path\n      fileName\n      title\n    }\n    issues {\n      id\n      status\n    }\n    prs {\n      id\n      status\n    }\n  }\n": types.FeatureListItemFragmentDoc,
     "\n  fragment SpecDetail on Spec {\n    fileName\n    title\n    path\n    body\n    baseSha\n  }\n": types.SpecDetailFragmentDoc,
@@ -107,7 +107,7 @@ export function graphql(source: "\n  fragment CommentFields on Comment {\n    id
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  fragment IssueListItem on Issue {\n    ...EntityCore\n    resolution\n  }\n"): (typeof documents)["\n  fragment IssueListItem on Issue {\n    ...EntityCore\n    resolution\n  }\n"];
+export function graphql(source: "\n  fragment IssueListItem on Issue {\n    ...EntityCore\n    resolution\n    rank\n    deadline\n  }\n"): (typeof documents)["\n  fragment IssueListItem on Issue {\n    ...EntityCore\n    resolution\n    rank\n    deadline\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
@@ -123,7 +123,7 @@ export function graphql(source: "\n  fragment LinkNodeTree on LinkNode {\n    ..
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  fragment IssueDetail on Issue {\n    ...EntityCore\n    body\n    resolution\n    duplicateOf\n    parent {\n      ...LinkNodeCore\n    }\n    subtasks(depth: 3) {\n      ...LinkNodeTree\n    }\n    comments {\n      ...CommentFields\n    }\n  }\n"): (typeof documents)["\n  fragment IssueDetail on Issue {\n    ...EntityCore\n    body\n    resolution\n    duplicateOf\n    parent {\n      ...LinkNodeCore\n    }\n    subtasks(depth: 3) {\n      ...LinkNodeTree\n    }\n    comments {\n      ...CommentFields\n    }\n  }\n"];
+export function graphql(source: "\n  fragment IssueDetail on Issue {\n    ...IssueListItem\n    body\n    duplicateOf\n    parent {\n      ...LinkNodeCore\n    }\n    subtasks(depth: 3) {\n      ...LinkNodeTree\n    }\n    comments {\n      ...CommentFields\n    }\n  }\n"): (typeof documents)["\n  fragment IssueDetail on Issue {\n    ...IssueListItem\n    body\n    duplicateOf\n    parent {\n      ...LinkNodeCore\n    }\n    subtasks(depth: 3) {\n      ...LinkNodeTree\n    }\n    comments {\n      ...CommentFields\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */

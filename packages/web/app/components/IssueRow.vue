@@ -49,9 +49,17 @@ const props = defineProps<{ issue: IssueListItemFragment }>();
         <span v-if="props.issue.milestone" class="inline-flex items-center gap-1">
           <UIcon name="i-lucide-flag" class="size-3" />{{ props.issue.milestone }}
         </span>
+        <span
+          v-if="props.issue.rank !== null && props.issue.rank !== undefined"
+          class="inline-flex items-center gap-1"
+          data-testid="issue-row-rank"
+        >
+          <UIcon name="i-lucide-list-ordered" class="size-3" />{{ props.issue.rank }}
+        </span>
         <span v-if="props.issue.resolution" class="inline-flex items-center gap-1">
           <UIcon name="i-lucide-check" class="size-3" />{{ props.issue.resolution }}
         </span>
+        <DueDate v-if="props.issue.deadline" :deadline="props.issue.deadline" />
       </div>
     </NuxtLink>
 

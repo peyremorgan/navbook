@@ -27,7 +27,7 @@ import {
 import { isId } from "./id.ts";
 import { formatPerson, parsePerson } from "./person.ts";
 import { SLUG_PATTERN, slugify } from "./slug.ts";
-import { parseIso } from "./time.ts";
+import { isCalendarDate, parseIso } from "./time.ts";
 
 export const SHA_PATTERN = /^[0-9a-f]{40}$/;
 /** The identity card at the top of a feature directory (spec 02 §2.11). */
@@ -78,6 +78,7 @@ const STRING_KEYS = [
   "target",
   "source",
   "milestone",
+  "deadline",
   "resolution",
   "duplicate-of",
   "superseded-by",
@@ -120,6 +121,7 @@ function normalizeKey(nav: NavDoc, key: string, rawValue: unknown): unknown {
   if ((STRING_KEYS as readonly string[]).includes(key)) {
     return stringAt(nav, [key]) ?? rawValue;
   }
+  if (key === "rank") return normalizeRank(rawValue);
   if (key === "labels" || key === "subtasks") return normalizeStringList(nav, key, rawValue);
   if (key === "assignee" || key === "feature" || key === "reviewer") {
     return Array.isArray(rawValue)
@@ -129,6 +131,21 @@ function normalizeKey(nav: NavDoc, key: string, rawValue: unknown): unknown {
   if (key === "revisions") return normalizeRevisions(nav, rawValue);
   if (key === "merged") return normalizeMerged(nav, rawValue);
   return rawValue;
+}
+
+/**
+ * Read `rank` as the number it means (§2.5).
+ *
+ * The opposite errand to {@link stringAt}'s: this key's spec type is a number,
+ * so a hand-written `rank: "10"` is recovered rather than merely diagnosed —
+ * the same courtesy `STRING_KEYS` does a commit SHA that YAML made an integer
+ * of. Anything that is not a finite number after that is left exactly as it was
+ * parsed, for `validateIssue` to name.
+ */
+function normalizeRank(rawValue: unknown): unknown {
+  if (typeof rawValue !== "string" || rawValue.trim() === "") return rawValue;
+  const value = Number(rawValue);
+  return Number.isFinite(value) ? value : rawValue;
 }
 
 function normalizeStringList(nav: NavDoc, key: string, rawValue: unknown): unknown {
@@ -262,6 +279,41 @@ function checkFeature(parsed: ParsedFile, problems: Problem[]): void {
   }
 }
 
+/**
+ * `rank` is a number and nothing else (§2.5).
+ *
+ * A position rather than a grade, so `0` and a negative are as ordinary as any
+ * other value and only the type is worth checking. NaN and the infinities are
+ * refused with everything else that is not a number: none of them orders
+ * against anything, which is the only thing a rank is for.
+ */
+function checkRank(parsed: ParsedFile, problems: Problem[]): void {
+  const value = parsed.fm.rank;
+  if (value === undefined || value === null) return;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    problems.push({ key: "rank", message: "'rank' must be a number" });
+  }
+}
+
+/**
+ * `deadline` is a calendar date and not an instant (§2.5).
+ *
+ * Deliberately not {@link parseIso}, which accepts a bare date but accepts a
+ * timestamp too. A `deadline` that carried a time would have a zone in it, and
+ * two people in different places would then disagree about which day it named
+ * — which is the whole reason the key is a date.
+ */
+function checkDeadline(parsed: ParsedFile, problems: Problem[]): void {
+  const value = parsed.fm.deadline;
+  if (value === undefined || value === null) return;
+  if (typeof value !== "string" || !isCalendarDate(value)) {
+    problems.push({
+      key: "deadline",
+      message: `'deadline' must be a calendar date as YYYY-MM-DD, got ${JSON.stringify(value)}`,
+    });
+  }
+}
+
 function checkIdReference(parsed: ParsedFile, key: string, problems: Problem[]): void {
   const value = parsed.fm[key];
   if (value === undefined || value === null) return;
@@ -288,12 +340,15 @@ function checkNoStatusKey(parsed: ParsedFile, problems: Problem[]): void {
 }
 
 /**
- * Decomposition links are issue-only (§2.5). A pull request is a proposed
- * change, not a unit of work that can be broken down, so the keys are rejected
- * on `pr.md` rather than silently carried as unknown keys.
+ * Some keys belong to an issue and to nothing else (§2.5), and are rejected on
+ * `pr.md` rather than silently carried as unknown keys.
+ *
+ * A pull request is a proposed change rather than a unit of work: it cannot be
+ * broken down, and it is not scheduled — what orders a review queue is the
+ * state §2.7 derives from the reviews themselves.
  */
-function checkNoLinkKeys(parsed: ParsedFile, problems: Problem[]): void {
-  for (const key of LINK_KEYS) {
+function checkNoIssueOnlyKeys(parsed: ParsedFile, problems: Problem[]): void {
+  for (const key of ISSUE_ONLY_KEYS) {
     if (!hasKey(parsed.nav, key)) continue;
     problems.push({ key, message: `'${key}' is an issue-only key (§2.5)` });
   }
@@ -301,6 +356,9 @@ function checkNoLinkKeys(parsed: ParsedFile, problems: Problem[]): void {
 
 /** The frontmatter keys that record issue decomposition (§2.5). */
 export const LINK_KEYS = ["parent", "subtasks"] as const;
+
+/** Every key §2.5 gives an issue and §2.7 does not give a pull request. */
+export const ISSUE_ONLY_KEYS = [...LINK_KEYS, "rank", "deadline"] as const;
 
 /** Read `parent` defensively; a malformed value reads as no parent. */
 export function readParent(fm: Record<string, unknown>): string | null {
@@ -313,6 +371,24 @@ export function readSubtasks(fm: Record<string, unknown>): string[] {
   const value = fm.subtasks;
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === "string" && isId(entry));
+}
+
+/**
+ * Read `rank` defensively; anything that is not a finite number reads as none.
+ *
+ * `-0` is folded into `0`. The two sort and print identically, so the fold
+ * costs nothing and saves every reader from having to know that.
+ */
+export function readRank(fm: Record<string, unknown>): number | null {
+  const value = fm.rank;
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return value === 0 ? 0 : value;
+}
+
+/** Read `deadline` defensively; anything that is not a calendar date reads as none. */
+export function readDeadline(fm: Record<string, unknown>): string | null {
+  const value = fm.deadline;
+  return typeof value === "string" && isCalendarDate(value) ? value : null;
 }
 
 /** Read `labels` defensively, ignoring malformed entries. */
@@ -383,6 +459,8 @@ export function validateIssue(parsed: ParsedFile): Problem[] {
   checkPersonList(parsed, "assignee", problems);
   checkOptionalString(parsed, "milestone", problems);
   checkFeature(parsed, problems);
+  checkRank(parsed, problems);
+  checkDeadline(parsed, problems);
   checkOptionalString(parsed, "resolution", problems);
   checkIdReference(parsed, "duplicate-of", problems);
   checkIdReference(parsed, "parent", problems);
@@ -409,7 +487,7 @@ export function validatePr(parsed: ParsedFile): Problem[] {
   checkFeature(parsed, problems);
   checkOptionalString(parsed, "resolution", problems);
   checkIdReference(parsed, "superseded-by", problems);
-  checkNoLinkKeys(parsed, problems);
+  checkNoIssueOnlyKeys(parsed, problems);
   checkNoStatusKey(parsed, problems);
   if (parsed.fm.draft !== undefined && typeof parsed.fm.draft !== "boolean") {
     problems.push({ key: "draft", message: "'draft' must be a boolean" });
@@ -522,7 +600,7 @@ function isValidLine(value: unknown): boolean {
 
 /* ------------------------------------------------------------- construction */
 
-export interface NewIssueInput {
+export interface NewEntityInput {
   title: string;
   author: string;
   created: string;
@@ -532,8 +610,15 @@ export interface NewIssueInput {
   milestone?: string;
   /** Feature slugs this entity belongs to (§2.11). */
   features?: string[];
+}
+
+export interface NewIssueInput extends NewEntityInput {
   /** The issue this one is a subtask of; the reciprocal side is the caller's. */
   parent?: string;
+  /** Where it sits in the queue; lower first (§2.5). */
+  rank?: number;
+  /** When the work is wanted, `YYYY-MM-DD` (§2.5). */
+  deadline?: string;
 }
 
 /** Render a new `issue.md`. */
@@ -541,12 +626,21 @@ export function newIssueFile(input: NewIssueInput): string {
   const nav = emptyDoc();
   patchDoc(nav, { title: input.title, author: input.author, created: input.created });
   applyOptionalMeta(nav, input);
+  // `0` is a rank like any other, so what is asked is whether one was given —
+  // not whether it is truthy. Neither key is checked here: this renders what it
+  // was handed, and `validateIssue` is what tells the author it will not do.
+  if (input.rank !== undefined) patchDoc(nav, { rank: input.rank });
+  if (input.deadline) patchDoc(nav, { deadline: input.deadline });
   if (input.parent) patchDoc(nav, { parent: input.parent });
   nav.body = `\n${normalizeBody(input.body)}`;
   return serializeDoc(nav);
 }
 
-export interface NewPrInput extends NewIssueInput {
+/**
+ * A pull request takes what both kinds share and none of what §2.5 keeps for an
+ * issue: it is never a subtask, and it is neither ranked nor due.
+ */
+export interface NewPrInput extends NewEntityInput {
   target: string;
   source: string;
   revisions: Revision[];
@@ -573,7 +667,7 @@ export function newPrFile(input: NewPrInput): string {
   return serializeDoc(nav);
 }
 
-function applyOptionalMeta(nav: NavDoc, input: NewIssueInput): void {
+function applyOptionalMeta(nav: NavDoc, input: NewEntityInput): void {
   if (input.labels?.length) setFlowList(nav, "labels", input.labels);
   writeScalarOrList(nav, "assignee", input.assignee);
   if (input.milestone) patchDoc(nav, { milestone: input.milestone });

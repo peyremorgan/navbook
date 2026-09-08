@@ -16,6 +16,7 @@ import {
   normalizeList,
   normalizeOptional,
   PatchError,
+  parseRankInput,
 } from "../../app/utils/patch";
 
 const BEFORE: EntityEdit = {
@@ -157,5 +158,99 @@ describe("buildEntityPatch", () => {
         milestone: null,
       },
     );
+  });
+});
+
+/**
+ * Rank and deadline through the same three states as every other field, plus
+ * the two things only true of these: a rank of zero is a position and not an
+ * absence, and a bad deadline is refused here rather than at the server.
+ */
+describe("buildEntityPatch — rank and deadline", () => {
+  /** An issue that is neither placed nor dated, which most of them are. */
+  const UNPLACED: EntityEdit = { ...BEFORE, rank: null, deadline: null };
+  /** And one that is both. */
+  const PLACED: EntityEdit = { ...BEFORE, rank: 10, deadline: "2026-10-01" };
+
+  it("places and dates an issue that was neither", () => {
+    assert.deepEqual(buildEntityPatch(UNPLACED, { rank: 20 }), { rank: 20 });
+    assert.deepEqual(buildEntityPatch(UNPLACED, { deadline: "2026-10-01" }), {
+      deadline: "2026-10-01",
+    });
+  });
+
+  it("sends a rank of zero, which is a position rather than an absence", () => {
+    assert.deepEqual(buildEntityPatch(UNPLACED, { rank: 0 }), { rank: 0 });
+    assert.deepEqual(buildEntityPatch(PLACED, { rank: 0 }), { rank: 0 });
+  });
+
+  it("sends a negative and a fractional rank, which the format allows", () => {
+    assert.deepEqual(buildEntityPatch(UNPLACED, { rank: -5 }), { rank: -5 });
+    assert.deepEqual(buildEntityPatch(UNPLACED, { rank: 12.5 }), { rank: 12.5 });
+  });
+
+  it("sends an explicit null to unplace and to undate", () => {
+    assert.deepEqual(buildEntityPatch(PLACED, { rank: null }), { rank: null });
+    assert.deepEqual(buildEntityPatch(PLACED, { deadline: null }), { deadline: null });
+    // A blank field is how a form spells "no value", and means the same thing.
+    assert.deepEqual(buildEntityPatch(PLACED, { deadline: "  " }), { deadline: null });
+  });
+
+  it("is null when what was said is what is already there", () => {
+    assert.equal(buildEntityPatch(PLACED, { rank: 10 }), null);
+    assert.equal(buildEntityPatch(PLACED, { deadline: "2026-10-01" }), null);
+    assert.equal(buildEntityPatch(PLACED, { deadline: " 2026-10-01 " }), null);
+    assert.equal(buildEntityPatch(UNPLACED, { rank: null, deadline: null }), null);
+  });
+
+  it("leaves a key nobody named alone", () => {
+    assert.deepEqual(Object.keys(buildEntityPatch(PLACED, { rank: 30 }) ?? {}), ["rank"]);
+    assert.equal(buildEntityPatch(PLACED, { title: PLACED.title }), null);
+  });
+
+  it("refuses a rank that is not a number, rather than sending it", () => {
+    assert.throws(() => buildEntityPatch(UNPLACED, { rank: Number.NaN }), PatchError);
+    assert.throws(() => buildEntityPatch(UNPLACED, { rank: Number.NaN }), /a rank is a number/);
+    assert.throws(() => buildEntityPatch(UNPLACED, { rank: Number.POSITIVE_INFINITY }), PatchError);
+  });
+
+  it("refuses a deadline that is not a day, rather than sending it", () => {
+    for (const value of ["2026-02-30", "2026-10-01T09:00:00Z", "2026-1-1", "someday"]) {
+      assert.throws(() => buildEntityPatch(UNPLACED, { deadline: value }), PatchError, value);
+    }
+    assert.throws(
+      () => buildEntityPatch(UNPLACED, { deadline: "someday" }),
+      /a deadline is a date/,
+    );
+  });
+
+  it("treats an issue with the keys absent as one carrying neither", () => {
+    // A fragment that did not ask for them arrives with both undefined; that
+    // must read as unplaced rather than as a change.
+    assert.equal(buildEntityPatch(BEFORE, { rank: null }), null);
+    assert.equal(buildEntityPatch(BEFORE, { deadline: null }), null);
+    assert.deepEqual(buildEntityPatch(BEFORE, { rank: 5 }), { rank: 5 });
+  });
+});
+
+describe("parseRankInput", () => {
+  it("reads a blank field as no rank at all", () => {
+    assert.equal(parseRankInput(""), null);
+    assert.equal(parseRankInput("   "), null);
+    assert.equal(parseRankInput(null), null);
+    assert.equal(parseRankInput(undefined), null);
+  });
+
+  it("reads a number, whole, negative or fractional", () => {
+    assert.equal(parseRankInput("10"), 10);
+    assert.equal(parseRankInput(" 0 "), 0);
+    assert.equal(parseRankInput("-5"), -5);
+    assert.equal(parseRankInput("12.5"), 12.5);
+  });
+
+  it("reads text that is not a number as NaN, for the builder to refuse", () => {
+    // Not null: "unplace it" and "that is not a rank" are different answers,
+    // and only one of them is an edit.
+    assert.equal(Number.isNaN(parseRankInput("soon") as number), true);
   });
 });

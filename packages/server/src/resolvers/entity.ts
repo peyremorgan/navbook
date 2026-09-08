@@ -13,9 +13,11 @@ import {
   parentNode,
   type ReviewSummary,
   readAssignees,
+  readDeadline,
   readFeatures,
   readLabels,
   readMerged,
+  readRank,
   readReviewers,
   readRevisions,
   reviewSummary,
@@ -76,6 +78,11 @@ function sharedFields<P>(record: (parent: P) => EntityRecord) {
 
 export const Issue: IssueResolvers = {
   ...sharedFields<IssueParent>((issue) => issue),
+  // Read rather than projected straight off `fm`: a value the file spells in a
+  // way the schema cannot promise reads as absent, which is the same courtesy
+  // `labels` and `assignees` get.
+  rank: (issue) => readRank(issue.fm),
+  deadline: (issue) => readDeadline(issue.fm),
   resolution: (issue) => text(issue.fm, "resolution"),
   duplicateOf: (issue) => text(issue.fm, "duplicate-of"),
   parent: async (issue, _args, ctx) => parentNode(await ctx.repo(), issue) ?? null,

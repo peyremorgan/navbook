@@ -22,6 +22,9 @@ describe("defaultInboxParams", () => {
       kind: "any",
       feature: null,
       finished: false,
+      // Priority, unlike the listings: this page answers "what next", which is
+      // the question a rank was written down to answer (spec 02 §2.5).
+      sort: "priority",
       text: "",
     });
     assert.deepEqual(queryToInboxParams({}), defaultInboxParams());
@@ -40,6 +43,7 @@ describe("queryToInboxParams", () => {
         kind: "pr",
         feature: "authentication",
         status: "all",
+        sort: "newest",
         q: "deadline",
       }),
       {
@@ -47,6 +51,7 @@ describe("queryToInboxParams", () => {
         kind: "pr",
         feature: "authentication",
         finished: true,
+        sort: "newest",
         text: "deadline",
       },
     );
@@ -92,16 +97,49 @@ describe("queryToInboxParams", () => {
   it("names everything as the default view, however it was asked for", () => {
     assert.equal(queryToInboxParams({ view: "everything" }).view, "everything");
   });
+
+  it("reads priority when no order was named, since that is what an inbox is for", () => {
+    assert.equal(queryToInboxParams({}).sort, "priority");
+  });
+
+  it("reads the order that was named, folded", () => {
+    assert.equal(queryToInboxParams({ sort: "deadline" }).sort, "deadline");
+    assert.equal(queryToInboxParams({ sort: "NEWEST" }).sort, "newest");
+  });
+
+  it("falls back rather than failing on an order that is not one", () => {
+    // A URL is typed by hand and shared, and the inbox is a better answer
+    // than an error — the same rule the view and the kind follow.
+    assert.equal(queryToInboxParams({ sort: "priorty" }).sort, "priority");
+    assert.equal(queryToInboxParams({ sort: "" }).sort, "priority");
+  });
 });
 
 describe("inboxParamsToQuery", () => {
+  const base = { sort: "priority" as const };
   const cases: InboxParams[] = [
-    { view: "everything", kind: "any", feature: null, finished: false, text: "" },
-    { view: "assigned", kind: "issue", feature: "billing", finished: true, text: "deadline" },
-    { view: "authored", kind: "pr", feature: null, finished: false, text: "" },
-    { view: "reviews", kind: "any", feature: "auth", finished: true, text: '"two words"' },
+    { view: "everything", kind: "any", feature: null, finished: false, text: "", ...base },
+    {
+      view: "assigned",
+      kind: "issue",
+      feature: "billing",
+      finished: true,
+      text: "deadline",
+      ...base,
+    },
+    { view: "authored", kind: "pr", feature: null, finished: false, text: "", ...base },
+    { view: "reviews", kind: "any", feature: "auth", finished: true, text: '"two words"', ...base },
     // A slug nobody lowercased, which has to come back exactly as it went in.
-    { view: "everything", kind: "any", feature: "Authentication", finished: false, text: "" },
+    {
+      view: "everything",
+      kind: "any",
+      feature: "Authentication",
+      finished: false,
+      text: "",
+      ...base,
+    },
+    { view: "everything", kind: "any", feature: null, finished: false, text: "", sort: "deadline" },
+    { view: "everything", kind: "any", feature: null, finished: false, text: "", sort: "newest" },
   ];
 
   it("round-trips every combination", () => {
@@ -117,9 +155,24 @@ describe("inboxParamsToQuery", () => {
         kind: "any",
         feature: null,
         finished: false,
+        sort: "priority",
         text: "",
       }),
       { view: "reviews" },
+    );
+  });
+
+  it("keeps an order that is not the default, and only that", () => {
+    assert.deepEqual(
+      inboxParamsToQuery({
+        view: "everything",
+        kind: "any",
+        feature: null,
+        finished: false,
+        sort: "newest",
+        text: "",
+      }),
+      { sort: "newest" },
     );
   });
 

@@ -7,6 +7,7 @@ import {
   currentAuthor,
   executeIssueLink,
   findParentIssue,
+  isCalendarDate,
   newIssueFile,
   openIssue,
   planIssueLink,
@@ -26,11 +27,20 @@ export interface IssueOpenOptions extends GlobalFlags {
   assignee?: string[];
   milestone?: string;
   feature?: string[];
+  rank?: number;
+  deadline?: string;
   parent?: string;
 }
 
 export function cmdIssueOpen(ctx: Ctx, title: string, opts: IssueOpenOptions): void {
   if (title.trim() === "") fail("an issue needs a title");
+  // Refused here rather than left to the file's own validation, for the reason
+  // `--parent` is resolved here: being told a flag will not do is worth much
+  // more before an editor has been filled in than after.
+  if (opts.rank !== undefined && !Number.isFinite(opts.rank)) fail("--rank must be a number");
+  if (opts.deadline !== undefined && !isCalendarDate(opts.deadline)) {
+    fail("--deadline must be a calendar date, as YYYY-MM-DD");
+  }
   const { created } = prepareOpen(ctx);
   // Resolved before anything is composed: being told the parent does not exist
   // is worth much more before an editor has been filled in than after.
@@ -50,6 +60,8 @@ export function cmdIssueOpen(ctx: Ctx, title: string, opts: IssueOpenOptions): v
         assignee: opts.assignee,
         milestone: opts.milestone,
         features: opts.feature,
+        rank: opts.rank,
+        deadline: opts.deadline,
         parent: parent?.id,
       }),
     validate: validateIssue,

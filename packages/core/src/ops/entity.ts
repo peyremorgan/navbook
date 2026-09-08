@@ -35,6 +35,7 @@ import {
   parseQuery,
   type Query,
 } from "../core/query.ts";
+import { calendarDateOf } from "../core/time.ts";
 import type { EntityKind, EntityRecord, Repo } from "../core/tree.ts";
 import { uncommittedPaths } from "../git/index-ops.ts";
 import {
@@ -65,14 +66,26 @@ export function selectEntities(repo: Repo, kind: EntityKind): EntityRecord[] {
   return kind === "issue" ? repo.issues : repo.prs;
 }
 
+/**
+ * Newest first, with a stable tie-break on ID — the listing order of spec 04
+ * §4.2, as a comparison.
+ *
+ * Exported because a front end offering the other orders of spec 02 §2.5 ends
+ * each of its chains with this one, and two spellings of "newest first" could
+ * only ever drift apart. `created` is compared as text: the values are ISO
+ * 8601 in UTC, which sorts lexically, and one the file spells unreadably still
+ * has somewhere to go rather than being a reason to fail.
+ */
+export function compareNewest(a: EntityRecord, b: EntityRecord): number {
+  const aCreated = typeof a.fm.created === "string" ? a.fm.created : "";
+  const bCreated = typeof b.fm.created === "string" ? b.fm.created : "";
+  if (aCreated !== bCreated) return aCreated < bCreated ? 1 : -1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
 /** Newest first, with a stable tie-break on ID. */
 export function sortEntities(entities: readonly EntityRecord[]): EntityRecord[] {
-  return [...entities].sort((a, b) => {
-    const aCreated = typeof a.fm.created === "string" ? a.fm.created : "";
-    const bCreated = typeof b.fm.created === "string" ? b.fm.created : "";
-    if (aCreated !== bCreated) return aCreated < bCreated ? 1 : -1;
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-  });
+  return [...entities].sort(compareNewest);
 }
 
 /**
@@ -82,11 +95,17 @@ export function sortEntities(entities: readonly EntityRecord[]): EntityRecord[] 
  * Naming no status here means the CLI's documented default of open only (spec
  * 04 §4.3), which is why the default is applied at parse time rather than in
  * `matchesQuery`: a query carrying no status filters by none.
+ *
+ * The day `deadline:overdue` is judged against comes from the workspace for
+ * the same reason every other stamp does: that is what `NAV_NOW` reaches, so a
+ * fixture asking what is overdue gets the same answer on any machine and on
+ * any day (spec 05 §5.4).
  */
-export function parseListQuery(terms: readonly string[], kind: EntityKind): Query {
+export function parseListQuery(ws: WsCtx, terms: readonly string[], kind: EntityKind): Query {
   const query = parseQuery([...terms], kind);
   if (isQueryError(query)) wsFail("invalid-input", query.message);
   if (query.status.length === 0) query.status = defaultStatuses();
+  query.today = calendarDateOf(ws.now());
   return query;
 }
 

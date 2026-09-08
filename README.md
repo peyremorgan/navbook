@@ -175,6 +175,7 @@ usually enough. A full directory name works too.
 | `nav feature show <slug>` | Its documents, the issues and pull requests that name it, and the commits that touched any of them. |
 | `nav feature spec add <slug> <title>` | Add a specification document. `nav feature spec edit` opens one in `$EDITOR`. |
 | `nav issue open <title> --feature <slug>` | File it against a feature. Repeatable; `nav issue list feature:auth` finds them again. |
+| `nav issue open <title> --rank 20 --deadline 2026-10-01` | Say where it sits in the queue and when it is wanted. `nav issue list --sort priority` reads them back; the web client reorders by dragging. |
 | `nav doctor [--fix]` | Check the tree against the specification. |
 
 `--commit` on any mutating command wraps the change in a well-formed
@@ -188,9 +189,13 @@ commit.
 nav issue list status:closed label:bug assignee:example.com "timeout"
 ```
 
-`status:`, `label:`, `assignee:`, `author:`, `milestone:`, `feature:`, and bare
-words that match the title, description or any comment body. Terms AND
-together; the default query is `status:open`.
+`status:`, `label:`, `assignee:`, `author:`, `milestone:`, `feature:`,
+`deadline:overdue|none`, and bare words that match the title, description or
+any comment body. Terms AND together; the default query is `status:open`.
+
+`--sort priority|deadline|newest` reads the listing in a different order.
+Sorting is a front end's reading and never an order the files hold, so it is
+the same three orders in the browser.
 
 ## Why the design is what it is
 

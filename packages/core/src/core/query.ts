@@ -7,7 +7,7 @@
  * (`label`, `assignee`, `feature`) AND theirs, matching forge convention.
  */
 
-import { readAssignees, readFeatures, readLabels, readReviewers } from "./files.ts";
+import { readAssignees, readDeadline, readFeatures, readLabels, readReviewers } from "./files.ts";
 import { personMatches } from "./person.ts";
 import { DEFAULT_REVIEW_POLICY, type ReviewPolicy } from "./policy.ts";
 import { isAwaiting, REVIEW_DECISIONS, type ReviewDecision, reviewSummary } from "./review.ts";
@@ -26,18 +26,35 @@ export interface Query {
   reviews: ReviewDecision[];
   /** `awaiting:` — who is asked and has not answered on the latest revision. */
   awaiting: string[];
+  /** `deadline:` — where the issue stands against its due date (spec 02 §2.5). */
+  deadline: DeadlineTerm[];
+  /**
+   * The day `overdue` is judged against, `YYYY-MM-DD`.
+   *
+   * Core has no clock, so the caller that has one supplies it: the CLI from
+   * the workspace, which is what carries `NAV_NOW` into a fixture, and the
+   * server from its own. A query that never asks `overdue` never needs it.
+   */
+  today: string | null;
   text: string[];
 }
+
+/** What `deadline:` can ask (spec 04 §4.3). */
+export const DEADLINE_TERMS = ["overdue", "none"] as const;
+export type DeadlineTerm = (typeof DEADLINE_TERMS)[number];
 
 export interface QueryError {
   message: string;
 }
 
 const KEYED_TERM =
-  /^(status|label|assignee|author|milestone|feature|reviewer|review|awaiting):(.*)$/;
+  /^(status|label|assignee|author|milestone|feature|reviewer|review|awaiting|deadline):(.*)$/;
 
 /** Terms that describe something only a pull request has (spec 04 §4.3). */
 const PR_ONLY_TERMS = ["reviewer", "review", "awaiting"] as const;
+
+/** And one that describes something only an issue has (spec 02 §2.5). */
+const ISSUE_ONLY_TERMS = ["deadline"] as const;
 
 export function emptyQuery(): Query {
   return {
@@ -50,6 +67,8 @@ export function emptyQuery(): Query {
     reviewers: [],
     reviews: [],
     awaiting: [],
+    deadline: [],
+    today: null,
     text: [],
   };
 }
@@ -81,6 +100,9 @@ export function parseQuery(terms: readonly string[], kind: EntityKind): Query | 
     if (value === "") return { message: `query term '${term}' is missing a value` };
     if (kind === "issue" && (PR_ONLY_TERMS as readonly string[]).includes(key)) {
       return { message: `'${key}:' describes a pull request; issues have no reviews` };
+    }
+    if (kind === "pr" && (ISSUE_ONLY_TERMS as readonly string[]).includes(key)) {
+      return { message: `'${key}:' describes an issue; pull requests have no deadline` };
     }
     switch (key) {
       case "status": {
@@ -120,6 +142,15 @@ export function parseQuery(terms: readonly string[], kind: EntityKind): Query | 
       case "awaiting":
         query.awaiting.push(value);
         break;
+      case "deadline": {
+        if (!(DEADLINE_TERMS as readonly string[]).includes(value)) {
+          return {
+            message: `unknown deadline term '${value}' (expected ${DEADLINE_TERMS.join(", ")})`,
+          };
+        }
+        query.deadline.push(value as DeadlineTerm);
+        break;
+      }
       default:
         query.milestones.push(value);
         break;
@@ -178,6 +209,8 @@ export function matchesQuery(
     if (!features.includes(wanted.toLowerCase())) return false;
   }
 
+  if (query.deadline.length > 0 && !matchesDeadline(query, entity)) return false;
+
   const reviewers = readReviewers(entity.fm);
   for (const wanted of query.reviewers) {
     if (!reviewers.some((person) => personMatches(wanted, person))) return false;
@@ -202,6 +235,29 @@ export function matchesQuery(
     if (!matchesText(needle.toLowerCase(), entity)) return false;
   }
   return true;
+}
+
+/**
+ * Where an issue stands against its deadline (spec 02 §2.5).
+ *
+ * The terms OR, as every single-valued key's do: asking for both the overdue
+ * and the undated is a question with an answer, unlike two labels naming
+ * different things.
+ *
+ * A query that asks `overdue` without a day to judge it against is a caller
+ * that forgot to supply one, and it is told so. Matching nothing would be a
+ * listing that looks answered and is not.
+ */
+function matchesDeadline(query: Query, entity: EntityRecord): boolean {
+  const deadline = readDeadline(entity.fm);
+  return query.deadline.some((term) => {
+    if (term === "none") return deadline === null;
+    if (query.today === null) {
+      throw new Error("'deadline:overdue' needs the day to judge it against");
+    }
+    // Strict: work wanted today is wanted today, and is not yet late.
+    return deadline !== null && deadline < query.today;
+  });
 }
 
 function matchesText(needle: string, entity: EntityRecord): boolean {

@@ -31,11 +31,13 @@
 <script setup lang="ts">
 import { statusLabel } from "~/utils/entities";
 import type { FilterState } from "~/utils/filter-params";
-import type { Status } from "~~/src/generated/gql/graphql";
+import type { DeadlineState, Status } from "~~/src/generated/gql/graphql";
 
 const props = defineProps<{
   filter: FilterState;
   statuses: readonly Status[];
+  /** Absent for pull requests, which are not scheduled (spec 02 §2.5). */
+  deadlines?: readonly DeadlineState[];
   labels: string[];
   assignees: string[];
   authors: string[];
@@ -58,6 +60,25 @@ function toggleStatus(status: Status): void {
     status: statusActive(status)
       ? selected.filter((item) => item !== status)
       : [...selected, status],
+  });
+}
+
+/** What each deadline chip says; the enum's own words are not the reader's. */
+const DEADLINE_LABEL: Record<DeadlineState, string> = {
+  OVERDUE: "Overdue",
+  NONE: "No deadline",
+};
+
+function deadlineActive(state: DeadlineState): boolean {
+  return props.filter.deadline.includes(state);
+}
+
+function toggleDeadline(state: DeadlineState): void {
+  const selected = props.filter.deadline;
+  emit("patch", {
+    deadline: deadlineActive(state)
+      ? selected.filter((item) => item !== state)
+      : [...selected, state],
   });
 }
 
@@ -131,6 +152,32 @@ const menusId = useId();
           @click="toggleStatus(status)"
         >
           {{ statusLabel(status) }}
+        </UButton>
+      </div>
+
+      <!--
+        Chips beside the status ones, and for the same reasons: there are two,
+        they are reached for often, and none selected means no narrowing. Only
+        an issue has a deadline, so the group is absent rather than empty on the
+        pull request listing.
+      -->
+      <div
+        v-if="props.deadlines?.length"
+        class="flex items-center gap-1"
+        role="group"
+        aria-label="Deadline"
+      >
+        <UButton
+          v-for="state in props.deadlines"
+          :key="state"
+          size="sm"
+          color="neutral"
+          :variant="deadlineActive(state) ? 'soft' : 'ghost'"
+          :aria-pressed="deadlineActive(state)"
+          :data-testid="`filter-deadline-${state.toLowerCase()}`"
+          @click="toggleDeadline(state)"
+        >
+          {{ DEADLINE_LABEL[state] }}
         </UButton>
       </div>
 

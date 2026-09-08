@@ -42,6 +42,7 @@ import {
   cmdPrUpdate,
 } from "./commands/pr.ts";
 import type { Ctx } from "./context.ts";
+import { DEFAULT_SORT, SORT_ORDERS } from "./sort.ts";
 
 /**
  * Read straight from package.json rather than duplicating the version as a
@@ -318,6 +319,13 @@ function buildIssueCommand(getCtx: () => Ctx): Command {
     .option("--assignee <email>", "assign to a person (repeatable)", collect, [])
     .option("--milestone <name>", "milestone")
     .option("--feature <slug>", "attach it to a feature (repeatable)", collect, [])
+    // Number rather than parseInt, and blank rather than 0, for the reason
+    // `--depth` does it: a value the command must refuse has to reach it
+    // intact rather than arrive silently rounded or defaulted.
+    .option("--rank <n>", "where it sits in the queue; lower first", (value) =>
+      value.trim() === "" ? Number.NaN : Number(value),
+    )
+    .option("--deadline <date>", "when the work is wanted, YYYY-MM-DD")
     .option("--parent <id>", "file it as a subtask of an existing issue")
     .option("--commit", commitHelp("issue"))
     .action((title, opts) => cmdIssueOpen(getCtx(), title, opts));
@@ -340,6 +348,11 @@ function buildIssueCommand(getCtx: () => Ctx): Command {
 
   addSharedVerbs(issue, "issue", getCtx, {
     extraColumns: [],
+    configureList: (command) =>
+      command.option(
+        "--sort <order>",
+        `listing order: ${SORT_ORDERS.join(", ")} (default ${DEFAULT_SORT})`,
+      ),
     configureShow: (command) =>
       // Number, not parseInt: '2.5' has to reach the command as 2.5 so it can
       // be refused, rather than being silently rounded to something valid.

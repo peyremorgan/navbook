@@ -26,7 +26,7 @@ import { PR_STATUSES } from "~/utils/filter-params";
 
 const route = useRoute();
 const router = useRouter();
-const filter = useEntityFilter(PR_STATUSES);
+const filter = useEntityFilter({ statuses: PR_STATUSES });
 
 const allRefs = computed({
   get: () => route.query.refs === "all",

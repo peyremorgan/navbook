@@ -273,7 +273,7 @@ export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void 
       when: (entities) => entities.some((entity) => summaryOf(entity).reviewers.length > 0),
     },
   ];
-  const query = parseListQuery(terms, "pr");
+  const query = parseListQuery(ctx, terms, "pr");
 
   if (!opts.allRefs) {
     reportList(ctx, "pr", listEntities(ctx, "pr", query), { ...opts, extraColumns });

@@ -7,6 +7,7 @@
  */
 
 import {
+  calendarDateOf,
   findEntity,
   findFeature,
   listEntities,
@@ -17,14 +18,27 @@ import {
   runDoctor,
   WorkspaceError,
 } from "@navbook/core";
-import { run } from "../errors.ts";
+import type { GraphQLCtx } from "../context.ts";
+import { invalidInput, run } from "../errors.ts";
 import type { QueryResolvers } from "../generated/resolver-types.ts";
 import type { PrParent } from "../mappers.ts";
 import { toQuery } from "./map.ts";
 
+/**
+ * The day a `deadline` filter is judged against: the server's own, in UTC.
+ *
+ * Its clock rather than the caller's, so that two people asking the same
+ * question get the same answer. A browser drawing "2 days overdue" beside a
+ * row reads its own calendar and may disagree for the few hours their days do
+ * not line up; what a filter returns is one repository's answer.
+ */
+function today(ctx: GraphQLCtx): string {
+  return calendarDateOf(ctx.ws.now());
+}
+
 export const Query: QueryResolvers = {
   issues: (_parent, args, ctx) =>
-    run(() => ctx.sync.read(() => listEntities(ctx.ws, "issue", toQuery(args.filter)))),
+    run(() => ctx.sync.read(() => listEntities(ctx.ws, "issue", toQuery(args.filter, today(ctx))))),
 
   issue: (_parent, args, ctx) =>
     run(() => ctx.sync.read(() => findEntity(ctx.ws, "issue", args.ref))),
@@ -32,7 +46,13 @@ export const Query: QueryResolvers = {
   prs: (_parent, args, ctx) =>
     run(() =>
       ctx.sync.read((): PrParent[] => {
-        const query = toQuery(args.filter);
+        // The mirror of what `parseQuery` refuses on an issue: a term that
+        // describes something this noun does not have is an error rather than
+        // a filter that matches nothing (spec 04 §4.3).
+        if (args.filter?.deadline?.length) {
+          throw invalidInput("'deadline' describes an issue; pull requests have no deadline");
+        }
+        const query = toQuery(args.filter, today(ctx));
         // A pull request's files live on the branch it proposes to merge, so
         // the working tree usually does not hold them (spec 03 §3.5).
         if (args.allRefs) {

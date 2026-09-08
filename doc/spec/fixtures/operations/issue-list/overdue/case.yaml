@@ -1,0 +1,7 @@
+spec-version: 1
+description: deadline:overdue is judged against the day the command runs, and the day itself is not yet late
+init: {from: before}
+run:
+  command: [issue, list, "deadline:overdue"]
+  env: {NAV_NOW: "2026-08-06T12:00:00Z"}
+expect: {exit: 0, stdout: expected/stdout.txt}
