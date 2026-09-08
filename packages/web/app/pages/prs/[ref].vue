@@ -17,7 +17,7 @@
 <script setup lang="ts">
 import { useMutation, useQuery } from "@vue/apollo-composable";
 import { ADD_COMMENT, UPDATE_PR } from "~/graphql/mutations";
-import { PR_QUERY } from "~/graphql/queries";
+import { PR_QUERY, REVIEW_POLICY_QUERY } from "~/graphql/queries";
 import { buildCommentTree, countComments } from "~/utils/comments";
 import { newestFirst, shortSha } from "~/utils/entities";
 import { describeApiError, unservedBranch } from "~/utils/errors";
@@ -34,6 +34,12 @@ const { result, loading, error, refetch } = useQuery(PR_QUERY, () => ({ ref: ref
   fetchPolicy: "cache-and-network",
 });
 const pr = computed(() => result.value?.pr ?? null);
+
+// A property of the repository rather than of this pull request, so it is its
+// own query: it explains the decision beside it, and a page that failed to
+// read it should still show everything else (spec 02 §2.10).
+const { result: policyResult } = useQuery(REVIEW_POLICY_QUERY);
+const reviewPolicy = computed(() => policyResult.value?.reviewPolicy ?? null);
 
 const comments = computed(() => buildCommentTree(pr.value?.comments ?? []));
 const commentCount = computed(() => countComments(comments.value));
@@ -169,7 +175,11 @@ const branchHint = computed(() => refusedOn.value);
           </span>
           <span>opened <TimeAgo :iso="pr.created" /> by <PersonLabel :person="pr.author" /></span>
           <span>· {{ commentCount }} comment{{ commentCount === 1 ? "" : "s" }}</span>
-          <ReviewBadge :decision="pr.reviewDecision" :asked="pr.reviewers.length > 0" />
+          <ReviewBadge
+            :decision="pr.reviewDecision"
+            :asked="pr.reviewers.length > 0"
+            :approvals="pr.approvals"
+          />
         </div>
         <div v-if="pr.refs.length" class="flex flex-wrap items-center gap-1 text-xs text-muted">
           <UIcon name="i-lucide-git-branch" class="size-3" />
@@ -259,6 +269,7 @@ const branchHint = computed(() => refusedOn.value);
           >
             <template #display>
               <ReviewList :reviews="pr.reviews" />
+              <ReviewPolicyNote :policy="reviewPolicy" class="mt-2" />
             </template>
           </LabelEditor>
 

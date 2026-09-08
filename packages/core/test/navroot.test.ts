@@ -24,7 +24,7 @@ import {
   findRepo,
 } from "../src/git/repo.ts";
 import { rewritePlan } from "../src/ops/entity.ts";
-import { makeWsCtx, WorkspaceError } from "../src/workspace/index.ts";
+import { makeWsCtx, readReviewPolicy, WorkspaceError } from "../src/workspace/index.ts";
 
 /** A fresh repository with one commit, so the index and HEAD both exist. */
 function inRepo(use: (dir: string) => void): void {
@@ -366,5 +366,57 @@ describe("rewritePlan", () => {
         }),
       (error: unknown) => error === boom,
     );
+  });
+});
+
+describe("readReviewPolicy", () => {
+  it("reads the marker of whichever directory discovery settled on", () => {
+    // The point of reading it here rather than out of a parsed tree: a renamed
+    // root's policy has to be found by the same rules the root itself is.
+    inRepo((dir) => {
+      plantMarker(dir, ".issues");
+      writeFileSync(
+        join(dir, ".issues", NAV_MARKER),
+        '{"version": 1, "review": {"minApprovals": 3}}',
+        "utf8",
+      );
+      git(["add", "-A"], { cwd: dir });
+      const ws = makeWsCtx({ cwd: dir });
+      assert.equal(ws.navDir, ".issues");
+      assert.deepEqual(readReviewPolicy(ws).policy, { selfReview: false, minApprovals: 3 });
+    });
+  });
+
+  it("declares nothing where there is no marker, which is not a fault", () => {
+    inRepo((dir) => {
+      mkdirSync(join(dir, ".navbook"), { recursive: true });
+      const reading = readReviewPolicy(makeWsCtx({ cwd: dir }));
+      assert.equal(reading.declared, false);
+      assert.deepEqual(reading.problems, []);
+    });
+  });
+
+  it("reports a marker it cannot read rather than throwing on it", () => {
+    inRepo((dir) => {
+      plantMarker(dir, ".navbook");
+      writeFileSync(join(dir, ".navbook", NAV_MARKER), "{ not json", "utf8");
+      assert.deepEqual(readReviewPolicy(makeWsCtx({ cwd: dir })).problems, ["is not valid JSON"]);
+    });
+  });
+
+  it("treats a path that is not a file as no marker, as the tree walk does", () => {
+    // A directory wearing the name is pathological, but the read must not throw
+    // where the walk simply skips: `readNavTree` reads files, so `parseTree`
+    // sees no marker here, and a `doctor` and a `pr list` that disagreed about
+    // whether a policy exists would be worse than one counting by the defaults.
+    inRepo((dir) => {
+      mkdirSync(join(dir, ".navbook", NAV_MARKER), { recursive: true });
+      const reading = readReviewPolicy(makeWsCtx({ cwd: dir }));
+      assert.deepEqual(reading, {
+        policy: { selfReview: false, minApprovals: 1 },
+        declared: false,
+        problems: [],
+      });
+    });
   });
 });

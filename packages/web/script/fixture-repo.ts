@@ -143,8 +143,14 @@ export function createFixtureRepo(options: FixtureOptions = {}): FixtureRepo {
     writeFileSync(target, content, "utf8");
   };
 
-  // The skeleton exactly as `nav init` writes it, marker included.
-  write(".navbook/navbook.json", '{\n  "version": 1\n}\n');
+  // The skeleton as `nav init` writes it, plus a review policy — because the
+  // served pull request has exactly one approval, and asking for two is what
+  // makes the shortfall visible on the page without anybody arranging it
+  // (spec 02 §2.10).
+  write(
+    ".navbook/navbook.json",
+    `${JSON.stringify({ version: 1, review: { selfReview: false, minApprovals: 2 } }, null, 2)}\n`,
+  );
   for (const path of ["issues/open", "issues/closed", "prs/open", "prs/merged", "prs/closed"]) {
     write(`.navbook/${path}/.gitkeep`, "");
   }

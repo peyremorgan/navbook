@@ -1,0 +1,20 @@
+spec-version: 1
+description: approving your own pull request is recorded, and says it will not be counted
+history:
+  - {id: base, branch: main, apply: history/00-base, message: "feat: initial code", date: 2026-08-01T10:00:00Z}
+  - {id: feat, branch: feat/auth, from: base, apply: history/01-feat, message: "feat: rework auth tokens", date: 2026-08-04T16:00:00Z}
+run:
+  checkout: feat/auth
+  before:
+    - nav: [pr, open, --title, "Refactor auth token handling", -m, "Replaces the ad-hoc token cache.", --commit]
+      env: {NAV_IDS: "dk3mp2x9", NAV_NOW: "2026-08-04T16:40:00Z"}
+  # The file is written either way: a review is a record of what somebody said,
+  # and it is never refused (spec 02 §2.7). What the warning prevents is
+  # believing the decision moved.
+  command: [pr, review, dk3m, --approve, -m, "Looks right to me."]
+  env: {NAV_NOW: "2026-08-05T10:14:33Z", NAV_IDS: "q8zm3vp1"}
+expect:
+  exit: 0
+  stdout: expected/stdout.txt
+  stderr-contains: ["your own pull request", "will not count"]
+  tree: expected/tree

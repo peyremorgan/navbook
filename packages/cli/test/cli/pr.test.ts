@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { makeNavRepo, type TempRepo } from "../helpers/temprepo.ts";
+import { FIXTURE_IDENTITY, makeNavRepo, type TempRepo } from "../helpers/temprepo.ts";
 
 interface Scenario {
   repo: TempRepo;
@@ -52,6 +52,23 @@ function commentFile(repo: TempRepo, name: string): string {
 
 /** The fixture pull request's own file, as `repo.write` addresses it. */
 const PR_PATH = ".navbook/prs/open/dk3mp2x9-refactor-auth/pr.md";
+
+/** Declare a review policy in the marker, on the branch checked out now. */
+function declarePolicy(repo: TempRepo, review: unknown): void {
+  repo.write(".navbook/navbook.json", `${JSON.stringify({ version: 1, review }, null, 2)}\n`);
+  repo.commitAll("chore: declare a review policy");
+}
+
+/** Approve the fixture pull request as somebody, from its own branch. */
+function approveAs(repo: TempRepo, email: string, id: string): void {
+  repo.git(["config", "user.email", email]);
+  const result = repo.nav(["pr", "review", "dk3m", "--approve", "-m", "Fine by me.", "--commit"], {
+    NAV_IDS: id,
+    NAV_NOW: "2026-08-06T10:00:00Z",
+  });
+  assert.equal(result.code, 0, result.stderr);
+  repo.git(["config", "user.email", FIXTURE_IDENTITY.email]);
+}
 
 function prFile(repo: TempRepo, status: string): string {
   return readFileSync(
@@ -906,5 +923,386 @@ describe("history-based doctor checks", () => {
     } finally {
       repo.cleanup();
     }
+  });
+});
+
+describe("the review policy", () => {
+  describe("nav pr show", () => {
+    it("says nothing extra where no policy is declared", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        const shown = repo.nav(["pr", "show", "dk3m"]);
+        assert.equal(shown.code, 0, shown.stderr);
+        assert.equal(shown.stdout.includes("policy:"), false, shown.stdout);
+        assert.equal(shown.stdout.includes("approvals"), false, shown.stdout);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("names the policy even before anybody has reviewed", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        declarePolicy(repo, { selfReview: false, minApprovals: 2 });
+        const shown = repo.nav(["pr", "show", "dk3m"]).stdout;
+        assert.match(shown, /policy: +2 approvals required, self-review off/);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("counts the approvals it has against the ones it needs", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        declarePolicy(repo, { minApprovals: 2 });
+        approveAs(repo, "alice@example.com", "aaa11111");
+        const shown = repo.nav(["pr", "show", "dk3m"]).stdout;
+        assert.match(shown, /review: +pending {2}\(1 of 2 approvals\)/);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("shows the shortfall before anybody has been asked, since the policy is the ask", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        declarePolicy(repo, { minApprovals: 2 });
+        const shown = repo.nav(["pr", "show", "dk3m"]).stdout;
+        assert.match(shown, /review: +pending {2}\(0 of 2 approvals\)/);
+        assert.equal(
+          shown.includes("reviewers:"),
+          false,
+          "and nobody is listed, because nobody is",
+        );
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("still says nothing about a pull request nobody asked and one approval suits", () => {
+      // The rule the count is an exception to: a decision of `pending` where
+      // nothing is outstanding is noise, and stays hidden.
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        declarePolicy(repo, { minApprovals: 1 });
+        const shown = repo.nav(["pr", "show", "dk3m"]).stdout;
+        assert.equal(shown.includes("review:"), false, shown);
+        assert.match(shown, /policy: +1 approval required/);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("leaves the count off when one approval is what is wanted", () => {
+      // "1 of 1" beside every decision is a fact nobody was missing.
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        declarePolicy(repo, { minApprovals: 1 });
+        approveAs(repo, "alice@example.com", "aaa11111");
+        const shown = repo.nav(["pr", "show", "dk3m"]).stdout;
+        assert.match(shown, /review: +approved/);
+        assert.equal(shown.includes("1 of 1"), false, shown);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("counts the author's own approval when self-review is allowed", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        declarePolicy(repo, { selfReview: true });
+        const filed = repo.nav(["pr", "review", "dk3m", "--approve", "-m", "Mine.", "--commit"], {
+          NAV_IDS: "aaa11111",
+          NAV_NOW: "2026-08-06T10:00:00Z",
+        });
+        assert.equal(filed.code, 0, filed.stderr);
+        assert.equal(filed.stderr.includes("will not count"), false, "and says nothing about it");
+        const shown = repo.nav(["pr", "show", "dk3m"]).stdout;
+        assert.match(shown, /review: +approved/);
+        assert.match(shown, /policy: +1 approval required, self-review on/);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("carries the policy and the count into --json", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        declarePolicy(repo, { minApprovals: 2 });
+        approveAs(repo, "alice@example.com", "aaa11111");
+        const shown = JSON.parse(repo.nav(["pr", "show", "dk3m", "--json"]).stdout);
+        assert.deepEqual(shown.review.approvals, { given: 1, required: 2 });
+        assert.deepEqual(shown.reviewPolicy, {
+          selfReview: false,
+          minApprovals: 2,
+          declared: true,
+        });
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("reports the defaults as undeclared, so a script can tell them apart", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        const shown = JSON.parse(repo.nav(["pr", "show", "dk3m", "--json"]).stdout);
+        assert.deepEqual(shown.reviewPolicy, {
+          selfReview: false,
+          minApprovals: 1,
+          declared: false,
+        });
+      } finally {
+        repo.cleanup();
+      }
+    });
+  });
+
+  describe("nav pr review", () => {
+    it("warns an author that their own approval will not count", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        const filed = repo.nav(["pr", "review", "dk3m", "--approve", "-m", "Mine.", "--commit"], {
+          NAV_IDS: "aaa11111",
+          NAV_NOW: "2026-08-06T10:00:00Z",
+        });
+        assert.equal(filed.code, 0, "the review is filed all the same");
+        assert.match(filed.stderr, /your own pull request/);
+        assert.match(filed.stderr, /this approve will not count/);
+        assert.match(repo.nav(["pr", "show", "dk3m"]).stdout, /Mine\./, "and it is on the record");
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("says nothing about a verdict that judges nothing", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        const filed = repo.nav(["pr", "review", "dk3m", "-m", "Read it."], {
+          NAV_IDS: "aaa11111",
+          NAV_NOW: "2026-08-06T10:00:00Z",
+        });
+        assert.equal(filed.stderr.includes("will not count"), false, filed.stderr);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("says nothing to somebody reviewing a pull request that is not theirs", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        repo.git(["config", "user.email", "alice@example.com"]);
+        const filed = repo.nav(["pr", "review", "dk3m", "--approve", "-m", "Fine."], {
+          NAV_IDS: "aaa11111",
+          NAV_NOW: "2026-08-06T10:00:00Z",
+        });
+        assert.equal(filed.stderr.includes("will not count"), false, filed.stderr);
+      } finally {
+        repo.cleanup();
+      }
+    });
+  });
+
+  describe("nav pr merge", () => {
+    it("merges in silence where no policy is declared", () => {
+      const { repo } = withOpenPr();
+      try {
+        const merged = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+        assert.equal(merged.code, 0, merged.stderr);
+        assert.equal(merged.stdout.includes("required approval"), false, merged.stdout);
+        assert.equal(merged.stderr, "");
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("says what is missing and merges anyway with no terminal to ask", () => {
+      // A pipeline that stopped for a question nobody can answer would be the
+      // gate spec 02 §2.7 forbids, arrived at by accident.
+      const { repo } = withOpenPr();
+      try {
+        declarePolicy(repo, { minApprovals: 2 });
+        const merged = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+        assert.equal(merged.code, 0, merged.stderr);
+        assert.match(merged.stdout, /#dk3mp2x9 has 0 of 2 required approvals/);
+        assert.match(merged.stderr, /merging #dk3mp2x9 anyway; pass --yes/);
+        assert.match(merged.stdout, /Merged #dk3mp2x9/);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("says what is missing without the warning when --yes answered in advance", () => {
+      const { repo } = withOpenPr();
+      try {
+        declarePolicy(repo, { minApprovals: 2 });
+        const merged = repo.nav(["pr", "merge", "dk3m", "--yes"], {
+          NAV_NOW: "2026-08-07T12:00:00Z",
+        });
+        assert.equal(merged.code, 0, merged.stderr);
+        assert.match(merged.stdout, /#dk3mp2x9 has 0 of 2 required approvals/);
+        assert.equal(merged.stderr, "", "nothing is left to warn about");
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("names who is blocking rather than counting approvals", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        repo.git(["config", "user.email", "alice@example.com"]);
+        repo.nav(["pr", "review", "dk3m", "--request-changes", "-m", "Not yet.", "--commit"], {
+          NAV_IDS: "aaa11111",
+          NAV_NOW: "2026-08-06T10:00:00Z",
+        });
+        repo.git(["config", "user.email", FIXTURE_IDENTITY.email]);
+        repo.git(["checkout", "--quiet", "main"]);
+        declarePolicy(repo, { minApprovals: 1 });
+        const merged = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+        assert.equal(merged.code, 0, merged.stderr);
+        assert.match(merged.stdout, /has changes requested by .*alice@example\.com/);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("merges in silence once the policy is met", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        approveAs(repo, "alice@example.com", "aaa11111");
+        repo.git(["checkout", "--quiet", "main"]);
+        declarePolicy(repo, { minApprovals: 1 });
+        const merged = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+        assert.equal(merged.code, 0, merged.stderr);
+        assert.equal(merged.stdout.includes("required approval"), false, merged.stdout);
+        assert.equal(merged.stderr, "");
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("counts by the target branch's policy, since that is the tree being merged into", () => {
+      const { repo } = withOpenPr();
+      try {
+        declarePolicy(repo, { minApprovals: 2 });
+        const merged = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+        assert.equal(merged.code, 0, merged.stderr);
+        assert.match(merged.stdout, /0 of 2 required approvals/);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("does not count by a policy the source branch alone declares", () => {
+      // The branch asking to be merged does not get to say how the branch
+      // receiving it counts. Only the source declares one here, so a message
+      // mentioning it at all would be the wrong marker being read.
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        declarePolicy(repo, { minApprovals: 9 });
+        repo.git(["checkout", "--quiet", "main"]);
+        const merged = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+        assert.equal(merged.code, 0, merged.stderr);
+        assert.equal(merged.stdout.includes("required approval"), false, merged.stdout);
+        assert.equal(merged.stderr, "");
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("warns rather than asks when finishing a merge that stopped for conflicts", () => {
+      // Two branches editing the marker is an ordinary conflict, and it is the
+      // shortest route to one. By `--continue` the merge is under way, so the
+      // moment to have asked has passed and the shortfall is only reported.
+      const { repo } = withOpenPr({ advanceMain: true });
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        declarePolicy(repo, { minApprovals: 9 });
+        repo.git(["checkout", "--quiet", "main"]);
+        declarePolicy(repo, { minApprovals: 2 });
+
+        const stopped = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+        assert.equal(stopped.code, 1);
+        assert.match(stopped.stderr, /produced conflicts/);
+
+        repo.write(
+          ".navbook/navbook.json",
+          '{\n  "version": 1,\n  "review": {"minApprovals": 2}\n}\n',
+        );
+        repo.git(["add", ".navbook/navbook.json"]);
+        const finished = repo.nav(["pr", "merge", "--continue", "dk3m"], {
+          NAV_NOW: "2026-08-07T12:00:00Z",
+        });
+        assert.equal(finished.code, 0, finished.stderr);
+        assert.match(finished.stderr, /#dk3mp2x9 was merged with 0 of 2 required approvals/);
+        assert.match(finished.stdout, /Merged #dk3mp2x9/);
+      } finally {
+        repo.cleanup();
+      }
+    });
+  });
+
+  describe("a marker nobody can read", () => {
+    it("is a doctor error, so the pre-commit hook stops it", () => {
+      const repo = makeNavRepo();
+      try {
+        repo.write(".navbook/navbook.json", '{"version": 1, "review": {"minApprovals": 0}}');
+        repo.commitAll("chore: a policy with a typo in it");
+        const doctor = repo.nav(["doctor"]);
+        assert.equal(doctor.code, 2);
+        assert.match(doctor.stdout, /D15 +\.navbook\/navbook\.json: 'review\.minApprovals'/);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("is caught by --staged, before the commit that would carry it", () => {
+      const repo = makeNavRepo();
+      try {
+        repo.write(".navbook/navbook.json", "{ not json at all");
+        repo.git(["add", "-A"]);
+        const doctor = repo.nav(["doctor", "--staged"]);
+        assert.equal(doctor.code, 2);
+        assert.match(doctor.stdout, /D15/);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("stops no command: every reader falls back and says what it found", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.write(".navbook/navbook.json", '{"version": 1, "review": {"selfReview": "yes"}}');
+        repo.commitAll("chore: a policy with a typo in it");
+
+        const listed = repo.nav(["pr", "list", "--all-refs"]);
+        assert.equal(listed.code, 0, listed.stderr);
+        assert.match(listed.stdout, /#dk3mp2x9/);
+        assert.match(
+          listed.stderr,
+          /'review\.selfReview' must be true or false; using the default/,
+        );
+
+        const merged = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+        assert.equal(merged.code, 0, merged.stderr);
+        assert.match(merged.stderr, /using the default/);
+      } finally {
+        repo.cleanup();
+      }
+    });
   });
 });

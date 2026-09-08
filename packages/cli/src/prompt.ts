@@ -39,6 +39,18 @@ export function confirmAndPerform(ctx: Ctx, opts: ConfirmOptions): boolean {
   return true;
 }
 
+/**
+ * Whether there is somebody at a terminal to answer a question.
+ *
+ * Both ends matter: the question is written to stdout and the answer is read
+ * from stdin, so a run with either one redirected has nobody to ask. A caller
+ * that would otherwise block a pipeline on a prompt uses this to decide to
+ * say its piece and carry on instead.
+ */
+export function isInteractive(ctx: Ctx): boolean {
+  return process.stdin.isTTY === true && ctx.stdout.isTTY === true;
+}
+
 /** Ask a yes/no question; anything but `y`/`yes` — including EOF — is a no. */
 export function askYesNo(ctx: Ctx, question: string): boolean {
   ctx.stdout.write(question);

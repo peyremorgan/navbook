@@ -31,9 +31,11 @@ with the user's confirmation).
 - Machine output: every listing command accepts `--json` (one JSON object per
   entity, schema mirroring the frontmatter plus `id`, `slug`, `status`,
   `path`). `nav pr show --json` additionally carries `review`, the derived
-  state of [02 §2.7](02-data-model.md), so a script need not re-derive it. It
-  is on `show` and not on `list` because `show` has already read every comment
-  it is computed from, and a listing that read them all to fill in one column
+  state of [02 §2.7](02-data-model.md) including the `approvals` it counted,
+  and `reviewPolicy`, the policy it counted them against ([02
+  §2.10](02-data-model.md)), so a script need not re-derive either. They are on
+  `show` and not on `list` because `show` has already read every comment they
+  are computed from, and a listing that read them all to fill in one column
   would pay for it on every entity in the tree.
 - Exit codes: `0` success; `1` operational error (not found, ambiguous,
   malformed input); `2` format violation detected (doctor errors).
@@ -162,7 +164,9 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   branch; `--all-refs` scans all local and fetched remote branches. Same
   query grammar.
 - `nav pr show <id>`, `nav pr edit <id>`, `nav pr comment <id> ...` — as the
-  corresponding `issue` verbs, operating on `pr.md`.
+  corresponding `issue` verbs, operating on `pr.md`. `show` reports the review
+  decision, how many approvals stand against the number required when that is
+  more than one, and the declared policy itself ([02 §2.10](02-data-model.md)).
 - `nav pr close <id> [--resolution declined]` — record the PR under
   `prs/closed/` on the current branch. A PR's files normally live on its source
   branch, so when the ID is not present in the checked-out tree the directory is
@@ -207,7 +211,13 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   to a line without judging anything: an inline note is discussion about a
   place in the diff, and turning every one of them into a review would say its
   author had read the whole revision.
-- `nav pr merge <id> [--no-ff]` — from the target branch: `git merge` the
+
+  A verdict on one's own pull request is written like any other, and warns that
+  it will not be counted, unless the review policy allows self-review ([02
+  §2.10](02-data-model.md)). The file is the record and it is never refused;
+  what the warning prevents is somebody approving their own work and believing
+  they have moved the decision.
+- `nav pr merge <id> [--no-ff] [-y|--yes]` — from the target branch: `git merge` the
   source branch with the PR directory moved to `prs/merged/` inside the merge
   commit, then record the `merged:` block in a follow-up commit
   (the merge SHA is unknowable inside the merge itself). When the merge can
@@ -215,12 +225,24 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   the move, so the archive and the `merged:` block are written together in the
   immediate follow-up commit that [02 §2.8](02-data-model.md) allows; the block
   then has no `commit:` key, because no merge commit exists to name.
+
+  When the repository declares a review policy ([02 §2.10](02-data-model.md))
+  and the pull request's decision is not `approved`, it MUST print what is
+  missing — how many of the required approvals it has, or who requested
+  changes — before merging. It then asks `Merge anyway? [y/N]`, which `--yes`
+  answers in advance. Where there is no terminal to ask, it warns on stderr and
+  merges: a pipeline that stopped to ask a question nobody can answer would be
+  a gate by accident, which [02 §2.7](02-data-model.md) forbids. Declining the
+  question exits 1 without merging — the operator's own answer, not a refusal
+  by the tool. A repository that declares no policy is merged in silence.
 - `nav pr merge --continue [<id>]` — finish a merge that stopped for conflict
   resolution. `nav pr merge` never aborts a conflicted merge: the author's
   resolution is worth keeping, and the remaining steps (moving the directory
   and recording `merged:`) are exactly what is easy to forget. `--continue`
   refuses while any path is still unmerged, and infers the pull request from
-  `MERGE_HEAD` when no ID is given.
+  `MERGE_HEAD` when no ID is given. An unmet policy is reported here as a
+  warning and never as a question: the merge is already under way, and the
+  moment to have asked has passed.
 
 ### Features — `nav feature <verb>`
 
@@ -315,6 +337,7 @@ Doctor checks (E = error → exit 2, W = warning → exit 0 with report):
 | D12 | The `parent` chain loops, an issue naming itself included | E |
 | D13 | The layout and schema of `specs/`: a feature directory name that is not a slug, a file directly in `specs/`, a feature directory with no `feature.md`, or a `feature.md` or document missing a required key ([2.11](02-data-model.md)) | E |
 | D14 | An entity's `feature` names a slug with no `specs/<slug>/` directory in this tree | W |
+| D15 | `navbook.json` is not a JSON object, or its `review` policy is malformed ([2.10](02-data-model.md)) | E |
 
 D8 MUST NOT report a trailer naming an entity that a `docs(<kind>): delete
 #<id>` commit later removed, or that such a commit's `Deletes:` trailers name.
@@ -328,9 +351,15 @@ nobody has fetched, and an error would make the order in which two branches
 land a correctness question. D13 is an error because a directory that violates
 the layout can be read by nothing.
 
-D11, D12, D13 and D14 are decidable from the tree alone, so unlike D7, D9 and
-D10 they run under `--staged` and the pre-commit hook blocks a link broken by
-hand. A
+D15 reports one diagnostic per fault it finds, so a marker that mistypes both
+policy keys names both. It is an error because a policy nobody can read is a
+policy nobody is following, and the file is small enough that whoever wrote it
+can see what is wrong. It never stops a command: every reader falls back to the
+defaults of [02 §2.10](02-data-model.md), reports the fault, and carries on.
+
+D11, D12, D13, D14 and D15 are decidable from the tree alone, so unlike D7, D9
+and D10 they run under `--staged` and the pre-commit hook blocks a link broken
+by hand. A
 D11 repair is not offered there, though: it rewrites a whole file, and under
 `--staged` that file's content came from the index, so writing it back into the
 working tree would discard whatever was not staged.

@@ -198,3 +198,11 @@ merged branch. This read-only rendering is Navbook's zero-install adoption path.
   a reading of the files, never a gate: `nav pr merge` merges a pull request
   nobody has approved, because whether that is acceptable is not the tracker's
   question to answer.
+
+  A repository may say in its marker how many approvals it expects and whether
+  an author may review their own work ([02 §2.10](02-data-model.md)), and that
+  is as far as it goes: the policy changes what the decision counts, and it
+  makes `nav pr merge` name what is missing and ask before merging short of it
+  ([04 §4.3](04-cli.md)). The question is a courtesy to the person typing, not
+  a lock — `--yes` answers it, a run with no terminal proceeds without it, and
+  nothing anywhere refuses.

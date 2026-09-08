@@ -61,6 +61,7 @@ function pr(id: string, extra: Partial<PrListItemFragment> = {}): PrListItemFrag
     refs: [],
     reviewers: [],
     reviewDecision: "PENDING",
+    approvals: { given: 0, required: 1 },
     merged: null,
     ...extra,
   };

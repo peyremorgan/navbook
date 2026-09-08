@@ -45,6 +45,7 @@ import {
   loadRepoForQuery,
   nowIso,
   type RunPlanResult,
+  readReviewPolicy,
   repoPath,
   repoPaths,
   requireNavbook,
@@ -94,15 +95,28 @@ export interface ListEntitiesOptions {
   entities?: readonly EntityRecord[];
 }
 
-/** Entities of one kind matching a query, newest first. */
+/**
+ * Entities of one kind matching a query, newest first.
+ *
+ * The review policy comes from the tree this read loaded, or from the marker
+ * directly when the caller supplied its own entities — either way it is the
+ * working tree's, which is what spec 02 §2.10 counts by.
+ */
 export function listEntities(
   ws: WsCtx,
   kind: EntityKind,
   query: Query,
   opts: ListEntitiesOptions = {},
 ): EntityRecord[] {
-  const source = opts.entities ?? selectEntities(loadRepoForQuery(ws, query, kind), kind);
-  return sortEntities(source.filter((entity) => matchesQuery(query, entity)));
+  if (opts.entities) {
+    const { policy } = readReviewPolicy(ws);
+    return sortEntities(opts.entities.filter((entity) => matchesQuery(query, entity, policy)));
+  }
+  const repo = loadRepoForQuery(ws, query, kind);
+  const { policy } = repo.reviewPolicy;
+  return sortEntities(
+    selectEntities(repo, kind).filter((entity) => matchesQuery(query, entity, policy)),
+  );
 }
 
 /** Resolve an ID or unambiguous prefix against the working tree. */

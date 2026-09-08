@@ -48,6 +48,7 @@ import { askYesNo } from "../prompt.ts";
 import { renderDetail } from "../render/detail.ts";
 import { type Column, renderTable } from "../render/table.ts";
 import { composeFile } from "./compose.ts";
+import { warnPolicyProblems } from "./policy.ts";
 
 export interface GlobalFlags {
   json?: boolean;
@@ -150,6 +151,8 @@ export interface ShowOptions extends GlobalFlags {
 export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOptions): void {
   const repo = loadRepo(ctx);
   const entity = resolveEntity(repo, prefix, kind);
+  const reading = repo.reviewPolicy;
+  if (kind === "pr") warnPolicyProblems(ctx, reading);
   if (opts.json) {
     // `parent` and `subtasks` are frontmatter, so they are already in the
     // object; resolving them would be a second, differently-shaped answer.
@@ -159,7 +162,16 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
     ctx.stdout.write(
       `${JSON.stringify(
         entityJson(ctx.navDir, entity, {
-          ...(kind === "pr" ? { review: reviewSummary(entity) } : {}),
+          ...(kind === "pr"
+            ? {
+                review: reviewSummary(entity, reading.policy),
+                reviewPolicy: {
+                  selfReview: reading.policy.selfReview,
+                  minApprovals: reading.policy.minApprovals,
+                  declared: reading.declared,
+                },
+              }
+            : {}),
           comments: entity.comments.map((comment) => commentJson(ctx.navDir, comment)),
         }),
       )}\n`,
@@ -176,7 +188,7 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
         ? {
             links: { parent: parentNode(repo, entity), subtasks: subtaskTree(repo, entity, depth) },
           }
-        : {}),
+        : { reviewPolicy: reading }),
     })}\n`,
   );
 }

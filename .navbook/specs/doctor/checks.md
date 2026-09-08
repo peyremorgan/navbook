@@ -13,8 +13,11 @@ title: Checks
 | D8 dangling references, in prose, frontmatter and the last 100 commits' trailers | the tree plus recent history | warning |
 | D11 link disagreement, D12 parent loop | the tree | error |
 | D13 the layout and schema of `specs/`, D14 dangling `feature:` | the tree | D13 error, D14 warning |
+| D15 the marker's review policy | the tree | error |
 
 `--fix` applies what can be settled without discarding anything anybody asserted: reuniting a comment stranded by the first-comment race, archiving a merged pull request, and the D11 repairs the tree or git history can decide. Repairs are judged together, and one that would only close a loop between them is withdrawn. Two issues claiming one subtask is settled by history, letting the last claim stand; where history cannot say, or a claim names an issue this tree lacks, the fault is reported rather than guessed at.
+
+D15 reports one diagnostic per fault, so a marker mistyping both policy keys names both. It stops nothing: every reader has already fallen back to the defaults of spec 02 §2.10 by the time it says what it found, which is why a typo in the marker costs a warning on a listing rather than the listing.
 
 `nav install --hooks` installs a thin `pre-commit` hook that runs `nav doctor --staged` and blocks on errors only.
 
@@ -27,4 +30,4 @@ title: Checks
 
 ## Drift from the specification
 
-None found. Every check in the table of spec 04 §4.3 is implemented at the level it names, and the 48-hour D10 threshold the spec requires implementations to document is `TIMESTAMP_SKEW_HOURS`.
+None found. Every check in the table of spec 04 §4.3 is implemented at the level it names, and the 48-hour D10 threshold the spec requires implementations to document is `TIMESTAMP_SKEW_HOURS`. D15 checks the policy alone and not `version`, which §2.10 requires to be `1`: a tool refusing to count approvals over a key it does not read would be reporting the wrong thing twice.

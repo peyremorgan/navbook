@@ -323,19 +323,24 @@ themselves are what it is derived from:
   verdict carrying forward, seen from the other side. Re-requesting a review
   after a force-push is thus not an action anyone has to remember to take.
 - A **decision** for the whole pull request is `changes-requested` when any
-  person's state is `request-changes`, otherwise `approved` when any person's
-  state is `approve`, otherwise `pending`.
+  person's state is `request-changes`, otherwise `approved` when at least
+  `minApprovals` people's state is `approve`, otherwise `pending`.
 - The people considered are those `reviewer` names **and** anyone else who has
   bound a verdict to that revision: a review nobody asked for is still a
   review. The pull request's own `author` is excluded throughout, from the
-  listing and from the decision alike.
+  listing and from the decision alike, unless `selfReview` says otherwise.
+
+`minApprovals` and `selfReview` are the **review policy**, which the marker
+declares (§2.10). A repository that declares none is read with the defaults,
+one approval and no self-review, which are the rule stated above without them.
 
 Nothing here is a gate. A decision of `pending` does not make a merge wrong,
 and `approved` does not make one right; both are readings of what the files
 say, and merge policy belongs to the forge or to team convention ([01
 §1.7](01-functionality.md)). A tool MUST NOT refuse an operation on the
 strength of a derived review state, and MUST NOT write any of these states
-into a file.
+into a file. A declared policy changes what the reading counts, and what a
+tool may say about it; it never changes what a tool will do.
 
 `draft` and `reviewer` are independent: a draft may name the people it will
 ask, and one that does is still not asking.
@@ -378,9 +383,10 @@ ask, and one that does is still not asking.
 
 `navbook.json`, at the top of the root directory, is the **marker**: its
 presence is what identifies the directory that contains it as a Navbook root
-(§2.1). It MUST be a JSON object. This revision defines one key, `version`,
-whose value MUST be the integer `1`; tools MUST ignore keys they do not
-recognize, and MUST NOT reject a marker for carrying them.
+(§2.1). It MUST be a JSON object. This revision defines two keys, `version`,
+whose value MUST be the integer `1`, and `review`, the review policy below;
+tools MUST ignore keys they do not recognize, and MUST NOT reject a marker for
+carrying them.
 
 A tool MUST NOT require the marker in order to read a `.navbook/` directory: a
 repository using the default name and predating this revision has none, and
@@ -388,12 +394,48 @@ remains conforming. A tool that creates a root directory MUST write a marker
 into it, so that a repository which later renames the directory stays
 locatable.
 
+### The review policy
+
+`review`, when present, MUST be an object. It says how the reviews of §2.7 are
+counted, and it is the one thing in the marker a tool reads rather than merely
+finds.
+
+```json
+{
+  "version": 1,
+  "review": {
+    "selfReview": false,
+    "minApprovals": 2
+  }
+}
+```
+
+| Key | Req. | Type | Default | Meaning |
+|-----|------|------|---------|---------|
+| `selfReview` | MAY | boolean | `false` | Whether a pull request's own author is counted among its reviewers (§2.7) |
+| `minApprovals` | MAY | integer ≥ 1 | `1` | How many approvals a decision of `approved` takes |
+
+The defaults are what §2.7 describes without a policy, so a repository that
+declares none, and one that predates this revision, are read identically.
+
+A malformed policy is a fault in the marker, not in the tree it marks, and a
+tool MUST report it (check D15 of [04 §4.3](04-cli.md)) rather than act on it.
+Each key falls back to its default independently, and a marker that is not JSON
+at all falls back to both: whatever is wrong with a file that names a
+directory, the entities inside it are still readable, and a listing that
+refused to run would say less than a listing with a warning on it.
+
+**A policy is advisory.** It changes what the decision of §2.7 counts, and
+therefore what every reading of that decision reports, and a tool MAY say that
+a policy is unmet wherever saying so is useful. It remains subject to §2.7: no
+tool refuses an operation because of it.
+
 `specs/`, at the top of the root directory, holds features (§2.11).
 
-Future revisions of this spec may define: `.navbook/config.*` (repository-level
-configuration), `.navbook/sync/` (forge-sync state), and additional files
-inside entity directories. Tools MUST leave unrecognized files in these
-locations untouched.
+Future revisions of this spec may define: `.navbook/config.*` (configuration
+beyond what the marker carries), `.navbook/sync/` (forge-sync state), and
+additional files inside entity directories. Tools MUST leave unrecognized files
+in these locations untouched.
 
 ## 2.11 Features and specifications
 

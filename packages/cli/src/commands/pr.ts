@@ -20,18 +20,22 @@ import {
   listEntities,
   listPrsAcrossRefs,
   type MergeResult,
+  type MergeReview,
   materializePrIfAbsent,
   type NewCommentInput,
   newCommentFile,
   newPrFile,
   openPr,
   parseListQuery,
+  parsePerson,
   planPrMerge,
   preparePrOpen,
   type ReviewSummary,
   readReviewers,
+  readReviewPolicy,
   requestReview,
   reviewSummary,
+  sameEmail,
   stringField,
   toNdjson,
   updatePr,
@@ -41,6 +45,7 @@ import {
 } from "@navbook/core";
 import type { Ctx } from "../context.ts";
 import { fail } from "../errors.ts";
+import { askYesNo, isInteractive } from "../prompt.ts";
 import { composeFile } from "./compose.ts";
 import {
   type CloseOptions,
@@ -50,6 +55,7 @@ import {
   type ListOptions,
   reportList,
 } from "./entity.ts";
+import { describeShortfall, mergeAction, warnPolicyProblems } from "./policy.ts";
 
 /* --------------------------------------------------------------------- open */
 
@@ -204,6 +210,29 @@ export function cmdPrReview(ctx: Ctx, prefix: string, opts: ReviewOptions): void
   ctx.stdout.write(`${label} #${entity.id}  ${ctx.navDir}/${path}  (#${id})\n`);
   if (isReview) ctx.stdout.write(`Bound to revision ${revision.slice(0, 12)}\n`);
   if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
+  warnIfOwnVerdict(ctx, entity, verdict);
+}
+
+/**
+ * Warn an author that their own verdict will not be counted.
+ *
+ * After the file is written, never instead of it: the review is a record of
+ * what somebody said and it is never refused (spec 02 §2.7). What the warning
+ * prevents is approving your own work and believing you moved the decision —
+ * which is exactly what a repository allowing self-review did decide to let
+ * you do, so it says nothing there.
+ */
+function warnIfOwnVerdict(ctx: Ctx, entity: EntityRecord, verdict: Verdict | undefined): void {
+  if (verdict === undefined || verdict === "comment") return;
+  const { policy } = readReviewPolicy(ctx);
+  if (policy.selfReview) return;
+  const author = parsePerson(stringField(entity, "author"))?.email;
+  const mine = parsePerson(currentAuthor(ctx))?.email;
+  if (!author || !mine || !sameEmail(author, mine)) return;
+  ctx.stderr.write(
+    `${ctx.colors.yellow("warning:")} #${entity.id} is your own pull request; ` +
+      `this ${verdict} will not count toward its review\n`,
+  );
 }
 
 /* --------------------------------------------------------------------- list */
@@ -213,13 +242,16 @@ export interface PrListOptions extends ListOptions {
 }
 
 export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void {
+  const reading = readReviewPolicy(ctx);
+  warnPolicyProblems(ctx, reading);
+
   // Read once per entity: the decision decides both whether the column appears
   // and what every row of it says, and each reading walks the comment files.
   const summaries = new Map<string, ReviewSummary>();
   const summaryOf = (entity: EntityRecord): ReviewSummary => {
     const cached = summaries.get(entity.id);
     if (cached) return cached;
-    const summary = reviewSummary(entity);
+    const summary = reviewSummary(entity, reading.policy);
     summaries.set(entity.id, summary);
     return summary;
   };
@@ -290,17 +322,62 @@ export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void 
 export interface MergeOptions extends GlobalFlags {
   noFf?: boolean;
   continue?: boolean;
+  /** Answer the review-policy question in advance. */
+  yes?: boolean;
 }
 
 export function cmdPrMerge(ctx: Ctx, prefix: string | undefined, opts: MergeOptions): void {
   if (opts.continue) {
-    reportMerge(ctx, continuePrMerge(ctx, prefix));
+    const result = continuePrMerge(ctx, prefix);
+    // A merge already under way: the moment to have asked has passed, so an
+    // unmet policy is reported and nothing is put to the user.
+    warnPolicyProblems(ctx, result.review.reading);
+    const shortfall = declaredShortfall(result.review);
+    if (shortfall) {
+      ctx.stderr.write(
+        `${ctx.colors.yellow("warning:")} #${result.entity.id} was merged with ${shortfall}\n`,
+      );
+    }
+    reportMerge(ctx, result);
     return;
   }
   if (!prefix) fail("nav pr merge needs the ID of the pull request to merge");
 
   const plan = planPrMerge(ctx, prefix, { noFf: opts.noFf });
+  warnPolicyProblems(ctx, plan.review.reading);
+  confirmAgainstPolicy(ctx, plan.entity.id, plan.review, opts.yes === true);
   reportMerge(ctx, executePrMerge(ctx, plan));
+}
+
+/** What the pull request is short of, but only where a policy was declared. */
+function declaredShortfall(review: MergeReview): string | null {
+  return review.reading.declared ? describeShortfall(review.summary) : null;
+}
+
+/**
+ * Say what a declared policy is missing, and ask before merging short of it.
+ *
+ * Never a refusal. `--yes` answers in advance, a run with no terminal says its
+ * piece and carries on — a pipeline that stopped for a question nobody can
+ * answer would be the gate spec 02 §2.7 forbids, arrived at by accident. What
+ * exits 1 is the user answering no, which is their decision and not the tool's.
+ */
+function confirmAgainstPolicy(ctx: Ctx, id: string, review: MergeReview, assumeYes: boolean): void {
+  const shortfall = declaredShortfall(review);
+  if (shortfall === null) return;
+  ctx.stdout.write(`#${id} has ${shortfall}\n`);
+
+  switch (mergeAction({ shortfall, assumeYes, interactive: isInteractive(ctx) })) {
+    case "proceed":
+      return;
+    case "warn-and-proceed":
+      ctx.stderr.write(
+        `${ctx.colors.yellow("warning:")} merging #${id} anyway; pass --yes to say so\n`,
+      );
+      return;
+    case "ask":
+      if (!askYesNo(ctx, "Merge anyway? [y/N] ")) fail(`#${id} was not merged`);
+  }
 }
 
 function reportMerge(ctx: Ctx, result: MergeResult): void {

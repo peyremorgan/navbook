@@ -10,10 +10,16 @@
  * Everything is read against the pull request's **latest** revision, so
  * appending one returns every reviewer to `pending` — the rule that a verdict
  * binds to one revision, seen from the request's side.
+ *
+ * How the reading counts is the repository's to say (§2.10): how many
+ * approvals `approved` takes, and whether the author is among the people
+ * counted. The defaults are the rule as §2.7 states it without a policy, so
+ * every repository that declares none reads exactly as it did.
  */
 
 import { isOpinionated, readReviewers, readRevisions } from "./files.ts";
 import { parsePerson, personMatches } from "./person.ts";
+import { DEFAULT_REVIEW_POLICY, type ReviewPolicy } from "./policy.ts";
 import type { CommentRecord, EntityRecord } from "./tree.ts";
 
 /** What one person has said about the revision in question. */
@@ -34,12 +40,23 @@ export interface ReviewerState {
   commentId?: string;
 }
 
+/** How many approvals stand, against how many the policy asks for. */
+export interface ApprovalCount {
+  given: number;
+  required: number;
+}
+
 export interface ReviewSummary {
   /** The revision every state is read against; absent when none is recorded. */
   revision?: string;
-  /** Everyone asked, plus everyone who reviewed. Never the pull request's author. */
+  /**
+   * Everyone asked, plus everyone who reviewed. The pull request's own author
+   * only when the policy allows self-review (§2.10).
+   */
   reviewers: ReviewerState[];
   decision: ReviewDecision;
+  /** What the decision counted: approvals given, and the number required. */
+  approvals: ApprovalCount;
 }
 
 /** The identity two spellings of one address share, for grouping and comparison. */
@@ -61,22 +78,27 @@ function verdictOn(comment: CommentRecord, revision: string): string | undefined
 }
 
 /**
- * Read the review state of a pull request.
+ * Read the review state of a pull request, counting by `policy`.
  *
  * The people counted are those `reviewer:` names and anyone else who bound a
  * verdict to the latest revision — a review nobody asked for is still a review
  * — minus the pull request's own author, whose verdicts are recorded like any
- * other comment and count for nothing.
+ * other comment and count for nothing. A policy that allows self-review puts
+ * the author back among them, where they are read exactly like anybody else.
  *
  * The entity's comments must have been read: they are where every answer lives,
  * so a tree loaded without them reports everybody as pending rather than
  * failing. `loadRepoForQuery` reads a pull request's own comments for exactly
  * this reason, and `loadRepo` reads them all.
  */
-export function reviewSummary(entity: EntityRecord): ReviewSummary {
+export function reviewSummary(
+  entity: EntityRecord,
+  policy: ReviewPolicy = DEFAULT_REVIEW_POLICY,
+): ReviewSummary {
   const revision = latestRevision(entity.fm);
   const author = typeof entity.fm.author === "string" ? identity(entity.fm.author) : "";
-  const theirOwn = (person: string): boolean => author !== "" && identity(person) === author;
+  const theirOwn = (person: string): boolean =>
+    !policy.selfReview && author !== "" && identity(person) === author;
 
   // Insertion order is the order they are reported in: everyone asked, as the
   // file asks them, then whoever else turned up, as they reviewed.
@@ -107,10 +129,12 @@ export function reviewSummary(entity: EntityRecord): ReviewSummary {
   }
 
   const reviewers = [...states.values()];
+  const given = reviewers.filter((entry) => entry.state === "approve").length;
   return {
     ...(revision === undefined ? {} : { revision }),
     reviewers,
-    decision: decide(reviewers),
+    decision: decide(reviewers, policy.minApprovals),
+    approvals: { given, required: policy.minApprovals },
   };
 }
 
@@ -128,17 +152,22 @@ function nextState(current: ReviewState | undefined, verdict: string): ReviewSta
 }
 
 /**
- * What the states add up to.
+ * What the states add up to, against the approvals `minApprovals` asks for.
  *
- * A block outranks an approval, and an approval outranks silence. Nobody's
- * silence withholds a decision: Navbook records reviews and gates nothing
- * (spec 01 §1.7), so "one person has not looked yet" shows in their own row
- * rather than folding into a verdict on the whole pull request.
+ * A block outranks any number of approvals, and an approval outranks silence.
+ * Nobody's silence withholds a decision: Navbook records reviews and gates
+ * nothing (spec 01 §1.7), so "one person has not looked yet" shows in their
+ * own row rather than folding into a verdict on the whole pull request — and
+ * a repository that asks for two approvals and has one reads as `pending`,
+ * which is a count falling short, not a refusal.
  */
-export function decide(reviewers: readonly ReviewerState[]): ReviewDecision {
+export function decide(reviewers: readonly ReviewerState[], minApprovals = 1): ReviewDecision {
   if (reviewers.some((entry) => entry.state === "request-changes")) return "changes-requested";
-  if (reviewers.some((entry) => entry.state === "approve")) return "approved";
-  return "pending";
+  const approvals = reviewers.filter((entry) => entry.state === "approve").length;
+  // A marker cannot ask for fewer than one approval (§2.10), but this is an
+  // exported function and a caller can hand it any number; nothing should ever
+  // read as approved with nobody approving.
+  return approvals >= Math.max(1, minApprovals) ? "approved" : "pending";
 }
 
 /**

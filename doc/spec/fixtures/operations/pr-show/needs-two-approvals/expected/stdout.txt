@@ -1,0 +1,18 @@
+#dk3mp2x9 Refactor auth token handling
+status:    open
+author:    Nav Test <nav@test.invalid>
+created:   2026-08-04T16:40:00Z
+target:    main
+source:    feat/auth
+revisions: 1. head {{short:feat}}  base {{short:base}}  2026-08-04T16:40:00Z
+review:    pending  (1 of 2 approvals)
+reviewers: alice@example.com  [approve]
+policy:    2 approvals required, self-review off
+path:      .navbook/prs/open/dk3mp2x9-refactor-auth-token-handling/
+
+Replaces the ad-hoc token cache.
+
+comments (1):
+
+  #q8zm3vp1  Nav Test <alice@example.com>  2026-08-05T10:14:33Z  [approve]  @{{short:feat}}
+    Reads well.

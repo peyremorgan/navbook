@@ -1,0 +1,20 @@
+spec-version: 1
+description: show counts approvals against the number the marker asks for, and names the policy
+history:
+  - {id: base, branch: main, apply: history/00-base, message: "feat: initial code", date: 2026-08-01T10:00:00Z}
+  - {id: feat, branch: feat/auth, from: base, apply: history/01-feat, message: "feat: rework auth tokens", date: 2026-08-04T16:00:00Z}
+run:
+  checkout: feat/auth
+  before:
+    - nav: [pr, open, --title, "Refactor auth token handling", -m, "Replaces the ad-hoc token cache.", --commit]
+      env: {NAV_IDS: "dk3mp2x9", NAV_NOW: "2026-08-04T16:40:00Z"}
+    - nav: [pr, request, dk3m, "alice@example.com", --commit]
+      env: {NAV_NOW: "2026-08-05T09:00:00Z"}
+    # One approval, by somebody who is not the author, against a marker asking
+    # for two: the decision is pending because the count falls short, which is
+    # a reading of the files and not a refusal of anything (spec 02 §2.7).
+    - git: [config, user.email, "alice@example.com"]
+    - nav: [pr, review, dk3m, --approve, -m, "Reads well.", --commit]
+      env: {NAV_IDS: "q8zm3vp1", NAV_NOW: "2026-08-05T10:14:33Z"}
+  command: [pr, show, dk3m]
+expect: {exit: 0, stdout: expected/stdout.txt}

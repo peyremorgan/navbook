@@ -22,6 +22,25 @@ export const VIEWER_QUERY = graphql(`
   }
 `);
 
+/**
+ * How this repository counts reviews (spec 02 §2.10).
+ *
+ * A property of the repository rather than of any pull request, so it is asked
+ * for once and read beside whichever pull request is on screen. `problems` is
+ * why the numbers may be the defaults: a marker nobody can read is reported
+ * rather than obeyed, and the page says so instead of quietly counting wrong.
+ */
+export const REVIEW_POLICY_QUERY = graphql(`
+  query ReviewPolicy {
+    reviewPolicy {
+      selfReview
+      minApprovals
+      declared
+      problems
+    }
+  }
+`);
+
 export const ISSUES_QUERY = graphql(`
   query Issues($filter: EntityFilter) {
     issues(filter: $filter) {

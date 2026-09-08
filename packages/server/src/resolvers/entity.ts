@@ -11,6 +11,7 @@ import {
   type CommentRecord,
   type EntityRecord,
   parentNode,
+  type ReviewSummary,
   readAssignees,
   readFeatures,
   readLabels,
@@ -99,18 +100,25 @@ export const Pr: PrResolvers = {
   },
   refs: (pr) => [...pr.refs],
   reviewers: (pr) => readReviewers(pr.entity.fm),
-  // Derived on demand (spec 02 §2.7); the summary is computed once for both
-  // fields, since a client asking for the states almost always wants the
-  // decision they add up to.
-  reviews: (pr) =>
-    reviewSummary(pr.entity).reviewers.map((entry) => ({
+  // Derived on demand (spec 02 §2.7), counted by the policy the marker
+  // declares (§2.10). Each of the three fields reads the summary for itself
+  // rather than sharing one: they are cheap beside the tree read they follow,
+  // and a client that asks for one of them should not pay for the others.
+  reviews: async (pr, _args, ctx) =>
+    (await summaryOf(pr, ctx)).reviewers.map((entry) => ({
       person: entry.person,
       state: toGqlReviewState(entry.state),
       volunteer: entry.volunteer,
       comment: entry.commentId ?? null,
     })),
-  reviewDecision: (pr) => toGqlDecision(reviewSummary(pr.entity).decision),
+  reviewDecision: async (pr, _args, ctx) => toGqlDecision((await summaryOf(pr, ctx)).decision),
+  approvals: async (pr, _args, ctx) => (await summaryOf(pr, ctx)).approvals,
 };
+
+/** A pull request's review state, counted by the request's policy. */
+async function summaryOf(pr: PrParent, ctx: GraphQLCtx): Promise<ReviewSummary> {
+  return reviewSummary(pr.entity, (await ctx.reviewPolicy()).policy);
+}
 
 export const Entity: EntityResolvers = {
   __resolveType: (parent: EntityParent) => (recordOf(parent).kind === "issue" ? "Issue" : "Pr"),

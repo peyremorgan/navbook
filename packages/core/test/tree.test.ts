@@ -90,6 +90,42 @@ describe("parseTree", () => {
     assert.deepEqual(repo.reserved.sort(), ["NOTES.md", "config.yaml", "sync/github/state.json"]);
   });
 
+  describe("the marker", () => {
+    it("reads the review policy out of it", () => {
+      const repo = parseTree(
+        tree({ "navbook.json": '{"version": 1, "review": {"minApprovals": 2}}' }),
+      );
+      assert.deepEqual(repo.reviewPolicy.policy, { selfReview: false, minApprovals: 2 });
+      assert.equal(repo.reviewPolicy.declared, true);
+    });
+
+    it("does not call it uninterpreted, because it is read", () => {
+      const repo = parseTree(tree({ "navbook.json": '{"version": 1}' }));
+      assert.deepEqual(repo.reserved, []);
+    });
+
+    it("declares nothing for a tree that has none, which stays conforming", () => {
+      const repo = parseTree(tree({ "issues/open/bqlybac0-x/issue.md": issue() }));
+      assert.deepEqual(repo.reviewPolicy, {
+        policy: { selfReview: false, minApprovals: 1 },
+        declared: false,
+        problems: [],
+      });
+    });
+
+    it("keeps an archived copy of one reserved, since only the live marker is read", () => {
+      const repo = parseTree(tree({ "archive/2026/navbook.json": '{"version": 1}' }));
+      assert.deepEqual(repo.reserved, ["archive/2026/navbook.json"]);
+      assert.equal(repo.reviewPolicy.declared, false);
+    });
+
+    it("carries the fault forward rather than throwing on it", () => {
+      const repo = parseTree(tree({ "navbook.json": "not json at all" }));
+      assert.deepEqual(repo.reviewPolicy.problems, ["is not valid JSON"]);
+      assert.deepEqual(repo.problems, [], "which is D15's business, not the walk's");
+    });
+  });
+
   it("preserves unknown extra files inside an entity directory", () => {
     const repo = parseTree(
       tree({

@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "review": {
+    "selfReview": true,
+    "minApprovals": 3
+  },
+  "someKeyAFutureRevisionMayDefine": "left alone"
+}

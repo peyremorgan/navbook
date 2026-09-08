@@ -13,6 +13,7 @@ export * from "./json.ts";
 export * from "./links.ts";
 export * from "./ops.ts";
 export * from "./person.ts";
+export * from "./policy.ts";
 export * from "./query.ts";
 export * from "./refs.ts";
 export * from "./review.ts";

@@ -60,6 +60,10 @@ export const PR_LIST_ITEM = graphql(`
     refs
     reviewers
     reviewDecision
+    approvals {
+      given
+      required
+    }
     merged {
       date
       by

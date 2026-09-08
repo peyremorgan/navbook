@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { ReviewPolicy } from "../src/core/policy.ts";
 import {
   isQueryError,
   matchesQuery,
@@ -257,6 +258,17 @@ const prMatching = (entities: EntityRecord[], ...terms: string[]): string[] =>
     .map((e) => e.id)
     .sort();
 
+/** The same, counted by a policy the marker declared (spec 02 §2.10). */
+const prMatchingUnder = (
+  entities: EntityRecord[],
+  policy: ReviewPolicy,
+  ...terms: string[]
+): string[] =>
+  entities
+    .filter((e) => matchesQuery(prQuery(...terms), e, policy))
+    .map((e) => e.id)
+    .sort();
+
 describe("the review query terms", () => {
   const entities = buildPrs([
     { id: "aaaaaaa1", reviewer: "alice@example.com", reviews: ["alice@example.com approve"] },
@@ -298,6 +310,25 @@ describe("the review query terms", () => {
     assert.deepEqual(prMatching(entities, "review:approved"), ["aaaaaaa1", "ddddddd4"]);
     assert.deepEqual(prMatching(entities, "review:changes-requested"), ["ccccccc3"]);
     assert.deepEqual(prMatching(entities, "review:pending"), ["bbbbbbb2", "eeeeeee5"]);
+  });
+
+  it("counts the decision by the declared policy, so a listing agrees with a show", () => {
+    const twice: ReviewPolicy = { selfReview: false, minApprovals: 2 };
+    // Each of these has one approval, which is enough by default and short of
+    // a policy asking for two.
+    assert.deepEqual(prMatching(entities, "review:approved"), ["aaaaaaa1", "ddddddd4"]);
+    assert.deepEqual(prMatchingUnder(entities, twice, "review:approved"), []);
+    assert.deepEqual(prMatchingUnder(entities, twice, "review:pending"), [
+      "aaaaaaa1",
+      "bbbbbbb2",
+      "ddddddd4",
+      "eeeeeee5",
+    ]);
+  });
+
+  it("leaves a block short of nothing, since approvals cannot outvote one", () => {
+    const many: ReviewPolicy = { selfReview: false, minApprovals: 5 };
+    assert.deepEqual(prMatchingUnder(entities, many, "review:changes-requested"), ["ccccccc3"]);
   });
 
   it("ORs two decisions, since a pull request has only one", () => {
