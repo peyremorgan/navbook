@@ -610,3 +610,176 @@ describe("nav issue delete", () => {
     }
   });
 });
+
+/**
+ * Rank and deadline, from the flags that write them to the orders that read
+ * them (spec 02 §2.5).
+ *
+ * The listing orders are the point of both keys, so what is asserted about
+ * them is the order itself rather than the flag's exit code — and one issue in
+ * the fixture carries neither key, because "unranked and undated go last" is
+ * the half of each order that is easy to get wrong.
+ */
+describe("nav issue rank and deadline", () => {
+  let repo: TempRepo;
+
+  /**
+   * Four issues, opened on four days so that newest-first and priority
+   * disagree: without that, an assertion about `--sort priority` would pass
+   * against a listing that had not been sorted at all.
+   */
+  const seed = (): TempRepo => {
+    const made = makeNavRepo();
+    const open = (day: string, id: string, title: string, ...flags: string[]): void => {
+      const result = made.nav(["issue", "open", title, "-m", "Body.", ...flags], {
+        NAV_NOW: `2026-09-0${day}T12:00:00Z`,
+        NAV_IDS: id,
+      });
+      assert.equal(result.code, 0, result.stderr);
+    };
+    open("1", "aaaa0001", "Urgent", "--rank", "10", "--deadline", "2026-08-01");
+    open("2", "aaaa0002", "Next", "--rank", "20");
+    open("3", "aaaa0003", "Someday", "--deadline", "2026-12-31");
+    open("4", "aaaa0004", "Unplaced");
+    return made;
+  };
+
+  /** The ids a listing printed, in the order it printed them. */
+  const listed = (args: string[], env: NodeJS.ProcessEnv = {}): string[] => {
+    const result = repo.nav(["issue", "list", ...args], env);
+    assert.equal(result.code, 0, result.stderr);
+    return [...result.stdout.matchAll(/#(\w{8})/g)].map((match) => match[1] as string);
+  };
+
+  before(() => {
+    repo = seed();
+  });
+  after(() => repo.cleanup());
+
+  it("writes both keys as the flags spell them", () => {
+    const file = readFileSync(
+      join(repo.dir, ".navbook/issues/open/aaaa0001-urgent/issue.md"),
+      "utf8",
+    );
+    assert.match(file, /^rank: 10$/m);
+    assert.match(file, /^deadline: 2026-08-01$/m);
+  });
+
+  it("lists newest first until asked for another order", () => {
+    assert.deepEqual(listed([]), ["aaaa0004", "aaaa0003", "aaaa0002", "aaaa0001"]);
+  });
+
+  it("puts the ranked first and the unranked last under priority", () => {
+    assert.deepEqual(listed(["--sort", "priority"]), [
+      "aaaa0001",
+      "aaaa0002",
+      "aaaa0003",
+      "aaaa0004",
+    ]);
+  });
+
+  it("puts the soonest first and the undated last under deadline", () => {
+    // The undated but ranked issue outranks the one with neither key, which is
+    // the second tier of the chain doing its work.
+    assert.deepEqual(listed(["--sort", "deadline"]), [
+      "aaaa0001",
+      "aaaa0003",
+      "aaaa0002",
+      "aaaa0004",
+    ]);
+  });
+
+  it("orders the JSON as it orders the table", () => {
+    const result = repo.nav(["issue", "list", "--sort", "priority", "--json"]);
+    assert.equal(result.code, 0, result.stderr);
+    const rows = result.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { id: string; rank?: unknown; deadline?: unknown });
+    assert.deepEqual(
+      rows.map((row) => row.id),
+      ["aaaa0001", "aaaa0002", "aaaa0003", "aaaa0004"],
+    );
+    // The projection never changes a key's type (spec 04 §4.2): a rank is a
+    // JSON number and a deadline a JSON string.
+    assert.equal(rows[0]?.rank, 10);
+    assert.equal(rows[0]?.deadline, "2026-08-01");
+    assert.equal(rows[3]?.rank, undefined);
+  });
+
+  it("shows a column only when something in the listing carries it", () => {
+    assert.match(repo.nav(["issue", "list"]).stdout, /RANK\s+DEADLINE/);
+    // Narrowed to the one issue that has neither, both columns go away.
+    const narrowed = repo.nav(["issue", "list", "Unplaced"]);
+    assert.doesNotMatch(narrowed.stdout, /RANK/);
+    assert.doesNotMatch(narrowed.stdout, /DEADLINE/);
+  });
+
+  it("renders both keys as rows on show, a rank of zero included", () => {
+    const shown = repo.nav(["issue", "show", "aaaa0001"]).stdout;
+    assert.match(shown, /^rank:\s+10$/m);
+    assert.match(shown, /^deadline:\s+2026-08-01$/m);
+
+    const zeroed = seed();
+    try {
+      zeroed.nav(["issue", "open", "Zero", "-m", "b", "--rank", "0"], { NAV_IDS: "aaaa0005" });
+      assert.match(zeroed.nav(["issue", "show", "aaaa0005"]).stdout, /^rank:\s+0$/m);
+    } finally {
+      zeroed.cleanup();
+    }
+  });
+
+  it("finds what is past its day, counting today as not yet late", () => {
+    assert.deepEqual(listed(["deadline:overdue"], { NAV_NOW: "2026-09-08T12:00:00Z" }), [
+      "aaaa0001",
+    ]);
+    assert.deepEqual(listed(["deadline:overdue"], { NAV_NOW: "2026-08-01T12:00:00Z" }), []);
+    assert.deepEqual(listed(["deadline:overdue"], { NAV_NOW: "2026-08-02T00:00:00Z" }), [
+      "aaaa0001",
+    ]);
+  });
+
+  it("finds what has no day at all, and ANDs with the rest of the query", () => {
+    assert.deepEqual(listed(["deadline:none"]), ["aaaa0004", "aaaa0002"]);
+    assert.deepEqual(listed(["deadline:none", "Next"]), ["aaaa0002"]);
+  });
+
+  it("refuses a rank that is not a number, before opening anything", () => {
+    for (const value of ["abc", "", "NaN", "Infinity"]) {
+      const result = repo.nav(["issue", "open", "T", "-m", "b", "--rank", value], {
+        NAV_IDS: "bbbb0001",
+      });
+      assert.equal(result.code, 1, value);
+      assert.match(result.stderr, /--rank must be a number/, value);
+    }
+    assert.equal(existsSync(join(repo.dir, ".navbook/issues/open/bbbb0001-t")), false);
+  });
+
+  it("refuses a deadline that is not a calendar day, before opening anything", () => {
+    for (const value of ["2026-02-30", "2026-10-01T09:00:00Z", "2026-1-1", "someday"]) {
+      const result = repo.nav(["issue", "open", "T", "-m", "b", "--deadline", value], {
+        NAV_IDS: "bbbb0002",
+      });
+      assert.equal(result.code, 1, value);
+      assert.match(result.stderr, /--deadline must be a calendar date/, value);
+    }
+    assert.equal(existsSync(join(repo.dir, ".navbook/issues/open/bbbb0002-t")), false);
+  });
+
+  it("refuses an order that is not one, rather than quietly using the default", () => {
+    const result = repo.nav(["issue", "list", "--sort", "priorty"]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /--sort must be one of priority, deadline, newest/);
+  });
+
+  it("refuses the deadline term on pull requests, which are not scheduled", () => {
+    const result = repo.nav(["pr", "list", "deadline:overdue"]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /describes an issue/);
+  });
+
+  it("offers the deadline term to issues and not to pull requests", () => {
+    assert.match(repo.nav(["__complete", "issue", "list"]).stdout, /^deadline:$/m);
+    assert.doesNotMatch(repo.nav(["__complete", "pr", "list"]).stdout, /^deadline:$/m);
+  });
+});

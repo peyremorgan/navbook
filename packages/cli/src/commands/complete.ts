@@ -19,6 +19,8 @@ const SPEC_VERBS = ["add", "edit", "list"];
 const QUERY_KEYS = ["status:", "label:", "assignee:", "author:", "milestone:", "feature:"];
 /** Terms only a pull request has (spec 04 §4.3), offered only where they work. */
 const PR_QUERY_KEYS = ["reviewer:", "review:", "awaiting:"];
+/** And the one only an issue has (spec 02 §2.5). */
+const ISSUE_QUERY_KEYS = ["deadline:"];
 
 export function cmdComplete(ctx: Ctx, words: string[]): void {
   for (const candidate of completionsFor(ctx, words)) ctx.stdout.write(`${candidate}\n`);
@@ -38,7 +40,8 @@ function completionsFor(ctx: Ctx, words: string[]): string[] {
   if (!verbs.includes(verb)) return [];
 
   if (verb === "list") {
-    const keys = kind === "pr" ? [...QUERY_KEYS, ...PR_QUERY_KEYS] : QUERY_KEYS;
+    const keys =
+      kind === "pr" ? [...QUERY_KEYS, ...PR_QUERY_KEYS] : [...QUERY_KEYS, ...ISSUE_QUERY_KEYS];
     return [...keys, ...labels(ctx), ...features(ctx)];
   }
   if (verb === "open") return [];
