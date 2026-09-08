@@ -4,6 +4,7 @@ author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-08T04:20:39Z
 labels: [enhancement]
 feature: issues
+resolution: fixed
 ---
 
 An issue can say what it is and who holds it, but not where it sits in the queue or when it is wanted. Two frontmatter keys close that:
