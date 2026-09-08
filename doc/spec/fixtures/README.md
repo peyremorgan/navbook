@@ -127,6 +127,6 @@ NAV_BIN=/path/to/rust/nav pnpm test:conformance
 
 ## Diagnostics are compared by code, not by wording
 
-`format/invalid` fixtures assert the check code (`D1`…`D14`), the level
+`format/invalid` fixtures assert the check code (`D1`…`D15`), the level
 (error/warning) and the path. Diagnostic *messages* are implementation-defined
 and are never compared, so implementations may word them for their own users.
