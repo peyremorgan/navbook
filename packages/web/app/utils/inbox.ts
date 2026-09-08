@@ -9,15 +9,15 @@
  * does not decide who somebody is (`app/utils/people.ts`), it only remembers
  * which answer an entity arrived in.
  *
- * The order is the server's own — newest first, ties broken by id (spec 04
- * §4.2, `sortEntities` in core) — so a merged listing reads exactly like the
- * listings it was merged from. `created` is compared as a string, as core
- * compares it: the values are ISO 8601 in UTC, which sorts lexically, and
- * parsing them would only invent a way to disagree.
+ * Merging does not order: the page decides that, because the inbox is the one
+ * listing that defaults to priority rather than to the order the answers
+ * arrived in (spec 02 §2.5). What is guaranteed here is only that every entity
+ * appears once, carrying every reason it has.
  */
 
 import { distinctValues } from "~/utils/entities";
 import { splitTerms } from "~/utils/filter-params";
+import { compareBy, type Sortable, type SortOrder } from "~/utils/sort";
 import type {
   InboxQueryVariables,
   IssueListItemFragment,
@@ -55,12 +55,27 @@ export interface InboxAnswers {
   prs: readonly InboxGroup<PrListItemFragment>[];
 }
 
-/** Newest first, ties broken by id — the order every listing arrives in. */
-export function compareInboxItems(a: InboxItem, b: InboxItem): number {
-  const first = a.entity.created;
-  const second = b.entity.created;
-  if (first !== second) return first < second ? 1 : -1;
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+/**
+ * A row as the comparators read it.
+ *
+ * A pull request carries neither key, so `rank` and `deadline` are left
+ * undefined and every order puts it after the work that was scheduled — which
+ * is what `nullsLast` already does for an issue nobody has placed.
+ */
+export function sortableOf(item: InboxItem): Sortable {
+  if (item.kind === "pr") return { id: item.id, created: item.entity.created };
+  return {
+    id: item.id,
+    created: item.entity.created,
+    rank: item.entity.rank,
+    deadline: item.entity.deadline,
+  };
+}
+
+/** The inbox in one of the orders of spec 02 §2.5. */
+export function sortInbox(items: readonly InboxItem[], order: SortOrder): InboxItem[] {
+  const compare = compareBy(order);
+  return [...items].sort((a, b) => compare(sortableOf(a), sortableOf(b)));
 }
 
 /**
@@ -98,7 +113,7 @@ export function mergeInbox(answers: InboxAnswers): InboxItem[] {
     }
   }
 
-  return [...byKey.values()].sort(compareInboxItems);
+  return [...byKey.values()];
 }
 
 /* ------------------------------------------------------------------ narrow */

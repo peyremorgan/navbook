@@ -13,6 +13,7 @@
  * an editor and closed it again.
  */
 
+import { isCalendarDate } from "~/utils/dates";
 import type { UpdateIssueInput, UpdatePrInput } from "~~/src/generated/gql/graphql";
 
 /**
@@ -30,6 +31,10 @@ export interface EntityEdit {
   milestone: string | null;
   features: string[];
   reviewers?: string[];
+  /** Where it sits in the queue; issues only (spec 02 §2.5). */
+  rank?: number | null;
+  /** When the work is wanted, `YYYY-MM-DD`; issues only. */
+  deadline?: string | null;
 }
 
 /** An update input without the `ref`, which the caller knows. */
@@ -62,6 +67,19 @@ export function normalizeList(values: readonly string[]): string[] {
 export function normalizeOptional(value: string | null | undefined): string | null {
   const trimmed = (value ?? "").trim();
   return trimmed === "" ? null : trimmed;
+}
+
+/**
+ * What a number field means: blank is no rank, and anything else is a number.
+ *
+ * NaN comes back rather than null for text that is not a number, so that
+ * "unplace it" and "that is not a rank" stay different answers — the second is
+ * refused by the builder below, the first is an ordinary edit.
+ */
+export function parseRankInput(value: string | null | undefined): number | null {
+  const trimmed = (value ?? "").trim();
+  if (trimmed === "") return null;
+  return Number(trimmed);
 }
 
 function sameList(a: readonly string[], b: readonly string[]): boolean {
@@ -119,6 +137,22 @@ export function buildEntityPatch(
   if (after.reviewers !== undefined) {
     const reviewers = normalizeList(after.reviewers);
     if (!sameList(reviewers, normalizeList(before.reviewers ?? []))) patch.reviewers = reviewers;
+  }
+
+  if (after.rank !== undefined) {
+    const rank = after.rank;
+    // Null unplaces it; a number places it. Anything else is a typo in a field
+    // and is said so, rather than sent for the server to refuse.
+    if (rank !== null && !Number.isFinite(rank)) throw new PatchError("a rank is a number");
+    if (rank !== (before.rank ?? null)) patch.rank = rank;
+  }
+
+  if (after.deadline !== undefined) {
+    const deadline = normalizeOptional(after.deadline);
+    if (deadline !== null && !isCalendarDate(deadline)) {
+      throw new PatchError("a deadline is a date, as YYYY-MM-DD");
+    }
+    if (deadline !== normalizeOptional(before.deadline)) patch.deadline = deadline;
   }
 
   return Object.keys(patch).length === 0 ? null : patch;

@@ -20,6 +20,7 @@ import {
   type InboxSelection,
   type InboxView,
 } from "~/utils/inbox";
+import { isSortOrder, type SortOrder } from "~/utils/sort";
 
 export interface InboxParams extends InboxSelection {
   /**
@@ -31,15 +32,30 @@ export interface InboxParams extends InboxSelection {
    * a question for the listing it came from.
    */
   finished: boolean;
+  /**
+   * The order the list is read in (spec 02 §2.5).
+   *
+   * Priority by default, unlike the listings. Those answer "what is there",
+   * where newest first is the honest reading; this one answers "what next",
+   * which is the question a rank was written down to answer.
+   */
+  sort: SortOrder;
   /** The search box verbatim; `splitTerms` turns it into `text` terms. */
   text: string;
 }
 
 /** The keys this page owns; everything else in the URL is left alone. */
-export const INBOX_PARAM_KEYS = ["view", "kind", "feature", "status", "q"] as const;
+export const INBOX_PARAM_KEYS = ["view", "kind", "feature", "status", "sort", "q"] as const;
 
 export function defaultInboxParams(): InboxParams {
-  return { view: "everything", kind: "any", feature: null, finished: false, text: "" };
+  return {
+    view: "everything",
+    kind: "any",
+    feature: null,
+    finished: false,
+    sort: "priority",
+    text: "",
+  };
 }
 
 /** The first value a key holds; each of these groups chooses exactly one. */
@@ -62,6 +78,7 @@ export function queryToInboxParams(query: RouteQuery): InboxParams {
     // written and compared with case folded — as core compares it.
     feature: first(query.feature),
     finished: firstWord(query.status) === "all",
+    sort: isSortOrder(firstWord(query.sort)) ? (firstWord(query.sort) as SortOrder) : "priority",
     text: joinTerms(queryValues(query.q).flatMap(splitTerms)),
   };
 }
@@ -73,6 +90,7 @@ export function inboxParamsToQuery(params: InboxParams): Record<string, string> 
   if (params.kind !== "any") query.kind = params.kind;
   if (params.feature !== null && params.feature !== "") query.feature = params.feature;
   if (params.finished) query.status = "all";
+  if (params.sort !== "priority") query.sort = params.sort;
   const terms = splitTerms(params.text);
   if (terms.length > 0) query.q = joinTerms(terms);
   return query;

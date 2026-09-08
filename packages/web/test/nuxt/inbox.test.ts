@@ -1,13 +1,12 @@
 /**
- * The inbox is four answers made into one list, so what is worth proving is
- * that nothing is lost, nothing is doubled, and the order is the one every
- * listing already arrives in.
+ * The inbox is four answers made into one list, so what is worth proving of the
+ * merge is that nothing is lost and nothing is doubled — and of the sort, that
+ * every order of spec 02 §2.5 reads the keys in the right order of precedence.
  */
 
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import {
-  compareInboxItems,
   INBOX_REASONS,
   type InboxItem,
   type InboxSelection,
@@ -17,6 +16,7 @@ import {
   narrowInbox,
   railCounts,
   sameFeature,
+  sortInbox,
 } from "../../app/utils/inbox";
 import type { IssueListItemFragment, PrListItemFragment } from "../../src/generated/gql/graphql";
 
@@ -36,6 +36,8 @@ function issue(id: string, extra: Partial<IssueListItemFragment> = {}): IssueLis
     milestone: null,
     features: [],
     resolution: null,
+    rank: null,
+    deadline: null,
     ...extra,
   };
 }
@@ -92,7 +94,6 @@ describe("mergeInbox", () => {
     const items = mergeInbox(
       answers({ assignedIssues: [issue("aaaa0001")], awaitingPrs: [pr("bbbb0002")] }),
     );
-    // Both were created at the same instant here, so the id breaks the tie.
     assert.deepEqual(
       items.map((item) => [item.kind, item.id, item.reasons]),
       [
@@ -152,70 +153,114 @@ describe("mergeInbox", () => {
     assert.deepEqual(new Set(items.map((item) => item.kind)), new Set(["issue", "pr"]));
   });
 
-  it("puts the newest first, breaking ties on the id", () => {
+  it("leaves the ordering to the page, which is what decides it", () => {
+    // Merging says which rows there are; the order is a reading of them, and
+    // the inbox reads them by priority rather than by when they arrived.
     const items = mergeInbox(
       answers({
         assignedIssues: [
           issue("aaaa0003", { created: "2026-08-02T09:00:00Z" }),
           issue("aaaa0001", { created: "2026-08-05T09:00:00Z" }),
-          // Same instant as aaaa0003, so the id decides and does so ascending.
-          issue("aaaa0002", { created: "2026-08-02T09:00:00Z" }),
         ],
       }),
     );
-    assert.deepEqual(
-      items.map((item) => item.id),
-      ["aaaa0001", "aaaa0002", "aaaa0003"],
-    );
-  });
-
-  it("mixes finished work in by date rather than appending it", () => {
-    const items = mergeInbox({
-      issues: [
-        { reason: "assigned", entities: [issue("aaaa0002", { created: "2026-08-02T09:00:00Z" })] },
-        {
-          reason: "assigned",
-          entities: [issue("aaaa0009", { created: "2026-08-09T09:00:00Z", status: "CLOSED" })],
-        },
-      ],
-      prs: [],
-    });
-    assert.deepEqual(
-      items.map((item) => item.id),
-      ["aaaa0009", "aaaa0002"],
-    );
+    assert.deepEqual(new Set(items.map((item) => item.id)), new Set(["aaaa0001", "aaaa0003"]));
   });
 });
 
-describe("compareInboxItems", () => {
-  const item = (id: string, created: string): InboxItem => ({
+describe("sortInbox", () => {
+  const item = (id: string, entity: Partial<IssueListItemFragment>): InboxItem => ({
     kind: "issue",
     id,
     reasons: ["assigned"],
-    entity: issue(id, { created }),
+    entity: issue(id, entity),
   });
 
-  it("puts the later timestamp first", () => {
-    const newer = item("b", "2026-08-02T09:30:00Z");
-    const older = item("a", "2026-08-02T09:15:00Z");
-    assert.ok(compareInboxItems(newer, older) < 0);
-    assert.ok(compareInboxItems(older, newer) > 0);
+  const ids = (items: InboxItem[], order: "priority" | "deadline" | "newest"): string[] =>
+    sortInbox(items, order).map((sorted) => sorted.id);
+
+  const SAME_DAY = "2026-08-01T10:00:00Z";
+
+  it("puts the newest first under newest, breaking ties on the id", () => {
+    const items = [
+      item("aaaa0003", { created: "2026-08-02T09:00:00Z" }),
+      item("aaaa0001", { created: "2026-08-05T09:00:00Z" }),
+      // Same instant as aaaa0003, so the id decides and does so ascending.
+      item("aaaa0002", { created: "2026-08-02T09:00:00Z" }),
+    ];
+    assert.deepEqual(ids(items, "newest"), ["aaaa0001", "aaaa0002", "aaaa0003"]);
   });
 
-  it("compares the timestamp as text, without parsing it", () => {
-    // Core compares the raw frontmatter value, so a value it cannot parse is
-    // still something to order — placed by its text, and never a reason to
-    // fail. Where it lands is not worth pinning; that it lands is.
-    const sane = item("a", "2026-08-02T09:15:00Z");
-    const nonsense = item("b", "not a date at all");
-    assert.equal(compareInboxItems(sane, nonsense), -compareInboxItems(nonsense, sane));
-    assert.notEqual(compareInboxItems(sane, nonsense), 0);
+  it("mixes finished work in by date rather than appending it", () => {
+    const items = [
+      item("aaaa0002", { created: "2026-08-02T09:00:00Z" }),
+      item("aaaa0009", { created: "2026-08-09T09:00:00Z", status: "CLOSED" }),
+    ];
+    assert.deepEqual(ids(items, "newest"), ["aaaa0009", "aaaa0002"]);
   });
 
-  it("is zero only for the same row", () => {
-    const created = "2026-08-01T10:00:00Z";
-    assert.equal(compareInboxItems(item("a", created), item("a", created)), 0);
-    assert.notEqual(compareInboxItems(item("a", created), item("b", created)), 0);
+  it("reads rank first under priority, and puts the unranked last", () => {
+    const items = [
+      item("aaaa0003", { created: SAME_DAY }),
+      item("aaaa0001", { created: SAME_DAY, rank: 20 }),
+      item("aaaa0002", { created: SAME_DAY, rank: 10 }),
+    ];
+    assert.deepEqual(ids(items, "priority"), ["aaaa0002", "aaaa0001", "aaaa0003"]);
+  });
+
+  it("falls through to the deadline when two rows share a rank", () => {
+    const items = [
+      item("aaaa0001", { created: SAME_DAY, rank: 10, deadline: "2026-12-31" }),
+      item("aaaa0002", { created: SAME_DAY, rank: 10, deadline: "2026-08-05" }),
+      item("aaaa0003", { created: SAME_DAY, rank: 10 }),
+    ];
+    assert.deepEqual(ids(items, "priority"), ["aaaa0002", "aaaa0001", "aaaa0003"]);
+  });
+
+  it("reads the deadline first under deadline, and the rank second", () => {
+    const items = [
+      // Placed but undated: it comes after everything with a day, and before
+      // the row that has neither.
+      item("aaaa0002", { created: SAME_DAY, rank: 20 }),
+      item("aaaa0001", { created: SAME_DAY, rank: 10, deadline: "2026-12-31" }),
+      item("aaaa0004", { created: SAME_DAY }),
+      item("aaaa0003", { created: SAME_DAY, deadline: "2026-08-05" }),
+    ];
+    assert.deepEqual(ids(items, "deadline"), ["aaaa0003", "aaaa0001", "aaaa0002", "aaaa0004"]);
+  });
+
+  it("sorts a pull request as unranked and undated, since it is neither", () => {
+    const items: InboxItem[] = [
+      { kind: "pr", id: "bbbb0001", reasons: ["author"], entity: pr("bbbb0001") },
+      item("aaaa0001", { created: SAME_DAY, rank: 50 }),
+    ];
+    assert.deepEqual(ids(items, "priority"), ["aaaa0001", "bbbb0001"]);
+    assert.deepEqual(ids(items, "deadline"), ["aaaa0001", "bbbb0001"]);
+  });
+
+  it("orders totally, so no two rows ever compare equal", () => {
+    // Every chain ends on the id, which is what makes the order stable across
+    // a refetch — and across the two front ends that implement these rules.
+    const items = [
+      item("aaaa0002", { created: SAME_DAY }),
+      item("aaaa0001", { created: SAME_DAY }),
+    ];
+    for (const order of ["priority", "deadline", "newest"] as const) {
+      assert.deepEqual(ids(items, order), ["aaaa0001", "aaaa0002"], order);
+      assert.deepEqual(ids([...items].reverse(), order), ["aaaa0001", "aaaa0002"], order);
+    }
+  });
+
+  it("leaves the list it was given alone", () => {
+    const items = [
+      item("aaaa0002", { created: SAME_DAY, rank: 20 }),
+      item("aaaa0001", { created: SAME_DAY, rank: 10 }),
+    ];
+    sortInbox(items, "priority");
+    assert.deepEqual(
+      items.map((row) => row.id),
+      ["aaaa0002", "aaaa0001"],
+    );
   });
 });
 

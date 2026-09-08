@@ -11,11 +11,14 @@
  * is one the reader chose.
  */
 
-import type { EntityFilter, Status } from "~~/src/generated/gql/graphql";
+import type { DeadlineState, EntityFilter, Status } from "~~/src/generated/gql/graphql";
 
 /** Statuses an issue can be in; a pull request adds `MERGED`. */
 export const ISSUE_STATUSES: readonly Status[] = ["OPEN", "CLOSED"];
 export const PR_STATUSES: readonly Status[] = ["OPEN", "MERGED", "CLOSED"];
+
+/** Where an issue stands against its deadline; issues only (spec 02 §2.5). */
+export const DEADLINE_STATES: readonly DeadlineState[] = ["OVERDUE", "NONE"];
 
 export interface FilterState {
   /** Empty means any status, as an empty `EntityFilter.status` does. */
@@ -27,6 +30,8 @@ export interface FilterState {
   features: string[];
   /** Asked to review it; pull requests only (spec 02 §2.7). */
   reviewers: string[];
+  /** Where it stands against its deadline; issues only (spec 02 §2.5). */
+  deadline: DeadlineState[];
   /** The search box verbatim; `splitTerms` turns it into `text` terms. */
   text: string;
 }
@@ -41,6 +46,7 @@ export function emptyFilter(): FilterState {
     milestones: [],
     features: [],
     reviewers: [],
+    deadline: [],
     text: "",
   };
 }
@@ -54,6 +60,7 @@ export function isEmptyFilter(filter: FilterState): boolean {
     filter.milestones.length === 0 &&
     filter.features.length === 0 &&
     filter.reviewers.length === 0 &&
+    filter.deadline.length === 0 &&
     filter.text.trim() === ""
   );
 }
@@ -83,6 +90,18 @@ function statuses(raw: QueryValue, allowed: readonly Status[]): Status[] {
   // typed by hand and shared, and a stale `status=merged` on the issue list
   // should show the issue list, not an error.
   return allowed.filter((status) => wanted.includes(status));
+}
+
+/**
+ * The deadline states a URL names, dropped for the same reason a status is
+ * when it does not apply.
+ *
+ * `allowed` is empty on the pull request listing, so `?deadline=overdue` there
+ * reads as no narrowing rather than as a filter the API would refuse.
+ */
+function deadlineStates(raw: QueryValue, allowed: readonly DeadlineState[]): DeadlineState[] {
+  const wanted = queryValues(raw).map((item) => item.toUpperCase());
+  return allowed.filter((state) => wanted.includes(state));
 }
 
 /**
@@ -119,15 +138,23 @@ export function joinTerms(terms: readonly string[]): string {
     .join(" ");
 }
 
-export function queryToFilter(query: RouteQuery, allowed: readonly Status[]): FilterState {
+export interface FilterKeys {
+  /** Statuses this listing has; the rest are dropped from the URL. */
+  statuses: readonly Status[];
+  /** Deadline states it has: none, on a listing whose noun is not scheduled. */
+  deadlines?: readonly DeadlineState[];
+}
+
+export function queryToFilter(query: RouteQuery, keys: FilterKeys): FilterState {
   return {
-    status: statuses(query.status, allowed),
+    status: statuses(query.status, keys.statuses),
     labels: queryValues(query.label),
     assignees: queryValues(query.assignee),
     authors: queryValues(query.author),
     milestones: queryValues(query.milestone),
     features: queryValues(query.feature),
     reviewers: queryValues(query.reviewer),
+    deadline: deadlineStates(query.deadline, keys.deadlines ?? []),
     text: joinTerms(queryValues(query.q).flatMap(splitTerms)),
   };
 }
@@ -154,6 +181,10 @@ export function filterToQuery(filter: FilterState): Record<string, string[]> {
   put("milestone", filter.milestones);
   put("feature", filter.features);
   put("reviewer", filter.reviewers);
+  put(
+    "deadline",
+    filter.deadline.map((state) => state.toLowerCase()),
+  );
   const terms = splitTerms(filter.text);
   if (terms.length > 0) query.q = [joinTerms(terms)];
   return query;
@@ -169,6 +200,7 @@ export function toEntityFilter(filter: FilterState): EntityFilter {
   if (filter.milestones.length > 0) entityFilter.milestones = [...filter.milestones];
   if (filter.features.length > 0) entityFilter.features = [...filter.features];
   if (filter.reviewers.length > 0) entityFilter.reviewers = [...filter.reviewers];
+  if (filter.deadline.length > 0) entityFilter.deadline = [...filter.deadline];
   const terms = splitTerms(filter.text);
   if (terms.length > 0) entityFilter.text = terms;
   return entityFilter;

@@ -9,9 +9,9 @@
 import { useQuery } from "@vue/apollo-composable";
 import { FEATURES_QUERY, ISSUES_QUERY } from "~/graphql/queries";
 import { distinctValues } from "~/utils/entities";
-import { ISSUE_STATUSES } from "~/utils/filter-params";
+import { DEADLINE_STATES, ISSUE_STATUSES } from "~/utils/filter-params";
 
-const filter = useEntityFilter(ISSUE_STATUSES);
+const filter = useEntityFilter({ statuses: ISSUE_STATUSES, deadlines: DEADLINE_STATES });
 
 const { result, loading, error, refetch } = useQuery(
   ISSUES_QUERY,

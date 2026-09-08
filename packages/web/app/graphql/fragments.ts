@@ -44,10 +44,17 @@ export const COMMENT_FIELDS = graphql(`
   }
 `);
 
+/**
+ * `rank` and `deadline` are here and not on `EntityCore` because they are
+ * issue-only (spec 02 §2.5): a pull request has neither, and a fragment that
+ * asked for them on `Entity` would not compile.
+ */
 export const ISSUE_LIST_ITEM = graphql(`
   fragment IssueListItem on Issue {
     ...EntityCore
     resolution
+    rank
+    deadline
   }
 `);
 
