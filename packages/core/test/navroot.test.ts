@@ -403,4 +403,20 @@ describe("readReviewPolicy", () => {
       assert.deepEqual(readReviewPolicy(makeWsCtx({ cwd: dir })).problems, ["is not valid JSON"]);
     });
   });
+
+  it("treats a path that is not a file as no marker, as the tree walk does", () => {
+    // A directory wearing the name is pathological, but the read must not throw
+    // where the walk simply skips: `readNavTree` reads files, so `parseTree`
+    // sees no marker here, and a `doctor` and a `pr list` that disagreed about
+    // whether a policy exists would be worse than one counting by the defaults.
+    inRepo((dir) => {
+      mkdirSync(join(dir, ".navbook", NAV_MARKER), { recursive: true });
+      const reading = readReviewPolicy(makeWsCtx({ cwd: dir }));
+      assert.deepEqual(reading, {
+        policy: { selfReview: false, minApprovals: 1 },
+        declared: false,
+        problems: [],
+      });
+    });
+  });
 });

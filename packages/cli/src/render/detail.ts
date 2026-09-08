@@ -127,20 +127,27 @@ function reviewRows(
   // The policy is worth stating even where nobody has reviewed: it is what
   // this pull request will be read against, and a reader who has to guess
   // whether one approval is enough has been told half of it.
-  const policy = reading.declared ? [["policy", c.dim(describeReviewPolicy(reading.policy))]] : [];
-  if (summary.reviewers.length === 0) return policy as [string, string][];
+  const policy: [string, string][] = reading.declared
+    ? [["policy", c.dim(describeReviewPolicy(reading.policy))]]
+    : [];
 
   // The count only earns its place where more than one approval is wanted;
   // "1 of 1" beside every decision is a fact nobody was missing.
   const { given, required } = summary.approvals;
   const counted = required > 1 ? c.dim(`  (${given} of ${required} approvals)`) : "";
+  // A count is itself something to say, so it shows the decision even where
+  // nobody was asked: under a policy wanting more than one approval, the
+  // policy is the ask, and hiding the shortfall until somebody is named would
+  // be reporting silence about the one thing standing in the way.
+  if (summary.reviewers.length === 0 && counted === "") return policy;
+
   const rows: [string, string][] = [["review", `${paintDecision(summary.decision, c)}${counted}`]];
   summary.reviewers.forEach((entry, index) => {
     const state = paintState(entry.state, c);
     const asked = entry.volunteer ? c.dim(" (not asked)") : "";
     rows.push([index === 0 ? "reviewers" : "", `${entry.person}  ${state}${asked}`]);
   });
-  return [...rows, ...(policy as [string, string][])];
+  return [...rows, ...policy];
 }
 
 function paintDecision(decision: string, c: Colors): string {

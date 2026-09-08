@@ -119,10 +119,23 @@ export function loadRepoForQuery(ws: WsCtx, query: Query, kind: EntityKind): Rep
  * other branches: it is how *this* checkout counts, and a pull request read
  * from a ref would otherwise be counted by whatever its own branch happened to
  * say, which is a second answer to a question that has one.
+ *
+ * A path that cannot be read as a file — a directory wearing the name, or one
+ * the process has no permission for — is treated as no marker at all, which is
+ * exactly what `readNavTree` concludes about it: it walks files, so the same
+ * path is simply absent from the tree `parseTree` judges. Agreeing with that
+ * matters more than reporting it, since a repository whose `doctor` and whose
+ * `pr list` disagreed about whether a policy exists would be worse than one
+ * quietly counting by the defaults.
  */
 export function readReviewPolicy(ws: WsCtx): ReviewPolicyReading {
   const path = join(ws.navRoot, NAV_MARKER);
-  return parseReviewPolicy(existsSync(path) ? readFileSync(path, "utf8") : undefined);
+  if (!existsSync(path)) return parseReviewPolicy(undefined);
+  try {
+    return parseReviewPolicy(readFileSync(path, "utf8"));
+  } catch {
+    return parseReviewPolicy(undefined);
+  }
 }
 
 /** Fail with a helpful message when the repository has no Navbook directory yet. */

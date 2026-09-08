@@ -966,6 +966,38 @@ describe("the review policy", () => {
       }
     });
 
+    it("shows the shortfall before anybody has been asked, since the policy is the ask", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        declarePolicy(repo, { minApprovals: 2 });
+        const shown = repo.nav(["pr", "show", "dk3m"]).stdout;
+        assert.match(shown, /review: +pending {2}\(0 of 2 approvals\)/);
+        assert.equal(
+          shown.includes("reviewers:"),
+          false,
+          "and nobody is listed, because nobody is",
+        );
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("still says nothing about a pull request nobody asked and one approval suits", () => {
+      // The rule the count is an exception to: a decision of `pending` where
+      // nothing is outstanding is noise, and stays hidden.
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        declarePolicy(repo, { minApprovals: 1 });
+        const shown = repo.nav(["pr", "show", "dk3m"]).stdout;
+        assert.equal(shown.includes("review:"), false, shown);
+        assert.match(shown, /policy: +1 approval required/);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
     it("leaves the count off when one approval is what is wanted", () => {
       // "1 of 1" beside every decision is a fact nobody was missing.
       const { repo } = withOpenPr();
