@@ -7,7 +7,7 @@ title: Fixtures
 `doc/spec/fixtures/` holds plain, browsable files plus a `case.yaml` per case; the harness in `test/conformance/` materialises a deterministic git repository, runs one command against `$NAV_BIN`, and compares exit code, stdout, the resulting tree and the commits made (spec 05 §5.4).
 
 - **Format fixtures** — valid trees that must produce no diagnostics, hand-edit oddities included, and invalid trees with the diagnostics they must produce, compared by check, level and path only.
-- **Operation fixtures** — before-tree, command, after-tree, exit code and stdout for the CLI verbs, `feature` verbs included.
+- **Operation fixtures** — before-tree, command, after-tree, exit code and stdout for the CLI verbs, `feature` verbs included. The `issue-list` cases pin the orders of spec 02 §2.5 as well as the filters, since an order is the one thing two implementations can differ about while both look right.
 - **Merge fixtures** — the scenario table of spec 03 §3.3 as replayable histories with expected post-merge trees.
 - **Determinism** — `NAV_NOW` and `NAV_IDS` replace the clock and the ID generator; git identity, dates, locale and configuration are pinned; SHAs are placeholders substituted at comparison time.
 - **Recording** — `node test/conformance/record.ts` regenerates expectations; what it records is what the implementation does, so the diff is read against the specification before it is committed.
