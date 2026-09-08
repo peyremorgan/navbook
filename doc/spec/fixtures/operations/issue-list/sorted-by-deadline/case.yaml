@@ -1,0 +1,5 @@
+spec-version: 1
+description: --sort deadline reads the day first and the rank second, so a placed issue with no day outranks one with neither
+init: {from: before}
+run: {command: [issue, list, --sort, deadline]}
+expect: {exit: 0, stdout: expected/stdout.txt}

@@ -1,0 +1,2 @@
+Created .navbook/issues/open/w2rfk8na-schedule-the-key-rotation/  (#w2rfk8na)
+Committed docs(issue): open #w2rfk8na

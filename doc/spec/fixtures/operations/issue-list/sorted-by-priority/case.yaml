@@ -1,0 +1,5 @@
+spec-version: 1
+description: --sort priority reads rank first and deadline second, and puts what carries neither last
+init: {from: before}
+run: {command: [issue, list, --sort, priority]}
+expect: {exit: 0, stdout: expected/stdout.txt}

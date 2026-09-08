@@ -1,0 +1,11 @@
+spec-version: 1
+description: rank and deadline are written as frontmatter, after the keys both kinds share
+init: {from: before}
+run:
+  command: [issue, open, "Schedule the key rotation", -m, "Keys outlive their sessions.", --rank, "20", --deadline, "2026-10-01", --commit]
+  env: {NAV_NOW: "2026-08-10T12:00:00Z", NAV_IDS: "w2rfk8na"}
+expect:
+  exit: 0
+  stdout: expected/stdout.txt
+  tree: expected/tree
+  commits: ["docs(issue): open #w2rfk8na\n"]
