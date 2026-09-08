@@ -4,6 +4,7 @@
  * listings a feature's timeline is built from.
  */
 
+import { dedupePeople, type Person, parsePerson } from "../core/person.ts";
 import { git, gitMaybe, gitRun, splitLines } from "./exec.ts";
 
 /** ASCII SOH/STX: separators that cannot occur in a commit message or path. */
@@ -156,4 +157,49 @@ export function searchCommits(cwd: string, search: CommitSearch): CommitSummary[
 /** Resolve a revision, throwing a useful message when it does not exist. */
 export function requireSha(cwd: string, rev: string): string {
   return git(["rev-parse", "--verify", `${rev}^{commit}`], { cwd }).trim();
+}
+
+/**
+ * Everyone who authored a commit reachable from `rev`, newest first.
+ *
+ * `%aN` and `%aE` rather than `%an` and `%ae`, so `.mailmap` is applied by git
+ * itself — which is how the SHOULD of spec 02 §2.4 is honoured here without
+ * this layer learning what a mailmap is. One entry per address, and since the
+ * walk is newest first the name a person last committed under is the one that
+ * survives.
+ *
+ * The separators are NUL and newline rather than the SOH and STX the listings
+ * above use, because those two are the ones git guarantees: it truncates an
+ * identity at a NUL and strips the newlines out of one, while a control
+ * character like SOH survives in a name and would otherwise split a record
+ * that is not finished. Angle brackets are stripped too, so composing the
+ * address back from the two halves cannot be made to say something else.
+ *
+ * An author git accepts but the format's grammar does not — `root@localhost`,
+ * whose domain has no dot — is skipped rather than offered: every person field
+ * validates what it is given, so a suggestion that could not be saved is worse
+ * than no suggestion at all.
+ *
+ * Empty where the revision does not resolve, which is the repository whose
+ * branch is unborn as well as the one asked about a rev it does not have.
+ */
+export function commitAuthors(cwd: string, rev = "HEAD"): Person[] {
+  const result = gitRun(
+    // `--no-show-signature`: a clone with `log.showSignature` set would
+    // otherwise interleave the signature's own lines into the output.
+    ["log", "--no-show-signature", "--format=%aE%x00%aN", rev],
+    // One short line per commit, where the default budget is sized for one
+    // commit's patch: a history long enough to overflow 64 MB is not exotic.
+    { cwd, maxBuffer: 256 * 1024 * 1024 },
+  );
+  if (result.code !== 0) return [];
+
+  const people: Person[] = [];
+  for (const line of splitLines(result.stdout)) {
+    const [email, name] = line.split("\0");
+    if (email === undefined || email === "") continue;
+    const person = parsePerson(name === undefined || name === "" ? email : `${name} <${email}>`);
+    if (person !== null) people.push(person);
+  }
+  return dedupePeople(people);
 }

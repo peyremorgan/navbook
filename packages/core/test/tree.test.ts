@@ -3,7 +3,14 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { allIds, type CommentScope, type NavTree, parseTree, statusDir } from "../src/core/tree.ts";
+import {
+  allIds,
+  type CommentScope,
+  type NavTree,
+  parseTree,
+  statusDir,
+  treePeople,
+} from "../src/core/tree.ts";
 import { readNavTree } from "../src/workspace/workspace.ts";
 
 const SHA_A = "4f2c9d1e8a7b3c5d9e0f1a2b3c4d5e6f7a8b9c0d";
@@ -275,5 +282,85 @@ describe("readNavTree comment scope", () => {
     // What a pull-request listing needs to derive a review state, without
     // paying for the issue comments beside it (spec 05 §5.2's budget).
     assert.deepEqual(paths("prs"), ["prs/open/dk3mp2x9-y/comments/2026-08-03T141207Z-q8zm3vp1.md"]);
+  });
+});
+
+describe("treePeople", () => {
+  const people = (entries: Record<string, string>): string[] =>
+    treePeople(parseTree(tree(entries))).map((person) =>
+      person.name ? `${person.name} <${person.email}>` : person.email,
+    );
+
+  it("names everybody an entity's frontmatter does", () => {
+    assert.deepEqual(
+      people({
+        "issues/open/bqlybac0-login-timeout/issue.md":
+          "---\ntitle: Login times out\nauthor: Alice <alice@example.com>\n" +
+          "created: 2026-08-02T09:14:00Z\nassignee: [ked@example.com, Bob <bob@example.com>]\n---\n\nBody.\n",
+        "issues/open/bqlybac0-login-timeout/comments/2026-08-03T141207Z-t5kr1gq6.md":
+          "---\nauthor: Carol <carol@example.com>\n---\n\nReproduced.\n",
+      }),
+      [
+        "Alice <alice@example.com>",
+        "ked@example.com",
+        "Bob <bob@example.com>",
+        "Carol <carol@example.com>",
+      ],
+    );
+  });
+
+  it("names the reviewers asked and the person who merged it", () => {
+    assert.deepEqual(
+      people({
+        "prs/merged/dk3mp2x9-auth-refactor/pr.md":
+          `---\ntitle: Auth refactor\nauthor: ked@example.com\ncreated: 2026-08-04T16:40:00Z\n` +
+          `target: main\nsource: feat/auth\nreviewer: Rae <rae@example.com>\n` +
+          `revisions:\n  - head: ${SHA_A}\n    base: ${SHA_B}\n    date: 2026-08-04T16:40:00Z\n` +
+          `merged:\n  date: 2026-08-06T10:00:00Z\n  by: Mia <mia@example.com>\n---\n\nBody.\n`,
+      }),
+      ["ked@example.com", "Rae <rae@example.com>", "Mia <mia@example.com>"],
+    );
+  });
+
+  it("names a feature's author", () => {
+    assert.deepEqual(
+      people({
+        "specs/auth/feature.md":
+          "---\ntitle: Auth\nauthor: Fay <fay@example.com>\ncreated: 2026-08-01T09:00:00Z\n---\n\nBody.\n",
+      }),
+      ["Fay <fay@example.com>"],
+    );
+  });
+
+  it("skips what is not a person, rather than reporting it", () => {
+    assert.deepEqual(
+      people({
+        "issues/open/bqlybac0-login-timeout/issue.md":
+          "---\ntitle: Login times out\nauthor: not-an-address\n" +
+          'created: 2026-08-02T09:14:00Z\nassignee: [alice@example.com, 42, ""]\n' +
+          "merged:\n  by: 7\n---\n\nBody.\n",
+      }),
+      ["alice@example.com"],
+    );
+  });
+
+  it("says each person once, however many times the tree names them", () => {
+    assert.deepEqual(
+      people({
+        "issues/open/bqlybac0-login-timeout/issue.md":
+          "---\ntitle: Login times out\nauthor: alice@example.com\n" +
+          "created: 2026-08-02T09:14:00Z\n---\n\nBody.\n",
+        "issues/open/bqlybac0-login-timeout/comments/2026-08-03T141207Z-t5kr1gq6.md":
+          "---\nauthor: Alice <ALICE@example.com>\n---\n\nReproduced.\n",
+        "issues/closed/mz4kq1rv-crash-on-empty-file/issue.md":
+          "---\ntitle: Crash\nauthor: alice@example.com\ncreated: 2026-08-02T09:14:00Z\n---\n\nBody.\n",
+      }),
+      // Bare first, so the comment's spelling is what names them.
+      ["Alice <alice@example.com>"],
+    );
+  });
+
+  it("is empty for a tree with nobody in it", () => {
+    assert.deepEqual(people({}), []);
   });
 });

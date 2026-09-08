@@ -51,3 +51,57 @@ export function personMatches(queryValue: string, personField: string): boolean 
   const domain = email.slice(email.indexOf("@") + 1);
   return domain.includes(needle);
 }
+
+/**
+ * One entry per address, in the order the addresses first appear.
+ *
+ * The name is the first one any entry for that address carried, so a source
+ * listed before another names a person that later source cannot rename — while
+ * a later source may still name an address every earlier one left bare. That
+ * is what makes {@link mergePeople}'s argument order a precedence order.
+ */
+export function dedupePeople(people: Iterable<Person>): Person[] {
+  const byEmail = new Map<string, Person>();
+  for (const person of people) {
+    const key = person.email.trim().toLowerCase();
+    const seen = byEmail.get(key);
+    if (seen === undefined) {
+      byEmail.set(key, person);
+      continue;
+    }
+    // A bare entry is completed by a later one that has a name; a named entry
+    // is never renamed.
+    if (seen.name === undefined && person.name !== undefined) {
+      byEmail.set(key, { name: person.name, email: seen.email });
+    }
+  }
+  return [...byEmail.values()];
+}
+
+/**
+ * Order two people for a menu: by what is shown, then by what they are.
+ *
+ * Compared lowercased rather than through `localeCompare`, because the answer
+ * is computed once and read everywhere: a listing that depended on the locale
+ * of whichever process built it would not be one answer.
+ */
+export function comparePeople(a: Person, b: Person): number {
+  const left = (a.name ?? a.email).toLowerCase();
+  const right = (b.name ?? b.email).toLowerCase();
+  if (left !== right) return left < right ? -1 : 1;
+  const leftEmail = a.email.toLowerCase();
+  const rightEmail = b.email.toLowerCase();
+  if (leftEmail === rightEmail) return 0;
+  return leftEmail < rightEmail ? -1 : 1;
+}
+
+/**
+ * Several sources of people as one sorted directory, earlier sources first.
+ *
+ * "First" is about names rather than membership: every source contributes
+ * everybody it knows, and the earliest one that has a name for an address is
+ * the one that names it (see {@link dedupePeople}).
+ */
+export function mergePeople(...sources: readonly (readonly Person[])[]): Person[] {
+  return dedupePeople(sources.flat()).sort(comparePeople);
+}

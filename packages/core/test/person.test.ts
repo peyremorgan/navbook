@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { formatPerson, parsePerson, personMatches, sameEmail } from "../src/core/person.ts";
+import {
+  comparePeople,
+  dedupePeople,
+  formatPerson,
+  mergePeople,
+  parsePerson,
+  personMatches,
+  sameEmail,
+} from "../src/core/person.ts";
 
 describe("parsePerson", () => {
   it("accepts both spec forms", () => {
@@ -83,5 +91,117 @@ describe("personMatches", () => {
 
   it("still compares when the stored field is not a parseable address", () => {
     assert.equal(personMatches("not-an-address", "not-an-address"), true);
+  });
+});
+
+describe("dedupePeople", () => {
+  it("folds addresses case-insensitively, keeping the first spelling", () => {
+    assert.deepEqual(
+      dedupePeople([{ email: "Alice@Example.com" }, { email: "alice@example.com" }]),
+      [{ email: "Alice@Example.com" }],
+    );
+  });
+
+  it("keeps the first name an address was given", () => {
+    assert.deepEqual(
+      dedupePeople([
+        { name: "Alice New", email: "alice@example.com" },
+        { name: "Alice Old", email: "alice@example.com" },
+      ]),
+      [{ name: "Alice New", email: "alice@example.com" }],
+    );
+  });
+
+  it("lets a later entry name an address every earlier one left bare", () => {
+    assert.deepEqual(
+      dedupePeople([{ email: "alice@example.com" }, { name: "Alice", email: "ALICE@example.com" }]),
+      [{ name: "Alice", email: "alice@example.com" }],
+    );
+  });
+
+  it("keeps the order the addresses first appeared in", () => {
+    assert.deepEqual(
+      dedupePeople([
+        { email: "c@example.com" },
+        { email: "a@example.com" },
+        { email: "c@example.com" },
+      ]).map((person) => person.email),
+      ["c@example.com", "a@example.com"],
+    );
+  });
+
+  it("is empty for nothing", () => {
+    assert.deepEqual(dedupePeople([]), []);
+  });
+});
+
+describe("comparePeople", () => {
+  it("orders by what is shown, ignoring case", () => {
+    const sorted = [
+      { name: "Bob", email: "b@example.com" },
+      { name: "alice", email: "a@example.com" },
+    ].sort(comparePeople);
+    assert.deepEqual(
+      sorted.map((person) => person.name),
+      ["alice", "Bob"],
+    );
+  });
+
+  it("orders a nameless person by the address that is shown instead", () => {
+    const sorted = [{ name: "Zoe", email: "z@example.com" }, { email: "bare@example.com" }].sort(
+      comparePeople,
+    );
+    assert.deepEqual(
+      sorted.map((person) => person.email),
+      ["bare@example.com", "z@example.com"],
+    );
+  });
+
+  it("settles two people shown the same way by their addresses", () => {
+    const sorted = [
+      { name: "Alex", email: "b@example.com" },
+      { name: "alex", email: "a@example.com" },
+    ].sort(comparePeople);
+    assert.deepEqual(
+      sorted.map((person) => person.email),
+      ["a@example.com", "b@example.com"],
+    );
+    assert.equal(
+      comparePeople({ name: "A", email: "a@example.com" }, { name: "a", email: "A@example.com" }),
+      0,
+    );
+  });
+});
+
+describe("mergePeople", () => {
+  it("takes each name from the earliest source that has one", () => {
+    assert.deepEqual(
+      mergePeople(
+        [{ name: "From History", email: "one@example.com" }, { email: "two@example.com" }],
+        [
+          { name: "From The Tree", email: "ONE@example.com" },
+          { name: "Also The Tree", email: "two@example.com" },
+        ],
+      ),
+      [
+        { name: "Also The Tree", email: "two@example.com" },
+        { name: "From History", email: "one@example.com" },
+      ],
+    );
+  });
+
+  it("sorts what it merged, whatever order the sources were in", () => {
+    assert.deepEqual(
+      mergePeople(
+        [{ name: "Zoe", email: "z@example.com" }],
+        [{ name: "Amy", email: "a@example.com" }],
+      ).map((person) => person.name),
+      ["Amy", "Zoe"],
+    );
+  });
+
+  it("is empty for no sources at all", () => {
+    assert.deepEqual(mergePeople(), []);
+    assert.deepEqual(mergePeople([], []), []);
   });
 });

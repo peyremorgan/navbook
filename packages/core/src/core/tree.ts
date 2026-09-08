@@ -7,7 +7,8 @@
  */
 
 import { parseCommentFileName } from "./comments.ts";
-import { FEATURE_FILE, type ParsedFile, parseFile } from "./files.ts";
+import { FEATURE_FILE, type ParsedFile, parseFile, readMerged, readPersonList } from "./files.ts";
+import { dedupePeople, type Person, parsePerson } from "./person.ts";
 import { parseReviewPolicy, type ReviewPolicyReading } from "./policy.ts";
 import { parseDirName, SLUG_PATTERN } from "./slug.ts";
 
@@ -530,4 +531,36 @@ export function statusDir(kind: EntityKind, status: Status): string {
 /** Locate an entity by exact ID across both kinds. */
 export function findById(repo: Repo, id: string): EntityRecord | undefined {
   return repo.byId.get(id);
+}
+
+/**
+ * Everyone the tree names, in the order the addresses first appear.
+ *
+ * Read defensively, as every frontmatter reader here is: a value that is not a
+ * person is skipped rather than reported, because this is a directory of who
+ * is around and not a check on whether the files are well formed — `doctor`
+ * has that job, and it would say the same thing twice.
+ *
+ * `merged.by` is in it because merging a pull request is work somebody did
+ * (spec 02 §2.7), and comment authors are because saying something about an
+ * issue is the commonest way to be somebody this repository knows of.
+ */
+export function treePeople(repo: Repo): Person[] {
+  const found: Person[] = [];
+  const add = (field: unknown): void => {
+    if (typeof field !== "string") return;
+    const person = parsePerson(field);
+    if (person !== null) found.push(person);
+  };
+
+  for (const entity of allEntities(repo)) {
+    add(entity.fm.author);
+    for (const value of readPersonList(entity.fm, "assignee")) add(value);
+    for (const value of readPersonList(entity.fm, "reviewer")) add(value);
+    add(readMerged(entity.fm)?.by);
+    for (const comment of entity.comments) add(comment.author);
+  }
+  for (const feature of repo.features) add(feature.fm.author);
+
+  return dedupePeople(found);
 }
