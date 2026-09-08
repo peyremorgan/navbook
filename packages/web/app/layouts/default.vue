@@ -4,6 +4,7 @@
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
 import { VIEWER_QUERY } from "~/graphql/queries";
+import type { RouteQuery } from "~/utils/filter-params";
 import { HOME } from "~/utils/navigation";
 
 const auth = useAuth();
@@ -15,10 +16,28 @@ const { result } = useQuery(VIEWER_QUERY, null, { fetchPolicy: "cache-first" });
 const viewer = computed(() => result.value?.viewer ?? null);
 
 const links = [
-  { label: "Issues", to: "/issues", icon: "i-lucide-circle-dot" },
-  { label: "Pull requests", to: "/prs", icon: "i-lucide-git-pull-request" },
-  { label: "Features", to: "/features", icon: "i-lucide-layers" },
+  { label: "Issues", to: "/issues", icon: "i-lucide-circle-dot", testid: "nav-issues" },
+  { label: "Pull requests", to: "/prs", icon: "i-lucide-git-pull-request", testid: "nav-prs" },
+  { label: "Features", to: "/features", icon: "i-lucide-layers", testid: "nav-features" },
 ];
+
+// Each listing's tab goes back to the listing as it was left, which means
+// remembering the address, because the address is the filter. Watching it from
+// here rather than from the pages: this layout is the one thing mounted across
+// all of them, so every URL is seen once and from the file that owns the
+// links. A listing only — `/issues/new` and a detail page have queries of
+// their own, and neither is somewhere a tab points.
+const route = useRoute();
+const memory = useFilterMemory();
+watch(
+  () => route.fullPath,
+  () => {
+    if (links.some((link) => link.to === route.path)) {
+      memory.remember(route.path, route.query as RouteQuery);
+    }
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -27,10 +46,12 @@ const links = [
       <div class="mx-auto flex max-w-6xl items-center gap-6 px-4 py-3">
         <!--
           The wordmark is the way home, so it goes where the root goes: the
-          open issues. The button beside it is not — "Issues" means the
-          listing, all of it, which is the way back out of the filter.
+          open issues, every time. It is the one link in the header that does
+          not remember: the tab beside it comes back to the issues as they were
+          left, and two adjacent links that did the same thing would be one
+          link drawn twice.
         -->
-        <NuxtLink :to="HOME" class="flex items-center gap-2 font-semibold">
+        <NuxtLink :to="HOME" class="flex items-center gap-2 font-semibold" data-testid="nav-brand">
           <UIcon name="i-lucide-notebook-text" class="size-5 text-primary" />
           Navbook
         </NuxtLink>
@@ -39,7 +60,8 @@ const links = [
           <UButton
             v-for="link in links"
             :key="link.to"
-            :to="link.to"
+            :to="memory.target(link.to)"
+            :data-testid="link.testid"
             :icon="link.icon"
             :label="link.label"
             color="neutral"

@@ -83,16 +83,23 @@ test("replaces a query on the root rather than carrying it in", async ({ signedI
   await expect(signedIn.getByTestId("issue-row-aaaa0006")).toHaveCount(0);
 });
 
-test("takes the wordmark home and the tab to the whole listing", async ({ signedIn, stack }) => {
+test("takes the wordmark home and the tab back to where the listing was", async ({
+  signedIn,
+  stack,
+}) => {
   await signedIn.goto(`${stack.appUrl}/issues?label=bug`);
+  await signedIn.getByTestId("nav-prs").click();
+
+  // The two sit next to each other and do not mean the same thing. The tab is
+  // the way back to the listing as it was left (`filter-memory.spec.ts`)...
+  await signedIn.getByRole("link", { name: "Issues", exact: true }).click();
+  await expect(signedIn).toHaveURL(`${stack.appUrl}/issues?label=bug`);
+  await expect(signedIn.getByTestId("issue-row-aaaa0001")).toBeVisible();
+
+  // ...and the wordmark is the way home, every time, whatever was left where.
   await signedIn.getByRole("link", { name: "Navbook", exact: true }).click();
   await expect(signedIn).toHaveURL(`${stack.appUrl}/issues?status=open`);
-
-  // The two sit next to each other and do not mean the same thing: one is the
-  // way home, the other is the way out of whatever filter home arrived with.
-  await signedIn.getByRole("link", { name: "Issues", exact: true }).click();
-  await expect(signedIn).toHaveURL(`${stack.appUrl}/issues`);
-  await expect(signedIn.getByTestId("issue-row-aaaa0006")).toBeVisible();
+  await expect(signedIn.getByTestId("issue-row-aaaa0006")).toHaveCount(0);
 });
 
 test("filters by label, from the URL and from the chips", async ({ signedIn, stack }) => {

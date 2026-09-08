@@ -9,6 +9,8 @@ import { describe, it } from "vitest";
 import {
   DEADLINE_STATES,
   emptyFilter,
+  FILTER_KEYS,
+  filterQuery,
   filterToQuery,
   ISSUE_STATUSES,
   isEmptyFilter,
@@ -17,6 +19,7 @@ import {
   queryToFilter,
   splitTerms,
   toEntityFilter,
+  withoutFilter,
 } from "../../app/utils/filter-params";
 
 describe("splitTerms", () => {
@@ -187,5 +190,74 @@ describe("toEntityFilter", () => {
 
   it("passes statuses through in the schema's spelling", () => {
     assert.deepEqual(toEntityFilter({ ...emptyFilter(), status: ["CLOSED"] }).status, ["CLOSED"]);
+  });
+});
+
+describe("filterQuery", () => {
+  it("keeps the filter's parameters, and normalises them as queryToFilter would", () => {
+    assert.deepEqual(
+      filterQuery({
+        status: ["open", null, " closed "],
+        label: "bug",
+        q: "   ",
+        refs: "all",
+        page: "2",
+      }),
+      { status: ["open", "closed"], label: ["bug"] },
+    );
+  });
+
+  it("is empty when a URL carries nothing of the filter's", () => {
+    assert.deepEqual(filterQuery({}), {});
+    assert.deepEqual(filterQuery({ refs: "all" }), {});
+    assert.deepEqual(filterQuery({ label: [], assignee: undefined, q: "" }), {});
+  });
+
+  it("survives a value of the wrong shape, since storage is not a URL", () => {
+    // What comes back out of `sessionStorage` was written by some version of
+    // this client, and has to fail as nothing remembered rather than as a
+    // query string the router cannot navigate to.
+    const nonsense = { label: 7, assignee: { bad: true }, status: [null, 3], q: ["ok"] };
+    assert.deepEqual(filterQuery(nonsense as never), { q: ["ok"] });
+  });
+
+  it("names every parameter filterToQuery can write", () => {
+    // The two lists have to agree: one decides what a listing puts in its
+    // address, the other what is kept out of it and remembered.
+    const written = filterToQuery({
+      status: ["OPEN"],
+      labels: ["bug"],
+      assignees: ["a@example.invalid"],
+      authors: ["b@example.invalid"],
+      milestones: ["1.0"],
+      features: ["auth"],
+      reviewers: ["c@example.invalid"],
+      deadline: ["OVERDUE"],
+      text: "timeout",
+    });
+    assert.deepEqual(Object.keys(written).sort(), [...FILTER_KEYS].sort());
+    assert.deepEqual(filterQuery(written), written);
+  });
+});
+
+describe("withoutFilter", () => {
+  it("keeps what the page owns and drops what the filter does", () => {
+    assert.deepEqual(withoutFilter({ label: "bug", q: "x", status: "open", refs: "all" }), {
+      refs: "all",
+    });
+    assert.deepEqual(withoutFilter({}), {});
+  });
+
+  it("leaves the original alone", () => {
+    const query = { label: "bug", refs: "all" };
+    withoutFilter(query);
+    assert.deepEqual(query, { label: "bug", refs: "all" });
+  });
+
+  it("partitions a query with filterQuery, losing nothing the filter reads", () => {
+    const query = { status: "closed", label: ["bug", "auth"], q: '"slow link"', refs: "all" };
+    const rejoined = { ...withoutFilter(query), ...filterQuery(query) };
+    assert.deepEqual(queryToFilter(rejoined, ISSUES), queryToFilter(query, ISSUES));
+    assert.equal(rejoined.refs, "all");
   });
 });

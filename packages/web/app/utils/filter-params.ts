@@ -13,6 +13,19 @@
 
 import type { DeadlineState, EntityFilter, Status } from "~~/src/generated/gql/graphql";
 
+/** The parameters the filter owns. Everything else in a query belongs to the page. */
+export const FILTER_KEYS = [
+  "status",
+  "label",
+  "assignee",
+  "author",
+  "milestone",
+  "feature",
+  "reviewer",
+  "deadline",
+  "q",
+] as const;
+
 /** Statuses an issue can be in; a pull request adds `MERGED`. */
 export const ISSUE_STATUSES: readonly Status[] = ["OPEN", "CLOSED"];
 export const PR_STATUSES: readonly Status[] = ["OPEN", "MERGED", "CLOSED"];
@@ -136,6 +149,32 @@ export function joinTerms(terms: readonly string[]): string {
   return terms
     .map((term) => (/[\s"]/.test(term) ? `"${term.replaceAll('"', "")}"` : term))
     .join(" ");
+}
+
+/**
+ * Just the filter's own parameters, normalised the way `queryToFilter` reads
+ * them: every value a trimmed string, every empty key left out.
+ *
+ * This is `filterToQuery` for a query string that has been round the houses —
+ * typed by hand, or read back out of storage — so an unrecognised shape comes
+ * out as nothing remembered rather than as something that cannot be navigated
+ * to. Statuses are not checked against a listing here: `queryToFilter` already
+ * drops one that does not apply, and a filter is remembered per listing.
+ */
+export function filterQuery(query: RouteQuery): Record<string, string[]> {
+  const kept: Record<string, string[]> = {};
+  for (const key of FILTER_KEYS) {
+    const list = queryValues(query[key]);
+    if (list.length > 0) kept[key] = list;
+  }
+  return kept;
+}
+
+/** Everything the filter does not own, left exactly as it was found. */
+export function withoutFilter(query: RouteQuery): RouteQuery {
+  const rest: RouteQuery = { ...query };
+  for (const key of FILTER_KEYS) delete rest[key];
+  return rest;
 }
 
 export interface FilterKeys {
