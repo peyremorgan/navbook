@@ -73,7 +73,7 @@ The spec ships (in a future `doc/spec/fixtures/` tree) golden repositories:
 
 - **Format fixtures:** valid trees that MUST parse (including hand-edit
   oddities: unknown keys, archive/ subtree, prefix-length IDs), and invalid
-  trees with the doctor diagnostics (D1–D14) they MUST produce.
+  trees with the doctor diagnostics (D1–D15) they MUST produce.
 - **Operation fixtures:** (before-tree, command, after-tree, exit code,
   stdout-shape) tuples for every CLI command.
 - **Merge fixtures:** the scenario table of [03 §3.3](03-merge-and-branches.md)

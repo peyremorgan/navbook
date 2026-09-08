@@ -123,6 +123,25 @@ If two directories both carry a marker, `nav` says so and stops rather than
 picking one; set `NAV_ROOT` to say which you mean. A repository created before
 markers existed has none, and keeps working through step 2.
 
+The marker is also where a repository says what a review is supposed to add up
+to — how many approvals, and whether an author may review their own work:
+
+```json
+{
+  "version": 1,
+  "review": {
+    "selfReview": false,
+    "minApprovals": 2
+  }
+}
+```
+
+That is a reading, not a rule. `nav pr show` counts approvals against it,
+`nav pr merge` says what is missing and asks before merging short of it, and
+neither of them ever refuses: Navbook records reviews and enforces nothing
+([spec 01 §1.7](doc/spec/01-functionality.md)). Leave the key out and one
+approval is enough, which is what every repository did before it existed.
+
 ## Commands
 
 Everything is noun-verb, with one verb vocabulary shared by both entity kinds.
@@ -151,7 +170,7 @@ usually enough. A full directory name works too.
 | `nav pr review <id> --approve` | Record a verdict bound to a specific revision. Without a flag the verdict is `comment`: a review that judges nothing. |
 | `nav pr list awaiting:me@example.com` | Pull requests waiting on one person. `reviewer:` and `review:approved` filter the same listing. |
 | `nav pr list --all-refs` | Find PRs on branches you have fetched but not checked out. |
-| `nav pr merge <id>` | Merge into the checked-out target, archiving the discussion into its history. |
+| `nav pr merge <id>` | Merge into the checked-out target, archiving the discussion into its history. Says what a declared review policy is missing, and asks; `--yes` answers in advance. |
 | `nav feature open <title>` | Create a feature under `specs/`. `--slug` names its directory; the title otherwise. |
 | `nav feature show <slug>` | Its documents, the issues and pull requests that name it, and the commits that touched any of them. |
 | `nav feature spec add <slug> <title>` | Add a specification document. `nav feature spec edit` opens one in `$EDITOR`. |

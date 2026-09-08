@@ -210,7 +210,7 @@ type LinkNode {
 
 "One finding of the `doctor` check (spec 04 §4.3)."
 type Diagnostic {
-  "The check that produced it, D1 through D12."
+  "The check that produced it, D1 through D15."
   check: String!
   level: DiagnosticLevel!
   "Path relative to the Navbook directory, or empty for a repository-wide finding."
