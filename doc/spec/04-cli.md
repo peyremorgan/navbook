@@ -21,7 +21,9 @@ with the user's confirmation).
 ## 4.2 Global behavior
 
 - **ID arguments** accept any unambiguous prefix (≥ 4 chars); ambiguity is an
-  error listing the candidates.
+  error listing the candidates. They also accept what the tools print for an
+  entity: `#<id>` as a listing shows it, an `<id>-<slug>` directory name, and
+  the `path` that `--json` reports.
 - `--commit` on any mutating command wraps the change in a well-formed commit
   (`docs(issue): <action> #<id>` or `docs(pr): <action> #<id>` message per
   §3.2, `Refs:`/`Closes:` trailer as appropriate).

@@ -22,14 +22,19 @@ const NOUN: Record<EntityKind, string> = { issue: "issue", pr: "pull request" };
 const COMMAND: Record<EntityKind, string> = { issue: "nav issue", pr: "nav pr" };
 
 /**
- * Accept a whole entity directory name wherever an ID is expected.
+ * Accept what the tools print for an entity wherever an ID is expected.
  *
  * Shell completion offers `<id>-<slug>` names, and they are what a user copies
  * out of a path or a forge URL; the ID is simply its first eight characters.
+ * The path `--json` reports ends in one, so the last segment is what is read.
+ * A listing prints `#<id>`, the prose form of spec 02 §2.9, and the `#` is
+ * dropped: it is how the ID is written, not part of it.
  */
 export function asId(argument: string): string {
-  const match = /^([a-z][a-z0-9]{7})-[a-z0-9-]+$/.exec(argument.toLowerCase());
-  return match ? (match[1] as string) : argument;
+  const bare = argument.startsWith("#") ? argument.slice(1) : argument;
+  const name = bare.replace(/\/+$/, "").split("/").pop() ?? bare;
+  const match = /^([a-z][a-z0-9]{7})-[a-z0-9-]+$/.exec(name.toLowerCase());
+  return match ? (match[1] as string) : bare;
 }
 
 /** Resolve an ID or unambiguous prefix to an entity of the expected kind. */
