@@ -22,7 +22,7 @@ import { parsePerson, sameEmail } from "../core/person.ts";
 import type { ReviewPolicyReading } from "../core/policy.ts";
 import { matchesQuery, type Query } from "../core/query.ts";
 import { type ReviewSummary, reviewSummary } from "../core/review.ts";
-import { allEntities, type EntityRecord, parseTree } from "../core/tree.ts";
+import { allEntities, type EntityRecord, parseTree, type Repo } from "../core/tree.ts";
 import { gitMaybe } from "../git/exec.ts";
 import { isAncestor, mergeBase, objectExists } from "../git/history.ts";
 import { add, commit, composeMessage } from "../git/index-ops.ts";
@@ -50,6 +50,7 @@ import {
   isMergeInProgress,
   isTreeClean,
   resolveSha,
+  worktreeOfBranch,
 } from "../git/repo.ts";
 import {
   applyOps,
@@ -61,14 +62,15 @@ import {
   readReviewPolicy,
   repoPath,
   requireNavbook,
+  resolveEntity,
   runPlan,
   stage,
+  WorkspaceError,
   type WsCtx,
   wsFail,
 } from "../workspace/index.ts";
 import {
   type CommitOptions,
-  findEntity,
   type OpenEntityResult,
   type OpenInput,
   openEntity,
@@ -161,7 +163,7 @@ export interface PrUpdateResult {
 
 /** Append a revision pinning the current HEAD (spec 02 §2.7). */
 export function updatePr(ws: WsCtx, ref: string, opts: CommitOptions): PrUpdateResult {
-  const entity = findEntity(ws, "pr", ref);
+  const entity = findPrToWrite(ws, ref);
   if (entity.status !== "open") {
     wsFail(
       "precondition",
@@ -224,7 +226,7 @@ export function requestReview(
   people: readonly string[],
   opts: CommitOptions & { remove?: boolean },
 ): RequestReviewResult {
-  const entity = findEntity(ws, "pr", ref);
+  const entity = findPrToWrite(ws, ref);
   const author = typeof entity.fm.author === "string" ? entity.fm.author : "";
   if (!opts.remove) {
     // Only what this command is being asked to write: a `reviewer` entry
@@ -767,6 +769,8 @@ function conflictStop(ws: WsCtx, id: string): never {
 export interface LocatedPr {
   entity: EntityRecord;
   sourceRef: string;
+  /** Whether {@link sourceRef} is a remote-tracking branch rather than a local one. */
+  sourceRemote: boolean;
 }
 
 /**
@@ -806,11 +810,83 @@ export function locatePr(ws: WsCtx, ref: string): LocatedPr {
   // `source:` is only SHOULD, so fall back to a local ref before a remote one:
   // a local branch is the copy the user can actually merge.
   const declared = stringField(entry.entity, "source");
-  const sourceRef =
-    entry.refs.find((candidate) => candidate.short === declared)?.short ??
-    entry.refs.find((candidate) => !candidate.remote)?.short ??
-    (entry.refs[0]?.short as string);
-  return { entity: entry.entity, sourceRef };
+  const source =
+    entry.refs.find((candidate) => candidate.short === declared) ??
+    entry.refs.find((candidate) => !candidate.remote) ??
+    (entry.refs[0] as Ref);
+  return { entity: entry.entity, sourceRef: source.short, sourceRemote: source.remote };
+}
+
+export interface ReadablePr {
+  entity: EntityRecord;
+  /** The branch it was read from, or null when the working tree holds it. */
+  ref: string | null;
+}
+
+/**
+ * Find a pull request to read, wherever it is.
+ *
+ * The working tree first: that copy is the one with whatever has not been
+ * committed yet. Only when it is not here is the scan across branches worth
+ * its cost, and it is almost never here, because a pull request's files live
+ * on its source branch (spec 03 §3.5). Without this, `nav pr list --all-refs`
+ * would list IDs that `show` answers "no pull request matches" to.
+ */
+export function readPr(ws: WsCtx, ref: string, repo: Repo = loadRepo(ws)): ReadablePr {
+  const here = prInTree(repo, ref);
+  if (here) return { entity: here, ref: null };
+  const located = locatePr(ws, ref);
+  return { entity: located.entity, ref: located.sourceRef };
+}
+
+/**
+ * Find a pull request to write to, and refuse one this checkout does not hold.
+ *
+ * A comment or review is a file in the pull request's directory, so written
+ * here it would land beside no `pr.md` — the stranded comment of spec 03
+ * §3.3.1 — rather than on the branch under review. The scan can still see
+ * where the pull request lives, so the refusal says that, and the worktree to
+ * run in when one already has the branch, instead of claiming it does not
+ * exist.
+ */
+export function findPrToWrite(ws: WsCtx, ref: string): EntityRecord {
+  const here = prInTree(loadRepo(ws), ref);
+  if (here) return here;
+
+  const { entity, sourceRef, sourceRemote } = locatePr(ws, ref);
+  const why =
+    "a pull request is written on its source branch, beside the files it proposes to merge";
+  // A remote-tracking copy is `<remote>/<branch>`; `git switch <branch>` makes
+  // the local branch that tracks it.
+  const branch = sourceRemote ? sourceRef.slice(sourceRef.indexOf("/") + 1) : sourceRef;
+  const tree = sourceRemote ? null : worktreeOfBranch(ws.repoRoot, branch);
+  if (!sourceRemote && branch === currentBranch(ws.repoRoot)) {
+    wsFail(
+      "precondition",
+      `#${entity.id} is committed on '${branch}' but missing from the working tree`,
+      [`restore it with 'git checkout HEAD -- ${ws.navDir}/${entity.dirPath}'`],
+    );
+  }
+  wsFail(
+    "precondition",
+    `#${entity.id} is on '${sourceRef}', which is not checked out here`,
+    tree
+      ? [why, `'${branch}' is checked out in ${tree}; run the command there`]
+      : [
+          why,
+          `check out '${branch}' first: 'git switch ${branch}', or 'git worktree add <dir> ${branch}'`,
+        ],
+  );
+}
+
+/** The pull request in this tree, or null when only another branch could hold it. */
+function prInTree(repo: Repo, ref: string): EntityRecord | null {
+  try {
+    return resolveEntity(repo, ref, "pr");
+  } catch (error) {
+    if (error instanceof WorkspaceError && error.code === "not-found") return null;
+    throw error;
+  }
 }
 
 /* --------------------------------------------------------------------- close */

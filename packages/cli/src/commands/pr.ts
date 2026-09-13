@@ -17,7 +17,7 @@ import {
   type EntityRecord,
   entityJson,
   executePrMerge,
-  findEntity,
+  findPrToWrite,
   listEntities,
   listPrsAcrossRefs,
   type MergeResult,
@@ -161,7 +161,7 @@ export interface ReviewOptions extends GlobalFlags {
 }
 
 export function cmdPrReview(ctx: Ctx, prefix: string, opts: ReviewOptions): void {
-  const entity = findEntity(ctx, "pr", prefix);
+  const entity = findPrToWrite(ctx, prefix);
   const chosen = [opts.approve, opts.requestChanges, opts.comment].filter(Boolean).length;
   if (chosen > 1) {
     fail("choose one of --approve, --request-changes or --comment, not several");

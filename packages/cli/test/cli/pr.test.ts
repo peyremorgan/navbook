@@ -815,6 +815,174 @@ describe("nav pr list points at --all-refs", () => {
   });
 });
 
+describe("a pull request that only another branch holds", () => {
+  /** What `nav pr list --all-refs --json` hands a script to act on. */
+  function listedAcrossRefs(repo: TempRepo): Array<{ id: string; path: string }> {
+    const listed = repo.nav(["pr", "list", "--all-refs", "--json"]);
+    assert.equal(listed.code, 0, listed.stderr);
+    return listed.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+  }
+
+  it("shows every pull request the cross-ref listing returns, by any form it prints", () => {
+    const { repo } = withOpenPr();
+    try {
+      const listed = listedAcrossRefs(repo);
+      assert.equal(listed.length, 1);
+      const { id, path } = listed[0] as { id: string; path: string };
+
+      // The bare ID, the `#<id>` the table prints, and the `path` from --json.
+      for (const form of [id, `#${id}`, path, `${path}/`]) {
+        const shown = repo.nav(["pr", "show", form]);
+        assert.equal(shown.code, 0, `${form}: ${shown.stderr}`);
+        assert.match(shown.stdout, /Refactor auth/);
+        assert.match(shown.stderr, /read from 'feat\/auth'/);
+      }
+
+      const json = JSON.parse(repo.nav(["pr", "show", id, "--json"]).stdout);
+      assert.equal(json.id, id);
+      assert.deepEqual(json.refs, ["feat/auth"]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("carries its reviews across, so show reports the decision the branch holds", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      approveAs(repo, "rev@example.com", "rv11aa22");
+      repo.git(["checkout", "--quiet", "main"]);
+
+      const json = JSON.parse(repo.nav(["pr", "show", "dk3m", "--json"]).stdout);
+      assert.equal(json.comments.length, 1);
+      assert.equal(json.review.approvals.given, 1);
+      assert.equal(json.review.decision, "approved");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("does not show one from the tree it is not in when a copy is here", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      const shown = repo.nav(["pr", "show", "dk3m", "--json"]);
+      assert.equal(shown.code, 0, shown.stderr);
+      assert.equal(JSON.parse(shown.stdout).refs, undefined);
+      assert.equal(shown.stderr.includes("read from"), false);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("still says an unknown ID matches nothing", () => {
+    const { repo } = withOpenPr();
+    try {
+      const shown = repo.nav(["pr", "show", "zzzz9999"]);
+      assert.equal(shown.code, 1);
+      assert.match(shown.stderr, /no open pull request matches 'zzzz9999'/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses to review it here, naming the branch to review it on", () => {
+    const { repo, head } = withOpenPr();
+    try {
+      const reviewed = repo.nav([
+        "pr",
+        "review",
+        "dk3mp2x9",
+        "--revision",
+        head,
+        "--request-changes",
+        "-m",
+        "Not yet.",
+      ]);
+      assert.equal(reviewed.code, 1);
+      assert.match(reviewed.stderr, /#dk3mp2x9 is on 'feat\/auth', which is not checked out here/);
+      assert.match(reviewed.stderr, /git switch feat\/auth/);
+      // Nothing written: a review here would sit beside no pr.md.
+      assert.equal(repo.git(["status", "--porcelain"]).stdout, "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses every verb that writes into its directory", () => {
+    const { repo } = withOpenPr();
+    try {
+      for (const args of [
+        ["pr", "comment", "dk3m", "-m", "A thought."],
+        ["pr", "update", "dk3m"],
+        ["pr", "request", "dk3m", "rev@example.com"],
+        ["pr", "edit", "dk3m"],
+      ]) {
+        const result = repo.nav(args, { EDITOR: "true", VISUAL: "true" });
+        assert.equal(result.code, 1, `${args[1]}: ${result.stdout}`);
+        assert.match(result.stderr, /is on 'feat\/auth'/, `${args[1]}: ${result.stderr}`);
+      }
+      assert.equal(repo.git(["status", "--porcelain"]).stdout, "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("points at the worktree that has the branch, and reviews from there", () => {
+    const { repo } = withOpenPr();
+    const tree = join(repo.dir, "..", "worktree-review");
+    try {
+      repo.git(["worktree", "add", "--quiet", tree, "feat/auth"]);
+
+      const { id } = listedAcrossRefs(repo)[0] as { id: string };
+      const refused = repo.nav(["pr", "review", id, "--comment", "-m", "Read it."]);
+      assert.equal(refused.code, 1);
+      assert.match(
+        refused.stderr,
+        /'feat\/auth' is checked out in .*worktree-review; run the command there/,
+      );
+
+      const shown = JSON.parse(navIn(tree, repo.home, ["pr", "show", id, "--json"]).stdout);
+      const revision = shown.revisions.at(-1).head;
+      const reviewed = navIn(tree, repo.home, [
+        "pr",
+        "review",
+        id,
+        "--revision",
+        revision,
+        "--comment",
+        "-m",
+        "test review",
+        "--commit",
+      ]);
+      assert.equal(reviewed.code, 0, reviewed.stderr);
+      assert.match(reviewed.stdout, /Reviewed \(comment\) #dk3mp2x9/);
+    } finally {
+      repo.git(["worktree", "remove", "--force", tree]);
+      repo.cleanup();
+    }
+  });
+
+  it("names the local branch to make when only a remote-tracking one carries it", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["update-ref", "refs/remotes/origin/feat/auth", "feat/auth"]);
+      repo.git(["branch", "--quiet", "-D", "feat/auth"]);
+
+      assert.equal(repo.nav(["pr", "show", "dk3m"]).code, 0);
+      const reviewed = repo.nav(["pr", "review", "dk3m", "-m", "Read it."]);
+      assert.equal(reviewed.code, 1);
+      assert.match(reviewed.stderr, /is on 'origin\/feat\/auth'/);
+      assert.match(reviewed.stderr, /git switch feat\/auth/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
 describe("nav pr merge", () => {
   it("fast-forwards without a merge commit, and records no commit SHA", () => {
     const { repo } = withOpenPr();

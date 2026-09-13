@@ -137,6 +137,24 @@ export function currentBranch(cwd: string): string | null {
   return name === null || name === "" ? null : name;
 }
 
+/**
+ * The worktree that has a local branch checked out, or null when none does.
+ *
+ * Git lets a branch be checked out in one worktree at a time, so the answer is
+ * a single path — the current one included, which a caller that has already
+ * compared against {@link currentBranch} will not ask about.
+ */
+export function worktreeOfBranch(cwd: string, branch: string): string | null {
+  const listed = gitMaybe(["worktree", "list", "--porcelain"], { cwd });
+  if (listed === null) return null;
+  let path: string | null = null;
+  for (const line of splitLines(listed)) {
+    if (line.startsWith("worktree ")) path = line.slice("worktree ".length);
+    else if (line === `branch refs/heads/${branch}`) return path;
+  }
+  return null;
+}
+
 /** Resolve a revision to a full 40-hex SHA, or null when it does not exist. */
 export function resolveSha(cwd: string, rev: string): string | null {
   const sha = gitMaybe(["rev-parse", "--verify", "--quiet", `${rev}^{commit}`], { cwd });

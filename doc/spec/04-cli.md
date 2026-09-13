@@ -182,6 +182,18 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   corresponding `issue` verbs, operating on `pr.md`. `show` reports the review
   decision, how many approvals stand against the number required when that is
   more than one, and the declared policy itself ([02 §2.10](02-data-model.md)).
+
+  Every ID `nav pr list --all-refs` prints MUST resolve for these verbs and for
+  `update`, `request` and `review`. When the checked-out tree does not hold the
+  pull request, `show` reads it from the ref that carries it, as `close` does,
+  names that ref on stderr, and adds it as `refs` to `--json`. The verbs that
+  write into its directory (`edit`, `comment`, `update`, `request`, `review`)
+  MUST instead refuse with exit 1, naming the branch and, when another
+  worktree has it checked out, that worktree. Written here, the file would sit
+  beside no `pr.md`, the stranded comment of
+  [03 §3.3.1](03-merge-and-branches.md), rather than on the branch under review.
+  "No pull request matches" is reserved for an ID that no fetched branch
+  carries.
 - `nav pr close <id> [--resolution declined]` — record the PR under
   `prs/closed/` on the current branch. A PR's files normally live on its source
   branch, so when the ID is not present in the checked-out tree the directory is
