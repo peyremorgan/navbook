@@ -166,8 +166,12 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   entry pinning `head` = current `HEAD` SHA and `base` = `git merge-base HEAD
   <target>`.
 - `nav pr list [query]... [--all-refs]` — open PRs found on the current
-  branch; `--all-refs` scans all local and fetched remote branches. Same
-  query grammar. When the current branch matches none and other branches carry
+  branch; `--all-refs` scans all local and fetched remote branches, skipping
+  any PR that the branch answering for it — its `target`, or the default
+  branch ([03 §3.1](03-merge-and-branches.md)) — already files under
+  `prs/merged/` or `prs/closed/`, because a source branch left behind after
+  its merge still carries the `prs/open/` copy that was current before it.
+  Same query grammar. When the current branch matches none and other branches carry
   open PRs, the count of those is written to stderr with a pointer to
   `--all-refs`: a signpost, not a listing, because a checkout of the target
   branch legitimately has nothing to show ([03 §3.5](03-merge-and-branches.md))

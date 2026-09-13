@@ -76,6 +76,8 @@ import {
 } from "./entity.ts";
 
 const PR_OPEN_DIR = "prs/open";
+/** Where a pull request sits once it is no longer in flight (spec 02 §2.1). */
+const PR_SETTLED_DIRS = ["prs/merged", "prs/closed"] as const;
 
 /* --------------------------------------------------------------------- open */
 
@@ -316,12 +318,20 @@ export interface FoundPr {
   refs: Ref[];
 }
 
-/** Open pull requests on any fetched branch, matching a query. */
+/**
+ * Open pull requests on any fetched branch, matching a query.
+ *
+ * The enumeration is filtered before the query runs: a listing answers "what is
+ * still in flight?", so a pull request its target branch has already merged or
+ * closed does not belong in it, however many source branches still carry the
+ * copy that was current before the merge.
+ */
 export function listPrsAcrossRefs(ws: WsCtx, query: Query): FoundPr[] {
   // Read once for the whole scan, and from here rather than from each ref: a
   // pull request is counted by how this checkout counts (spec 02 §2.10).
   const { policy } = readReviewPolicy(ws);
-  return scanRefsForOpenPrs(ws).filter((entry) => matchesQuery(query, entry.entity, policy));
+  const found = dropSettledOnTarget(ws, listBranchRefs(ws.repoRoot), scanRefsForOpenPrs(ws));
+  return found.filter((entry) => matchesQuery(query, entry.entity, policy));
 }
 
 /**
@@ -331,6 +341,12 @@ export function listPrsAcrossRefs(ws: WsCtx, query: Query): FoundPr[] {
  * — so this is how they are discovered (spec 03 §3.5). Local refs win when the
  * same PR appears on several, and every ref it was found on is reported: this
  * is the state of the branches you have fetched, not an aggregate truth.
+ *
+ * Deliberately unfiltered — it reports what the refs say, including the open
+ * copy a source branch still carries after its merge. Listing drops those
+ * ({@link dropSettledOnTarget}); merging wants to see them, so that a second
+ * `nav pr merge` can say the branch is already contained rather than that the
+ * pull request cannot be found.
  */
 export function scanRefsForOpenPrs(ws: WsCtx): FoundPr[] {
   const cwd = ws.repoRoot;
@@ -372,6 +388,84 @@ export function scanRefsForOpenPrs(ws: WsCtx): FoundPr[] {
     }
   }
   return [...byId.values()];
+}
+
+/**
+ * The ref entitled to answer for a pull request: the branch it targets, which
+ * is where the merge files it as merged (spec 03 §3.5). The local copy is
+ * preferred, then any remote-tracking one.
+ */
+function targetRefOf(refs: readonly Ref[], target: string): string | undefined {
+  if (target === "") return undefined;
+  const local = refs.find((ref) => !ref.remote && ref.short === target);
+  if (local) return local.full;
+  // A remote-tracking copy is `<remote>/<target>`, the remote being the first
+  // path segment — so `origin/release/dev` is not the branch `dev`.
+  return refs.find((ref) => ref.remote && ref.short.slice(ref.short.indexOf("/") + 1) === target)
+    ?.full;
+}
+
+/**
+ * Drop pull requests that the branch answering for them has already settled.
+ *
+ * Not an aggregation of tracker state — spec 03 §3.1 forbids that — but the
+ * opposite: each pull request's status is read from the one branch entitled to
+ * report it, its target, plus the default branch that is the tracker of record.
+ * The copy under `prs/open/` on a source branch is a snapshot taken before the
+ * merge, so a branch that has not merged or rebased since has simply not heard
+ * the news; it is the stale half of the "exactly one status directory"
+ * invariant (spec 03 §3.4), and reading it as current is what made every
+ * branch left behind after its merge report its pull request as still in
+ * flight. Consulting only those two refs is also what keeps a speculative
+ * close on some unrelated feature branch from settling anything.
+ */
+function dropSettledOnTarget(ws: WsCtx, refs: readonly Ref[], found: FoundPr[]): FoundPr[] {
+  if (found.length === 0) return found;
+
+  const consult = new Set<string>();
+  const record = defaultBranch(ws.repoRoot);
+  const recordRef = record === null ? undefined : targetRefOf(refs, record);
+  if (recordRef) consult.add(recordRef);
+  for (const entry of found) {
+    const ref = targetRefOf(refs, stringField(entry.entity, "target"));
+    if (ref) consult.add(ref);
+  }
+  if (consult.size === 0) return found;
+
+  // IDs are unique across the tracker (spec 02 §2.2), so an ID any of these
+  // refs files as settled is settled, whichever of them was asked for it.
+  const settled = settledPrIds(ws, [...consult]);
+  return settled.size === 0 ? found : found.filter((entry) => !settled.has(entry.entity.id));
+}
+
+/**
+ * The IDs that the given refs record as merged or closed.
+ *
+ * One `cat-file --batch-check` resolves every status directory asked for, and
+ * only the distinct trees that come back are listed, so refs sharing a
+ * merge-base cost one read between them. No `pr.md` is parsed: the directory a
+ * pull request sits in is its status (spec 02 §2.1), so the price does not
+ * grow with the number of pull requests.
+ */
+function settledPrIds(ws: WsCtx, refs: readonly string[]): Set<string> {
+  const cwd = ws.repoRoot;
+  const trees = batchResolve(
+    cwd,
+    refs.flatMap((ref) => PR_SETTLED_DIRS.map((dir) => `${ref}:${ws.navDir}/${dir}`)),
+  );
+
+  const ids = new Set<string>();
+  const seen = new Set<string>();
+  for (const tree of trees.values()) {
+    if (seen.has(tree)) continue;
+    seen.add(tree);
+    for (const name of lsTreeNamesOfTree(cwd, tree)) {
+      // Directories are `<id>-<slug>` and the ID alone is the reference.
+      const id = name === ".gitkeep" ? undefined : name.split("-")[0];
+      if (id) ids.add(id);
+    }
+  }
+  return ids;
 }
 
 /**
@@ -424,6 +518,14 @@ export function countOpenPrsOnOtherRefs(ws: WsCtx): number {
   // A pull request on the checked-out branch is not elsewhere, however many
   // other refs — its own `origin/` copy, most often — also carry it.
   for (const id of mine) elsewhere.delete(id);
+  // And not those the tracker of record has already merged or closed: a branch
+  // left behind after its merge still carries the open copy, and pointing at
+  // `--all-refs` for pull requests it would no longer list is a wrong signpost.
+  const record = defaultBranch(cwd);
+  const recordRef = record === null ? undefined : targetRefOf(refs, record);
+  if (recordRef) {
+    for (const id of settledPrIds(ws, [recordRef])) elsewhere.delete(id);
+  }
   return elsewhere.size;
 }
 

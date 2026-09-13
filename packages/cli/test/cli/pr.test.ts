@@ -636,6 +636,65 @@ describe("nav pr list --all-refs", () => {
     }
   });
 
+  it("drops a pull request the target branch has merged, stale source branch and all", () => {
+    const { repo } = withOpenPr({ advanceMain: true });
+    try {
+      // A branch left behind after the merge: it still carries the copy of the
+      // pull request that was current when it was open.
+      repo.git(["branch", "backup/auth", "feat/auth"]);
+      repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      assert.match(repo.git(["ls-tree", "-r", "--name-only", "feat/auth"]).stdout, /prs\/open/);
+
+      const all = repo.nav(["pr", "list", "--all-refs"]);
+      assert.equal(all.code, 0, all.stderr);
+      assert.equal(all.stdout.includes("dk3mp2x9"), false, "main files it as merged");
+      assert.match(all.stdout, /No pull requests match/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("drops one the target branch has closed", () => {
+    const { repo } = withOpenPr();
+    try {
+      // Declining from the target branch brings the directory over and files it
+      // under prs/closed/ there, while feat/auth keeps its open copy.
+      const closed = repo.nav(["pr", "close", "dk3m", "--resolution", "declined", "--commit"], {
+        NAV_NOW: "2026-08-07T12:00:00Z",
+      });
+      assert.equal(closed.code, 0, closed.stderr);
+      assert.match(repo.git(["ls-tree", "-r", "--name-only", "feat/auth"]).stdout, /prs\/open/);
+
+      assert.equal(repo.nav(["pr", "list", "--all-refs"]).stdout.includes("dk3mp2x9"), false);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("keeps a pull request the target branch says nothing about", () => {
+    const { repo } = withOpenPr();
+    try {
+      // The guard reads the target branch only; an unrelated branch filing some
+      // other pull request as merged must not settle this one.
+      assert.match(repo.nav(["pr", "list", "--all-refs"]).stdout, /#dk3mp2x9/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("still lists one whose merge was never archived on the target", () => {
+    const { repo } = withOpenPr();
+    try {
+      // Merged by hand, so the directory never moved: doctor's "merged but not
+      // archived" case (spec 03 §3.5), and still in flight as far as the
+      // tracker is concerned.
+      repo.git(["merge", "--quiet", "--no-ff", "-m", "land it", "feat/auth"]);
+      assert.match(repo.nav(["pr", "list", "--all-refs"]).stdout, /#dk3mp2x9/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("ignores branches that have no .navbook at all", () => {
     const { repo } = withOpenPr();
     try {
