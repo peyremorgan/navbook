@@ -8,7 +8,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { gitMaybe, splitLines, splitNul } from "./exec.ts";
+import { gitMaybe, gitRun, splitLines, splitNul } from "./exec.ts";
 
 export interface Ref {
   /** Full ref name, e.g. `refs/heads/feat/auth`. */
@@ -97,4 +97,40 @@ export function catBlobs(cwd: string, requests: readonly BlobRequest[]): Map<str
     offset += size + 1; // the body is followed by a newline
   }
   return out;
+}
+
+/**
+ * Resolve many `<ref>:<path>` specs to object SHAs in one `cat-file
+ * --batch-check` process.
+ *
+ * Only the header line is read, so no content crosses the pipe: this is how a
+ * scan asks "which refs even have this directory?" before paying to read it.
+ * Specs that name nothing — the normal case, for a branch with no Navbook
+ * directory — are simply absent from the result.
+ */
+export function batchResolve(cwd: string, specs: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  if (specs.length === 0) return out;
+
+  const result = gitRun(["cat-file", "--batch-check"], { cwd, input: `${specs.join("\n")}\n` });
+  if (result.code !== 0) return out;
+
+  // One line per spec, in the order asked: `<sha> <type> <size>` when it
+  // resolves, `<spec> missing` or `<spec> ambiguous` when it does not.
+  const lines = splitLines(result.stdout);
+  for (const [index, line] of lines.entries()) {
+    const spec = specs[index];
+    if (spec === undefined) break;
+    const parts = line.split(" ");
+    const sha = parts[0];
+    if (parts.length < 3 || !sha || Number.isNaN(Number(parts[2]))) continue;
+    out.set(spec, sha);
+  }
+  return out;
+}
+
+/** Entries directly inside a tree that has already been resolved to a SHA. */
+export function lsTreeNamesOfTree(cwd: string, tree: string): string[] {
+  const output = gitMaybe(["ls-tree", "--name-only", "-z", tree], { cwd });
+  return output === null ? [] : splitNul(output).map((name) => name.replace(/\/$/, ""));
 }
