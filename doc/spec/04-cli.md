@@ -167,7 +167,11 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   <target>`.
 - `nav pr list [query]... [--all-refs]` — open PRs found on the current
   branch; `--all-refs` scans all local and fetched remote branches. Same
-  query grammar.
+  query grammar. When the current branch matches none and other branches carry
+  open PRs, the count of those is written to stderr with a pointer to
+  `--all-refs`: a signpost, not a listing, because a checkout of the target
+  branch legitimately has nothing to show ([03 §3.5](03-merge-and-branches.md))
+  and silence there reads as "there are none".
 - `nav pr show <id>`, `nav pr edit <id>`, `nav pr comment <id> ...` — as the
   corresponding `issue` verbs, operating on `pr.md`. `show` reports the review
   decision, how many approvals stand against the number required when that is

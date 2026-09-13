@@ -4,10 +4,30 @@
  */
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { FIXTURE_IDENTITY, makeNavRepo, type TempRepo } from "../helpers/temprepo.ts";
+import {
+  deterministicEnv,
+  FIXTURE_IDENTITY,
+  makeNavRepo,
+  navCommand,
+  type RunResult,
+  type TempRepo,
+} from "../helpers/temprepo.ts";
+
+/** Run the CLI somewhere other than the repository root — a worktree, say. */
+function navIn(cwd: string, home: string, args: string[]): RunResult {
+  const command = navCommand();
+  const result = spawnSync(command[0] as string, [...command.slice(1), ...args], {
+    cwd,
+    encoding: "utf8",
+    env: deterministicEnv(home),
+  });
+  if (result.error) throw result.error;
+  return { code: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+}
 
 interface Scenario {
   repo: TempRepo;
@@ -628,6 +648,109 @@ describe("nav pr list --all-refs", () => {
       assert.equal(all.code, 0, all.stderr);
       assert.match(all.stdout, /#dk3mp2x9/);
     } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+describe("nav pr list points at --all-refs", () => {
+  /** Open a second pull request on a new branch, and stay on that branch. */
+  function secondPrOnItsOwnBranch(repo: TempRepo): void {
+    repo.git(["checkout", "--quiet", "-b", "feat/search", "main"]);
+    repo.write("search.txt", "indexing\n");
+    repo.commitAll("feat: add search");
+    const opened = repo.nav(["pr", "open", "--title", "Add search", "-m", "Body.", "--commit"], {
+      NAV_IDS: "qq77ww88",
+      NAV_NOW: "2026-08-05T09:00:00Z",
+    });
+    assert.equal(opened.code, 0, opened.stderr);
+  }
+
+  it("names the count and the flag when this branch has nothing to show", () => {
+    const { repo } = withOpenPr();
+    try {
+      const listed = repo.nav(["pr", "list"]);
+      assert.equal(listed.code, 0, listed.stderr);
+      // The listing itself still reports the checked-out tree and no more.
+      assert.match(listed.stdout, /No pull requests match/);
+      assert.equal(listed.stdout.includes("dk3mp2x9"), false);
+      assert.match(listed.stderr, /1 open pull request on other branches/);
+      assert.match(listed.stderr, /--all-refs/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("counts each pull request once however many branches carry it", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["branch", "backup/auth", "feat/auth"]);
+      assert.match(repo.nav(["pr", "list"]).stderr, /1 open pull request on other branches/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("does not count a pull request that lives on the branch checked out", () => {
+    const { repo } = withOpenPr();
+    try {
+      secondPrOnItsOwnBranch(repo);
+      // Standing on feat/search, whose own PR simply does not match the query:
+      // only the one on feat/auth is somewhere `--all-refs` would reach.
+      const listed = repo.nav(["pr", "list", "label:no-such-label"]);
+      assert.match(listed.stdout, /No pull requests match/);
+      assert.match(listed.stderr, /1 open pull request on other branches/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("says nothing when there is no pull request anywhere", () => {
+    const repo = makeNavRepo();
+    try {
+      const listed = repo.nav(["pr", "list"]);
+      assert.match(listed.stdout, /No pull requests match/);
+      assert.equal(listed.stderr.trim(), "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("stays out of --json, which a pipeline reads as an empty result", () => {
+    const { repo } = withOpenPr();
+    try {
+      const listed = repo.nav(["pr", "list", "--json"]);
+      assert.equal(listed.code, 0, listed.stderr);
+      assert.equal(listed.stdout, "");
+      assert.equal(listed.stderr.trim(), "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("reaches a pull request opened in another worktree", () => {
+    const { repo } = withOpenPr();
+    const tree = join(repo.dir, "..", "worktree-auth");
+    try {
+      // The shape that prompted this: the branch carrying the PR is checked
+      // out somewhere else, so the main checkout can never see it in its tree.
+      repo.git(["worktree", "add", "--quiet", tree, "feat/auth"]);
+
+      const fromMain = repo.nav(["pr", "list"]);
+      assert.match(fromMain.stdout, /No pull requests match/);
+      assert.match(fromMain.stderr, /1 open pull request on other branches/);
+
+      // The worktree is an ordinary checkout of that branch: it lists its own
+      // pull request outright, and has nothing to point elsewhere for.
+      const fromTree = navIn(tree, repo.home, ["pr", "list"]);
+      assert.equal(fromTree.code, 0, fromTree.stderr);
+      assert.match(fromTree.stdout, /#dk3mp2x9/);
+      assert.equal(fromTree.stderr.trim(), "");
+
+      const all = navIn(tree, repo.home, ["pr", "list", "--all-refs"]);
+      assert.match(all.stdout, /#dk3mp2x9/);
+    } finally {
+      repo.git(["worktree", "remove", "--force", tree]);
       repo.cleanup();
     }
   });

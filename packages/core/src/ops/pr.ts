@@ -36,9 +36,11 @@ import {
   mergeNoCommit,
 } from "../git/merge.ts";
 import {
+  batchResolve,
   catBlobs,
   listBranchRefs,
   lsTreeNames,
+  lsTreeNamesOfTree,
   lsTreeRecursive,
   type Ref,
 } from "../git/refscan.ts";
@@ -370,6 +372,59 @@ export function scanRefsForOpenPrs(ws: WsCtx): FoundPr[] {
     }
   }
   return [...byId.values()];
+}
+
+/**
+ * How many open pull requests sit on branches other than the one checked out.
+ *
+ * A count, and deliberately nothing more: spec 03 §3.1 forbids aggregating
+ * tracker state across branches, so this answers only "is there something
+ * `--all-refs` would show you?". Without it an empty listing reads as "there
+ * are none" when the pull requests are merely on their own source branches,
+ * which is where spec 03 §3.5 puts them — the usual shape of a repository
+ * whose branches are checked out in separate worktrees.
+ *
+ * Cheap by construction: one `cat-file --batch-check` resolves every branch's
+ * `prs/open` directory at once, and only the distinct trees that come back are
+ * listed, so branches sharing a merge-base cost one read between them. No
+ * `pr.md` is parsed, so the price does not grow with the number of PRs.
+ */
+export function countOpenPrsOnOtherRefs(ws: WsCtx): number {
+  const cwd = ws.repoRoot;
+  const here = currentBranch(cwd);
+  const dir = `${ws.navDir}/${PR_OPEN_DIR}`;
+  const refs = listBranchRefs(cwd);
+
+  const trees = batchResolve(
+    cwd,
+    refs.map((ref) => `${ref.full}:${dir}`),
+  );
+  const listed = new Map<string, string[]>();
+  const namesOf = (tree: string): string[] => {
+    const cached = listed.get(tree);
+    if (cached) return cached;
+    const names = lsTreeNamesOfTree(cwd, tree);
+    listed.set(tree, names);
+    return names;
+  };
+
+  const mine = new Set<string>();
+  const elsewhere = new Set<string>();
+  for (const ref of refs) {
+    const tree = trees.get(`${ref.full}:${dir}`);
+    if (tree === undefined) continue;
+    for (const name of namesOf(tree)) {
+      if (name === ".gitkeep") continue;
+      // Directories are `<id>-<slug>` and the ID alone is the reference (spec
+      // 02 §2.2), so one pull request on ten branches is still one.
+      const id = name.split("-")[0];
+      if (id) (ref.short === here ? mine : elsewhere).add(id);
+    }
+  }
+  // A pull request on the checked-out branch is not elsewhere, however many
+  // other refs — its own `origin/` copy, most often — also carry it.
+  for (const id of mine) elsewhere.delete(id);
+  return elsewhere.size;
 }
 
 export function stringField(entity: EntityRecord, key: string): string {
