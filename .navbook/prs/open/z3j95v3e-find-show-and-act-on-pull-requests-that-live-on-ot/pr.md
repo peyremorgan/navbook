@@ -10,6 +10,7 @@ revisions:
   - head: 512f9f7c051168a7c1d37b5a4231c335f25a97a5
     base: 46501d696f5d1af53f8bf67626c373ee136d12a2
     date: 2026-09-13T22:30:53Z
+reviewer: copilot@github.com
 ---
 
 Makes pull requests on other branches both visible and usable from any checkout, the case that matters when every branch sits in its own worktree. It fixes #t4mwvm2j, where an agent could find its assigned PR with `nav pr list --all-refs` but not show or review it using any ID the listing printed.
