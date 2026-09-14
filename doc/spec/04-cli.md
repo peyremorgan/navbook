@@ -28,7 +28,10 @@ with the user's confirmation).
   (`docs(issue): <action> #<id>` or `docs(pr): <action> #<id>` message per
   §3.2, `Refs:`/`Closes:` trailer as appropriate).
   Without it, changes are left staged in the working tree for the user's own
-  commit. `--commit` MUST refuse to run with unrelated changes already staged.
+  commit. `--commit` MUST refuse to run with unrelated changes already staged,
+  and on a detached HEAD, where the commit would be reachable from no branch;
+  when a branch points at HEAD the refusal names it, and the worktree that has
+  it checked out if there is one. Both refusals come before any file is written.
 - Author identity is taken from `git config user.name` / `user.email`.
 - Machine output: every listing command accepts `--json` (one JSON object per
   entity, schema mirroring the frontmatter plus `id`, `slug`, `status`,

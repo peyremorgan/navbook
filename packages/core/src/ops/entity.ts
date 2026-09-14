@@ -40,7 +40,7 @@ import type { EntityKind, EntityRecord, Repo } from "../core/tree.ts";
 import { uncommittedPaths } from "../git/index-ops.ts";
 import {
   absPath,
-  assertNoUnrelatedStaged,
+  assertCommittable,
   currentAuthor,
   loadRepo,
   loadRepoForQuery,
@@ -423,7 +423,7 @@ export function planEntityDelete(
       repairs: links?.repairs ?? [],
     }),
   );
-  if (opts.commit) assertNoUnrelatedStaged(ws, repoPaths(ws.navDir, planPaths(plan)));
+  if (opts.commit) assertCommittable(ws, repoPaths(ws.navDir, planPaths(plan)));
   return {
     entity,
     alsoRemoved: links?.alsoRemoved ?? [],

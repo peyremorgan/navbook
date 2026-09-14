@@ -983,6 +983,85 @@ describe("a pull request that only another branch holds", () => {
   });
 });
 
+describe("--commit on a detached HEAD", () => {
+  /** Detach at the pull request's branch, as a reviewer barred from it would. */
+  function detachAtFeature(repo: TempRepo): string {
+    repo.git(["checkout", "--quiet", "--detach", "feat/auth"]);
+    return repo.git(["rev-parse", "HEAD"]).stdout.trim();
+  }
+
+  it("refuses to commit a review there, naming the worktree that has the branch", () => {
+    const { repo } = withOpenPr();
+    const tree = join(repo.dir, "..", "worktree-detached");
+    try {
+      repo.git(["worktree", "add", "--quiet", tree, "feat/auth"]);
+      const head = detachAtFeature(repo);
+
+      const reviewed = repo.nav([
+        "pr",
+        "review",
+        "dk3m",
+        "--comment",
+        "-m",
+        "Read it.",
+        "--commit",
+      ]);
+      assert.equal(reviewed.code, 1);
+      assert.match(reviewed.stderr, /HEAD is detached/);
+      assert.match(
+        reviewed.stderr,
+        /HEAD is at 'feat\/auth', which is checked out in .*worktree-detached; run the command there/,
+      );
+      // Refused before anything was written, let alone committed.
+      assert.equal(repo.git(["status", "--porcelain"]).stdout, "");
+      assert.equal(repo.git(["rev-parse", "HEAD"]).stdout.trim(), head);
+    } finally {
+      repo.git(["worktree", "remove", "--force", tree]);
+      repo.cleanup();
+    }
+  });
+
+  it("names the branch to check out when no worktree has it", () => {
+    const { repo } = withOpenPr();
+    try {
+      detachAtFeature(repo);
+      const reviewed = repo.nav(["pr", "review", "dk3m", "--approve", "-m", "Fine.", "--commit"]);
+      assert.equal(reviewed.code, 1);
+      assert.match(reviewed.stderr, /git switch feat\/auth/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses on a commit no branch points at, and for an issue too", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "--detach", "main~1"]);
+      const opened = repo.nav(["issue", "open", "Stray", "-m", "Body.", "--commit"]);
+      assert.equal(opened.code, 1);
+      assert.match(opened.stderr, /HEAD is detached/);
+      assert.match(opened.stderr, /check out a branch first/);
+      assert.equal(repo.git(["status", "--porcelain"]).stdout, "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("still writes and stages without --commit, leaving the commit to be placed", () => {
+    const { repo } = withOpenPr();
+    try {
+      detachAtFeature(repo);
+      const reviewed = repo.nav(["pr", "review", "dk3m", "--comment", "-m", "Read it."], {
+        NAV_IDS: "dtc11111",
+      });
+      assert.equal(reviewed.code, 0, reviewed.stderr);
+      assert.match(repo.git(["diff", "--cached", "--name-only"]).stdout, /dtc11111\.md/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
 describe("nav pr merge", () => {
   it("fast-forwards without a merge commit, and records no commit SHA", () => {
     const { repo } = withOpenPr();
