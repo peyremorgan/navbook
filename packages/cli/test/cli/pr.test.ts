@@ -764,6 +764,53 @@ describe("nav pr list points at --all-refs", () => {
     }
   });
 
+  it("does not count one its own target has merged, where --all-refs would not list it", () => {
+    const repo = makeNavRepo();
+    try {
+      // The target is not the default branch: main has never heard of the pull
+      // request, and only dev files it as merged.
+      repo.write("app.txt", "original\n");
+      repo.commitAll("feat: initial code");
+      repo.git(["branch", "dev"]);
+      repo.git(["checkout", "--quiet", "-b", "feat/auth"]);
+      repo.write("auth.txt", "token handling\n");
+      repo.commitAll("feat: rework auth tokens");
+      const opened = repo.nav(
+        ["pr", "open", "--target", "dev", "--title", "Refactor auth", "-m", "Body.", "--commit"],
+        {
+          NAV_IDS: "dk3mp2x9",
+          NAV_NOW: "2026-08-04T16:40:00Z",
+        },
+      );
+      assert.equal(opened.code, 0, opened.stderr);
+      repo.git(["checkout", "--quiet", "dev"]);
+      const merged = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      assert.equal(merged.code, 0, merged.stderr);
+      repo.git(["checkout", "--quiet", "main"]);
+
+      assert.match(repo.nav(["pr", "list", "--all-refs"]).stdout, /No pull requests match/);
+      const listed = repo.nav(["pr", "list"]);
+      assert.match(listed.stdout, /No pull requests match/);
+      assert.equal(listed.stderr.trim(), "", "the hint and the listing agree");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("does not count a pull request the detached HEAD holds", () => {
+    const { repo } = withOpenPr();
+    try {
+      // No branch is checked out, but the tree is feat/auth's: its pull request
+      // is here, not somewhere --all-refs would have to reach.
+      repo.git(["checkout", "--quiet", "--detach", "feat/auth"]);
+      const listed = repo.nav(["pr", "list", "label:no-such-label"]);
+      assert.match(listed.stdout, /No pull requests match/);
+      assert.equal(listed.stderr.trim(), "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("says nothing when there is no pull request anywhere", () => {
     const repo = makeNavRepo();
     try {

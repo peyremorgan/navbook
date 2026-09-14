@@ -176,9 +176,10 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   branch ([03 §3.1](03-merge-and-branches.md)) — already files under
   `prs/merged/` or `prs/closed/`, because a source branch left behind after
   its merge still carries the `prs/open/` copy that was current before it.
-  Same query grammar. When the current branch matches none and other branches carry
-  open PRs, the count of those is written to stderr with a pointer to
-  `--all-refs`: a signpost, not a listing, because a checkout of the target
+  Same query grammar. When the checked-out tree matches none and other branches
+  carry open PRs that `--all-refs` would list — so neither one the tree already
+  holds nor one settled as above — their count is written to stderr with a
+  pointer to `--all-refs`: a signpost, not a listing, because a checkout of the target
   branch legitimately has nothing to show ([03 §3.5](03-merge-and-branches.md))
   and silence there reads as "there are none".
 - `nav pr show <id>`, `nav pr edit <id>`, `nav pr comment <id> ...` — as the

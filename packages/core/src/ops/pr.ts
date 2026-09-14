@@ -8,6 +8,7 @@
  */
 
 import { type Revision, readRevisions } from "../core/files.ts";
+import { parseDoc, stringAt } from "../core/frontmatter.ts";
 import { MIN_PREFIX_LENGTH, resolvePrefix } from "../core/id.ts";
 import {
   type MergedBlock,
@@ -423,21 +424,36 @@ function targetRefOf(refs: readonly Ref[], target: string): string | undefined {
  */
 function dropSettledOnTarget(ws: WsCtx, refs: readonly Ref[], found: FoundPr[]): FoundPr[] {
   if (found.length === 0) return found;
+  const settled = settledOnTargets(
+    ws,
+    refs,
+    found.map((entry) => stringField(entry.entity, "target")),
+  );
+  return settled.size === 0 ? found : found.filter((entry) => !settled.has(entry.entity.id));
+}
 
+/**
+ * The IDs settled on the default branch or on any of `targets`.
+ *
+ * Shared by the listing and by the count that points at it, so the two cannot
+ * disagree about what is still in flight.
+ */
+function settledOnTargets(
+  ws: WsCtx,
+  refs: readonly Ref[],
+  targets: readonly string[],
+): Set<string> {
   const consult = new Set<string>();
   const record = defaultBranch(ws.repoRoot);
   const recordRef = record === null ? undefined : targetRefOf(refs, record);
   if (recordRef) consult.add(recordRef);
-  for (const entry of found) {
-    const ref = targetRefOf(refs, stringField(entry.entity, "target"));
+  for (const target of targets) {
+    const ref = targetRefOf(refs, target);
     if (ref) consult.add(ref);
   }
-  if (consult.size === 0) return found;
-
   // IDs are unique across the tracker (spec 02 §2.2), so an ID any of these
   // refs files as settled is settled, whichever of them was asked for it.
-  const settled = settledPrIds(ws, [...consult]);
-  return settled.size === 0 ? found : found.filter((entry) => !settled.has(entry.entity.id));
+  return consult.size === 0 ? new Set() : settledPrIds(ws, [...consult]);
 }
 
 /**
@@ -480,55 +496,75 @@ function settledPrIds(ws: WsCtx, refs: readonly string[]): Set<string> {
  * which is where spec 03 §3.5 puts them — the usual shape of a repository
  * whose branches are checked out in separate worktrees.
  *
+ * It must agree with that listing, so a pull request is settled by the same
+ * refs {@link dropSettledOnTarget} asks: its target and the default branch.
+ *
  * Cheap by construction: one `cat-file --batch-check` resolves every branch's
  * `prs/open` directory at once, and only the distinct trees that come back are
- * listed, so branches sharing a merge-base cost one read between them. No
- * `pr.md` is parsed, so the price does not grow with the number of PRs.
+ * listed, so branches sharing a merge-base cost one read between them. Only
+ * each pull request's `pr.md` is read, for its target, once per distinct tree.
  */
 export function countOpenPrsOnOtherRefs(ws: WsCtx): number {
   const cwd = ws.repoRoot;
-  const here = currentBranch(cwd);
   const dir = `${ws.navDir}/${PR_OPEN_DIR}`;
   const refs = listBranchRefs(cwd);
 
-  const trees = batchResolve(
-    cwd,
-    refs.map((ref) => `${ref.full}:${dir}`),
-  );
+  // HEAD rather than the branch's name: a detached HEAD has no name, and its
+  // tree still holds whatever pull requests it holds.
+  const trees = batchResolve(cwd, [`HEAD:${dir}`, ...refs.map((ref) => `${ref.full}:${dir}`)]);
   const listed = new Map<string, string[]>();
   const namesOf = (tree: string): string[] => {
     const cached = listed.get(tree);
     if (cached) return cached;
-    const names = lsTreeNamesOfTree(cwd, tree);
+    const names = lsTreeNamesOfTree(cwd, tree).filter((name) => name !== ".gitkeep");
     listed.set(tree, names);
     return names;
   };
+  // Directories are `<id>-<slug>` and the ID alone is the reference (spec 02
+  // §2.2), so one pull request on ten branches is still one.
+  const idOf = (name: string): string => name.split("-")[0] as string;
 
-  const mine = new Set<string>();
-  const elsewhere = new Set<string>();
+  const headTree = trees.get(`HEAD:${dir}`);
+  const mine = new Set(headTree === undefined ? [] : namesOf(headTree).map(idOf));
+
+  // Where each pull request elsewhere was first seen, a local branch's copy
+  // preferred, as the scan behind the listing prefers it.
+  const elsewhere = new Map<string, { tree: string; name: string; remote: boolean }>();
   for (const ref of refs) {
     const tree = trees.get(`${ref.full}:${dir}`);
     if (tree === undefined) continue;
     for (const name of namesOf(tree)) {
-      if (name === ".gitkeep") continue;
-      // Directories are `<id>-<slug>` and the ID alone is the reference (spec
-      // 02 §2.2), so one pull request on ten branches is still one.
-      const id = name.split("-")[0];
-      if (id) (ref.short === here ? mine : elsewhere).add(id);
+      const id = idOf(name);
+      // A pull request this tree holds is not elsewhere, however many other
+      // refs — its own `origin/` copy, most often — also carry it.
+      if (id === "" || mine.has(id)) continue;
+      const seen = elsewhere.get(id);
+      if (!seen || (seen.remote && !ref.remote)) {
+        elsewhere.set(id, { tree, name, remote: ref.remote });
+      }
     }
   }
-  // A pull request on the checked-out branch is not elsewhere, however many
-  // other refs — its own `origin/` copy, most often — also carry it.
-  for (const id of mine) elsewhere.delete(id);
-  // And not those the tracker of record has already merged or closed: a branch
-  // left behind after its merge still carries the open copy, and pointing at
-  // `--all-refs` for pull requests it would no longer list is a wrong signpost.
-  const record = defaultBranch(cwd);
-  const recordRef = record === null ? undefined : targetRefOf(refs, record);
-  if (recordRef) {
-    for (const id of settledPrIds(ws, [recordRef])) elsewhere.delete(id);
+  if (elsewhere.size === 0) return 0;
+
+  const blobs = catBlobs(
+    cwd,
+    [...elsewhere.values()].map(({ tree, name }) => ({ ref: tree, path: `${name}/pr.md` })),
+  );
+  const targets = [...elsewhere.values()].map(({ tree, name }) =>
+    targetOf(blobs.get(`${tree}:${name}/pr.md`)),
+  );
+  const settled = settledOnTargets(ws, refs, targets);
+  return [...elsewhere.keys()].filter((id) => !settled.has(id)).length;
+}
+
+/** The `target:` a `pr.md` names, or "" when it names none or does not parse. */
+function targetOf(text: string | undefined): string {
+  if (text === undefined) return "";
+  try {
+    return stringAt(parseDoc(text), ["target"]) ?? "";
+  } catch {
+    return "";
   }
-  return elsewhere.size;
 }
 
 export function stringField(entity: EntityRecord, key: string): string {
