@@ -2,6 +2,7 @@
 title: Let the web client discover a provider whose discovery document is not under its issuer
 author: Morgan PEYRE <morgan@peyre.info>
 created: 2026-09-15T08:35:43Z
+assignee: Claude <noreply@anthropic.com>
 labels: [enhancement]
 feature: web
 parent: rmsuy3z6
