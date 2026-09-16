@@ -10,6 +10,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { GitTimeoutError } from "@navbook/core";
 import { RepoSync, type SyncGit } from "../../src/sync.ts";
 
 const ROOT = "/clone";
@@ -34,66 +35,109 @@ interface Scripted {
   fastForwardable?: boolean;
   /** No such branch on the remote yet. */
   noUpstream?: boolean;
+  /** What the fetch raises instead of returning, as a stopped one would. */
+  fetchThrows?: Error;
+  /** What the push raises instead of returning. */
+  pushThrows?: Error;
+  /** Hold every push until this resolves, so something can be queued behind it. */
+  pushGate?: Promise<void>;
 }
 
 interface Recorder {
   git: SyncGit;
   calls: string[];
+  /** The timeout each network call was given, in the order they were made. */
+  timeouts: (number | undefined)[];
 }
 
 function recorder(script: Scripted = {}): Recorder {
   const calls: string[] = [];
+  const timeouts: (number | undefined)[] = [];
   const next = <T>(queue: T[]): T => (queue.length > 1 ? (queue.shift() as T) : (queue[0] as T));
   const pushes = [...(script.pushes ?? ["ok"])];
   const merges = [...(script.merges ?? ["staged"])];
   const behind = [...(script.behind ?? [false])];
 
   const git: SyncGit = {
-    fetchRemote: (_cwd, remote) => {
+    fetchRemote: async (_cwd, remote, opts) => {
+      timeouts.push(opts?.timeoutMs);
       calls.push(`fetch ${remote}`);
+      if (script.fetchThrows) throw script.fetchThrows;
     },
-    pushBranch: (_cwd, remote, branch) => {
+    pushBranch: async (_cwd, remote, branch, opts) => {
+      timeouts.push(opts?.timeoutMs);
+      await script.pushGate;
+      if (script.pushThrows) {
+        calls.push(`push ${remote} ${branch} -> stopped`);
+        throw script.pushThrows;
+      }
       const outcome = next(pushes);
       calls.push(`push ${remote} ${branch} -> ${outcome}`);
       return outcome;
     },
-    resolveSha: () => (script.noUpstream ? null : "a".repeat(40)),
-    isAlreadyMerged: () => !next(behind),
-    canFastForward: () => script.fastForwardable === true,
-    fastForward: () => {
+    resolveSha: async () => (script.noUpstream ? null : "a".repeat(40)),
+    isAlreadyMerged: async () => !next(behind),
+    canFastForward: async () => script.fastForwardable === true,
+    fastForward: async () => {
       calls.push("fast-forward");
     },
-    mergeNoCommit: () => {
+    mergeNoCommit: async () => {
       const outcome = next(merges);
       calls.push(`merge -> ${outcome}`);
       return outcome;
     },
-    commitMerge: () => {
+    commitMerge: async () => {
       calls.push("commit-merge");
       if (script.commitMergeFails) throw new Error("hook refused the merge commit");
       return "b".repeat(40);
     },
-    abortMerge: () => {
+    abortMerge: async () => {
       calls.push("abort-merge");
     },
-    conflictedPaths: () => script.conflicted ?? [".navbook/issues/open/aa111111-x/issue.md"],
-    currentBranch: () => "main",
+    conflictedPaths: async () => script.conflicted ?? [".navbook/issues/open/aa111111-x/issue.md"],
+    currentBranch: async () => "main",
   };
-  return { git, calls };
+  return { git, calls, timeouts };
 }
 
-function makeSync(script: Scripted = {}, opts: { remote?: string | null; ttl?: number } = {}) {
+function makeSync(
+  script: Scripted = {},
+  opts: { remote?: string | null; ttl?: number; timeout?: number } = {},
+) {
   const rec = recorder(script);
+  const reported: string[] = [];
   let clock = 1_000_000;
   const sync = new RepoSync({
     repoRoot: ROOT,
     remote: opts.remote === undefined ? "origin" : opts.remote,
     pullIntervalMs: opts.ttl ?? 0,
+    ...(opts.timeout === undefined ? {} : { gitTimeoutMs: opts.timeout }),
     git: rec.git,
     now: () => clock,
+    report: (line) => {
+      reported.push(line);
+    },
   });
-  return { sync, calls: rec.calls, advance: (ms: number) => (clock += ms) };
+  return {
+    sync,
+    calls: rec.calls,
+    timeouts: rec.timeouts,
+    reported,
+    advance: (ms: number) => (clock += ms),
+  };
 }
+
+/** A push that will not return until the test says so. */
+function gate(): { open: () => void; closed: Promise<void> } {
+  let open: () => void = () => undefined;
+  const closed = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { open, closed };
+}
+
+/** Enough turns of the event loop for anything that is going to run to have run. */
+const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 10));
 
 /** The extensions of a thrown API error, for asserting on its code. */
 function extensionsOf(error: unknown): Record<string, unknown> {
@@ -330,17 +374,119 @@ describe("RepoSync ordering", () => {
     assert.equal(await sync.read(() => "after"), "after");
   });
 
-  it("drains, so a shutdown never cuts an operation in half", async () => {
-    const { sync } = makeSync();
-    let finished = false;
-    void sync.write(
+  it("holds the tree still while a push is in flight, and runs the read after it", async () => {
+    // The case the lock exists for: the write's body has run and its push is
+    // out on the network, and a read arrives. Nothing may touch the tree until
+    // the push has returned — the read runs after, not in the gap.
+    const push = gate();
+    const { sync, calls } = makeSync({ pushGate: push.closed });
+    const order: string[] = [];
+
+    const write = sync.write(
       () => {
-        finished = true;
+        order.push("write");
+        return 1;
       },
       () => true,
     );
+    const read = sync.read(() => {
+      order.push("read");
+      return 2;
+    });
 
-    await sync.drain();
-    assert.equal(finished, true);
+    await settle();
+    assert.deepEqual(order, ["write"]);
+    assert.deepEqual(calls, ["fetch origin"]);
+
+    push.open();
+    await Promise.all([write, read]);
+    assert.deepEqual(order, ["write", "read"]);
+    assert.deepEqual(calls, ["fetch origin", "push origin main -> ok", "fetch origin"]);
+  });
+
+  it("drains, so a shutdown never cuts an operation in half", async () => {
+    const push = gate();
+    const { sync, calls } = makeSync({ pushGate: push.closed });
+    let finished = false;
+    void sync.write(
+      () => undefined,
+      () => true,
+    );
+
+    // The write is between its commit and its push: the one moment the
+    // clone's state depends on finishing.
+    const drained = sync.drain().then(() => {
+      finished = true;
+    });
+    await settle();
+    assert.equal(finished, false);
+
+    push.open();
+    await drained;
+    assert.deepEqual(calls, ["fetch origin", "push origin main -> ok"]);
+  });
+});
+
+describe("RepoSync timeouts", () => {
+  const committed = () => true;
+  const stoppedFetch = new GitTimeoutError(["fetch", "--quiet", "--prune", "origin"], 500);
+  const stoppedPush = new GitTimeoutError(["push", "--quiet", "origin", "main:main"], 500);
+
+  it("gives the network calls the timeout, and only when one is configured", async () => {
+    const { sync, timeouts } = makeSync({}, { timeout: 500 });
+    await sync.write(() => undefined, committed);
+    assert.deepEqual(timeouts, [500, 500]);
+
+    const unbounded = makeSync({}, { timeout: 0 });
+    await unbounded.sync.write(() => undefined, committed);
+    assert.deepEqual(unbounded.timeouts, [undefined, undefined]);
+  });
+
+  it("fails the request whose fetch was stopped, having written nothing", async () => {
+    const { sync, reported } = makeSync({ fetchThrows: stoppedFetch }, { timeout: 500 });
+    let ran = false;
+
+    await assert.rejects(
+      sync.write(() => {
+        ran = true;
+      }, committed),
+      (error: unknown) => {
+        const extensions = extensionsOf(error);
+        assert.equal(extensions.code, "SYNC_FAILED");
+        assert.equal(extensions.keptLocalCommit, false);
+        assert.match((error as Error).message, /fetch did not finish within 500 ms/);
+        return true;
+      },
+    );
+    assert.equal(ran, false);
+    // The operator hears about it too, with what git was running.
+    assert.equal(reported.length, 1);
+    assert.match(reported[0] as string, /git fetch --quiet --prune origin/);
+  });
+
+  it("keeps the commit whose push was stopped, and says so", async () => {
+    const { sync, calls } = makeSync({ pushThrows: stoppedPush }, { timeout: 500 });
+
+    await assert.rejects(
+      sync.write(() => undefined, committed),
+      (error: unknown) => {
+        const extensions = extensionsOf(error);
+        assert.equal(extensions.code, "SYNC_FAILED");
+        // Committed before the push was tried, so it is in the clone's history
+        // and the next push carries it — nothing for an operator to do.
+        assert.equal(extensions.keptLocalCommit, true);
+        assert.match((error as Error).message, /push did not finish within 500 ms/);
+        return true;
+      },
+    );
+    // Stopped once, not retried: a retry would only wait the timeout out again.
+    assert.deepEqual(calls, ["fetch origin", "push origin main -> stopped"]);
+  });
+
+  it("hands the clone to the next operation once a call is stopped", async () => {
+    const { sync } = makeSync({ fetchThrows: stoppedFetch }, { timeout: 500 });
+    await assert.rejects(sync.read(() => undefined));
+    // Offline work is unaffected by a remote that stopped answering.
+    assert.equal(await sync.locked(() => "still here"), "still here");
   });
 });

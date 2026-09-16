@@ -10,53 +10,70 @@
  * What it must never do is resolve a conflict on somebody's behalf: a merge that
  * conflicts is aborted and reported, and any commit already made stays in the
  * clone for an operator to deal with.
+ *
+ * The git calls are awaited, not blocked on. A fetch or a push takes as long
+ * as the network takes, and a server that blocked its event loop for that
+ * would make one person's slow push everybody's latency — including requests
+ * that never touch the clone. So the network calls yield, and the operation
+ * they belong to holds the {@link Mutex} while they do; the tree stays still
+ * for it, and the process stays answerable for everyone else. The operation's
+ * own body — composing files, validating them, committing — stays synchronous:
+ * it is local disk work measured in milliseconds, and the boundary belongs
+ * where the network is.
  */
 
 import {
-  abortMerge,
-  canFastForward,
-  commitMerge,
-  conflictedPaths,
-  currentBranch,
-  fastForward,
-  fetchRemote,
-  isAlreadyMerged,
+  abortMergeAsync,
+  canFastForwardAsync,
+  commitMergeAsync,
+  conflictedPathsAsync,
+  currentBranchAsync,
+  fastForwardAsync,
+  fetchRemoteAsync,
+  GitTimeoutError,
+  isAlreadyMergedAsync,
   type MergeOutcome,
-  mergeNoCommit,
+  mergeNoCommitAsync,
+  type NetworkOptions,
   type PushOutcome,
-  pushBranch,
-  resolveSha,
+  pushBranchAsync,
+  resolveShaAsync,
 } from "@navbook/core";
 import { apiError } from "./errors.ts";
 import { Mutex } from "./lock.ts";
 
 /** The git operations the engine needs, injectable so the matrix is testable. */
 export interface SyncGit {
-  fetchRemote(cwd: string, remote: string): void;
-  pushBranch(cwd: string, remote: string, branch: string): PushOutcome;
-  resolveSha(cwd: string, rev: string): string | null;
-  isAlreadyMerged(cwd: string, source: string): boolean;
-  canFastForward(cwd: string, source: string): boolean;
-  fastForward(cwd: string, source: string): void;
-  mergeNoCommit(cwd: string, source: string): MergeOutcome;
-  commitMerge(cwd: string, message: string): string;
-  abortMerge(cwd: string): void;
-  conflictedPaths(cwd: string): string[];
-  currentBranch(cwd: string): string | null;
+  fetchRemote(cwd: string, remote: string, opts?: NetworkOptions): Promise<void>;
+  pushBranch(
+    cwd: string,
+    remote: string,
+    branch: string,
+    opts?: NetworkOptions,
+  ): Promise<PushOutcome>;
+  resolveSha(cwd: string, rev: string): Promise<string | null>;
+  isAlreadyMerged(cwd: string, source: string): Promise<boolean>;
+  canFastForward(cwd: string, source: string): Promise<boolean>;
+  fastForward(cwd: string, source: string): Promise<void>;
+  mergeNoCommit(cwd: string, source: string): Promise<MergeOutcome>;
+  commitMerge(cwd: string, message: string): Promise<string>;
+  abortMerge(cwd: string): Promise<void>;
+  conflictedPaths(cwd: string): Promise<string[]>;
+  currentBranch(cwd: string): Promise<string | null>;
 }
 
 export const REAL_GIT: SyncGit = {
-  fetchRemote,
-  pushBranch,
-  resolveSha,
-  isAlreadyMerged,
-  canFastForward,
-  fastForward,
-  mergeNoCommit,
-  commitMerge,
-  abortMerge,
-  conflictedPaths,
-  currentBranch,
+  fetchRemote: fetchRemoteAsync,
+  pushBranch: pushBranchAsync,
+  resolveSha: resolveShaAsync,
+  isAlreadyMerged: isAlreadyMergedAsync,
+  canFastForward: canFastForwardAsync,
+  fastForward: fastForwardAsync,
+  mergeNoCommit: mergeNoCommitAsync,
+  commitMerge: commitMergeAsync,
+  abortMerge: abortMergeAsync,
+  conflictedPaths: conflictedPathsAsync,
+  currentBranch: currentBranchAsync,
 };
 
 export interface SyncOptions {
@@ -65,8 +82,18 @@ export interface SyncOptions {
   remote: string | null;
   /** How stale a read may let its view of the remote become. */
   pullIntervalMs: number;
+  /**
+   * How long a fetch or a push may take before it is stopped.
+   *
+   * A stopped call fails its own request with `SYNC_FAILED` and releases the
+   * clone to the next one. Unset or 0 waits as long as git does, which on a
+   * remote that accepts the connection and never answers can be forever.
+   */
+  gitTimeoutMs?: number;
   git?: SyncGit;
   now?: () => number;
+  /** Where to say what happened to a call that was stopped: the log, in a server. */
+  report?: (line: string) => void;
 }
 
 /** What a mutation's write did, and whether the commit reached the remote. */
@@ -130,17 +157,45 @@ export function syncPushRejected(): Error {
   );
 }
 
+/**
+ * A fetch or push that ran out of time and was stopped.
+ *
+ * Nothing needs reconciling, which is what sets it apart from a conflict: a
+ * commit left behind by a stopped push is in the clone's history, and the next
+ * push carries it along with whatever that request adds. Whether the stopped
+ * push landed anyway is the remote's to know; either way the next one is a
+ * no-op or a fast-forward, never a conflict of this request's making.
+ */
+export function syncTimedOut(error: GitTimeoutError, keptLocalCommit: boolean): Error {
+  const call = error.args[0] === "push" ? "push" : "fetch";
+  return apiError(
+    `the server's ${call} did not finish within ${error.timeoutMs} ms and was stopped`,
+    "SYNC_FAILED",
+    {
+      keptLocalCommit,
+      details: keptLocalCommit
+        ? [
+            "the change is committed in the clone but may not have reached the remote",
+            "the next mutation that pushes carries it; try again once the remote answers",
+          ]
+        : ["the remote is slow or unreachable; try again"],
+    },
+  );
+}
+
 export class RepoSync {
   private readonly lock = new Mutex();
   private readonly opts: SyncOptions;
   private readonly git: SyncGit;
   private readonly now: () => number;
+  private readonly report: (line: string) => void;
   private lastFetch = Number.NEGATIVE_INFINITY;
 
   constructor(opts: SyncOptions) {
     this.opts = opts;
     this.git = opts.git ?? REAL_GIT;
     this.now = opts.now ?? Date.now;
+    this.report = opts.report ?? (() => undefined);
   }
 
   /** True when there is no remote to synchronise with. */
@@ -150,8 +205,8 @@ export class RepoSync {
 
   /** Run a read, having brought the clone up to date first. */
   read<T>(body: () => T): Promise<T> {
-    return this.lock.run(() => {
-      this.pull({ force: false, keptLocalCommit: false });
+    return this.lock.run(async () => {
+      await this.pull({ force: false, keptLocalCommit: false });
       return body();
     });
   }
@@ -176,10 +231,10 @@ export class RepoSync {
    * pushed would be a lie.
    */
   write<T>(body: () => T, committed: (result: T) => boolean): Promise<WriteResult<T>> {
-    return this.lock.run(() => {
-      this.pull({ force: true, keptLocalCommit: false });
+    return this.lock.run(async () => {
+      await this.pull({ force: true, keptLocalCommit: false });
       const result = body();
-      const pushed = committed(result) ? this.pushWithRetry() : false;
+      const pushed = committed(result) ? await this.pushWithRetry() : false;
       return { result, pushed };
     });
   }
@@ -187,6 +242,21 @@ export class RepoSync {
   /** Wait for in-flight work to finish, so shutdown never cuts one in half. */
   drain(): Promise<void> {
     return this.lock.drain();
+  }
+
+  /** What the calls that reach the network are told. */
+  private network(): NetworkOptions {
+    return this.opts.gitTimeoutMs ? { timeoutMs: this.opts.gitTimeoutMs } : {};
+  }
+
+  /**
+   * What a network call that was stopped becomes: a line in the log, and a
+   * `SYNC_FAILED` for the client. Anything else is passed through as it came.
+   */
+  private stopped(error: unknown, keptLocalCommit: boolean): unknown {
+    if (!(error instanceof GitTimeoutError)) return error;
+    this.report(`nav-server: ${error.message}`);
+    return syncTimedOut(error, keptLocalCommit);
   }
 
   /**
@@ -197,15 +267,19 @@ export class RepoSync {
    * network's. A mutation always fetches: it is about to write, and writing on a
    * stale tree is how avoidable conflicts are made.
    */
-  private pull(opts: { force: boolean; keptLocalCommit: boolean }): void {
+  private async pull(opts: { force: boolean; keptLocalCommit: boolean }): Promise<void> {
     const remote = this.opts.remote;
     if (remote === null) return;
     if (!opts.force && this.now() - this.lastFetch < this.opts.pullIntervalMs) return;
 
-    this.git.fetchRemote(this.opts.repoRoot, remote);
+    try {
+      await this.git.fetchRemote(this.opts.repoRoot, remote, this.network());
+    } catch (error) {
+      throw this.stopped(error, opts.keptLocalCommit);
+    }
     this.lastFetch = this.now();
     try {
-      this.merge(remote);
+      await this.merge(remote);
     } catch (error) {
       if (error instanceof MergeConflict) throw syncConflict(error.paths, opts.keptLocalCommit);
       throw error;
@@ -213,38 +287,47 @@ export class RepoSync {
   }
 
   /** Merge the remote-tracking branch into HEAD. Throws {@link MergeConflict}. */
-  private merge(remote: string): void {
+  private async merge(remote: string): Promise<void> {
     const root = this.opts.repoRoot;
-    const branch = this.git.currentBranch(root);
+    const branch = await this.git.currentBranch(root);
     if (branch === null) return;
     const upstream = `${remote}/${branch}`;
     // Nothing to merge: the remote has no such branch yet, or holds nothing new.
-    if (this.git.resolveSha(root, upstream) === null) return;
-    if (this.git.isAlreadyMerged(root, upstream)) return;
+    if ((await this.git.resolveSha(root, upstream)) === null) return;
+    if (await this.git.isAlreadyMerged(root, upstream)) return;
 
-    if (this.git.canFastForward(root, upstream)) {
-      this.git.fastForward(root, upstream);
+    if (await this.git.canFastForward(root, upstream)) {
+      await this.git.fastForward(root, upstream);
       return;
     }
-    if (this.git.mergeNoCommit(root, upstream) === "conflict") {
+    if ((await this.git.mergeNoCommit(root, upstream)) === "conflict") {
       // "conflict" is every non-zero exit, not only a content conflict: git
       // also refuses outright over unrelated histories, a busy index, or a
       // working tree the merge would overwrite. Which it was decides what the
       // operator has to do, and only the conflicted paths tell them apart.
-      const paths = this.git.conflictedPaths(root);
+      const paths = await this.git.conflictedPaths(root);
       // Abort before reporting: leaving a half-merged tree behind would fail
       // every later operation for a reason unrelated to what it asked for.
-      this.git.abortMerge(root);
+      await this.git.abortMerge(root);
       if (paths.length === 0) throw mergeRefused(upstream);
       throw new MergeConflict(paths);
     }
     try {
-      this.git.commitMerge(root, `Merge remote-tracking branch '${upstream}'`);
+      await this.git.commitMerge(root, `Merge remote-tracking branch '${upstream}'`);
     } catch (error) {
       // The merge is staged but uncommitted, which is the one state this
       // module must never leave behind — every later request would fail in it.
-      this.git.abortMerge(root);
+      await this.git.abortMerge(root);
       throw error;
+    }
+  }
+
+  /** One push, with a stopped one reported as the commit it leaves behind. */
+  private async push(root: string, remote: string, branch: string): Promise<PushOutcome> {
+    try {
+      return await this.git.pushBranch(root, remote, branch, this.network());
+    } catch (error) {
+      throw this.stopped(error, true);
     }
   }
 
@@ -256,18 +339,18 @@ export class RepoSync {
    * spinning. The change is safe either way — it is in the clone's history, and
    * the error says so.
    */
-  private pushWithRetry(): boolean {
+  private async pushWithRetry(): Promise<boolean> {
     const remote = this.opts.remote;
     if (remote === null) return false;
     const root = this.opts.repoRoot;
-    const branch = this.git.currentBranch(root);
+    const branch = await this.git.currentBranch(root);
     if (branch === null) return false;
 
-    if (this.git.pushBranch(root, remote, branch) === "ok") return true;
+    if ((await this.push(root, remote, branch)) === "ok") return true;
     // Rejected: somebody pushed first. Merge what they pushed and try again —
     // and if that merge conflicts, the commit stays local, which the error says.
-    this.pull({ force: true, keptLocalCommit: true });
-    if (this.git.pushBranch(root, remote, branch) === "ok") return true;
+    await this.pull({ force: true, keptLocalCommit: true });
+    if ((await this.push(root, remote, branch)) === "ok") return true;
     throw syncPushRejected();
   }
 }

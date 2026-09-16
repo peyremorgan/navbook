@@ -5,14 +5,15 @@
  * commits cannot interleave with another doing the same. Reads take it too: a
  * read's pull moves the tree under any operation that did not.
  *
- * As things stand it guards less than it looks. Every core operation is
- * synchronous — git runs through `spawnSync` — so an operation already runs to
- * completion in one turn of the event loop and could not be interleaved anyway.
- * What the lock does today is order the awaits *around* those turns (a field
- * resolver reading the tree after its parent's transaction has returned) and
- * make {@link Mutex.drain} meaningful at shutdown. What it is really for is the
- * day the git layer stops being synchronous, which is the fix for it blocking
- * the event loop: on that day this is what keeps the guarantee.
+ * The git calls an operation makes are awaited, so an operation spans many
+ * turns of the event loop and the loop answers other requests in between —
+ * requests that need the tree wait here, and requests that do not (a health
+ * probe, the GraphiQL page, a refused token) are answered at once. This is
+ * what makes the queue the guarantee rather than an ornament: without it a
+ * read could run between another operation's pull and its commit, on a tree
+ * mid-move. It is also what makes {@link Mutex.drain} mean something at
+ * shutdown, where a mutation between its commit and its push is the one
+ * moment the clone's state depends on finishing.
  */
 export class Mutex {
   /** Resolves when everything queued so far has finished, one way or another. */

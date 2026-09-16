@@ -49,10 +49,15 @@ Every option has a flag and an environment variable. Flags win.
 | `--oidc-jwks-url <url>` | `NAV_SERVER_OIDC_JWKS_URL` | no | discovered from the issuer |
 | `--remote <name>` | `NAV_SERVER_REMOTE` | no | `origin` |
 | `--pull-interval-ms <n>` | `NAV_SERVER_PULL_INTERVAL_MS` | no | `10000` |
+| `--git-timeout-ms <n>` | `NAV_SERVER_GIT_TIMEOUT_MS` | no | `30000` (`0` waits as long as git does) |
 | `--no-graphiql` | `NAV_SERVER_GRAPHIQL=false` | no | the explorer is served |
 
 `--pull-interval-ms` is how stale a *read* may let its view of the remote
-become; a mutation always fetches first. There is no way to turn
+become; a mutation always fetches first. `--git-timeout-ms` is how long any
+one fetch or push may take: one that runs longer is stopped and its request
+fails with `SYNC_FAILED`, so a remote that has stopped answering costs one
+request rather than every request queued behind it. A stopped push leaves its
+commit in the clone, and the next push carries it. There is no way to turn
 authentication off: every operation, read or write, needs a valid token.
 
 The server also honors `NAV_ROOT`, the variable that names the Navbook
@@ -77,7 +82,10 @@ off if reaching it at all is more than you want to offer.
   server runs git with prompts disabled, so a missing credential fails the
   request rather than hanging it.
 - **One server per clone.** Operations are serialised against the single
-  working tree.
+  working tree. Requests are not: git is awaited rather than blocked on, so a
+  slow push holds up the operations queued behind it and nothing else — a
+  health probe, the GraphiQL page or a refused token is answered meanwhile.
+  `--git-timeout-ms` bounds how long the queue can be held.
 - **Start it clean.** The server refuses to start on a dirty tree, a detached
   HEAD, or a repository with no `.navbook/` — each of those would otherwise
   surface as a puzzling failure on somebody's first mutation.
@@ -160,8 +168,7 @@ proposes to merge, so `prs(allRefs: true)` can find one this checkout does not
 hold, but commenting on it needs a server serving that branch — the refusal
 says which one.
 
-Two limits worth knowing at this scale: git runs synchronously, so a slow fetch
-or push blocks concurrent requests; and two clients editing one issue are
+One limit worth knowing at this scale: two clients editing one issue are
 last-write-wins rather than detected.
 
 ## Development

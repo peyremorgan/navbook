@@ -6,12 +6,19 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { GitError, git } from "../src/git/exec.ts";
-import { fetchRemote, hasRemote, listRemotes, pushBranch } from "../src/git/remote.ts";
+import { GitError, GitTimeoutError, git } from "../src/git/exec.ts";
+import {
+  fetchRemote,
+  fetchRemoteAsync,
+  hasRemote,
+  listRemotes,
+  pushBranch,
+  pushBranchAsync,
+} from "../src/git/remote.ts";
 
 const IDENTITY = { name: "Nav Test", email: "nav@test.invalid" };
 
@@ -25,38 +32,66 @@ interface Fixture {
   commit(dir: string, name: string): void;
 }
 
-function inRemotes(use: (fx: Fixture) => void): void {
+function makeRemotes(): Fixture & { cleanup(): void } {
   const root = mkdtempSync(join(tmpdir(), "navbook-remote-"));
+  const origin = join(root, "origin.git");
+  const clone = join(root, "clone");
+  const peer = join(root, "peer");
+  git(["init", "--quiet", "--bare", "-b", "main", origin]);
+
+  const commit = (dir: string, name: string): void => {
+    writeFileSync(join(dir, name), `${name}\n`, "utf8");
+    git(["add", "-A"], { cwd: dir });
+    git(["commit", "--quiet", "-m", name], { cwd: dir });
+  };
+
+  const setUp = (dir: string): void => {
+    git(["config", "user.name", IDENTITY.name], { cwd: dir });
+    git(["config", "user.email", IDENTITY.email], { cwd: dir });
+    git(["config", "commit.gpgsign", "false"], { cwd: dir });
+  };
+
+  git(["clone", "--quiet", origin, clone]);
+  setUp(clone);
+  commit(clone, "first");
+  assert.equal(pushBranch(clone, "origin", "main"), "ok");
+
+  git(["clone", "--quiet", origin, peer]);
+  setUp(peer);
+
+  return {
+    origin,
+    clone,
+    peer,
+    commit,
+    cleanup: () => rmSync(root, { recursive: true, force: true }),
+  };
+}
+
+function inRemotes(use: (fx: Fixture) => void): void {
+  const fx = makeRemotes();
   try {
-    const origin = join(root, "origin.git");
-    const clone = join(root, "clone");
-    const peer = join(root, "peer");
-    git(["init", "--quiet", "--bare", "-b", "main", origin]);
-
-    const commit = (dir: string, name: string): void => {
-      writeFileSync(join(dir, name), `${name}\n`, "utf8");
-      git(["add", "-A"], { cwd: dir });
-      git(["commit", "--quiet", "-m", name], { cwd: dir });
-    };
-
-    const setUp = (dir: string): void => {
-      git(["config", "user.name", IDENTITY.name], { cwd: dir });
-      git(["config", "user.email", IDENTITY.email], { cwd: dir });
-      git(["config", "commit.gpgsign", "false"], { cwd: dir });
-    };
-
-    git(["clone", "--quiet", origin, clone]);
-    setUp(clone);
-    commit(clone, "first");
-    assert.equal(pushBranch(clone, "origin", "main"), "ok");
-
-    git(["clone", "--quiet", origin, peer]);
-    setUp(peer);
-
-    use({ origin, clone, peer, commit });
+    use(fx);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    fx.cleanup();
   }
+}
+
+async function inRemotesAsync(use: (fx: Fixture) => Promise<void>): Promise<void> {
+  const fx = makeRemotes();
+  try {
+    await use(fx);
+  } finally {
+    fx.cleanup();
+  }
+}
+
+/** Make the origin sit on every push for `seconds`, as an unreachable one would. */
+function stallPushes(origin: string, seconds: number): () => void {
+  const hook = join(origin, "hooks", "pre-receive");
+  writeFileSync(hook, `#!/bin/sh\nsleep ${seconds}\nexit 0\n`, "utf8");
+  chmodSync(hook, 0o755);
+  return () => rmSync(hook, { force: true });
 }
 
 describe("remotes", () => {
@@ -118,6 +153,57 @@ describe("remotes", () => {
     inRemotes(({ clone }) => {
       assert.throws(() => pushBranch(clone, "nowhere", "main"), GitError);
       assert.throws(() => pushBranch(clone, "origin", "no-such-branch"), GitError);
+    });
+  });
+});
+
+describe("remotes, without blocking", () => {
+  it("fetches and pushes as the blocking forms do", async () => {
+    await inRemotesAsync(async ({ clone, peer, commit }) => {
+      commit(peer, "second");
+      assert.equal(await pushBranchAsync(peer, "origin", "main"), "ok");
+
+      await fetchRemoteAsync(clone, "origin");
+      assert.notEqual(
+        git(["rev-parse", "origin/main"], { cwd: clone }).trim(),
+        git(["rev-parse", "HEAD"], { cwd: clone }).trim(),
+      );
+
+      commit(clone, "ours");
+      assert.equal(await pushBranchAsync(clone, "origin", "main"), "rejected");
+      await assert.rejects(fetchRemoteAsync(clone, "nowhere"), GitError);
+      await assert.rejects(pushBranchAsync(clone, "nowhere", "main"), GitError);
+    });
+  });
+
+  it("stops a push the remote sits on, and can push again once it answers", async () => {
+    await inRemotesAsync(async ({ origin, clone, commit }) => {
+      const unstall = stallPushes(origin, 5);
+      commit(clone, "slow");
+
+      const started = Date.now();
+      await assert.rejects(
+        pushBranchAsync(clone, "origin", "main", { timeoutMs: 300 }),
+        GitTimeoutError,
+      );
+      const elapsed = Date.now() - started;
+      assert.ok(elapsed < 3000, `a 300 ms timeout took ${elapsed} ms`);
+
+      // Stopped cleanly: nothing was left locked, and the commit is still ours to push.
+      unstall();
+      assert.equal(await pushBranchAsync(clone, "origin", "main", { timeoutMs: 10_000 }), "ok");
+      assert.equal(
+        git(["rev-parse", "main"], { cwd: origin }).trim(),
+        git(["rev-parse", "HEAD"], { cwd: clone }).trim(),
+      );
+    });
+  });
+
+  it("waits as long as git does when given no timeout", async () => {
+    await inRemotesAsync(async ({ origin, clone, commit }) => {
+      stallPushes(origin, 1);
+      commit(clone, "patient");
+      assert.equal(await pushBranchAsync(clone, "origin", "main"), "ok");
     });
   });
 });

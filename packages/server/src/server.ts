@@ -107,6 +107,9 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     repoRoot,
     remote,
     pullIntervalMs: config.pullIntervalMs,
+    gitTimeoutMs: config.gitTimeoutMs,
+    // A stopped fetch or push is the operator's news as much as the client's.
+    report,
   });
 
   // One per process, beside the clone it describes: the history it walks is

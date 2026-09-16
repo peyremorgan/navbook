@@ -26,6 +26,10 @@ export interface Harness {
   fixture: Fixture;
   issuer: StubIssuer;
   port: number;
+  /** The server process, for a test that has to signal it mid-request. */
+  pid: number;
+  /** Resolves with the exit code once the server process has ended. */
+  exited: Promise<number | null>;
   /** Everything the server has written to stderr, for startup assertions. */
   stderr(): string;
   /** A signed token; the default one carries a name and an email. */
@@ -42,6 +46,8 @@ export interface Harness {
 export interface HarnessOptions extends FixtureOptions {
   /** How stale a read may be; 0 makes every read fetch, as the sync tests need. */
   pullIntervalMs?: number;
+  /** How long a fetch or push may take before the server stops it. */
+  gitTimeoutMs?: number;
   /** Discover the JWKS through the issuer rather than being told where it is. */
   discover?: boolean;
   /** Set the clone up before the server is started, e.g. onto another branch. */
@@ -72,11 +78,15 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<Harness> 
       ...(opts.discover ? [] : ["--oidc-jwks-url", issuer.jwksUrl]),
       "--pull-interval-ms",
       String(opts.pullIntervalMs ?? 0),
+      ...(opts.gitTimeoutMs === undefined ? [] : ["--git-timeout-ms", String(opts.gitTimeoutMs)]),
       ...(opts.graphiql ? [] : ["--no-graphiql"]),
     ],
     { env: fixture.env, stdio: ["ignore", "pipe", "pipe"] },
   );
 
+  const exited = new Promise<number | null>((resolve) =>
+    child.once("exit", (code) => resolve(code)),
+  );
   let errors = "";
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk: string) => {
@@ -113,6 +123,8 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<Harness> 
     fixture,
     issuer,
     port,
+    pid: child.pid as number,
+    exited,
     stderr: () => errors,
     token: (signOpts) => issuer.sign(signOpts),
     async gql(query, variables, auth) {
