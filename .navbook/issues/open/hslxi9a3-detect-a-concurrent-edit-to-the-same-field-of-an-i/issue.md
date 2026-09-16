@@ -3,6 +3,7 @@ title: Detect a concurrent edit to the same field of an issue or pull request, i
 author: Morgan PEYRE <morgan@peyre.info>
 created: 2026-09-16T06:10:21Z
 labels: [enhancement]
+assignee: Claude <noreply@anthropic.com>
 feature: [server, web, issues]
 parent: tn7ptt6k
 ---
