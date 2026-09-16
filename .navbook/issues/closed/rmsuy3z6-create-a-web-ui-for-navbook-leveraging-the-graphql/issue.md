@@ -6,6 +6,7 @@ labels: [enhancement]
 assignee: admin@brickcode.tech
 feature: web
 resolution: fixed
+subtasks: [qrudyd2x, nmnq562b, j2w7kse7, o4kt93fo, hc9g6iog, i6nzbn1d, hw45rswy]
 ---
 
 Build a web-based UI for Navbook (issues/PRs) that consumes the @navbook/server GraphQL API instead of talking to the git-native store directly.

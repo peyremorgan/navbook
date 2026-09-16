@@ -4,6 +4,7 @@ author: Morgan PEYRE <morgan@peyre.info>
 created: 2026-09-15T08:35:43Z
 labels: [enhancement]
 feature: [server, gateway, web]
+parent: tn7ptt6k
 ---
 
 `nav-server` authorizes every token its issuer signs for its audience, for reads and writes alike, and the READMEs say to "put the policy you need in front". In practice there is nothing to put in front: the API takes a bearer token, so a forward-auth proxy would have to verify the same JWT and reimplement the check, and an identity provider rarely scopes a client to a subset of its users.

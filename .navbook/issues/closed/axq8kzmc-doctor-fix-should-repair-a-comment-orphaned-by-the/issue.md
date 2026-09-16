@@ -5,6 +5,7 @@ created: 2026-08-02T15:09:42Z
 labels: [milestone-2, doctor]
 resolution: fixed
 feature: doctor
+parent: gnm7l46s
 ---
 
 When the very first comment on an entity races a status change, git cannot infer the directory rename and leaves the comment under the old status directory (spec 03 §3.3.1, verified against git 2.43).

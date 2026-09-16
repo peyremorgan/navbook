@@ -4,6 +4,7 @@ author: Morgan PEYRE <morgan@peyre.info>
 created: 2026-09-15T08:35:42Z
 labels: [enhancement]
 feature: [web, gateway]
+parent: rmsuy3z6
 ---
 
 The web client asks for the API's audience with an `audience` query parameter on the authorization request (`packages/web/app/plugins/02.auth.ts`, `extraQueryParams: { audience }`). That is Auth0's spelling. Providers that implement resource indicators (RFC 8707) read `resource` instead, and read it at the **token** endpoint.

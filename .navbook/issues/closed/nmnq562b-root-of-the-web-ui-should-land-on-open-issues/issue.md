@@ -5,6 +5,7 @@ created: 2026-09-07T17:12:39Z
 labels: [enhancement]
 feature: web
 resolution: fixed
+parent: rmsuy3z6
 ---
 
 `/` redirects to `/issues` with no query string, and a filter naming no status means any status — so the front page opens on closed issues mixed in with the open ones.

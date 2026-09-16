@@ -4,6 +4,7 @@ author: Morgan PEYRE <morgan@peyre.info>
 created: 2026-09-15T08:35:43Z
 labels: [enhancement]
 feature: [packaging, server, web]
+parent: rop9bg3d
 ---
 
 The only documented deployment is `docker compose up -d --build` on a Docker host with a Traefik watching the Docker socket, and no image is published: every deployment builds both images from a checkout. That fits one machine. It does not fit a Kubernetes cluster, where Traefik is an ingress controller, TLS comes from cert-manager, and nodes pull images from a registry rather than building them.

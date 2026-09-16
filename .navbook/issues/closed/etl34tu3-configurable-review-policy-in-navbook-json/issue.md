@@ -5,6 +5,7 @@ created: 2026-09-08T00:24:27Z
 labels: [enhancement]
 feature: pull-requests
 resolution: fixed
+parent: b26np83t
 ---
 
 `navbook.json` should be able to say what a review is supposed to add up to: whether a pull request's own author may review it, and how many approvals `approved` takes.

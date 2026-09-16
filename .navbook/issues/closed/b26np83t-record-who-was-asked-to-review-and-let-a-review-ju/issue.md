@@ -5,6 +5,8 @@ created: 2026-09-07T17:57:16Z
 labels: [enhancement]
 feature: pull-requests
 resolution: fixed
+parent: yoo6arff
+subtasks: [etl34tu3]
 ---
 
 A pull request records who reviewed it and what they said, but nothing records who was *asked*. Add the request, and the third verdict every forge has and this format lacks.

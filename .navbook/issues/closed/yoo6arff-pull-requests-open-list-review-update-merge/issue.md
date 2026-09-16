@@ -5,6 +5,7 @@ created: 2026-08-02T15:09:42Z
 labels: [milestone-3, pr]
 resolution: fixed
 feature: pull-requests
+subtasks: [gpx7xpww, en1bjq9j, b26np83t]
 ---
 
 Implement the PR-only verbs from spec 04 §4.3 on top of the shared verb vocabulary already in `src/cli/commands/entity.ts`.

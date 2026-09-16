@@ -4,6 +4,7 @@ author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-08T14:45:05Z
 labels: [enhancement]
 feature: [pull-requests, cli]
+parent: yoo6arff
 ---
 
 `nav pr merge` records the merge as a commit on the target branch: the directory move from `prs/open/` to `prs/merged/`, and the `merged:` block appended to `pr.md`. That commit lands on the target and nowhere else.

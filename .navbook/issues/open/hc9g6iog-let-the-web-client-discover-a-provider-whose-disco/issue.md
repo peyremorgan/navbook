@@ -4,6 +4,7 @@ author: Morgan PEYRE <morgan@peyre.info>
 created: 2026-09-15T08:35:43Z
 labels: [enhancement]
 feature: web
+parent: rmsuy3z6
 ---
 
 `config.json` names the provider with one key, `oidc.issuer`, and the web client uses it as the `authority` oidc-client-ts discovers from: it fetches `<issuer>/.well-known/openid-configuration`. That holds for most providers and fails for one whose issuer carries a path its discovery document does not sit under.

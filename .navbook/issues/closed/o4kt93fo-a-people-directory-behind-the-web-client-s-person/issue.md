@@ -5,6 +5,7 @@ created: 2026-09-08T08:57:28Z
 labels: [enhancement]
 feature: [server, web]
 resolution: fixed
+parent: rmsuy3z6
 ---
 
 Every person menu in the web client offers whatever the listing on screen happens to contain: the assignees on an issue, the ones on the filing form, the assignee, author and reviewer filters, and the reviewers of a pull request. That is a guess made from the answer to a different question, and it is wrong in both directions — somebody nobody has assigned yet is never offered, and the issue page fetches a whole listing only to make the guess.

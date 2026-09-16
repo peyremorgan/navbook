@@ -5,6 +5,7 @@ created: 2026-08-02T15:09:43Z
 labels: [milestone-3, pr]
 resolution: fixed
 feature: pull-requests
+parent: yoo6arff
 ---
 
 When `git merge` conflicts inside `nav pr merge`, the directory move to `prs/merged/` and the `merged:` block still have to happen once the human has resolved the conflict.
