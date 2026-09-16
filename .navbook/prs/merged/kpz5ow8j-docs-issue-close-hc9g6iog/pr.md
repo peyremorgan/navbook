@@ -12,6 +12,10 @@ revisions:
   - head: 122167a5abe9f0d4d1d31d53e5b7b28db9d10d1b
     base: 90e8ff208af16918f3cec7a2a548e5e9b7af9982
     date: 2026-09-16T17:38:42Z
+merged:
+  date: 2026-09-16T17:39:43Z
+  by: Claude <noreply@anthropic.com>
+  commit: 4923f93da7e0dc24670cdf2b3057f98b3d75b046
 ---
 
 Fixes #hc9g6iog: the web client could not start a sign-in against a provider whose discovery document is not under its issuer, and the server, told the same issuer, hit the same 404 unless the JWKS URL was spelled out.
