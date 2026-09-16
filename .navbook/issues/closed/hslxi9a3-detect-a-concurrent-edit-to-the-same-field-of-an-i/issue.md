@@ -6,6 +6,7 @@ labels: [enhancement]
 assignee: Claude <noreply@anthropic.com>
 feature: [server, web, issues]
 parent: tn7ptt6k
+resolution: fixed
 ---
 
 `updateSpec` and `updateFeature` take the `baseSha` the editor started from and refuse with `STALE_CONTENT` when the file has moved on since. `updateIssue` and `updatePr` take no such thing: `patchEntity` in `src/resolvers/mutation.ts` reads the file, applies the patch and writes it back, with nothing to say what the client was looking at when it composed the request.
