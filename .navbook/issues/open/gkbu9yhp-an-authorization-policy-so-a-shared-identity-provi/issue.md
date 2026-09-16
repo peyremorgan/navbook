@@ -3,6 +3,7 @@ title: An authorization policy, so a shared identity provider does not open the 
 author: Morgan PEYRE <morgan@peyre.info>
 created: 2026-09-15T08:35:43Z
 labels: [enhancement]
+assignee: Claude <noreply@anthropic.com>
 feature: [server, gateway, web]
 parent: tn7ptt6k
 ---
