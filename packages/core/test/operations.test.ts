@@ -641,12 +641,12 @@ describe("ops: updating and merging a pull request", () => {
   });
 });
 
-/** `findEntity` but null instead of throwing, for asserting absence. */
 /** `git rev-list --left-right --count a...b`: commits only `a` has, then only `b`. */
 function branchesApart(dir: string, a: string, b: string): string {
   return git(["rev-list", "--left-right", "--count", `${a}...${b}`], { cwd: dir }).trim();
 }
 
+/** `findEntity` but null instead of throwing, for asserting absence. */
 function findEntityOrNull(ws: WsCtx, ref: string): EntityRecord | null {
   try {
     return findEntity(ws, "pr", ref);
