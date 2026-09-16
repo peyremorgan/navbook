@@ -17,6 +17,9 @@ revisions:
   - head: aec0a1528452a2b4bf4446a4b98424831dbde798
     base: 3f98070c239afe3a04578760b063b4ea9ae4d768
     date: 2026-09-16T17:24:56Z
+merged:
+  date: 2026-09-16T17:24:57Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Closes #hslxi9a3.
