@@ -5,6 +5,7 @@ created: 2026-09-02T16:06:02Z
 labels: [enhancement]
 assignee: admin@brickcode.tech
 feature: web
+resolution: fixed
 ---
 
 Build a web-based UI for Navbook (issues/PRs) that consumes the @navbook/server GraphQL API instead of talking to the git-native store directly.
