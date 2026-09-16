@@ -4,6 +4,6 @@ author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-08-03T23:07:49Z
 feature: server
 resolution: fixed
-subtasks: [gkbu9yhp, i3fyesqd]
+subtasks: [gkbu9yhp, i3fyesqd, hslxi9a3]
 ---
 Create a new package containing a GraphQL API server exposing the core lib's read & write operations
