@@ -5,7 +5,7 @@
  */
 
 import { dedupePeople, type Person, parsePerson } from "../core/person.ts";
-import { git, gitMaybe, gitRun, splitLines } from "./exec.ts";
+import { git, gitMaybe, gitRun, gitRunAsync, splitLines } from "./exec.ts";
 
 /** ASCII SOH/STX: separators that cannot occur in a commit message or path. */
 const RECORD_SEPARATOR = "\u0001";
@@ -58,7 +58,20 @@ export function addedAt(cwd: string, path: string): FileVersion | null {
 
 /** True when `ancestor` is an ancestor of `descendant` (or the same commit). */
 export function isAncestor(cwd: string, ancestor: string, descendant: string): boolean {
-  return gitRun(["merge-base", "--is-ancestor", ancestor, descendant], { cwd }).code === 0;
+  return gitRun(isAncestorArgs(ancestor, descendant), { cwd }).code === 0;
+}
+
+/** {@link isAncestor} without blocking. */
+export async function isAncestorAsync(
+  cwd: string,
+  ancestor: string,
+  descendant: string,
+): Promise<boolean> {
+  return (await gitRunAsync(isAncestorArgs(ancestor, descendant), { cwd })).code === 0;
+}
+
+function isAncestorArgs(ancestor: string, descendant: string): string[] {
+  return ["merge-base", "--is-ancestor", ancestor, descendant];
 }
 
 /** The merge base of two revisions, or null when they share no history. */

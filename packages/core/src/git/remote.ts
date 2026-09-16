@@ -7,13 +7,30 @@
  *
  * Both commands reach the network, so both run with the terminal prompt
  * disabled: a server request must fail with a message rather than hang on a
- * credential prompt nobody is there to answer.
+ * credential prompt nobody is there to answer. And both have an `Async` twin
+ * that takes a timeout, because a remote that has stopped answering is the
+ * other way a request could hang — and the one a server cannot afford, since
+ * every operation queues behind the one holding the clone.
  */
 
-import { GitError, git, gitRun, splitLines } from "./exec.ts";
+import {
+  GitError,
+  type GitResult,
+  git,
+  gitAsync,
+  gitRun,
+  gitRunAsync,
+  splitLines,
+} from "./exec.ts";
 
 /** Environment for a command that may reach the network. */
 const NON_INTERACTIVE: NodeJS.ProcessEnv = { GIT_TERMINAL_PROMPT: "0" };
+
+/** What a call that reaches the network may be told. */
+export interface NetworkOptions {
+  /** Stop the command after this long; unset or 0 waits as long as git does. */
+  timeoutMs?: number;
+}
 
 /** Remotes configured on the repository. */
 export function listRemotes(cwd: string): string[] {
@@ -26,12 +43,34 @@ export function hasRemote(cwd: string, name: string): boolean {
   return listRemotes(cwd).includes(name);
 }
 
+const fetchArgs = (remote: string): string[] => ["fetch", "--quiet", "--prune", remote];
+
 /** Fetch a remote's branches, throwing {@link GitError} when git fails. */
 export function fetchRemote(cwd: string, remote: string): void {
-  git(["fetch", "--quiet", "--prune", remote], { cwd, env: NON_INTERACTIVE });
+  git(fetchArgs(remote), { cwd, env: NON_INTERACTIVE });
+}
+
+/**
+ * {@link fetchRemote} without blocking.
+ *
+ * Rejects with {@link GitTimeoutError} when the fetch outlives `timeoutMs`.
+ */
+export async function fetchRemoteAsync(
+  cwd: string,
+  remote: string,
+  opts: NetworkOptions = {},
+): Promise<void> {
+  await gitAsync(fetchArgs(remote), { cwd, env: NON_INTERACTIVE, ...opts });
 }
 
 export type PushOutcome = "ok" | "rejected";
+
+const pushArgs = (remote: string, branch: string): string[] => [
+  "push",
+  "--quiet",
+  remote,
+  `${branch}:${branch}`,
+];
 
 /**
  * Push a branch to a remote.
@@ -42,8 +81,28 @@ export type PushOutcome = "ok" | "rejected";
  * retrying it could not help.
  */
 export function pushBranch(cwd: string, remote: string, branch: string): PushOutcome {
-  const args = ["push", "--quiet", remote, `${branch}:${branch}`];
-  const result = gitRun(args, { cwd, env: NON_INTERACTIVE });
+  const args = pushArgs(remote, branch);
+  return pushOutcome(args, gitRun(args, { cwd, env: NON_INTERACTIVE }));
+}
+
+/**
+ * {@link pushBranch} without blocking.
+ *
+ * Rejects with {@link GitTimeoutError} when the push outlives `timeoutMs`. A
+ * stopped push may or may not have landed — the remote decides that on its
+ * own clock — which is why the caller's next push carries the same commits.
+ */
+export async function pushBranchAsync(
+  cwd: string,
+  remote: string,
+  branch: string,
+  opts: NetworkOptions = {},
+): Promise<PushOutcome> {
+  const args = pushArgs(remote, branch);
+  return pushOutcome(args, await gitRunAsync(args, { cwd, env: NON_INTERACTIVE, ...opts }));
+}
+
+function pushOutcome(args: string[], result: GitResult): PushOutcome {
   if (result.code === 0) return "ok";
   if (isNonFastForward(result.stderr)) return "rejected";
   throw new GitError(args, result);

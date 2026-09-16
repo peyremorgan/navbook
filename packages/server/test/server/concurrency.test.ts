@@ -5,14 +5,14 @@
  * produce ten ids, ten commits and one clean tree, and reads taken alongside
  * them never see a tree mid-move.
  *
- * They do not, on their own, prove the repository lock is what achieves that.
- * Every core operation is `spawnSync`, so a read or a write runs to completion
- * in a single synchronous turn and cannot interleave whether the lock is there
- * or not — removing it leaves these passing. The lock earns its place by
- * ordering the awaits *around* those turns, and by making `drain` meaningful at
- * shutdown; `test/unit/sync.test.ts` asserts that ordering directly. These
- * tests are what would notice if the git layer ever became asynchronous and the
- * guarantee stopped being free.
+ * The repository lock is what achieves that. Every operation awaits its git
+ * calls, so a mutation spans many turns of the event loop and another request
+ * can be dispatched in each of them — between a pull and a commit, or between
+ * a commit and a push. Only the queue in `src/lock.ts` keeps a read out of
+ * those gaps; remove it and these fail. `test/unit/sync.test.ts` asserts the
+ * ordering directly, and `responsiveness.test.ts` proves the other half: that
+ * a request which needs no tree is answered inside those gaps rather than
+ * after them.
  */
 
 import assert from "node:assert/strict";

@@ -43,12 +43,19 @@ describe("loadConfig", () => {
     );
   });
 
-  it("defaults the port, remote, staleness window and explorer", () => {
+  it("defaults the port, remote, staleness window, git timeout and explorer", () => {
     const config = loadConfig({}, [...REQUIRED]);
     assert.equal(config.port, 4000);
     assert.equal(config.remote, "origin");
     assert.equal(config.pullIntervalMs, 10_000);
+    assert.equal(config.gitTimeoutMs, 30_000);
     assert.equal(config.graphiql, true);
+  });
+
+  it("reads the git timeout from a flag or the environment, 0 meaning none", () => {
+    assert.equal(loadConfig({}, [...REQUIRED, "--git-timeout-ms", "5000"]).gitTimeoutMs, 5000);
+    assert.equal(loadConfig({ NAV_SERVER_GIT_TIMEOUT_MS: "0" }, [...REQUIRED]).gitTimeoutMs, 0);
+    assert.throws(() => loadConfig({}, [...REQUIRED, "--git-timeout-ms", "soon"]), ConfigError);
   });
 
   it("accepts port 0, which asks for any free one", () => {

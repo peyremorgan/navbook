@@ -6,6 +6,7 @@ assignee: Claude <noreply@anthropic.com>
 labels: [enhancement]
 feature: [server, gateway]
 parent: tn7ptt6k
+resolution: fixed
 ---
 
 `nav-server` runs every git command through `spawnSync`, so a fetch, a merge or a push occupies the event loop for its whole duration. One person's slow push is every other person's latency: the process cannot answer an unrelated read — or serve the GraphiQL page, or a health probe — until the network call returns. On a remote that is briefly unreachable, `git push` waits out its own timeout with the server wedged behind it.

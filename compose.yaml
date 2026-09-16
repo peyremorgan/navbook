@@ -33,6 +33,7 @@ services:
       NAV_SERVER_OIDC_JWKS_URL: ${NAVBOOK_OIDC_JWKS_URL:-}
       NAV_SERVER_REMOTE: ${NAVBOOK_REMOTE:-origin}
       NAV_SERVER_PULL_INTERVAL_MS: ${NAVBOOK_PULL_INTERVAL_MS:-10000}
+      NAV_SERVER_GIT_TIMEOUT_MS: ${NAVBOOK_GIT_TIMEOUT_MS:-30000}
       NAV_SERVER_GRAPHIQL: ${NAVBOOK_GRAPHIQL:-false}
       NAV_ROOT: ${NAVBOOK_ROOT:-}
       # What the entrypoint needs to make the clone in the first place.

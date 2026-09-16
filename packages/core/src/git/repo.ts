@@ -14,7 +14,7 @@
 import { type Dirent, existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { NAV_MARKER } from "../core/tree.ts";
-import { git, gitMaybe, gitRun, splitLines, splitNul } from "./exec.ts";
+import { git, gitMaybe, gitMaybeAsync, gitRun, splitLines, splitNul } from "./exec.ts";
 
 /** The directory name used unless a repository says otherwise. */
 export const DEFAULT_NAV_DIR = ".navbook";
@@ -131,15 +131,37 @@ function markersInIndex(repoRoot: string): string[] {
   return [...dirs].sort();
 }
 
+const CURRENT_BRANCH = ["symbolic-ref", "--quiet", "--short", "HEAD"];
+
 /** Current branch name, or null when HEAD is detached. */
 export function currentBranch(cwd: string): string | null {
-  const name = gitMaybe(["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd });
+  return branchName(gitMaybe(CURRENT_BRANCH, { cwd }));
+}
+
+/** {@link currentBranch} without blocking. */
+export async function currentBranchAsync(cwd: string): Promise<string | null> {
+  return branchName(await gitMaybeAsync(CURRENT_BRANCH, { cwd }));
+}
+
+function branchName(name: string | null): string | null {
   return name === null || name === "" ? null : name;
 }
 
 /** Resolve a revision to a full 40-hex SHA, or null when it does not exist. */
 export function resolveSha(cwd: string, rev: string): string | null {
-  const sha = gitMaybe(["rev-parse", "--verify", "--quiet", `${rev}^{commit}`], { cwd });
+  return fullSha(gitMaybe(resolveArgs(rev), { cwd }));
+}
+
+/** {@link resolveSha} without blocking. */
+export async function resolveShaAsync(cwd: string, rev: string): Promise<string | null> {
+  return fullSha(await gitMaybeAsync(resolveArgs(rev), { cwd }));
+}
+
+function resolveArgs(rev: string): string[] {
+  return ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`];
+}
+
+function fullSha(sha: string | null): string | null {
   return sha && /^[0-9a-f]{40}$/.test(sha) ? sha : null;
 }
 

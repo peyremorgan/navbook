@@ -26,6 +26,8 @@ export interface Config {
   remote: string;
   /** How stale a read may let its view of the remote become, in milliseconds. */
   pullIntervalMs: number;
+  /** How long a fetch or push may take before it is stopped, in milliseconds; 0 never stops one. */
+  gitTimeoutMs: number;
   graphiql: boolean;
 }
 
@@ -39,6 +41,7 @@ const OPTIONS = {
   "oidc-jwks-url": { type: "string" },
   remote: { type: "string" },
   "pull-interval-ms": { type: "string" },
+  "git-timeout-ms": { type: "string" },
   "no-graphiql": { type: "boolean" },
   help: { type: "boolean" },
 } as const;
@@ -52,6 +55,8 @@ export const USAGE = `Usage: nav-server [options]
   --oidc-jwks-url <url>      JWKS endpoint (default: discovered from the issuer)
   --remote <name>            remote to synchronise with (default: origin)
   --pull-interval-ms <n>     how stale a read may be (default: 10000)
+  --git-timeout-ms <n>       how long a fetch or push may take, 0 for as long
+                             as git allows (default: 30000)
   --no-graphiql              do not serve the GraphiQL explorer
 
 Every option can also be given as an environment variable: --oidc-issuer is
@@ -101,6 +106,10 @@ export function loadConfig(env: NodeJS.ProcessEnv, argv: readonly string[]): Con
     pullIntervalMs: wholeNumber(
       read("pull-interval-ms", "NAV_SERVER_PULL_INTERVAL_MS") ?? "10000",
       "--pull-interval-ms",
+    ),
+    gitTimeoutMs: wholeNumber(
+      read("git-timeout-ms", "NAV_SERVER_GIT_TIMEOUT_MS") ?? "30000",
+      "--git-timeout-ms",
     ),
     graphiql: values["no-graphiql"] !== true && env.NAV_SERVER_GRAPHIQL !== "false",
   };

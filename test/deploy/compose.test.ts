@@ -158,6 +158,7 @@ describe("the deployment descriptor", () => {
       "NAV_SERVER_OIDC_JWKS_URL",
       "NAV_SERVER_REMOTE",
       "NAV_SERVER_PULL_INTERVAL_MS",
+      "NAV_SERVER_GIT_TIMEOUT_MS",
       "NAV_SERVER_GRAPHIQL",
       "NAV_ROOT",
     ]) {
