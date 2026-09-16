@@ -42,8 +42,8 @@ rm -f "$root/config.json"
 
 graphql_url=$(required NAVBOOK_GRAPHQL_URL "${NAVBOOK_GRAPHQL_URL:-}" \
   "the address the browser sends GraphQL to")
-oidc_issuer=$(required NAVBOOK_OIDC_ISSUER "${NAVBOOK_OIDC_ISSUER:-}" \
-  "the OIDC issuer to sign in against")
+oidc_discovery_url=$(required NAVBOOK_OIDC_DISCOVERY_URL "${NAVBOOK_OIDC_DISCOVERY_URL:-}" \
+  "the OIDC provider's discovery document")
 oidc_client_id=$(required NAVBOOK_OIDC_CLIENT_ID "${NAVBOOK_OIDC_CLIENT_ID:-}" \
   "the OIDC client to sign in as")
 oidc_audience=$(required NAVBOOK_OIDC_AUDIENCE "${NAVBOOK_OIDC_AUDIENCE:-}" \
@@ -53,7 +53,7 @@ cat > "$root/config.json" <<JSON
 {
   "graphqlUrl": "$graphql_url",
   "oidc": {
-    "issuer": "$oidc_issuer",
+    "discoveryUrl": "$oidc_discovery_url",
     "clientId": "$oidc_client_id",
     "audience": "$oidc_audience"
   }

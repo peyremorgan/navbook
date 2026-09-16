@@ -91,7 +91,8 @@ To run the three by hand instead:
 ```sh
 node script/dev-issuer.ts --port 9000
 nav-server --repo /path/to/a/clone --port 4000 \
-  --oidc-issuer http://localhost:9000 --oidc-audience navbook
+  --oidc-discovery-url http://localhost:9000/.well-known/openid-configuration \
+  --oidc-audience navbook
 pnpm --filter @navbook/web dev
 ```
 
@@ -115,7 +116,7 @@ the addresses that deployment uses:
 {
   "graphqlUrl": "https://navbook.example.com/graphql",
   "oidc": {
-    "issuer": "https://accounts.example.com",
+    "discoveryUrl": "https://accounts.example.com/.well-known/openid-configuration",
     "clientId": "navbook-web",
     "audience": "navbook"
   }
@@ -134,6 +135,13 @@ Two things the host has to do:
   what the SPA fallback `nuxi generate` emits is for.
 - **Nothing about CORS.** The API answers any origin with an `Authorization`
   header, so the app and the server need not share one.
+
+The provider is named by its **discovery document** rather than by its issuer,
+because the two are not always one derivation apart: a provider may carry a
+path its document does not sit under, and a client told the issuer alone would
+look in the wrong place. The client has no use for the issuer by itself — it
+never checks a token's `iss`; the server does, and takes it from the same
+document — so the document's address is the one key.
 
 What the identity provider has to do:
 

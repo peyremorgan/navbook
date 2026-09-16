@@ -206,7 +206,7 @@ describe("a clone that cannot be served", () => {
       env: { PATH: process.env.PATH },
     });
     assert.equal(result.status, 2);
-    assert.match(result.stderr ?? "", /missing required option --oidc-issuer/);
+    assert.match(result.stderr ?? "", /missing required option --oidc-discovery-url/);
     // And says how, rather than only that it will not.
     assert.match(result.stderr ?? "", /Usage: nav-server/);
   });

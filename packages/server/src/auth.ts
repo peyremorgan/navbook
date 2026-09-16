@@ -21,36 +21,62 @@ export interface Authenticator {
 }
 
 export interface AuthOptions {
-  issuer: string;
+  /** Where the provider is: its discovery document, or the issuer and its keys spelled out. */
+  provider: OidcProvider;
   audience: string;
-  /** JWKS endpoint; discovered from the issuer when absent. */
-  jwksUrl?: string;
   /** Key source, injected by tests that run their own issuer. */
   keys?: JWTVerifyGetKey;
 }
 
-/** OpenID discovery: the issuer says where its keys are published. */
-export async function discoverJwksUrl(issuer: string): Promise<string> {
-  const url = new URL(".well-known/openid-configuration", withTrailingSlash(issuer));
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`OIDC discovery failed for ${issuer}: HTTP ${response.status}`);
-  }
-  const document = (await response.json()) as { jwks_uri?: unknown };
-  if (typeof document.jwks_uri !== "string" || document.jwks_uri === "") {
-    throw new Error(`OIDC discovery for ${issuer} returned no jwks_uri`);
-  }
-  return document.jwks_uri;
+/**
+ * How the provider is named.
+ *
+ * Its discovery document says both what a token must carry as `iss` and where
+ * the keys are, so its address is enough on its own — and is the only thing
+ * that works for a provider whose document does not sit under its issuer.
+ * A provider the server cannot reach at start is spelled out instead, both
+ * halves at once, since neither can be derived from the other.
+ */
+export type OidcProvider = { discoveryUrl: string } | { issuer: string; jwksUrl: string };
+
+export interface ResolvedProvider {
+  issuer: string;
+  jwksUrl: string;
 }
 
-/** `new URL(path, base)` drops a base's last segment unless it ends in a slash. */
-function withTrailingSlash(url: string): string {
-  return url.endsWith("/") ? url : `${url}/`;
+/**
+ * OpenID discovery: the document says who the issuer is and where its keys are.
+ *
+ * The `issuer` it declares is taken on the same trust as its `jwks_uri` was
+ * already: whoever controls the document controls which keys are accepted,
+ * so letting it name the issuer too gives it nothing it did not have.
+ */
+export async function discoverProvider(discoveryUrl: string): Promise<ResolvedProvider> {
+  const response = await fetch(discoveryUrl);
+  if (!response.ok) {
+    throw new Error(`OIDC discovery failed for ${discoveryUrl}: HTTP ${response.status}`);
+  }
+  const document = (await response.json()) as Record<string, unknown>;
+  return {
+    issuer: declared(document, "issuer", discoveryUrl),
+    jwksUrl: declared(document, "jwks_uri", discoveryUrl),
+  };
+}
+
+function declared(document: Record<string, unknown>, key: string, discoveryUrl: string): string {
+  const value = document[key];
+  if (typeof value !== "string" || value === "") {
+    throw new Error(`OIDC discovery at ${discoveryUrl} returned no ${key}`);
+  }
+  return value;
 }
 
 export async function makeAuthenticator(opts: AuthOptions): Promise<Authenticator> {
-  const keys =
-    opts.keys ?? createRemoteJWKSet(new URL(opts.jwksUrl ?? (await discoverJwksUrl(opts.issuer))));
+  const { issuer, jwksUrl } =
+    "discoveryUrl" in opts.provider
+      ? await discoverProvider(opts.provider.discoveryUrl)
+      : opts.provider;
+  const keys = opts.keys ?? createRemoteJWKSet(new URL(jwksUrl));
 
   return {
     async verify(header) {
@@ -60,7 +86,7 @@ export async function makeAuthenticator(opts: AuthOptions): Promise<Authenticato
       let payload: JWTPayload;
       try {
         ({ payload } = await jwtVerify(token, keys, {
-          issuer: opts.issuer,
+          issuer,
           audience: opts.audience,
           // An expiry is required rather than merely honoured when present:
           // jose checks `exp` only if the token carries one, so without this a

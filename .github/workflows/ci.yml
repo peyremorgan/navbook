@@ -157,7 +157,7 @@ jobs:
         run: |
           docker run -d --name web-smoke -p 8080:80 \
             -e NAVBOOK_GRAPHQL_URL=https://api.smoke.invalid/graphql \
-            -e NAVBOOK_OIDC_ISSUER=https://accounts.smoke.invalid \
+            -e NAVBOOK_OIDC_DISCOVERY_URL=https://accounts.smoke.invalid/.well-known/openid-configuration \
             -e NAVBOOK_OIDC_CLIENT_ID=navbook-web \
             -e NAVBOOK_OIDC_AUDIENCE=navbook \
             navbook-web:local
@@ -167,7 +167,7 @@ jobs:
           done
           curl -fsS http://127.0.0.1:8080/config.json | tee /tmp/config.json
           jq -e '.graphqlUrl == "https://api.smoke.invalid/graphql"' /tmp/config.json
-          jq -e '.oidc.issuer == "https://accounts.smoke.invalid"' /tmp/config.json
+          jq -e '.oidc.discoveryUrl == "https://accounts.smoke.invalid/.well-known/openid-configuration"' /tmp/config.json
           jq -e '.oidc.clientId == "navbook-web" and .oidc.audience == "navbook"' /tmp/config.json
           # Routing happens in the browser: a reload on a deep link has to find
           # the app rather than a 404.

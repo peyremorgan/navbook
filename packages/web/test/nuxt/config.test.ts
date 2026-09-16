@@ -9,14 +9,22 @@ import { ConfigError, configUrl, loadConfig, parseConfig } from "../../app/utils
 
 const VALID = {
   graphqlUrl: "https://nav.example.invalid/graphql",
-  oidc: { issuer: "https://id.example.invalid", clientId: "navbook-web", audience: "navbook" },
+  oidc: {
+    discoveryUrl: "https://id.example.invalid/.well-known/openid-configuration",
+    clientId: "navbook-web",
+    audience: "navbook",
+  },
 };
 
 describe("parseConfig", () => {
   it("accepts a complete document and trims it", () => {
     const config = parseConfig({
       graphqlUrl: "  https://nav.example.invalid/graphql  ",
-      oidc: { issuer: "https://id.example.invalid ", clientId: "navbook-web", audience: "navbook" },
+      oidc: {
+        discoveryUrl: "https://id.example.invalid/.well-known/openid-configuration ",
+        clientId: "navbook-web",
+        audience: "navbook",
+      },
     });
     assert.deepEqual(config, VALID);
   });

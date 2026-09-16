@@ -97,11 +97,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
 
   const auth =
     opts.auth ??
-    (await makeAuthenticator({
-      issuer: config.issuer,
-      audience: config.audience,
-      ...(config.jwksUrl === undefined ? {} : { jwksUrl: config.jwksUrl }),
-    }));
+    (await makeAuthenticator({ provider: config.provider, audience: config.audience }));
 
   const sync = new RepoSync({
     repoRoot,

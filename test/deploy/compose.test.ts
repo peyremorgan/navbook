@@ -153,9 +153,8 @@ describe("the deployment descriptor", () => {
 
     for (const name of [
       "NAV_SERVER_REPO",
-      "NAV_SERVER_OIDC_ISSUER",
+      "NAV_SERVER_OIDC_DISCOVERY_URL",
       "NAV_SERVER_OIDC_AUDIENCE",
-      "NAV_SERVER_OIDC_JWKS_URL",
       "NAV_SERVER_REMOTE",
       "NAV_SERVER_PULL_INTERVAL_MS",
       "NAV_SERVER_GIT_TIMEOUT_MS",

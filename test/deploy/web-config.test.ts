@@ -18,7 +18,7 @@ import { runWebConfig } from "./helpers.ts";
 
 const COMPLETE = {
   NAVBOOK_GRAPHQL_URL: "https://api.navbook.example.com/graphql",
-  NAVBOOK_OIDC_ISSUER: "https://accounts.example.com",
+  NAVBOOK_OIDC_DISCOVERY_URL: "https://accounts.example.com/.well-known/openid-configuration",
   NAVBOOK_OIDC_CLIENT_ID: "navbook-web",
   NAVBOOK_OIDC_AUDIENCE: "navbook",
 };
@@ -44,7 +44,7 @@ describe("the web container's configuration", () => {
     assert.deepEqual(written(root), {
       graphqlUrl: "https://api.navbook.example.com/graphql",
       oidc: {
-        issuer: "https://accounts.example.com",
+        discoveryUrl: "https://accounts.example.com/.well-known/openid-configuration",
         clientId: "navbook-web",
         audience: "navbook",
       },
@@ -57,14 +57,18 @@ describe("the web container's configuration", () => {
       join(root, "config.json"),
       JSON.stringify({
         graphqlUrl: "http://localhost:4000/graphql",
-        oidc: { issuer: "http://localhost:9000", clientId: "navbook-web", audience: "navbook" },
+        oidc: {
+          discoveryUrl: "http://localhost:9000/.well-known/openid-configuration",
+          clientId: "navbook-web",
+          audience: "navbook",
+        },
       }),
     );
 
     assert.equal(runWebConfig(root, COMPLETE).code, 0);
 
     assert.equal(written(root).graphqlUrl, COMPLETE.NAVBOOK_GRAPHQL_URL);
-    assert.equal(written(root).oidc.issuer, COMPLETE.NAVBOOK_OIDC_ISSUER);
+    assert.equal(written(root).oidc.discoveryUrl, COMPLETE.NAVBOOK_OIDC_DISCOVERY_URL);
   });
 
   it("survives a value carrying a quote or a backslash", () => {
@@ -120,7 +124,10 @@ describe("the web container's configuration", () => {
 
   it("says what is wrong with a value holding a line break, rather than writing broken JSON", () => {
     const root = bundle();
-    const result = runWebConfig(root, { ...COMPLETE, NAVBOOK_OIDC_ISSUER: "https://a\nhttps://b" });
+    const result = runWebConfig(root, {
+      ...COMPLETE,
+      NAVBOOK_OIDC_DISCOVERY_URL: "https://a\nhttps://b",
+    });
 
     assert.notEqual(result.code, 0);
     assert.match(result.stderr, /must not contain a line break/);

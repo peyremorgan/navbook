@@ -6,30 +6,33 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ConfigError, loadConfig } from "../../src/config.ts";
 
-const REQUIRED = ["--oidc-issuer", "https://issuer.example", "--oidc-audience", "navbook"] as const;
+const DISCOVERY = "https://issuer.example/.well-known/openid-configuration";
+const REQUIRED = ["--oidc-discovery-url", DISCOVERY, "--oidc-audience", "navbook"] as const;
 
 describe("loadConfig", () => {
   it("reads the required options from flags", () => {
     const config = loadConfig({}, [...REQUIRED]);
-    assert.equal(config.issuer, "https://issuer.example");
+    assert.deepEqual(config.provider, { discoveryUrl: DISCOVERY });
     assert.equal(config.audience, "navbook");
   });
 
   it("reads them from the environment when no flag is given", () => {
     const config = loadConfig(
       {
-        NAV_SERVER_OIDC_ISSUER: "https://from-env.example",
+        NAV_SERVER_OIDC_DISCOVERY_URL: "https://from-env.example/oidc",
         NAV_SERVER_OIDC_AUDIENCE: "env-audience",
       },
       [],
     );
-    assert.equal(config.issuer, "https://from-env.example");
+    assert.deepEqual(config.provider, { discoveryUrl: "https://from-env.example/oidc" });
     assert.equal(config.audience, "env-audience");
   });
 
   it("prefers a flag over the environment", () => {
-    const config = loadConfig({ NAV_SERVER_OIDC_ISSUER: "https://ignored.example" }, [...REQUIRED]);
-    assert.equal(config.issuer, "https://issuer.example");
+    const config = loadConfig({ NAV_SERVER_OIDC_DISCOVERY_URL: "https://ignored.example" }, [
+      ...REQUIRED,
+    ]);
+    assert.deepEqual(config.provider, { discoveryUrl: DISCOVERY });
   });
 
   it("says which required option is missing", () => {
@@ -37,9 +40,50 @@ describe("loadConfig", () => {
       () => loadConfig({}, []),
       (error: unknown) => {
         assert.ok(error instanceof ConfigError);
-        assert.match(error.message, /--oidc-issuer/);
+        assert.match(error.message, /--oidc-discovery-url/);
         return true;
       },
+    );
+  });
+
+  it("takes the issuer and its keys spelled out instead of a discovery document", () => {
+    const config = loadConfig({}, [
+      "--oidc-issuer",
+      "https://issuer.example",
+      "--oidc-jwks-url",
+      "https://issuer.example/keys",
+      "--oidc-audience",
+      "navbook",
+    ]);
+    assert.deepEqual(config.provider, {
+      issuer: "https://issuer.example",
+      jwksUrl: "https://issuer.example/keys",
+    });
+  });
+
+  it("refuses half of the spelled-out shape, naming the other half", () => {
+    for (const half of [
+      ["--oidc-issuer", "https://issuer.example"],
+      ["--oidc-jwks-url", "https://issuer.example/keys"],
+    ]) {
+      assert.throws(
+        () => loadConfig({}, [...half, "--oidc-audience", "navbook"]),
+        /--oidc-issuer and --oidc-jwks-url go together/,
+      );
+    }
+  });
+
+  it("refuses both shapes at once, rather than guessing which one is meant", () => {
+    assert.throws(
+      () => loadConfig({ NAV_SERVER_OIDC_ISSUER: "https://issuer.example" }, [...REQUIRED]),
+      /give one or the other/,
+    );
+    // An empty variable, which is how a container leaves a setting unset, is
+    // not a second shape.
+    assert.deepEqual(
+      loadConfig({ NAV_SERVER_OIDC_ISSUER: "", NAV_SERVER_OIDC_JWKS_URL: "" }, [...REQUIRED])
+        .provider,
+      { discoveryUrl: DISCOVERY },
     );
   });
 
@@ -71,14 +115,6 @@ describe("loadConfig", () => {
   it("turns the explorer off by flag and by environment", () => {
     assert.equal(loadConfig({}, [...REQUIRED, "--no-graphiql"]).graphiql, false);
     assert.equal(loadConfig({ NAV_SERVER_GRAPHIQL: "false" }, [...REQUIRED]).graphiql, false);
-  });
-
-  it("omits the JWKS url when it is to be discovered", () => {
-    assert.equal(loadConfig({}, [...REQUIRED]).jwksUrl, undefined);
-    assert.equal(
-      loadConfig({}, [...REQUIRED, "--oidc-jwks-url", "https://issuer.example/keys"]).jwksUrl,
-      "https://issuer.example/keys",
-    );
   });
 
   it("reports an unknown flag rather than ignoring it", () => {

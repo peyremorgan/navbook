@@ -12,8 +12,15 @@
  */
 
 export interface OidcConfig {
-  /** Base URL of the OIDC provider; discovery hangs off it. */
-  issuer: string;
+  /**
+   * The provider's discovery document, which names everything else about it.
+   *
+   * Its address rather than the issuer's, because the two are not always
+   * one derivation apart: a provider may carry a path its document does not
+   * sit under. The client has no use for the issuer on its own — it never
+   * checks a token's `iss`; the server does — so the document is enough.
+   */
+  discoveryUrl: string;
   clientId: string;
   /** The `aud` the server checks. Requested so the provider mints it. */
   audience: string;
@@ -63,7 +70,7 @@ export function parseConfig(raw: unknown): WebConfig {
   return {
     graphqlUrl: requireString(root, "graphqlUrl", "graphqlUrl"),
     oidc: {
-      issuer: requireString(oidc, "issuer", "oidc.issuer"),
+      discoveryUrl: requireString(oidc, "discoveryUrl", "oidc.discoveryUrl"),
       clientId: requireString(oidc, "clientId", "oidc.clientId"),
       audience: requireString(oidc, "audience", "oidc.audience"),
     },
