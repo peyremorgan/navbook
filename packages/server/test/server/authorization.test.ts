@@ -81,7 +81,10 @@ describe("a policy requiring a role", () => {
       claims: { roles: ["other::role"] },
     });
     await h.gql(VIEWER, undefined, outsider);
-    assert.match(h.stderr(), /refused outsider@example\.invalid: .*'roles'.*'d3952bfb::developer'/);
+    assert.match(
+      h.stderr(),
+      /refused "outsider@example\.invalid": .*'roles'.*'d3952bfb::developer'/,
+    );
   });
 
   it("does not warn at startup that the deployment is open", () => {
@@ -127,22 +130,5 @@ describe("a policy of several rules", () => {
     ] as const) {
       assert.equal(errorCode(await h.gql(VIEWER, undefined, token)), "FORBIDDEN", what);
     }
-  });
-});
-
-describe("no policy at all", () => {
-  let h: Harness;
-
-  before(async () => {
-    h = await startHarness();
-  });
-
-  after(async () => {
-    await h.stop();
-  });
-
-  it("admits anyone the issuer signs for, and says so at startup", async () => {
-    ok(await h.gql(VIEWER));
-    assert.match(h.stderr(), /warning: no authorization policy; every token the provider signs/);
   });
 });

@@ -20,7 +20,7 @@
 import type { Identity } from "@navbook/core";
 import { createRemoteJWKSet, type JWTPayload, type JWTVerifyGetKey, jwtVerify } from "jose";
 import { forbidden, unauthenticated } from "./errors.ts";
-import { type AuthPolicy, OPEN_POLICY, policyViolation } from "./policy.ts";
+import { type AuthPolicy, describe, policyViolation } from "./policy.ts";
 
 export interface Authenticator {
   /** The identity a request's headers prove and the policy admits, or a thrown 401 or 403. */
@@ -31,10 +31,10 @@ export interface AuthOptions {
   /** Where the provider is: its discovery document, or the issuer and its keys spelled out. */
   provider: OidcProvider;
   audience: string;
-  /** Who is admitted among those the provider vouches for; everyone, when absent. */
-  policy?: AuthPolicy;
+  /** Who is admitted among those the provider vouches for. */
+  policy: AuthPolicy;
   /** Told why a verified token was refused, for the operator's log. */
-  report?: (line: string) => void;
+  report: (line: string) => void;
   /** Key source, injected by tests that run their own issuer. */
   keys?: JWTVerifyGetKey;
 }
@@ -88,8 +88,6 @@ export async function makeAuthenticator(opts: AuthOptions): Promise<Authenticato
       ? await discoverProvider(opts.provider.discoveryUrl)
       : opts.provider;
   const keys = opts.keys ?? createRemoteJWKSet(new URL(jwksUrl));
-  const policy = opts.policy ?? OPEN_POLICY;
-  const report = opts.report ?? (() => undefined);
 
   return {
     async verify(header) {
@@ -115,9 +113,11 @@ export async function makeAuthenticator(opts: AuthOptions): Promise<Authenticato
 
       // Admission comes after identity: a token with no email is not a person
       // this server can act for, whatever else it carries.
-      const violation = policyViolation(payload, policy);
+      const violation = policyViolation(payload, identity.email, opts.policy);
       if (violation !== null) {
-        report(`refused ${identity.email}: ${violation}`);
+        // Quoted: the address is the token's to choose, and a line break in
+        // it would otherwise write a second line the operator did not.
+        opts.report(`refused ${describe(identity.email)}: ${violation}`);
         throw forbidden("this account is not allowed on this repository");
       }
       return identity;

@@ -9,7 +9,7 @@
  */
 
 import type { User } from "oidc-client-ts";
-import { HOME, safeReturnPath } from "~/utils/navigation";
+import { HOME, NOT_ALLOWED, SIGNED_OUT, safeReturnPath } from "~/utils/navigation";
 
 /** Renew this many seconds before the token actually expires. */
 const SKEW_SECONDS = 30;
@@ -23,6 +23,12 @@ export interface Auth {
   /** Send the browser to the provider; `returnTo` is where to come back to. */
   login(returnTo?: string): Promise<void>;
   logout(): Promise<void>;
+  /**
+   * The server refused the signed-in account (`FORBIDDEN`): go to the page
+   * that says so. The token is kept, since it is good, and signing in again
+   * would only come back here.
+   */
+  refused(): Promise<void>;
   /** Finish the redirect back from the provider; returns where to go next. */
   completeLogin(): Promise<string>;
   /** A usable token, renewing first if the stored one is spent. */
@@ -88,7 +94,11 @@ export function useAuth(): Auth {
       // Every other page needs a token, so navigating to one of those would
       // send the person straight back to the provider — which, against a
       // provider holding a session cookie, signs them back in at once.
-      await navigateTo("/signed-out");
+      await navigateTo(SIGNED_OUT);
+    },
+
+    async refused() {
+      await navigateTo(NOT_ALLOWED, { replace: true });
     },
 
     async completeLogin() {

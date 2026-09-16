@@ -30,6 +30,11 @@ describe("authentication", () => {
     assert.deepEqual(data.viewer, { name: "A Person", email: "person@example.invalid" });
   });
 
+  it("says at startup that, with no policy, anyone the issuer signs for is admitted", () => {
+    // This harness runs without one; `authorization.test.ts` is the other case.
+    assert.match(h.stderr(), /warning: no authorization policy; every token the provider signs/);
+  });
+
   it("refuses a request with no token at all", async () => {
     const response = await h.gql(VIEWER, undefined, null);
     assert.equal(errorCode(response), "UNAUTHENTICATED");

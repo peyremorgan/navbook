@@ -15,15 +15,22 @@ import {
   emailDomain,
   isOpen,
   normalizeDomain,
-  OPEN_POLICY,
   parseClaimRequirement,
   policyViolation,
 } from "../../src/policy.ts";
 
+const OPEN: AuthPolicy = { requireClaims: [], allowEmailDomains: [], requireEmailVerified: false };
 const MEMBER: AuthPolicy = {
-  ...OPEN_POLICY,
+  ...OPEN,
   requireClaims: [{ name: "roles", value: "d3952bfb::developer" }],
 };
+const EMAIL = "person@example.invalid";
+
+/** The check as `verify` calls it: with the identity's trimmed email. */
+function violation(payload: Record<string, unknown>, policy: AuthPolicy): string | null {
+  const email = typeof payload.email === "string" ? payload.email.trim() : EMAIL;
+  return policyViolation(payload, email, policy);
+}
 
 describe("parseClaimRequirement", () => {
   it("splits on the first equals sign, so a value may carry one", () => {
@@ -75,6 +82,16 @@ describe("claimCarries", () => {
     assert.equal(claimCarries(["a b"], "a"), false);
   });
 
+  it("matches a value with a space in it whole, never as two words", () => {
+    assert.equal(claimCarries("Site Admins", "Site Admins"), true);
+    assert.equal(claimCarries(["Site Admins"], "Site Admins"), true);
+    assert.equal(claimCarries("Some Site Admins Here", "Site Admins"), false);
+    // And a single word is not found inside a longer sentence's words either
+    // when it is only part of one of them.
+    assert.equal(claimCarries("John Doe", "John"), true);
+    assert.equal(claimCarries("Johnny", "John"), false);
+  });
+
   it("compares a number or a boolean by its spelling", () => {
     assert.equal(claimCarries(true, "true"), true);
     assert.equal(claimCarries(42, "42"), true);
@@ -102,49 +119,58 @@ describe("emailDomain", () => {
 
 describe("policyViolation", () => {
   it("passes everything under the open policy", () => {
-    assert.equal(policyViolation({}, OPEN_POLICY), null);
-    assert.equal(isOpen(OPEN_POLICY), true);
+    assert.equal(violation({}, OPEN), null);
+    assert.equal(isOpen(OPEN), true);
     assert.equal(isOpen(MEMBER), false);
   });
 
   it("requires a claim to carry its value", () => {
-    assert.equal(policyViolation({ roles: ["d3952bfb::developer"] }, MEMBER), null);
-    assert.equal(policyViolation({ roles: "d3952bfb::developer" }, MEMBER), null);
-    assert.match(policyViolation({ roles: ["other::role"] }, MEMBER) ?? "", /does not carry/);
-    assert.match(policyViolation({}, MEMBER) ?? "", /no 'roles' claim/);
+    assert.equal(violation({ roles: ["d3952bfb::developer"] }, MEMBER), null);
+    assert.equal(violation({ roles: "d3952bfb::developer" }, MEMBER), null);
+    assert.match(violation({ roles: ["other::role"] }, MEMBER) ?? "", /does not carry/);
+    assert.match(violation({}, MEMBER) ?? "", /no 'roles' claim/);
   });
 
   it("ANDs several claim requirements together", () => {
     const both: AuthPolicy = {
-      ...OPEN_POLICY,
+      ...OPEN,
       requireClaims: [
         { name: "roles", value: "member" },
         { name: "scope", value: "navbook" },
       ],
     };
-    assert.equal(policyViolation({ roles: "member", scope: "openid navbook" }, both), null);
-    assert.match(policyViolation({ roles: "member", scope: "openid" }, both) ?? "", /'scope'/);
+    assert.equal(violation({ roles: "member", scope: "openid navbook" }, both), null);
+    assert.match(violation({ roles: "member", scope: "openid" }, both) ?? "", /'scope'/);
   });
 
   it("restricts the email domain to the allowed ones", () => {
-    const domains: AuthPolicy = { ...OPEN_POLICY, allowEmailDomains: ["example.com", "b.test"] };
-    assert.equal(policyViolation({ email: "a@Example.com" }, domains), null);
-    assert.equal(policyViolation({ email: "a@b.test" }, domains), null);
-    assert.match(policyViolation({ email: "a@evil.example.com" }, domains) ?? "", /domain/);
-    assert.match(policyViolation({ email: "a@other.test" }, domains) ?? "", /domain/);
-    assert.match(policyViolation({}, domains) ?? "", /domain/);
+    const domains: AuthPolicy = { ...OPEN, allowEmailDomains: ["example.com", "b.test"] };
+    assert.equal(violation({ email: "a@Example.com" }, domains), null);
+    assert.equal(violation({ email: "a@b.test" }, domains), null);
+    // Judged on the identity's address, which `verify` has trimmed already.
+    assert.equal(violation({ email: " a@example.com " }, domains), null);
+    assert.match(violation({ email: "a@evil.example.com" }, domains) ?? "", /domain/);
+    assert.match(violation({ email: "a@other.test" }, domains) ?? "", /domain/);
+    assert.match(policyViolation({}, "nobody", domains) ?? "", /domain/);
+  });
+
+  it("quotes the address in the reason, so it cannot break the line", () => {
+    const domains: AuthPolicy = { ...OPEN, allowEmailDomains: ["example.com"] };
+    const reason = policyViolation({}, "x@evil.test\nforged: line", domains) ?? "";
+    assert.equal(reason.includes("\n"), false);
+    assert.match(reason, /"x@evil\.test\\nforged: line"/);
   });
 
   it("requires email_verified to be exactly true", () => {
-    const verified: AuthPolicy = { ...OPEN_POLICY, requireEmailVerified: true };
-    assert.equal(policyViolation({ email_verified: true }, verified), null);
+    const verified: AuthPolicy = { ...OPEN, requireEmailVerified: true };
+    assert.equal(violation({ email_verified: true }, verified), null);
     for (const not of [false, "true", 1, undefined]) {
-      assert.match(policyViolation({ email_verified: not }, verified) ?? "", /email_verified/);
+      assert.match(violation({ email_verified: not }, verified) ?? "", /email_verified/);
     }
   });
 
   it("names the rule that failed, for the log", () => {
-    const reason = policyViolation({ roles: ["a"] }, MEMBER);
+    const reason = violation({ roles: ["a"] }, MEMBER);
     assert.match(reason ?? "", /'roles'.*'d3952bfb::developer'.*\["a"\]/);
   });
 });

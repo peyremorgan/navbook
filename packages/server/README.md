@@ -95,6 +95,12 @@ optional, and every one given has to hold:
   `true`. Without it, a provider that lets somebody set an unverified address
   lets them author as that person.
 
+A value with a comma in it cannot be given through the variable, which is
+split on commas; give it as a flag. The boolean variables — this one and
+`NAV_SERVER_GRAPHIQL` — take `true`, `yes` or `1` and `false`, `no` or `0`,
+in any case; anything else is refused at start rather than read as one of the
+two, and an empty value is the same as an unset one.
+
 A token that verifies but fails the policy is refused with `FORBIDDEN` and a
 403, not `UNAUTHENTICATED`: the person is signed in, and a client that sent
 them back to the provider would loop. The refusal tells them their account is

@@ -24,12 +24,20 @@
 export const HOME = "/issues?status=open";
 
 /**
- * Where somebody the server's authorization policy refused is sent.
+ * The routes that render without a token, named once.
  *
- * Named here beside `HOME` because the Apollo error link navigates to it and
- * the route guard exempts it, and the two have to agree on the spelling.
+ * The guard exempts them and something else navigates to each — the callback
+ * route is where the provider sends the browser, `logout` lands on
+ * `SIGNED_OUT`, and the Apollo error link sends a refused account to
+ * `NOT_ALLOWED` — so the spellings have to agree, and here is where they do.
  */
+export const AUTH_CALLBACK = "/auth/callback";
+/** Where signing out lands: a page that asks before signing in again. */
+export const SIGNED_OUT = "/signed-out";
+/** Where somebody the server's authorization policy refused is sent. */
 export const NOT_ALLOWED = "/not-allowed";
+/** Every route a visitor with no token may see. */
+export const TOKENLESS_ROUTES: readonly string[] = [AUTH_CALLBACK, SIGNED_OUT, NOT_ALLOWED];
 
 /**
  * A same-app path, or `HOME`.

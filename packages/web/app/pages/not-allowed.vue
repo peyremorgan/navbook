@@ -6,35 +6,52 @@
   situation the provider can fix, so this page does not send them there:
   signing in again would come straight back here. It says what happened, names
   the account so that a person with two knows which one this is, and offers
-  the one thing that changes anything, which is signing out to sign in as
-  somebody else.
+  two things. Trying again, for the person whose access was granted while they
+  sat here, since the token is still good and nothing on this page re-asks the
+  server; and signing out, for signing in as somebody else — as far as the
+  provider allows, since ending its session is its business, not this app's.
+
+  The route is exempt from the guard, so it also renders for somebody with no
+  session at all — back from `/signed-out`, or from a bookmark. They are
+  offered signing in, since signing out would remove nothing.
 -->
 <script setup lang="ts">
+import { HOME } from "~/utils/navigation";
+
 definePageMeta({ layout: false });
 const auth = useAuth();
 </script>
 
 <template>
-  <div class="grid min-h-screen place-items-center bg-default p-6">
-    <div class="max-w-md space-y-4 text-center" data-testid="not-allowed">
-      <UIcon name="i-lucide-shield-off" class="size-8 text-primary" />
-      <h1 class="text-lg font-semibold">This account is not allowed here</h1>
-      <p class="text-sm text-muted">
-        <template v-if="auth.email.value">
-          You are signed in as
-          <span class="font-medium text-default" data-testid="not-allowed-email">{{
-            auth.email.value
-          }}</span
-          >, but this repository's server does not admit that account.
-        </template>
-        <template v-else>
-          You are signed in, but this repository's server does not admit that account.
-        </template>
-        Ask whoever runs it for access, or sign out and sign in as somebody else.
-      </p>
-      <UButton data-testid="sign-out" icon="i-lucide-log-out" @click="auth.logout()">
+  <AuthNotice icon="i-lucide-shield-off" title="This account is not allowed here" testid="not-allowed">
+    <template v-if="auth.signedIn.value">
+      You are signed in<template v-if="auth.email.value">
+        as
+        <span class="font-medium text-default" data-testid="not-allowed-email">{{
+          auth.email.value
+        }}</span></template
+      >, but this repository's server does not admit that account. Ask whoever
+      runs it for access, or sign out and sign in as somebody else.
+    </template>
+    <template v-else>
+      This repository's server did not admit the account you signed in with.
+      Ask whoever runs it for access, or sign in as somebody else.
+    </template>
+    <template #actions>
+      <UButton data-testid="try-again" :to="HOME" color="neutral" variant="subtle">
+        Try again
+      </UButton>
+      <UButton
+        v-if="auth.signedIn.value"
+        data-testid="sign-out"
+        icon="i-lucide-log-out"
+        @click="auth.logout()"
+      >
         Sign out
       </UButton>
-    </div>
-  </div>
+      <UButton v-else data-testid="sign-in" icon="i-lucide-log-in" @click="auth.login(HOME)">
+        Sign in
+      </UButton>
+    </template>
+  </AuthNotice>
 </template>

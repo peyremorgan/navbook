@@ -55,6 +55,7 @@ export interface DevIssuer {
 interface PendingCode {
   name: string;
   email: string;
+  emailVerified: boolean;
   roles: string[];
   nonce: string | null;
   audience: string;
@@ -67,6 +68,8 @@ interface PendingCode {
 interface Session {
   name: string;
   email: string;
+  /** What the access token says as `email_verified`; a real provider checked, this one asks. */
+  emailVerified: boolean;
   /** What the access token carries as `roles`, for trying the server's policy against. */
   roles: string[];
   audience: string;
@@ -91,11 +94,12 @@ export async function startDevIssuer(options: DevIssuerOptions = {}): Promise<De
     const now = Math.floor(Date.now() / 1000);
     // The access token is the one `nav-server` verifies: its audience is the
     // API's, and `email` is what every mutation records as the author. The
-    // roles, when the form gave any, are for a server started with a policy;
-    // `email_verified` is what a provider that checked the address would say.
+    // roles, when the form gave any, and `email_verified` are for a server
+    // started with a policy: they are what the form said, so both sides of
+    // each rule can be tried.
     const accessToken = await new SignJWT({
       email: session.email,
-      email_verified: true,
+      email_verified: session.emailVerified,
       name: session.name,
       ...(session.roles.length === 0 ? {} : { roles: session.roles }),
     })
@@ -210,6 +214,8 @@ export async function startDevIssuer(options: DevIssuerOptions = {}): Promise<De
     pending.set(code, {
       name: (form.get("name") ?? "").trim(),
       email,
+      // A checkbox is in the form when ticked and absent when not.
+      emailVerified: form.get("email_verified") !== null,
       roles: (form.get("roles") ?? "").split(/\s+/).filter((role) => role !== ""),
       nonce: form.get("nonce") || null,
       audience: form.get("audience") || audienceDefault,
@@ -271,6 +277,7 @@ export async function startDevIssuer(options: DevIssuerOptions = {}): Promise<De
         requested(form, {
           name: record.name,
           email: record.email,
+          emailVerified: record.emailVerified,
           roles: record.roles,
           audience: record.audience,
           clientId: record.clientId,
@@ -418,6 +425,7 @@ function loginPage(fields: LoginFields): string {
       h1 { font-size: 1.1rem; margin: 0 0 .25rem; }
       p  { margin: 0 0 1.5rem; color: #78716c; font-size: .875rem; }
       label { display: block; font-weight: 500; margin-bottom: .25rem; font-size: .875rem; }
+      label.check { display: flex; gap: .5rem; align-items: center; margin-bottom: 1rem; font-weight: 400; }
       input[type=text], input[type=email] { width: 100%; padding: .5rem; margin-bottom: 1rem;
              border: 1px solid #d6d3d1; border-radius: .25rem; font: inherit; box-sizing: border-box; }
       button { width: 100%; padding: .55rem; border: 0; border-radius: .25rem;
@@ -438,6 +446,8 @@ function loginPage(fields: LoginFields): string {
       <label for="roles">Roles <small>(optional, space-separated; for a server started with a policy)</small></label>
       <input id="roles" name="roles" type="text" value="" autocomplete="off"
              placeholder="navbook::member">
+      <label class="check"><input name="email_verified" type="checkbox" checked>
+        Say the address is verified</label>
       <button type="submit">Sign in</button>
     </form>
   </body>

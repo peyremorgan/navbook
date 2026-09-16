@@ -9,7 +9,7 @@
  * to rather than at the front page.
  */
 
-import { NOT_ALLOWED } from "~/utils/navigation";
+import { TOKENLESS_ROUTES } from "~/utils/navigation";
 
 export default defineNuxtRouteMiddleware(async (to) => {
   // Three routes are exempt. `/auth/callback` is where signing in finishes,
@@ -19,7 +19,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
   // server's refusal of a signed-in account is explained, and what it offers
   // is signing out — a guard that sent them to the provider instead would
   // bring them straight back with the same refused token.
-  if (to.path === "/auth/callback" || to.path === "/signed-out" || to.path === NOT_ALLOWED) return;
+  if (TOKENLESS_ROUTES.includes(to.path)) return;
 
   const auth = useAuth();
   if (auth.signedIn.value) return;

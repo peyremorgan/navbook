@@ -115,6 +115,12 @@ describe("loadConfig", () => {
   it("turns the explorer off by flag and by environment", () => {
     assert.equal(loadConfig({}, [...REQUIRED, "--no-graphiql"]).graphiql, false);
     assert.equal(loadConfig({ NAV_SERVER_GRAPHIQL: "false" }, [...REQUIRED]).graphiql, false);
+    assert.equal(loadConfig({ NAV_SERVER_GRAPHIQL: "no" }, [...REQUIRED]).graphiql, false);
+    assert.equal(loadConfig({ NAV_SERVER_GRAPHIQL: "" }, [...REQUIRED]).graphiql, true);
+    assert.throws(
+      () => loadConfig({ NAV_SERVER_GRAPHIQL: "maybe" }, [...REQUIRED]),
+      /NAV_SERVER_GRAPHIQL takes true or false/,
+    );
   });
 
   it("reports an unknown flag rather than ignoring it", () => {
@@ -164,6 +170,17 @@ describe("loadConfig", () => {
       assert.deepEqual(policy.requireClaims, [{ name: "roles", value: "member" }]);
     });
 
+    it("treats a flag given empty as not given, so the variable still applies", () => {
+      // `--require-claim "$UNSET"` from a wrapper script must not silently
+      // open a server the environment had closed.
+      const { policy } = loadConfig({ NAV_SERVER_REQUIRE_CLAIMS: "roles=member" }, [
+        ...REQUIRED,
+        "--require-claim",
+        "",
+      ]);
+      assert.deepEqual(policy.requireClaims, [{ name: "roles", value: "member" }]);
+    });
+
     it("refuses a claim requirement that is not name=value", () => {
       for (const bad of ["roles", "=x", "roles="]) {
         assert.throws(
@@ -197,17 +214,20 @@ describe("loadConfig", () => {
       );
     });
 
-    it("requires a verified email by flag or by variable, and only by 'true'", () => {
+    it("requires a verified email by flag or by variable", () => {
       assert.equal(
         loadConfig({}, [...REQUIRED, "--require-email-verified"]).policy.requireEmailVerified,
         true,
       );
-      assert.equal(
-        loadConfig({ NAV_SERVER_REQUIRE_EMAIL_VERIFIED: "true" }, [...REQUIRED]).policy
-          .requireEmailVerified,
-        true,
-      );
-      for (const off of ["false", ""]) {
+      for (const on of ["true", "TRUE", "yes", "1"]) {
+        assert.equal(
+          loadConfig({ NAV_SERVER_REQUIRE_EMAIL_VERIFIED: on }, [...REQUIRED]).policy
+            .requireEmailVerified,
+          true,
+          on,
+        );
+      }
+      for (const off of ["false", "no", "0", ""]) {
         assert.equal(
           loadConfig({ NAV_SERVER_REQUIRE_EMAIL_VERIFIED: off }, [...REQUIRED]).policy
             .requireEmailVerified,
@@ -215,7 +235,7 @@ describe("loadConfig", () => {
         );
       }
       assert.throws(
-        () => loadConfig({ NAV_SERVER_REQUIRE_EMAIL_VERIFIED: "yes" }, [...REQUIRED]),
+        () => loadConfig({ NAV_SERVER_REQUIRE_EMAIL_VERIFIED: "maybe" }, [...REQUIRED]),
         /NAV_SERVER_REQUIRE_EMAIL_VERIFIED takes true or false/,
       );
     });

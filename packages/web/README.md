@@ -103,9 +103,10 @@ answers, read or write, needs a token — and `nuxi dev` needs something to log
 into. It is grown from the server suite's stub issuer and keeps its shape, so
 both exercise the real verification path rather than a bypass. Its form also
 takes a space-separated list of roles, minted into the access token as a
-`roles` array, and every token it mints says `email_verified`: that is how to
-try the server's [authorization policy](../server/README.md#who-is-allowed-in)
-and the refusal page against a `nav-server` started with one.
+`roles` array, and a box saying whether the address counts as verified: that
+is how to try both sides of the server's
+[authorization policy](../server/README.md#who-is-allowed-in), and the refusal
+page, against a `nav-server` started with one.
 
 ## Deploying it
 

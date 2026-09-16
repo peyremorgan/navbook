@@ -42,11 +42,16 @@ function authorizeUrl(overrides: Record<string, string> = {}): URL {
 }
 
 /** Drive the login form the way a browser would, and return the code. */
-async function signIn(email = "person@example.invalid", roles?: string): Promise<string> {
+async function signIn(
+  email = "person@example.invalid",
+  extra: { roles?: string; verified?: boolean } = {},
+): Promise<string> {
   const form = new URLSearchParams({
     name: "A Person",
     email,
-    ...(roles === undefined ? {} : { roles }),
+    ...(extra.roles === undefined ? {} : { roles: extra.roles }),
+    // The box is ticked by default, and a ticked box is in the form as "on".
+    ...(extra.verified === false ? {} : { email_verified: "on" }),
     client_id: "navbook-web",
     redirect_uri: REDIRECT,
     state: "st8",
@@ -185,7 +190,9 @@ describe("the token endpoint", () => {
   });
 
   it("carries the roles the form named, for a server started with a policy", async () => {
-    const code = await signIn("person@example.invalid", " navbook::member  d3952bfb::developer ");
+    const code = await signIn("person@example.invalid", {
+      roles: " navbook::member  d3952bfb::developer ",
+    });
     const { json } = await exchange({
       grant_type: "authorization_code",
       code,
@@ -198,6 +205,19 @@ describe("the token endpoint", () => {
       "navbook::member",
       "d3952bfb::developer",
     ]);
+  });
+
+  it("says the address is unverified when the box is not ticked", async () => {
+    const code = await signIn("person@example.invalid", { verified: false });
+    const { json } = await exchange({
+      grant_type: "authorization_code",
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: REDIRECT,
+      client_id: "navbook-web",
+    });
+    const tokens = json as unknown as Record<string, string>;
+    assert.equal(claims(tokens.access_token as string).email_verified, false);
   });
 
   it("refuses a code whose verifier does not match the challenge", async () => {

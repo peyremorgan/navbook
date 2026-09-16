@@ -31,7 +31,11 @@ export interface SignOptions {
   noExpiry?: boolean;
   /** Sign with a key the issuer does not publish. */
   wrongKey?: boolean;
-  /** Anything else the token should carry — `roles`, `email_verified` — for the policy to read. */
+  /**
+   * Anything else the token should carry — `roles`, `email_verified` — for the
+   * policy to read. Applied last, so a claim named here wins over the options
+   * above; the ones the builder sets (`iss`, `aud`, `exp`) are not claims.
+   */
   claims?: Record<string, unknown>;
 }
 
@@ -86,9 +90,10 @@ export async function startStubIssuer(options: StubIssuerOptions = {}): Promise<
     jwksUrl: `${issuer}/jwks`,
     async sign(opts: SignOptions = {}) {
       const now = Math.floor(Date.now() / 1000);
-      const claims: Record<string, unknown> = { ...opts.claims };
+      const claims: Record<string, unknown> = {};
       if (!opts.noEmail) claims.email = opts.email ?? "person@example.invalid";
       if (opts.name !== undefined) claims.name = opts.name;
+      Object.assign(claims, opts.claims);
 
       const jwt = new SignJWT(claims)
         .setProtectedHeader({ alg: "RS256", kid: "test-key" })

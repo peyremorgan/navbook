@@ -135,7 +135,8 @@ export function loadConfig(env: NodeJS.ProcessEnv, argv: readonly string[]): Con
       read("git-timeout-ms", "NAV_SERVER_GIT_TIMEOUT_MS") ?? "30000",
       "--git-timeout-ms",
     ),
-    graphiql: values["no-graphiql"] !== true && env.NAV_SERVER_GRAPHIQL !== "false",
+    graphiql:
+      values["no-graphiql"] !== true && booleanVariable(env, "NAV_SERVER_GRAPHIQL") !== false,
   };
 }
 
@@ -174,7 +175,8 @@ function provider(read: (flag: string, variable: string) => string | undefined):
  * A repeatable flag is a list of values; its variable is the same list with
  * commas between, since an environment entry is one string. Flags win whole:
  * a claim given on the command line replaces the variable's list rather than
- * joining it, as every other setting's flag replaces its variable.
+ * joining it, as every other setting's flag replaces its variable — and, as
+ * with every other setting, a flag given empty is a flag not given.
  */
 function policy(
   values: Record<string, string | string[] | boolean | undefined>,
@@ -182,44 +184,66 @@ function policy(
 ): AuthPolicy {
   const list = (flag: string, variable: string): string[] => {
     const given = values[flag];
-    if (Array.isArray(given) && given.length > 0) return given;
-    const fromEnv = env[variable];
-    return fromEnv === undefined ? [] : fromEnv.split(",");
+    const fromFlags = Array.isArray(given) ? entries(given) : [];
+    return fromFlags.length > 0 ? fromFlags : entries((env[variable] ?? "").split(","));
   };
+  const parsed = <T>(
+    flag: string,
+    variable: string,
+    parse: (text: string) => T | null,
+    expects: string,
+  ): T[] =>
+    list(flag, variable).map((text) => {
+      const value = parse(text);
+      if (value === null) throw new ConfigError(`--${flag} takes ${expects}, got '${text}'`);
+      return value;
+    });
 
-  const requireClaims: ClaimRequirement[] = [];
-  for (const text of list("require-claim", "NAV_SERVER_REQUIRE_CLAIMS")) {
-    if (text.trim() === "") continue;
-    const requirement = parseClaimRequirement(text);
-    if (requirement === null) {
-      throw new ConfigError(`--require-claim takes <name>=<value>, got '${text}'`);
-    }
-    requireClaims.push(requirement);
-  }
-
-  const allowEmailDomains: string[] = [];
-  for (const text of list("allow-email-domain", "NAV_SERVER_ALLOW_EMAIL_DOMAINS")) {
-    if (text.trim() === "") continue;
-    const domain = normalizeDomain(text);
-    if (domain === null) {
-      throw new ConfigError(
-        `--allow-email-domain takes a domain such as example.com, got '${text}'`,
-      );
-    }
-    allowEmailDomains.push(domain);
-  }
-
-  const verified = env.NAV_SERVER_REQUIRE_EMAIL_VERIFIED;
-  if (verified !== undefined && verified !== "" && verified !== "true" && verified !== "false") {
-    throw new ConfigError(
-      `NAV_SERVER_REQUIRE_EMAIL_VERIFIED takes true or false, got '${verified}'`,
-    );
-  }
   return {
-    requireClaims,
-    allowEmailDomains,
-    requireEmailVerified: values["require-email-verified"] === true || verified === "true",
+    requireClaims: parsed<ClaimRequirement>(
+      "require-claim",
+      "NAV_SERVER_REQUIRE_CLAIMS",
+      parseClaimRequirement,
+      "<name>=<value>",
+    ),
+    allowEmailDomains: parsed(
+      "allow-email-domain",
+      "NAV_SERVER_ALLOW_EMAIL_DOMAINS",
+      normalizeDomain,
+      "a domain such as example.com",
+    ),
+    requireEmailVerified:
+      values["require-email-verified"] === true ||
+      booleanVariable(env, "NAV_SERVER_REQUIRE_EMAIL_VERIFIED") === true,
   };
+}
+
+/** The entries of a list, trimmed, with the blanks a trailing comma leaves dropped. */
+function entries(texts: readonly string[]): string[] {
+  return texts.map((text) => text.trim()).filter((text) => text !== "");
+}
+
+/**
+ * A boolean variable, or undefined when it is unset or empty — which is how a
+ * container passes a setting nobody filled in. The spellings are the ones
+ * people copy from other tools; anything else is refused rather than read as
+ * one of the two.
+ */
+function booleanVariable(env: NodeJS.ProcessEnv, name: string): boolean | undefined {
+  const value = env[name];
+  if (value === undefined || value.trim() === "") return undefined;
+  switch (value.trim().toLowerCase()) {
+    case "true":
+    case "yes":
+    case "1":
+      return true;
+    case "false":
+    case "no":
+    case "0":
+      return false;
+    default:
+      throw new ConfigError(`${name} takes true or false, got '${value}'`);
+  }
 }
 
 function wholeNumber(value: string, what: string): number {

@@ -33,12 +33,6 @@ export interface AuthPolicy {
 }
 
 /** No rules at all: anyone the issuer signs for may read and write. */
-export const OPEN_POLICY: AuthPolicy = {
-  requireClaims: [],
-  allowEmailDomains: [],
-  requireEmailVerified: false,
-};
-
 export function isOpen(policy: AuthPolicy): boolean {
   return (
     policy.requireClaims.length === 0 &&
@@ -79,13 +73,15 @@ export function normalizeDomain(text: string): string | null {
  *
  * Equal when the claim is a scalar; contained when it is an array, or a
  * string of space-separated words — the shape `scope` always has and the one
- * Better Auth gives `roles`. A single-word string is both, and reads the same
- * either way.
+ * Better Auth gives `roles`. A value with a space in it can only ever be
+ * equal, so `groups=Site Admins` matches the string "Site Admins" and the
+ * array ["Site Admins"] alike, and never two words of a longer sentence.
  */
 export function claimCarries(claim: unknown, value: string): boolean {
   if (Array.isArray(claim)) return claim.some((item) => scalarIs(item, value));
-  if (typeof claim === "string") return claim.split(/\s+/).includes(value);
-  return scalarIs(claim, value);
+  if (scalarIs(claim, value)) return true;
+  if (typeof claim !== "string" || /\s/.test(value)) return false;
+  return claim.split(/\s+/).includes(value);
 }
 
 function scalarIs(claim: unknown, value: string): boolean {
@@ -110,10 +106,20 @@ export function emailDomain(email: string): string | null {
 /**
  * Why a verified token fails the policy, or null when it passes.
  *
+ * `email` is the address the identity was built from — the `email` claim,
+ * trimmed and known to be present — so the domain rule judges the address
+ * the server would act as, not a second reading of the claim.
+ *
  * The reason is written for the operator's log: it names the rule and what
  * the token had instead, which is exactly what a client must never be told.
+ * Every token value in it is quoted as JSON, so a claim somebody chose cannot
+ * end the line and begin another.
  */
-export function policyViolation(payload: JWTPayload, policy: AuthPolicy): string | null {
+export function policyViolation(
+  payload: JWTPayload,
+  email: string,
+  policy: AuthPolicy,
+): string | null {
   for (const { name, value } of policy.requireClaims) {
     const claim = payload[name];
     if (claim === undefined) return `the token carries no '${name}' claim (required: ${value})`;
@@ -123,10 +129,9 @@ export function policyViolation(payload: JWTPayload, policy: AuthPolicy): string
   }
 
   if (policy.allowEmailDomains.length > 0) {
-    const email = typeof payload.email === "string" ? payload.email : "";
     const domain = emailDomain(email);
     if (domain === null || !policy.allowEmailDomains.includes(domain)) {
-      return `the email domain of '${email}' is not one of ${policy.allowEmailDomains.join(", ")}`;
+      return `the email domain of ${describe(email)} is not one of ${policy.allowEmailDomains.join(", ")}`;
     }
   }
 
@@ -137,11 +142,7 @@ export function policyViolation(payload: JWTPayload, policy: AuthPolicy): string
   return null;
 }
 
-function describe(value: unknown): string {
-  if (value === undefined) return "no value";
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
+/** A claim as the log shows it: JSON, so it is one line whatever it holds. */
+export function describe(value: unknown): string {
+  return value === undefined ? "no value" : JSON.stringify(value);
 }

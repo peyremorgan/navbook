@@ -21,7 +21,6 @@ import { onError } from "@apollo/client/link/error";
 import { DefaultApolloClient } from "@vue/apollo-composable";
 import type { DocumentNode } from "graphql";
 import { describeApiError, errorHeading, isForbidden, isUnauthenticated } from "~/utils/errors";
-import { NOT_ALLOWED } from "~/utils/navigation";
 
 /**
  * Codes a caller has said it will handle itself.
@@ -54,9 +53,6 @@ function isMutation(document: DocumentNode): boolean {
 export default defineNuxtPlugin((nuxtApp) => {
   const config = nuxtApp.$navConfig;
   const auth = useAuth();
-  // Taken here, in the plugin's own context: the error link runs outside any
-  // component and cannot ask for the router when it needs one.
-  const router = useRouter();
 
   const authLink = setContext(async (_operation, previous) => {
     const token = await auth.getAccessToken();
@@ -64,6 +60,11 @@ export default defineNuxtPlugin((nuxtApp) => {
     if (token !== null) headers.authorization = `Bearer ${token}`;
     return { headers };
   });
+
+  // Whether a refused visit is already on its way to the page that explains
+  // it. Every operation a page issues fails the same way at once, and each
+  // would otherwise start a navigation that cancels the one before it.
+  let sendingAway = false;
 
   const errorLink = onError(({ graphQLErrors, networkError, operation }) => {
     const failure = describeApiError({ graphQLErrors, networkError });
@@ -77,12 +78,16 @@ export default defineNuxtPlugin((nuxtApp) => {
     }
 
     if (isForbidden(failure)) {
-      // Signed in, and refused by the repository's policy. The token is good,
-      // so signing in again would only come back here; the page says so and
-      // offers to sign out. Every operation on a page fails the same way, so
-      // this fires several times for one visit — hence the check.
-      if (router.currentRoute.value.path !== NOT_ALLOWED) void router.replace(NOT_ALLOWED);
-      return;
+      // Signed in, and refused by the repository's policy: the page says so
+      // and offers to sign out. The token itself is kept — see `refused`.
+      // No return: a refused *write* is still announced below, since the
+      // person who was admitted a moment ago has just lost what they typed.
+      if (!sendingAway) {
+        sendingAway = true;
+        void auth.refused().finally(() => {
+          sendingAway = false;
+        });
+      }
     }
 
     const context = operation.getContext() as HandledContext;
