@@ -1,0 +1,20 @@
+spec-version: 1
+description: --no-sync-source moves the target and nothing else, leaving the source branch one commit behind and its copy of the pull request open
+history:
+  - {id: base, branch: main, apply: history/00-base, message: "feat: initial code", date: 2026-08-01T10:00:00Z}
+  - {id: feat, branch: feat/auth, from: base, apply: history/01-feat, message: "feat: rework auth tokens", date: 2026-08-04T16:00:00Z}
+run:
+  checkout: feat/auth
+  before:
+    - nav: [pr, open, --title, "Refactor auth token handling", -m, "Replaces the ad-hoc token cache.", --commit]
+      env: {NAV_NOW: "2026-08-04T16:40:00Z"}
+    - git: [checkout, --quiet, main]
+  # The archive commit lands on main alone; feat/auth still carries the pull
+  # request under prs/open/, which is what the default fast-forward prevents.
+  command: [pr, merge, dk3m, --no-sync-source]
+  env: {NAV_NOW: "2026-08-07T12:00:00Z", NAV_IDS: "dk3mp2x9"}
+expect:
+  exit: 0
+  stdout: expected/stdout.txt
+  stderr: ""
+  tree: expected/tree

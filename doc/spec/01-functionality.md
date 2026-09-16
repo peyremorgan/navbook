@@ -146,6 +146,9 @@ Merge the source branch into the target as usual, moving the PR directory from
 `prs/open/` to `prs/merged/` as part of the merge (or an immediate follow-up
 commit). The entire discussion — description, comments, reviews, pinned
 revisions — is thereby archived into the target branch's permanent history.
+A source branch that outlives the merge is then fast-forwarded to the target
+where that is possible, so it does not go on carrying the pull request as open
+([04](04-cli.md), `nav pr merge`).
 Declined PRs never merge; a maintainer MAY record them in `prs/closed/` on the
 default branch.
 

@@ -7,7 +7,15 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -15,6 +23,7 @@ import { newCommentFile, newIssueFile, newPrFile, readRevisions } from "../src/c
 import { emptyQuery } from "../src/core/query.ts";
 import type { EntityRecord } from "../src/core/tree.ts";
 import { git } from "../src/git/exec.ts";
+import { resolveSha } from "../src/git/repo.ts";
 import {
   applyComment,
   bindReviewRevision,
@@ -491,6 +500,16 @@ describe("ops: updating and merging a pull request", () => {
       assert.equal(result.mergeSha, null, "a fast-forward creates no merge commit");
       assert.equal(result.dirPath, "prs/merged/ppp11111-work");
       assert.equal(findEntity(ws, "pr", "ppp1").status, "merged");
+      // The archive commit is on main alone; the source is brought up to it so
+      // the same pull request does not read `open` on one branch and `merged`
+      // on the other.
+      assert.deepEqual(result.source, { ref: "feature", outcome: "fast-forwarded" });
+      assert.equal(branchesApart(dir, "main", "feature"), "0\t0");
+      assert.match(
+        git(["reflog", "show", "-1", "feature"], { cwd: dir }),
+        /nav pr merge #ppp11111: to main/,
+        "the move is explained in the branch's reflog",
+      );
     });
   });
 
@@ -499,6 +518,60 @@ describe("ops: updating and merging a pull request", () => {
       git(["checkout", "-q", "main"], { cwd: dir });
       const result = executePrMerge(ws, planPrMerge(ws, "ppp1", { noFf: true }));
       assert.match(result.mergeSha ?? "", /^[0-9a-f]{40}$/);
+      // The source tip is a parent of the merge commit, so it fast-forwards too.
+      assert.equal(result.source.outcome, "fast-forwarded");
+      assert.equal(branchesApart(dir, "main", "feature"), "0\t0");
+    });
+  });
+
+  it("leaves the source branch behind when asked to", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "main"], { cwd: dir });
+      const result = executePrMerge(ws, planPrMerge(ws, "ppp1", { syncSource: false }));
+      assert.deepEqual(result.source, { ref: "feature", outcome: "disabled" });
+      assert.equal(branchesApart(dir, "main", "feature"), "1\t0");
+    });
+  });
+
+  it("does not move a source branch another worktree is standing on", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "main"], { cwd: dir });
+      const elsewhere = mkdtempSync(join(tmpdir(), "nav-wt-"));
+      rmSync(elsewhere, { recursive: true });
+      git(["worktree", "add", "-q", elsewhere, "feature"], { cwd: dir });
+      try {
+        const result = executePrMerge(ws, planPrMerge(ws, "ppp1"));
+        assert.equal(result.source.outcome, "checked-out");
+        assert.equal(
+          realpathSync(result.source.worktree ?? ""),
+          realpathSync(elsewhere),
+          "the caller is told where the branch is checked out",
+        );
+        // Moving the ref under a checked-out tree would strand its index and
+        // files behind its own HEAD, so it is left exactly where it was.
+        assert.equal(branchesApart(dir, "main", "feature"), "1\t0");
+        assert.equal(git(["status", "--porcelain"], { cwd: elsewhere }).trim(), "");
+      } finally {
+        git(["worktree", "remove", "--force", elsewhere], { cwd: dir });
+      }
+    });
+  });
+
+  it("does not move a source that is only a remote-tracking ref", () => {
+    inPrWorkspace((ws, dir) => {
+      // Turn the local branch into what a fetch would have left: the same
+      // commits under refs/remotes/, and nothing under refs/heads/.
+      const tip = git(["rev-parse", "feature"], { cwd: dir }).trim();
+      git(["checkout", "-q", "main"], { cwd: dir });
+      git(["branch", "-D", "feature"], { cwd: dir });
+      git(["update-ref", "refs/remotes/origin/feature", tip], { cwd: dir });
+
+      const plan = planPrMerge(ws, "ppp1");
+      assert.equal(plan.sourceRef, "origin/feature");
+      const result = executePrMerge(ws, plan);
+      assert.deepEqual(result.source, { ref: "origin/feature", outcome: "not-local" });
+      assert.equal(git(["rev-parse", "refs/remotes/origin/feature"], { cwd: dir }).trim(), tip);
+      assert.equal(resolveSha(dir, "refs/heads/origin/feature"), null, "nothing was created");
     });
   });
 
@@ -569,6 +642,11 @@ describe("ops: updating and merging a pull request", () => {
 });
 
 /** `findEntity` but null instead of throwing, for asserting absence. */
+/** `git rev-list --left-right --count a...b`: commits only `a` has, then only `b`. */
+function branchesApart(dir: string, a: string, b: string): string {
+  return git(["rev-list", "--left-right", "--count", `${a}...${b}`], { cwd: dir }).trim();
+}
+
 function findEntityOrNull(ws: WsCtx, ref: string): EntityRecord | null {
   try {
     return findEntity(ws, "pr", ref);

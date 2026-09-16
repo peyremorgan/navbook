@@ -48,6 +48,8 @@ import {
   isMergeInProgress,
   isTreeClean,
   resolveSha,
+  updateBranch,
+  worktreeHolding,
 } from "../git/repo.ts";
 import {
   applyOps,
@@ -408,6 +410,45 @@ export interface MergePlan {
   message: string;
   /** What the reviews say, for a caller that wants to mention it. */
   review: MergeReview;
+  /** Whether to bring the source branch up to the target afterwards. */
+  syncSource: boolean;
+}
+
+export interface MergeOptions {
+  noFf?: boolean;
+  /** Leave the source branch where it is; the default moves it (see {@link SourceSync}). */
+  syncSource?: boolean;
+}
+
+/**
+ * What became of the source branch once the merge was recorded.
+ *
+ * The archive commit lands on the target and nowhere else, so a source branch
+ * that outlives the merge — `dev` into `main` — is left one commit behind it,
+ * with the same pull request reading `merged` on one branch and `open` on the
+ * other. Fast-forwarding the source closes that gap; anything short of a
+ * fast-forward is a person's business, and is reported rather than attempted.
+ */
+export type SourceSyncOutcome =
+  /** The branch now points where the target does. */
+  | "fast-forwarded"
+  /** It already did. */
+  | "up-to-date"
+  /** A remote-tracking ref, or a branch this clone does not hold: not ours to move. */
+  | "not-local"
+  /** It has commits the target does not, so it cannot fast-forward. */
+  | "diverged"
+  /** Another worktree stands on it; moving the ref would leave that tree behind its HEAD. */
+  | "checked-out"
+  /** The caller asked for the target to move and nothing else. */
+  | "disabled";
+
+export interface SourceSync {
+  /** The ref the merge came from, as the plan named it. */
+  ref: string;
+  outcome: SourceSyncOutcome;
+  /** The worktree holding the branch, when that is what stopped the move. */
+  worktree?: string;
 }
 
 export interface MergeResult {
@@ -418,6 +459,8 @@ export interface MergeResult {
   dirPath: string;
   /** What the reviews said when the merge was made. */
   review: MergeReview;
+  /** What became of the source branch. */
+  source: SourceSync;
 }
 
 /** Read a pull request's review state against the working tree's policy. */
@@ -427,7 +470,7 @@ function mergeReview(ws: WsCtx, entity: EntityRecord): MergeReview {
 }
 
 /** Check a merge can proceed and decide how it would be performed. */
-export function planPrMerge(ws: WsCtx, ref: string, opts: { noFf?: boolean } = {}): MergePlan {
+export function planPrMerge(ws: WsCtx, ref: string, opts: MergeOptions = {}): MergePlan {
   if (isMergeInProgress(ws.repoRoot)) {
     wsFail("precondition", "a merge is already in progress", [
       "finish it with 'nav pr merge --continue', or 'git merge --abort'",
@@ -461,11 +504,21 @@ export function planPrMerge(ws: WsCtx, ref: string, opts: { noFf?: boolean } = {
     strategy: fastForwardable ? "fast-forward" : "merge-commit",
     message: mergeMessage(entity),
     review: mergeReview(ws, entity),
+    syncSource: opts.syncSource !== false,
   };
 }
 
 /** Carry out a merge the caller has decided to go ahead with. */
 export function executePrMerge(ws: WsCtx, plan: MergePlan): MergeResult {
+  const recorded = landMerge(ws, plan);
+  return { ...recorded, source: syncSourceBranch(ws, plan) };
+}
+
+/** A merge result before the source branch has been looked at. */
+type Recorded = Omit<MergeResult, "source">;
+
+/** Land the source branch on the target and record the pull request as merged. */
+function landMerge(ws: WsCtx, plan: MergePlan): Recorded {
   if (plan.strategy === "fast-forward") {
     // A fast-forward creates no commit to carry the move, so the archive
     // happens in the immediate follow-up commit that spec 02 §2.8 allows.
@@ -481,7 +534,11 @@ export function executePrMerge(ws: WsCtx, plan: MergePlan): MergeResult {
 }
 
 /** Finish a merge that was interrupted by conflicts. */
-export function continuePrMerge(ws: WsCtx, ref?: string): MergeResult {
+export function continuePrMerge(
+  ws: WsCtx,
+  ref?: string,
+  opts: Pick<MergeOptions, "syncSource"> = {},
+): MergeResult {
   if (isMergeInProgress(ws.repoRoot)) {
     const conflicts = conflictedPaths(ws.repoRoot);
     if (conflicts.length > 0) {
@@ -492,7 +549,7 @@ export function continuePrMerge(ws: WsCtx, ref?: string): MergeResult {
     }
   }
 
-  const entity = pendingMergePr(ws, ref);
+  const { entity, sourceRef } = pendingMergePr(ws, ref);
   // Read before the archive moves the directory, so the reviews are still
   // where the entity says they are.
   const review = mergeReview(ws, entity);
@@ -501,7 +558,43 @@ export function continuePrMerge(ws: WsCtx, ref?: string): MergeResult {
   const mergeSha = inProgress
     ? commitMerge(ws.repoRoot, mergeMessage(entity))
     : (resolveSha(ws.repoRoot, "HEAD") ?? null);
-  return recordMergedBlock(ws, archived, mergeSha, review);
+  const recorded = recordMergedBlock(ws, archived, mergeSha, review);
+  const source = syncSourceBranch(ws, {
+    entity,
+    sourceRef,
+    targetBranch: currentBranch(ws.repoRoot) ?? "HEAD",
+    syncSource: opts.syncSource !== false,
+  });
+  return { ...recorded, source };
+}
+
+/**
+ * Bring the source branch up to the target once the merge is recorded.
+ *
+ * Only ever a fast-forward, and only of a local branch nothing is standing on:
+ * every other case is reported and left exactly as it was. The check that the
+ * branch is behind the target is made here rather than on the plan, because it
+ * is only after the merge that the source is known to be an ancestor of HEAD.
+ */
+function syncSourceBranch(
+  ws: WsCtx,
+  plan: Pick<MergePlan, "entity" | "sourceRef" | "targetBranch" | "syncSource">,
+): SourceSync {
+  const ref = plan.sourceRef;
+  if (!plan.syncSource) return { ref, outcome: "disabled" };
+
+  const cwd = ws.repoRoot;
+  const from = resolveSha(cwd, `refs/heads/${ref}`);
+  if (from === null) return { ref, outcome: "not-local" };
+  const to = resolveSha(cwd, "HEAD");
+  if (to === null || from === to) return { ref, outcome: "up-to-date" };
+  if (!isAncestor(cwd, from, to)) return { ref, outcome: "diverged" };
+
+  const worktree = worktreeHolding(cwd, ref);
+  if (worktree !== null) return { ref, outcome: "checked-out", worktree };
+
+  updateBranch(cwd, ref, to, from, `nav pr merge #${plan.entity.id}: to ${plan.targetBranch}`);
+  return { ref, outcome: "fast-forwarded" };
 }
 
 function mergeMessage(entity: EntityRecord): string {
@@ -511,8 +604,8 @@ function mergeMessage(entity: EntityRecord): string {
 }
 
 /** The PR whose source branch this in-progress merge is bringing in. */
-function pendingMergePr(ws: WsCtx, ref: string | undefined): EntityRecord {
-  if (ref) return locatePr(ws, ref).entity;
+function pendingMergePr(ws: WsCtx, ref: string | undefined): LocatedPr {
+  if (ref) return locatePr(ws, ref);
 
   const incoming = mergeHead(ws.repoRoot);
   if (!incoming) {
@@ -535,7 +628,7 @@ function pendingMergePr(ws: WsCtx, ref: string | undefined): EntityRecord {
       "pass the ID: nav pr merge --continue <id>",
     ]);
   }
-  return first.entity;
+  return { entity: first.entity, sourceRef: sourceRefOf(first) };
 }
 
 /**
@@ -568,7 +661,7 @@ function recordMergedBlock(
   entity: EntityRecord,
   mergeSha: string | null,
   review: MergeReview,
-): MergeResult {
+): Recorded {
   const merged: MergedBlock = {
     date: nowIso(ws),
     by: currentAuthor(ws),
@@ -646,14 +739,19 @@ export function locatePr(ws: WsCtx, ref: string): LocatedPr {
   }
 
   const entry = found.find((candidate) => candidate.entity.id === resolution.id) as FoundPr;
+  return { entity: entry.entity, sourceRef: sourceRefOf(entry) };
+}
+
+/** The ref a pull request is merged from, out of those carrying it. */
+function sourceRefOf(entry: FoundPr): string {
   // `source:` is only SHOULD, so fall back to a local ref before a remote one:
   // a local branch is the copy the user can actually merge.
   const declared = stringField(entry.entity, "source");
-  const sourceRef =
+  return (
     entry.refs.find((candidate) => candidate.short === declared)?.short ??
     entry.refs.find((candidate) => !candidate.remote)?.short ??
-    (entry.refs[0]?.short as string);
-  return { entity: entry.entity, sourceRef };
+    (entry.refs[0]?.short as string)
+  );
 }
 
 /* --------------------------------------------------------------------- close */

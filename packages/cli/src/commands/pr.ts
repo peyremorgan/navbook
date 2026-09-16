@@ -35,6 +35,7 @@ import {
   readReviewPolicy,
   requestReview,
   reviewSummary,
+  type SourceSync,
   sameEmail,
   stringField,
   toNdjson,
@@ -324,11 +325,14 @@ export interface MergeOptions extends GlobalFlags {
   continue?: boolean;
   /** Answer the review-policy question in advance. */
   yes?: boolean;
+  /** `--no-sync-source`: leave the source branch where it is. */
+  syncSource?: boolean;
 }
 
 export function cmdPrMerge(ctx: Ctx, prefix: string | undefined, opts: MergeOptions): void {
+  const syncSource = opts.syncSource !== false;
   if (opts.continue) {
-    const result = continuePrMerge(ctx, prefix);
+    const result = continuePrMerge(ctx, prefix, { syncSource });
     // A merge already under way: the moment to have asked has passed, so an
     // unmet policy is reported and nothing is put to the user.
     warnPolicyProblems(ctx, result.review.reading);
@@ -343,7 +347,7 @@ export function cmdPrMerge(ctx: Ctx, prefix: string | undefined, opts: MergeOpti
   }
   if (!prefix) fail("nav pr merge needs the ID of the pull request to merge");
 
-  const plan = planPrMerge(ctx, prefix, { noFf: opts.noFf });
+  const plan = planPrMerge(ctx, prefix, { noFf: opts.noFf, syncSource });
   warnPolicyProblems(ctx, plan.review.reading);
   confirmAgainstPolicy(ctx, plan.entity.id, plan.review, opts.yes === true);
   reportMerge(ctx, executePrMerge(ctx, plan));
@@ -383,6 +387,35 @@ function confirmAgainstPolicy(ctx: Ctx, id: string, review: MergeReview, assumeY
 function reportMerge(ctx: Ctx, result: MergeResult): void {
   ctx.stdout.write(`Merged #${result.entity.id}  ${ctx.navDir}/${result.dirPath}/\n`);
   if (result.mergeSha) ctx.stdout.write(`Merge commit ${result.mergeSha.slice(0, 12)}\n`);
+  reportSourceSync(ctx, result.source, stringField(result.entity, "target"));
+}
+
+/**
+ * Say what became of the source branch. A move is one line; a branch that
+ * could not be moved is a warning, because somebody now has to do by hand what
+ * forgetting leaves wrong rather than stale; the rest costs nothing.
+ */
+function reportSourceSync(ctx: Ctx, source: SourceSync, target: string): void {
+  const warn = (text: string): void => {
+    ctx.stderr.write(`${ctx.colors.yellow("warning:")} ${text}\n`);
+  };
+  switch (source.outcome) {
+    case "fast-forwarded":
+      ctx.stdout.write(`Fast-forwarded ${source.ref} to ${target}\n`);
+      return;
+    case "diverged":
+      warn(
+        `${source.ref} was not moved: it has commits ${target} does not; merge ${target} into it`,
+      );
+      return;
+    case "checked-out":
+      warn(
+        `${source.ref} was not moved: it is checked out at ${source.worktree}; run 'git merge --ff-only ${target}' there`,
+      );
+      return;
+    default:
+      return;
+  }
 }
 
 /* --------------------------------------------------------------------- close */

@@ -170,7 +170,7 @@ usually enough. A full directory name works too.
 | `nav pr review <id> --approve` | Record a verdict bound to a specific revision. Without a flag the verdict is `comment`: a review that judges nothing. |
 | `nav pr list awaiting:me@example.com` | Pull requests waiting on one person. `reviewer:` and `review:approved` filter the same listing. |
 | `nav pr list --all-refs` | Find PRs on branches you have fetched but not checked out. |
-| `nav pr merge <id>` | Merge into the checked-out target, archiving the discussion into its history. Says what a declared review policy is missing, and asks; `--yes` answers in advance. |
+| `nav pr merge <id>` | Merge into the checked-out target, archiving the discussion into its history, then fast-forward the source branch so it does not keep the PR open; `--no-sync-source` skips that. Says what a declared review policy is missing, and asks; `--yes` answers in advance. |
 | `nav feature open <title>` | Create a feature under `specs/`. `--slug` names its directory; the title otherwise. |
 | `nav feature show <slug>` | Its documents, the issues and pull requests that name it, and the commits that touched any of them. |
 | `nav feature spec add <slug> <title>` | Add a specification document. `nav feature spec edit` opens one in `$EDITOR`. |

@@ -240,3 +240,38 @@ export function hooksDir(cwd: string): string {
   const path = git(["rev-parse", "--git-path", "hooks"], { cwd }).trim();
   return path.startsWith("/") ? path : join(cwd, path);
 }
+
+/**
+ * The worktree that has `branch` checked out, or null when none does.
+ *
+ * A ref can be moved from anywhere, but a worktree standing on it would then
+ * hold an index and files behind its own HEAD, which is what `git branch -f`
+ * refuses to do; a caller that updates refs directly has to ask first.
+ */
+export function worktreeHolding(cwd: string, branch: string): string | null {
+  const output = gitMaybe(["worktree", "list", "--porcelain"], { cwd });
+  if (output === null) return null;
+  let path: string | null = null;
+  for (const line of splitLines(output)) {
+    if (line.startsWith("worktree ")) path = line.slice("worktree ".length);
+    else if (line === `branch refs/heads/${branch}`) return path;
+  }
+  return null;
+}
+
+/**
+ * Point a local branch at `to`, provided it still points at `from`.
+ *
+ * `update-ref` rather than `branch -f`: it takes the expected old value, so a
+ * branch that moved between the caller's check and this write is left alone
+ * and the call fails rather than overwriting somebody's commit.
+ */
+export function updateBranch(
+  cwd: string,
+  branch: string,
+  to: string,
+  from: string,
+  reason: string,
+): void {
+  git(["update-ref", "-m", reason, `refs/heads/${branch}`, to, from], { cwd });
+}

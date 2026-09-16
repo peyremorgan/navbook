@@ -70,6 +70,11 @@ function approveAs(repo: TempRepo, email: string, id: string): void {
   repo.git(["config", "user.email", FIXTURE_IDENTITY.email]);
 }
 
+/** `git rev-list --left-right --count a...b`: commits only `a` has, then only `b`. */
+function branchesApart(repo: TempRepo, a: string, b: string): string {
+  return repo.git(["rev-list", "--left-right", "--count", `${a}...${b}`]).stdout.trim();
+}
+
 function prFile(repo: TempRepo, status: string): string {
   return readFileSync(
     join(repo.dir, `.navbook/prs/${status}/dk3mp2x9-refactor-auth/pr.md`),
@@ -640,6 +645,7 @@ describe("nav pr merge", () => {
       const result = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
       assert.equal(result.code, 0, result.stderr);
       assert.equal(result.stdout.includes("Merge commit"), false);
+      assert.match(result.stdout, /^Fast-forwarded feat\/auth to main$/m);
 
       const text = prFile(repo, "merged");
       assert.match(text, /^merged:$/m);
@@ -661,7 +667,63 @@ describe("nav pr merge", () => {
       assert.equal(merges, "Merge #dk3mp2x9: Refactor auth");
       const sha = repo.git(["rev-list", "--merges", "-1", "HEAD"]).stdout.trim();
       assert.match(prFile(repo, "merged"), new RegExp(`commit: ${sha}`));
+      assert.match(result.stdout, /^Fast-forwarded feat\/auth to main$/m);
+      assert.equal(branchesApart(repo, "main", "feat/auth"), "0\t0");
     } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("brings the source branch up to the target, so both read the PR as merged", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      assert.equal(branchesApart(repo, "main", "feat/auth"), "0\t0");
+      // The cross-branch scan is what would otherwise report the pull request
+      // as still open on its own branch.
+      const everywhere = repo.nav(["pr", "list", "--all-refs"]);
+      assert.equal(everywhere.code, 0, everywhere.stderr);
+      assert.doesNotMatch(everywhere.stdout, /dk3mp2x9/);
+      assert.match(
+        repo.git(["reflog", "show", "-1", "feat/auth"]).stdout,
+        /nav pr merge #dk3mp2x9: to main/,
+      );
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("--no-sync-source leaves the source branch where it was", () => {
+    const { repo } = withOpenPr();
+    try {
+      const result = repo.nav(["pr", "merge", "dk3m", "--no-sync-source"], {
+        NAV_NOW: "2026-08-07T12:00:00Z",
+      });
+      assert.equal(result.code, 0, result.stderr);
+      assert.doesNotMatch(result.stdout, /Fast-forwarded/);
+      assert.equal(result.stderr, "");
+      assert.equal(branchesApart(repo, "main", "feat/auth"), "1\t0");
+      assert.match(repo.nav(["pr", "list", "--all-refs"]).stdout, /dk3mp2x9 +open/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("warns instead of moving a source branch checked out in another worktree", () => {
+    const { repo } = withOpenPr();
+    const elsewhere = join(repo.home, "elsewhere");
+    try {
+      repo.git(["worktree", "add", "--quiet", elsewhere, "feat/auth"]);
+      const result = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /^Merged #dk3mp2x9/m);
+      assert.doesNotMatch(result.stdout, /Fast-forwarded/);
+      assert.match(result.stderr, /warning: feat\/auth was not moved: it is checked out at /);
+      assert.match(result.stderr, /git merge --ff-only main/);
+      assert.equal(branchesApart(repo, "main", "feat/auth"), "1\t0");
+      assert.equal(repo.git(["-C", elsewhere, "status", "--porcelain"]).stdout.trim(), "");
+    } finally {
+      repo.git(["worktree", "remove", "--force", elsewhere]);
       repo.cleanup();
     }
   });
@@ -711,6 +773,20 @@ describe("nav pr merge", () => {
     const { repo } = withOpenPr();
     try {
       repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      // The source branch was brought up to main, so no branch carries the
+      // pull request under prs/open/ any more and there is nothing to merge.
+      const gone = repo.nav(["pr", "merge", "dk3m"]);
+      assert.equal(gone.code, 1);
+      assert.match(gone.stderr, /no open pull request matches 'dk3m'/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses to merge a pull request its stale source branch still shows open", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.nav(["pr", "merge", "dk3m", "--no-sync-source"], { NAV_NOW: "2026-08-07T12:00:00Z" });
       // The stale source branch still carries the PR under prs/open/, so it is
       // still discoverable; what stops a second merge is the ancestry check.
       const again = repo.nav(["pr", "merge", "dk3m"]);
@@ -757,6 +833,57 @@ describe("nav pr merge", () => {
       assert.ok(existsSync(join(repo.dir, ".navbook/prs/merged/dk3mp2x9-conflicting/pr.md")));
       assert.match(repo.git(["log", "--merges", "--format=%s"]).stdout, /Merge #dk3mp2x9/);
       assert.equal(repo.nav(["doctor"]).code, 0);
+      // --continue finishes everything the uninterrupted merge would have done,
+      // the source branch included.
+      assert.match(finished.stdout, /^Fast-forwarded feat\/auth to main$/m);
+      assert.equal(branchesApart(repo, "main", "feat/auth"), "0\t0");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("warns instead of moving a source branch that took commits during the merge", () => {
+    const repo = makeNavRepo();
+    try {
+      repo.write("app.txt", "original\n");
+      repo.commitAll("feat: initial code");
+      repo.git(["checkout", "--quiet", "-b", "feat/auth"]);
+      repo.write("app.txt", "from the branch\n");
+      repo.commitAll("feat: change app");
+      repo.nav(["pr", "open", "--title", "Conflicting", "-m", "Body.", "--commit"], {
+        NAV_IDS: "dk3mp2x9",
+        NAV_NOW: "2026-08-04T16:40:00Z",
+      });
+      repo.git(["checkout", "--quiet", "main"]);
+      repo.write("app.txt", "from main\n");
+      repo.commitAll("feat: conflicting change on main");
+      assert.equal(repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" }).code, 1);
+
+      // While the conflict sits unresolved, somebody pushes feat/auth on: the
+      // merge in progress brings in the tip that was, not the tip that is.
+      const moved = repo
+        .git([
+          "commit-tree",
+          "feat/auth^{tree}",
+          "-p",
+          "feat/auth",
+          "-m",
+          "feat: more on the branch",
+        ])
+        .stdout.trim();
+      repo.git(["update-ref", "refs/heads/feat/auth", moved]);
+
+      repo.write("app.txt", "resolved by hand\n");
+      repo.git(["add", "app.txt"]);
+      const finished = repo.nav(["pr", "merge", "--continue"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      assert.equal(finished.code, 0, finished.stderr);
+      assert.doesNotMatch(finished.stdout, /Fast-forwarded/);
+      assert.match(
+        finished.stderr,
+        /warning: feat\/auth was not moved: it has commits main does not/,
+      );
+      assert.equal(repo.git(["rev-parse", "feat/auth"]).stdout.trim(), moved, "left untouched");
+      assert.equal(repo.git(["log", "--merges", "--oneline"]).stdout.trim().split("\n").length, 1);
     } finally {
       repo.cleanup();
     }

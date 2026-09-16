@@ -222,14 +222,28 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   §2.10](02-data-model.md)). The file is the record and it is never refused;
   what the warning prevents is somebody approving their own work and believing
   they have moved the decision.
-- `nav pr merge <id> [--no-ff] [-y|--yes]` — from the target branch: `git merge` the
-  source branch with the PR directory moved to `prs/merged/` inside the merge
-  commit, then record the `merged:` block in a follow-up commit
-  (the merge SHA is unknowable inside the merge itself). When the merge can
-  fast-forward and `--no-ff` was not given, there is no merge commit to carry
-  the move, so the archive and the `merged:` block are written together in the
-  immediate follow-up commit that [02 §2.8](02-data-model.md) allows; the block
-  then has no `commit:` key, because no merge commit exists to name.
+- `nav pr merge <id> [--no-ff] [-y|--yes] [--no-sync-source]` — from the target
+  branch: `git merge` the source branch with the PR directory moved to
+  `prs/merged/` inside the merge commit, then record the `merged:` block in a
+  follow-up commit (the merge SHA is unknowable inside the merge itself). When
+  the merge can fast-forward and `--no-ff` was not given, there is no merge
+  commit to carry the move, so the archive and the `merged:` block are written
+  together in the immediate follow-up commit that [02 §2.8](02-data-model.md)
+  allows; the block then has no `commit:` key, because no merge commit exists
+  to name.
+
+  That follow-up commit lands on the target and nowhere else, so a source
+  branch that outlives the merge — `dev` into `main` — would be left one commit
+  behind it, with the same pull request reading `merged` on one branch and
+  `open` on the other, which is exactly what `--all-refs` would then report.
+  Once the merge is recorded, `nav pr merge` therefore fast-forwards the source
+  branch to the target and prints `Fast-forwarded <source> to <target>`. It is
+  only ever a fast-forward of a local branch that nothing is standing on: a
+  source that is a remote-tracking ref, or a branch this clone does not hold,
+  is not touched and not mentioned; one that has commits the target does not,
+  or that another worktree has checked out, is left where it is with a warning
+  saying so — never a merge, never a commit, never a conflict. `--no-sync-source`
+  moves the target and nothing else. `--continue` performs the same step.
 
   When the repository declares a review policy ([02 §2.10](02-data-model.md))
   and the pull request's decision is not `approved`, it MUST print what is
