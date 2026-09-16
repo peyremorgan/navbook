@@ -51,6 +51,19 @@ export function blobAt(cwd: string, sha: string, path: string): string | null {
   return result.code === 0 ? result.stdout : null;
 }
 
+/**
+ * A blob's contents by its own hash, or null when this repository lacks it.
+ *
+ * Null covers every way the object can be unusable: not fetched here, not a
+ * blob at all, or not a hash. Only a hash-shaped argument reaches git, so a
+ * caller may pass exactly what a client sent.
+ */
+export function blobContent(cwd: string, sha: string): string | null {
+  if (!/^[0-9a-f]{40}([0-9a-f]{24})?$/i.test(sha)) return null;
+  const result = gitRun(["cat-file", "blob", sha], { cwd });
+  return result.code === 0 ? result.stdout : null;
+}
+
 /** The commit that introduced `path`, following renames. */
 export function addedAt(cwd: string, path: string): FileVersion | null {
   return fileVersions(cwd, path)[0] ?? null;

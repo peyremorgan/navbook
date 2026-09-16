@@ -14,6 +14,11 @@
   server does not have checked out: it can be read, and it can be written to by
   nobody. The alert says which branch to serve instead, because that is the
   actual remedy and nothing this client does can substitute for it.
+
+  The other refusal is `STALE_CONTENT`, handled as the issue page handles it:
+  every save names the version it was edited from, a field somebody else
+  changed since is refused, and the refused edit is kept beside what the page
+  now says until the person decides between them.
 -->
 <script setup lang="ts">
 import { useMutation, useQuery } from "@vue/apollo-composable";
@@ -21,7 +26,7 @@ import { ADD_COMMENT, UPDATE_PR } from "~/graphql/mutations";
 import { FEATURES_QUERY, PR_QUERY, PRS_QUERY, REVIEW_POLICY_QUERY } from "~/graphql/queries";
 import { buildCommentTree, countComments } from "~/utils/comments";
 import { distinctValues, newestFirst, shortSha } from "~/utils/entities";
-import { describeApiError, unservedBranch } from "~/utils/errors";
+import { describeApiError, staleEdit, unservedBranch } from "~/utils/errors";
 import { buildEntityPatch, type EntityEdit, PatchError } from "~/utils/patch";
 import type { Verdict } from "~~/src/generated/gql/graphql";
 
@@ -139,8 +144,10 @@ async function submit(input: {
 /* ----------------------------------------------------------------- metadata */
 
 const { mutate: patch, loading: patching } = useMutation(UPDATE_PR, {
-  context: { handledCodes: ["PRECONDITION"] },
+  context: { handledCodes: ["PRECONDITION", "STALE_CONTENT"] },
 });
+/** An edit refused because its field had moved, kept until the person decides. */
+const stale = ref<{ change: Partial<EntityEdit>; moved: string[]; wrote: string } | null>(null);
 // Asking somebody new to review is how they become somebody the repository
 // knows of, and the answer that listed everybody was fetched before they were.
 const refreshListings = useListingRefresh();
@@ -178,18 +185,30 @@ async function save(change: Partial<EntityEdit>, wrote: string): Promise<void> {
   }
   // Nothing moved, so there is nothing to send: the server refuses an empty
   // patch, and this is also what a closed editor should do.
-  if (built === null) return;
+  if (built === null) {
+    stale.value = null;
+    return;
+  }
 
   try {
-    const written = await patch({ input: { ref: pr.value.id, ...built } });
+    const written = await patch({
+      input: { ref: pr.value.id, ...built, baseSha: pr.value.baseSha },
+    });
     const payload = written?.data?.updatePr;
     if (payload) {
       commitToast.report(payload.commit, wrote);
       refreshListings();
       refusedOn.value = null;
+      stale.value = null;
     }
   } catch (failure) {
     const described = describeApiError(failure);
+    const conflict = staleEdit(described);
+    if (conflict !== null) {
+      stale.value = { change, moved: conflict.moved, wrote };
+      await refetch();
+      return;
+    }
     const branch = unservedBranch(described);
     if (branch === null) {
       toast.add({ title: "Could not save", description: described.message, color: "error" });
@@ -197,6 +216,13 @@ async function save(change: Partial<EntityEdit>, wrote: string): Promise<void> {
     }
     refusedOn.value = branch;
   }
+}
+
+/** Send the refused edit again, against the version the page now shows. */
+async function reapply(): Promise<void> {
+  const pending = stale.value;
+  if (pending === null) return;
+  await save(pending.change, pending.wrote);
 }
 
 /**
@@ -249,6 +275,15 @@ const branchHint = computed(() => refusedOn.value);
           <code v-for="branch in pr.refs" :key="branch" data-testid="pr-ref">{{ branch }}</code>
         </div>
       </header>
+
+      <StaleEditAlert
+        v-if="stale"
+        :moved="stale.moved"
+        :change="stale.change"
+        :saving="patching"
+        @reapply="reapply"
+        @dismiss="stale = null"
+      />
 
       <UAlert
         v-if="pr.merged"

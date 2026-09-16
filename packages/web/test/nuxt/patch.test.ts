@@ -12,7 +12,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import {
   buildEntityPatch,
+  describeEntityEdit,
   type EntityEdit,
+  fieldLabel,
   normalizeList,
   normalizeOptional,
   PatchError,
@@ -252,5 +254,41 @@ describe("parseRankInput", () => {
     // Not null: "unplace it" and "that is not a rank" are different answers,
     // and only one of them is an edit.
     assert.equal(Number.isNaN(parseRankInput("soon") as number), true);
+  });
+});
+
+describe("describeEntityEdit", () => {
+  // What the stale-edit alert shows: the refused edit, read back as a person
+  // would say it, so they can decide whether to save it over what is there.
+  it("names each field the edit carries, and only those", () => {
+    assert.deepEqual(describeEntityEdit({ title: "Mine", labels: ["bug", "auth"] }), [
+      { field: "title", value: "Mine" },
+      { field: "labels", value: "bug, auth" },
+    ]);
+  });
+
+  it("calls the body the description, as the page does", () => {
+    assert.deepEqual(describeEntityEdit({ body: "Words." }), [
+      { field: "description", value: "Words." },
+    ]);
+    assert.equal(fieldLabel("body"), "description");
+    assert.equal(fieldLabel("assignees"), "assignees");
+    assert.equal(fieldLabel("something-new"), "something-new");
+  });
+
+  it("says none for a cleared field, whichever way it is cleared", () => {
+    assert.deepEqual(
+      describeEntityEdit({ milestone: null, labels: [], rank: null, deadline: "" }),
+      [
+        { field: "labels", value: "none" },
+        { field: "milestone", value: "none" },
+        { field: "rank", value: "none" },
+        { field: "deadline", value: "none" },
+      ],
+    );
+  });
+
+  it("prints a rank as the number it is", () => {
+    assert.deepEqual(describeEntityEdit({ rank: 0 }), [{ field: "rank", value: "0" }]);
   });
 });

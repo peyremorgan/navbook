@@ -124,11 +124,17 @@ export const LINK_NODE_TREE = graphql(`
  * field added to a row cannot go missing from the page it links to — which is
  * exactly what the normalised cache would otherwise hide until somebody
  * navigated the wrong way round.
+ *
+ * `baseSha` is the one field selected here and not on the row: it is what a
+ * field edited from the rendered value hands back, so the server can refuse an
+ * edit made against a version somebody has since replaced. A row edits
+ * nothing, so it never asks.
  */
 export const ISSUE_DETAIL = graphql(`
   fragment IssueDetail on Issue {
     ...IssueListItem
     body
+    baseSha
     duplicateOf
     parent {
       ...LinkNodeCore
@@ -146,6 +152,7 @@ export const PR_DETAIL = graphql(`
   fragment PrDetail on Pr {
     ...PrListItem
     body
+    baseSha
     revisions {
       head
       base

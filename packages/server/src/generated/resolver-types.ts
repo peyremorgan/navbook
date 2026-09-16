@@ -291,6 +291,15 @@ export type Issue = Entity & {
   archived: Scalars['Boolean']['output'];
   assignees: Array<Scalars['String']['output']>;
   author: Scalars['String']['output'];
+  /**
+   * The blob hash of `issue.md` as it now stands.
+   *
+   * Hand it back as `baseSha` when editing a field from a rendered value, and an
+   * edit made against an older version of that field is refused rather than
+   * landed on top of somebody else's (see `UpdateIssueInput.baseSha`). Comments
+   * live in their own files, so the hash does not move when one is added.
+   */
+  baseSha: Scalars['String']['output'];
   body: Scalars['String']['output'];
   comments: Array<Comment>;
   created: Scalars['String']['output'];
@@ -497,6 +506,8 @@ export type Pr = Entity & {
   archived: Scalars['Boolean']['output'];
   assignees: Array<Scalars['String']['output']>;
   author: Scalars['String']['output'];
+  /** The blob hash of `pr.md` as it now stands; see `Issue.baseSha`. */
+  baseSha: Scalars['String']['output'];
   body: Scalars['String']['output'];
   comments: Array<Comment>;
   created: Scalars['String']['output'];
@@ -731,6 +742,18 @@ export type UpdateFeaturePayload = {
  */
 export type UpdateIssueInput = {
   assignees?: InputMaybe<Array<Scalars['String']['input']>>;
+  /**
+   * The `baseSha` the edit was composed against, when it was composed against one.
+   *
+   * Optional, unlike `UpdateSpecInput.baseSha`: a listing that toggles a label or
+   * a drag that sets a rank has not read the file, and need not. Absent, the
+   * patch lands on the file as it is. Present, the patch is refused with
+   * `STALE_CONTENT` when a field it names has changed since — and only then, so
+   * a label set on an issue somebody has just retitled still lands. The refusal
+   * lists the fields that moved in `extensions.moved`, spelled as this input
+   * spells them. A hash this server cannot resolve is stale by definition.
+   */
+  baseSha?: InputMaybe<Scalars['String']['input']>;
   body?: InputMaybe<Scalars['String']['input']>;
   /** When the work is wanted, `YYYY-MM-DD`; an explicit null undates it. */
   deadline?: InputMaybe<Scalars['String']['input']>;
@@ -759,6 +782,8 @@ export type UpdateIssuePayload = {
  */
 export type UpdatePrInput = {
   assignees?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** See `UpdateIssueInput.baseSha`. */
+  baseSha?: InputMaybe<Scalars['String']['input']>;
   body?: InputMaybe<Scalars['String']['input']>;
   features?: InputMaybe<Array<Scalars['String']['input']>>;
   labels?: InputMaybe<Array<Scalars['String']['input']>>;
@@ -1078,6 +1103,7 @@ export type IssueResolvers<ContextType = GraphQLCtx, ParentType extends Resolver
   archived?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   assignees?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
   author?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  baseSha?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   body?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   comments?: Resolver<Array<ResolversTypes['Comment']>, ParentType, ContextType>;
   created?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
@@ -1147,6 +1173,7 @@ export type PrResolvers<ContextType = GraphQLCtx, ParentType extends ResolversPa
   archived?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   assignees?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
   author?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  baseSha?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   body?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   comments?: Resolver<Array<ResolversTypes['Comment']>, ParentType, ContextType>;
   created?: Resolver<ResolversTypes['String'], ParentType, ContextType>;

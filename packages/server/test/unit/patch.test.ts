@@ -15,6 +15,8 @@ import {
   applySpecPatch,
   isEmptyPatch,
   isEmptySpecPatch,
+  movedFields,
+  namedFields,
 } from "../../src/patch.ts";
 
 // Repository-relative: `applyEntityPatch` reports the path it is given rather
@@ -318,5 +320,84 @@ describe("applySpecPatch", () => {
       isEmptySpecPatch({ feature: "auth", fileName: "x.md", baseSha: "x", body: "y" }),
       false,
     );
+  });
+});
+
+describe("movedFields", () => {
+  // Two versions of one file, and a patch: which of the fields the patch would
+  // write did somebody else change in between? Only those are a conflict.
+  const RETITLED = ORIGINAL.replace("title: Original", "title: Retitled");
+  const moved = (current: string, input: Record<string, unknown>): string[] =>
+    movedFields(ORIGINAL, current, { ref: "aa111111", ...input });
+
+  it("names a field the patch writes that has changed since", () => {
+    assert.deepEqual(moved(RETITLED, { title: "Mine" }), ["title"]);
+  });
+
+  it("ignores a field that changed when the patch leaves it alone", () => {
+    assert.deepEqual(moved(RETITLED, { labels: ["three"] }), []);
+  });
+
+  it("is empty when the two versions are the same file", () => {
+    assert.deepEqual(moved(ORIGINAL, { title: "Mine", labels: [], body: "New." }), []);
+  });
+
+  it("lists every moved field the patch names, in a fixed order", () => {
+    const both = RETITLED.replace("The body.", "Another body.");
+    assert.deepEqual(moved(both, { body: "Mine.", title: "Mine", milestone: "v2" }), [
+      "title",
+      "body",
+    ]);
+  });
+
+  it("reads a cleared key as a change", () => {
+    const unlabelled = ORIGINAL.replace("labels: [one, two]\n", "");
+    assert.deepEqual(moved(unlabelled, { labels: ["one"] }), ["labels"]);
+    const unmilestoned = ORIGINAL.replace("milestone: v1\n", "");
+    assert.deepEqual(moved(unmilestoned, { milestone: null }), ["milestone"]);
+  });
+
+  it("does not mistake a respelling for a change", () => {
+    // `assignee: A` and `assignee: [A]` are one value to every reader (§2.5),
+    // so a hand edit that switched spellings must not refuse the next patch.
+    const scalar = ORIGINAL.replace(
+      "milestone: v1",
+      "milestone: v1\nassignee: A <a@example.invalid>",
+    );
+    const list = ORIGINAL.replace(
+      "milestone: v1",
+      "milestone: v1\nassignee: [A <a@example.invalid>]",
+    );
+    assert.deepEqual(movedFields(scalar, list, { ref: "aa111111", assignees: [] }), []);
+  });
+
+  it("compares the body trimmed, as the resolver reports it", () => {
+    assert.deepEqual(moved(`${ORIGINAL}\n\n`, { body: "Mine." }), []);
+  });
+
+  it("reads rank and deadline the way their resolvers do", () => {
+    const placed = ORIGINAL.replace(
+      "milestone: v1",
+      "milestone: v1\nrank: 3\ndeadline: 2026-10-01",
+    );
+    assert.deepEqual(moved(placed, { rank: 1, deadline: null }), ["rank", "deadline"]);
+    // A deadline that is not a day reads as none, and none is what it was.
+    const junk = ORIGINAL.replace("milestone: v1", "milestone: v1\ndeadline: soon");
+    assert.deepEqual(moved(junk, { deadline: "2026-10-01" }), []);
+  });
+
+  it("names the pull request's reviewers by the input's spelling", () => {
+    const asked = ORIGINAL.replace("milestone: v1", "milestone: v1\nreviewer: r@example.invalid");
+    assert.deepEqual(moved(asked, { reviewers: [] }), ["reviewers"]);
+  });
+});
+
+describe("namedFields", () => {
+  it("lists what the patch names, and nothing about the hash or the ref", () => {
+    assert.deepEqual(namedFields({ ref: "aa111111", baseSha: "x", labels: null, title: "T" }), [
+      "title",
+      "labels",
+    ]);
+    assert.deepEqual(namedFields({ ref: "aa111111" }), []);
   });
 });

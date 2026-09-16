@@ -146,6 +146,17 @@ Three mutations have a shape worth knowing:
   a save on top of somebody else's paragraph is exactly the conflict this
   server surfaces rather than resolves. Read the file again, apply the change
   to what it says now, and save with the hash it now carries.
+- **`updateIssue`** and **`updatePr`** take the same `baseSha` — `Issue.baseSha`
+  and `Pr.baseSha` are the hash of `issue.md` or `pr.md` — but optionally, and
+  compare per field rather than per file. A patch is refused with
+  `STALE_CONTENT` only when a field it names has changed since the version it
+  was composed against; a label set on an issue somebody has just retitled is
+  not a conflict with anybody, and lands. The refusal lists the fields that
+  moved in `extensions.moved`. Without a hash the patch lands on the file as
+  it is, which is what a listing that toggles a label or a drag that sets a
+  rank wants: neither has read the file, and neither needs to. A hash this
+  server cannot resolve — from a clone it has not fetched — is stale by
+  definition.
 
 ### Features
 
@@ -167,9 +178,6 @@ and `doctor` is read-only here. A pull request's files live on the branch it
 proposes to merge, so `prs(allRefs: true)` can find one this checkout does not
 hold, but commenting on it needs a server serving that branch — the refusal
 says which one.
-
-One limit worth knowing at this scale: two clients editing one issue are
-last-write-wins rather than detected.
 
 ## Development
 

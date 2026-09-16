@@ -164,3 +164,47 @@ export function buildEntityPatch(
 
   return Object.keys(patch).length === 0 ? null : patch;
 }
+
+/** What each field of an edit is called on the page. */
+const FIELD_LABELS: Record<keyof EntityEdit, string> = {
+  title: "title",
+  body: "description",
+  labels: "labels",
+  assignees: "assignees",
+  milestone: "milestone",
+  features: "features",
+  reviewers: "reviewers",
+  rank: "rank",
+  deadline: "deadline",
+};
+
+/** The page's name for a field, given the mutation's — `body` is the description. */
+export function fieldLabel(field: string): string {
+  return FIELD_LABELS[field as keyof EntityEdit] ?? field;
+}
+
+/**
+ * An edit as a person would read it back: one line per field it names.
+ *
+ * For the alert that shows a refused edit beside what the file says now. A
+ * list is joined, an absence — a cleared milestone, an unplaced rank — is said
+ * as "none", and a field the edit does not name is not mentioned.
+ */
+export function describeEntityEdit(
+  change: Partial<EntityEdit>,
+): { field: string; value: string }[] {
+  const out: { field: string; value: string }[] = [];
+  for (const key of Object.keys(FIELD_LABELS) as (keyof EntityEdit)[]) {
+    const value = change[key];
+    if (value === undefined) continue;
+    const text = Array.isArray(value)
+      ? value.length === 0
+        ? "none"
+        : value.join(", ")
+      : value === null || value === ""
+        ? "none"
+        : String(value);
+    out.push({ field: FIELD_LABELS[key], value: text });
+  }
+  return out;
+}

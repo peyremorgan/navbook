@@ -15,6 +15,7 @@ import {
   errorHeading,
   isUnauthenticated,
   reparentConflict,
+  staleEdit,
   unservedBranch,
 } from "../../app/utils/errors";
 
@@ -186,5 +187,33 @@ describe("unservedBranch", () => {
       null,
     );
     assert.equal(unservedBranch(describeApiError(apolloError("x", { code: "NOT_FOUND" }))), null);
+  });
+});
+
+describe("staleEdit", () => {
+  it("reads the fields a refused edit was told had moved", () => {
+    const failure = describeApiError(
+      apolloError("title, milestone of #aaaa0001 changed since you opened it", {
+        code: "STALE_CONTENT",
+        moved: ["title", "milestone"],
+        details: ["reload it and apply your change to what it says now"],
+      }),
+    );
+    assert.deepEqual(staleEdit(failure), {
+      message: "title, milestone of #aaaa0001 changed since you opened it",
+      moved: ["title", "milestone"],
+    });
+  });
+
+  it("reads a per-file refusal, which names no fields, as stale all the same", () => {
+    const failure = describeApiError(
+      apolloError("auth/login-flow.md changed since you opened it", { code: "STALE_CONTENT" }),
+    );
+    assert.deepEqual(staleEdit(failure)?.moved, []);
+  });
+
+  it("is null for any other failure", () => {
+    assert.equal(staleEdit(describeApiError(apolloError("no", { code: "NOT_FOUND" }))), null);
+    assert.equal(staleEdit(describeApiError(new Error("offline"))), null);
   });
 });

@@ -18,7 +18,14 @@ import {
   type NavDoc,
   normalizeBody,
   parseDoc,
+  parseFile,
   patchDoc,
+  readAssignees,
+  readDeadline,
+  readFeatures,
+  readLabels,
+  readRank,
+  readReviewers,
   serializeDoc,
   setFlowList,
   writeScalarOrList,
@@ -124,6 +131,59 @@ export function applyEntityPatch(content: string, input: EntityPatch, path: stri
       details: ["fix the file by hand, or run 'nav doctor' to see what is wrong"],
     });
   }
+}
+
+/**
+ * The fields an entity patch can name, in the order a refusal lists them.
+ *
+ * Each is read from a file the way its resolver reads it, so that two spellings
+ * of one value — `assignee: A` and `assignee: [A]`, say — compare equal, and a
+ * respelling by a hand edit is never mistaken for somebody changing the field.
+ */
+const FIELD_READINGS: Record<
+  keyof Omit<EntityPatch, "ref" | "baseSha">,
+  (fm: Record<string, unknown>, body: string) => unknown
+> = {
+  title: (fm) => (typeof fm.title === "string" ? fm.title : ""),
+  body: (_fm, body) => body.trim(),
+  labels: (fm) => readLabels(fm),
+  assignees: (fm) => readAssignees(fm),
+  reviewers: (fm) => readReviewers(fm),
+  features: (fm) => readFeatures(fm),
+  milestone: (fm) =>
+    typeof fm.milestone === "string" && fm.milestone !== "" ? fm.milestone : null,
+  rank: (fm) => readRank(fm),
+  deadline: (fm) => readDeadline(fm),
+};
+
+/**
+ * The fields a patch names whose value differs between two versions of a file.
+ *
+ * This is the comparison behind a `baseSha` on an entity patch: `base` is the
+ * file as the client saw it and `current` is the file as it is now, and only a
+ * field the patch would write counts. A field somebody else changed that this
+ * patch leaves alone is not a conflict with anybody — the patch lands on their
+ * value and both changes survive — and refusing it would only teach clients to
+ * stop sending the hash. Names come back as the input spells them.
+ */
+export function movedFields(base: string, current: string, input: EntityPatch): string[] {
+  const before = parseFile(base);
+  const after = parseFile(current);
+  const moved: string[] = [];
+  for (const [field, read] of Object.entries(FIELD_READINGS)) {
+    if (input[field as keyof EntityPatch] === undefined) continue;
+    const was = JSON.stringify(read(before.fm, before.body));
+    const is = JSON.stringify(read(after.fm, after.body));
+    if (was !== is) moved.push(field);
+  }
+  return moved;
+}
+
+/** The fields a patch names, in the same order and spelling. */
+export function namedFields(input: EntityPatch): string[] {
+  return Object.keys(FIELD_READINGS).filter(
+    (field) => input[field as keyof EntityPatch] !== undefined,
+  );
 }
 
 /** True when a patch names nothing to change. */

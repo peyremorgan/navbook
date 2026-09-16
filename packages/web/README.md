@@ -42,6 +42,13 @@ prose several people work on. A save carries the version it started from, so a
 save made against a version somebody has since replaced is refused and offered
 a reload rather than landing on top of their paragraph.
 
+An issue's or a pull request's fields are edited one at a time, and each save
+carries the version it was read from too. When somebody changed that same field
+first, the save is refused, what was typed is kept on the page beside what the
+file says now, and the choice — save yours over it, or leave theirs — is made
+by clicking rather than by whoever happened to save last. A field somebody else
+changed that you did not touch is not a conflict, and your save lands beside it.
+
 Opening a pull request, appending a revision to one and merging it are not
 here, and neither is deleting anything — renaming or removing a feature or one
 of its documents included. They are checkout-centric maintainer actions and the

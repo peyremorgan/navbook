@@ -96,7 +96,11 @@ work on together, so the client reads and writes them; what it sends is still
 fields, and the server still composes the file. A save carries the hash the
 editor started from, and a save whose file has moved on since is refused rather
 than landed on top of somebody else's paragraph. That is the rule above applied
-to a document instead of a push: conflicts surface, they are not resolved.
+to a document instead of a push: conflicts surface, they are not resolved. An
+issue's and a pull request's fields are guarded the same way, in miniature: a
+field edited from a rendered value carries the hash of the file it was read
+from, and is refused only when that field — not the file — has changed since,
+because two people changing different fields of one issue are not in conflict.
 
 **The checkout-centric verbs are not exposed.** Opening a pull request,
 appending a revision to one, merging it, deleting an entity, `init`, and

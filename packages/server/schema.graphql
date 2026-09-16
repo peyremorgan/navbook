@@ -91,6 +91,15 @@ type Issue implements Entity {
   features: [String!]!
   body: String!
   comments: [Comment!]!
+  """
+  The blob hash of `issue.md` as it now stands.
+
+  Hand it back as `baseSha` when editing a field from a rendered value, and an
+  edit made against an older version of that field is refused rather than
+  landed on top of somebody else's (see `UpdateIssueInput.baseSha`). Comments
+  live in their own files, so the hash does not move when one is added.
+  """
+  baseSha: String!
 
   """
   Where the issue sits in the queue; lower first (spec 02 §2.5).
@@ -141,6 +150,8 @@ type Pr implements Entity {
   features: [String!]!
   body: String!
   comments: [Comment!]!
+  "The blob hash of `pr.md` as it now stands; see `Issue.baseSha`."
+  baseSha: String!
 
   "Branch the pull request proposes to merge into."
   target: String!
@@ -480,6 +491,18 @@ input UpdateIssueInput {
   rank: Float
   "When the work is wanted, `YYYY-MM-DD`; an explicit null undates it."
   deadline: String
+  """
+  The `baseSha` the edit was composed against, when it was composed against one.
+
+  Optional, unlike `UpdateSpecInput.baseSha`: a listing that toggles a label or
+  a drag that sets a rank has not read the file, and need not. Absent, the
+  patch lands on the file as it is. Present, the patch is refused with
+  `STALE_CONTENT` when a field it names has changed since — and only then, so
+  a label set on an issue somebody has just retitled still lands. The refusal
+  lists the fields that moved in `extensions.moved`, spelled as this input
+  spells them. A hash this server cannot resolve is stale by definition.
+  """
+  baseSha: String
 }
 
 type UpdateIssuePayload {
@@ -504,6 +527,8 @@ input UpdatePrInput {
   reviewers: [String!]
   milestone: String
   features: [String!]
+  "See `UpdateIssueInput.baseSha`."
+  baseSha: String
 }
 
 type UpdatePrPayload {

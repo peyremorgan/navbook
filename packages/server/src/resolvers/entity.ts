@@ -1,15 +1,19 @@
 /**
  * Projecting core's records onto the schema's types.
  *
- * Nothing here reads a file or runs git: these fields are already in the record
- * a query resolver returned. What they do is name frontmatter explicitly — `fm`
- * is an open map, and a schema that dumped it would promise a shape the format
- * does not guarantee.
+ * With one exception, nothing here reads a file or runs git: these fields are
+ * already in the record a query resolver returned. What they do is name
+ * frontmatter explicitly — `fm` is an open map, and a schema that dumped it
+ * would promise a shape the format does not guarantee. The exception is
+ * `baseSha`, which asks git what the entity's file hashes to, as
+ * `Feature.baseSha` does.
  */
 
 import {
+  absPath,
   type CommentRecord,
   type EntityRecord,
+  hashObject,
   parentNode,
   type ReviewSummary,
   readAssignees,
@@ -24,7 +28,7 @@ import {
   subtaskTree,
 } from "@navbook/core";
 import type { GraphQLCtx } from "../context.ts";
-import { invalidInput } from "../errors.ts";
+import { invalidInput, run } from "../errors.ts";
 import type {
   CommentResolvers,
   DiagnosticResolvers,
@@ -42,6 +46,37 @@ import {
   toGqlStatus,
   toGqlVerdict,
 } from "./map.ts";
+
+/**
+ * The blob hash of an entity's file, worked out once per record.
+ *
+ * Keyed by the record for the reason `Feature.baseSha` is: a write reads its
+ * entity back, so a payload holds a new record and gets a fresh answer, while a
+ * record that is asked twice in one request is hashed once. One `git
+ * hash-object` per entity that asks, which is the detail page and not the
+ * listing — a row has nothing to edit from, so its fragment never asks.
+ *
+ * Taken under the repository lock rather than beside it, as `Feature.commits`
+ * is: a field resolver runs after its parent's transaction has let go, and a
+ * file hashed while a close is moving its directory would hash to nothing.
+ *
+ * Empty is the answer when git cannot tell — a pull request read off another
+ * branch has no file here to hash. It is also the safe answer: an edit sent
+ * with a hash that can never match is refused, and nothing can be lost that
+ * way.
+ */
+const HASHES = new WeakMap<EntityRecord, Promise<string>>();
+
+function hashOf(ctx: GraphQLCtx, record: EntityRecord): Promise<string> {
+  let hash = HASHES.get(record);
+  if (hash === undefined) {
+    hash = run(() =>
+      ctx.sync.locked(() => hashObject(ctx.ws.repoRoot, absPath(ctx.ws, record.filePath)) ?? ""),
+    );
+    HASHES.set(record, hash);
+  }
+  return hash;
+}
 
 /** A frontmatter value when it is a non-empty string, and null otherwise. */
 function text(fm: Record<string, unknown>, key: string): string | null {
@@ -73,6 +108,7 @@ function sharedFields<P>(record: (parent: P) => EntityRecord) {
     features: (parent: P) => readFeatures(record(parent).fm),
     body: (parent: P) => record(parent).body.trim(),
     comments: (parent: P) => record(parent).comments,
+    baseSha: (parent: P, _args: unknown, ctx: GraphQLCtx) => hashOf(ctx, record(parent)),
   };
 }
 

@@ -128,3 +128,16 @@ export function unservedBranch(failure: ApiFailure): string | null {
   const ref = failure.extensions.sourceRef;
   return typeof ref === "string" ? ref : null;
 }
+
+/**
+ * The fields a `STALE_CONTENT` refusal of an entity patch said had moved.
+ *
+ * Named as the mutation's input names them (`body`, `assignees`), so a page can
+ * say which of its fields somebody else changed. A stale refusal that names
+ * none — the feature and document saves, which are per file — reads as an
+ * empty list rather than as not stale.
+ */
+export function staleEdit(failure: ApiFailure): { message: string; moved: string[] } | null {
+  if (failure.code !== "STALE_CONTENT") return null;
+  return { message: failure.message, moved: stringList(failure.extensions.moved) };
+}

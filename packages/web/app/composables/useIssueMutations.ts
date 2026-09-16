@@ -20,18 +20,21 @@ import {
   UNLINK_ISSUE,
   UPDATE_ISSUE,
 } from "~/graphql/mutations";
+import { describeApiError, staleEdit } from "~/utils/errors";
 import type { EntityPatch } from "~/utils/patch";
 
 /**
  * Failures the caller answers itself, so the shared toast stays quiet.
  *
- * Neither of these is really an error. `REPARENT_REQUIRED` is the server
- * asking whether you meant to move a subtask out from under the issue that
- * holds it — a question with a dialog behind it. `PRECONDITION` on a comment
- * names the branch to serve, which belongs beside the form, not in a toast
- * that disappears.
+ * None of these is really an error. `REPARENT_REQUIRED` is the server asking
+ * whether you meant to move a subtask out from under the issue that holds it —
+ * a question with a dialog behind it. `PRECONDITION` on a comment names the
+ * branch to serve, which belongs beside the form, not in a toast that
+ * disappears. `STALE_CONTENT` on an edit says somebody changed that field
+ * first, and only the page can show what it says now.
  */
 const ASKED = { handledCodes: ["REPARENT_REQUIRED", "PRECONDITION"] };
+const EDITED = { handledCodes: ["STALE_CONTENT"] };
 
 /**
  * Run a write, and return null rather than throwing when it fails.
@@ -57,7 +60,7 @@ export function useIssueMutations() {
   const refreshListings = useListingRefresh();
 
   const open = useMutation(OPEN_ISSUE);
-  const update = useMutation(UPDATE_ISSUE);
+  const update = useMutation(UPDATE_ISSUE, { context: EDITED });
   const close = useMutation(CLOSE_ISSUE);
   const reopen = useMutation(REOPEN_ISSUE);
   const comment = useMutation(ADD_COMMENT);
@@ -99,17 +102,31 @@ export function useIssueMutations() {
       });
     },
 
-    updateIssue(ref: string, patch: EntityPatch) {
-      return reported(async () => {
-        const payload = (await update.mutate({ input: { ref, ...patch } }))?.data?.updateIssue;
+    /**
+     * Patch some fields, saying which version of the file they were read from.
+     *
+     * `baseSha` is what lets the server refuse a field somebody else changed
+     * after the page was rendered, and that refusal is the one failure this
+     * lets through: it is a question — theirs or yours? — that only the page
+     * can put, beside what the file says now. A caller that edits from no
+     * rendered value, the inbox placing a row it dragged, sends no hash and is
+     * never asked.
+     */
+    async updateIssue(ref: string, patch: EntityPatch, baseSha?: string) {
+      try {
+        const input = { ref, ...patch, ...(baseSha === undefined ? {} : { baseSha }) };
+        const payload = (await update.mutate({ input }))?.data?.updateIssue;
         if (payload) {
           commit.report(payload.commit, "Saved");
           // A label, an assignee or a milestone decides which listings hold it,
           // and a rank or a deadline decides where in one it sits.
           refreshListings();
         }
-        return payload;
-      });
+        return payload ?? null;
+      } catch (failure) {
+        if (staleEdit(describeApiError(failure)) !== null) throw failure;
+        return null;
+      }
     },
 
     closeIssue(ref: string, resolution: string | null, duplicateOf: string | null) {

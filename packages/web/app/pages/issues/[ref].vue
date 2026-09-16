@@ -6,13 +6,19 @@
   null, so sending the whole form on every save would rewrite frontmatter
   nobody touched; `buildEntityPatch` sends only what changed, and nothing at
   all when nothing did.
+
+  Every save also says which version of the file it was edited from, and the
+  server refuses one whose field somebody else changed in the meantime. The
+  refused edit is kept and shown beside what the page now says, and the
+  decision is the person's: save theirs over it, having seen it, or leave it.
+  The page will not quietly pick one (spec 06 §6.3).
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
 import { FEATURES_QUERY, ISSUE_QUERY, ISSUES_QUERY } from "~/graphql/queries";
 import { buildCommentTree, countComments } from "~/utils/comments";
 import { distinctValues, shortId } from "~/utils/entities";
-import { describeApiError, reparentConflict } from "~/utils/errors";
+import { describeApiError, reparentConflict, staleEdit } from "~/utils/errors";
 import {
   buildEntityPatch,
   type EntityEdit,
@@ -80,6 +86,12 @@ const current = computed<EntityEdit>(() => ({
   deadline: issue.value?.deadline ?? null,
 }));
 
+/**
+ * An edit the server refused because its field had moved, kept until the
+ * person decides what to do with it.
+ */
+const stale = ref<{ change: Partial<EntityEdit>; moved: string[] } | null>(null);
+
 async function save(change: Partial<EntityEdit>): Promise<void> {
   if (issue.value === null) return;
   let patch: ReturnType<typeof buildEntityPatch>;
@@ -91,9 +103,29 @@ async function save(change: Partial<EntityEdit>): Promise<void> {
     return;
   }
   // Nothing changed. The server would refuse an empty patch, and it is right
-  // to: an edit that says nothing is not an edit.
-  if (patch === null) return;
-  await mutations.updateIssue(issue.value.id, patch);
+  // to: an edit that says nothing is not an edit. A refused edit reapplied
+  // once the page already says the same thing ends here too.
+  if (patch === null) {
+    stale.value = null;
+    return;
+  }
+  try {
+    const payload = await mutations.updateIssue(issue.value.id, patch, issue.value.baseSha);
+    if (payload) stale.value = null;
+  } catch (failure) {
+    const conflict = staleEdit(describeApiError(failure));
+    if (conflict === null) return;
+    // What was typed is kept; what the file says now is fetched and shown.
+    stale.value = { change, moved: conflict.moved };
+    await refetch();
+  }
+}
+
+/** Send the refused edit again, against the version the page now shows. */
+async function reapply(): Promise<void> {
+  const pending = stale.value;
+  if (pending === null) return;
+  await save(pending.change);
 }
 
 /* ------------------------------------------------------------- closing */
@@ -209,6 +241,15 @@ async function unlink(child: string): Promise<void> {
           <span>· {{ commentCount }} comment{{ commentCount === 1 ? "" : "s" }}</span>
         </div>
       </header>
+
+      <StaleEditAlert
+        v-if="stale"
+        :moved="stale.moved"
+        :change="stale.change"
+        :saving="mutations.busy.value"
+        @reapply="reapply"
+        @dismiss="stale = null"
+      />
 
       <UAlert
         v-if="issue.status === 'CLOSED'"
