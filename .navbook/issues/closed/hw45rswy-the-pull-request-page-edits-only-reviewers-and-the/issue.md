@@ -6,6 +6,7 @@ labels: [bug]
 assignee: noreply@anthropic.com
 feature: web
 parent: rmsuy3z6
+resolution: fixed
 ---
 
 A pull request's detail page in the web client renders Labels, Assignees and Milestone as read-only text, and offers no editor for the title or the body. Only `reviewers` can be changed.
