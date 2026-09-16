@@ -251,6 +251,34 @@ describe("the token endpoint", () => {
     assert.equal(replayed.status, 400);
   });
 
+  it("reads the audience from `resource`, on the authorization request and on every grant", async () => {
+    // RFC 8707's spelling, and the one Better Auth reads — at the token
+    // endpoint, not the authorize one.
+    const page = await (await fetch(authorizeUrl({ resource: "from-authorize" }))).text();
+    assert.match(page, /name="audience" value="from-authorize"/);
+
+    const code = await signIn();
+    const first = await exchange({
+      grant_type: "authorization_code",
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: REDIRECT,
+      resource: "https://api.example.invalid",
+    });
+    assert.equal(first.status, 200);
+    const tokens = first.json as unknown as Record<string, string>;
+    assert.equal(claims(tokens.access_token as string).aud, "https://api.example.invalid");
+
+    const renewed = await exchange({
+      grant_type: "refresh_token",
+      refresh_token: tokens.refresh_token as string,
+      resource: "https://other.example.invalid",
+    });
+    assert.equal(renewed.status, 200);
+    const access = (renewed.json as unknown as Record<string, string>).access_token as string;
+    assert.equal(claims(access).aud, "https://other.example.invalid");
+  });
+
   it("refuses a grant it does not implement", async () => {
     const { status, json } = await exchange({ grant_type: "password", username: "a" });
     assert.equal(status, 400);

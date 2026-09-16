@@ -17,31 +17,19 @@
  * behalf, and it keeps a reload from bouncing through the provider.
  */
 
-import { type User, UserManager, WebStorageStateStore } from "oidc-client-ts";
+import { type User, WebStorageStateStore } from "oidc-client-ts";
+import { ApiUserManager, oidcSettings } from "~/utils/oidc";
 
 export default defineNuxtPlugin((nuxtApp) => {
-  const config = nuxtApp.$navConfig;
-  const origin = window.location.origin;
+  const { oidc } = nuxtApp.$navConfig;
 
-  const manager = new UserManager({
-    authority: config.oidc.issuer,
-    client_id: config.oidc.clientId,
-    redirect_uri: `${origin}/auth/callback`,
-    post_logout_redirect_uri: origin,
-    response_type: "code",
-    scope: "openid profile email offline_access",
-    // Providers that mint API tokens want to be told which API. Ones that do
-    // not simply ignore it, so it is safe to send either way.
-    extraQueryParams: { audience: config.oidc.audience },
-    automaticSilentRenew: true,
-    // A hidden iframe renew needs third-party cookies. Refresh tokens do not.
-    silentRequestTimeoutInSeconds: 10,
-    userStore: new WebStorageStateStore({ store: window.sessionStorage }),
-    // The callback route reads the response itself, so leaving the code and
-    // state in the address bar afterwards would only invite a reload to
-    // replay a code the provider has already spent.
-    monitorSession: false,
-  });
+  const manager = new ApiUserManager(
+    {
+      ...oidcSettings({ ...oidc, origin: window.location.origin }),
+      userStore: new WebStorageStateStore({ store: window.sessionStorage }),
+    },
+    oidc.audience,
+  );
 
   const user = shallowRef<User | null>(null);
   manager.events.addUserLoaded((loaded: User) => {

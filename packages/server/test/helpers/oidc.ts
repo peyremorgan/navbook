@@ -18,8 +18,11 @@ export interface SignOptions {
   email?: string;
   /** Leave the `email` claim out, to prove a token without one is refused. */
   noEmail?: boolean;
-  /** Override the audience, to prove a wrong one is refused. */
-  audience?: string;
+  /**
+   * Override the audience, to prove a wrong one is refused — or give several,
+   * as a provider that adds its own userinfo endpoint does.
+   */
+  audience?: string | string[];
   /** Override the issuer, likewise. */
   issuer?: string;
   /** Issue a token that expired an hour ago. */

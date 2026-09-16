@@ -133,6 +133,16 @@ What the identity provider has to do:
 - **Mint JWT access tokens**, not opaque ones, since the server verifies the
   token itself against the issuer's JWKS.
 - **Put the audience in them.** The app asks for it, and the server checks it.
+  It asks under both names providers use: `audience` on the authorization
+  request, as Auth0 reads it, and `resource` (RFC 8707) on the authorization
+  request, the code exchange and every refresh. A provider that implements
+  resource indicators checks that value against the APIs it knows. Better
+  Auth, for one, refuses anything outside its `validAudiences` with
+  `invalid_request`, and mints an opaque token, not a JWT, when no
+  `resource` is sent at all. So the configured audience has to be a string
+  the provider lists as a valid audience. A token whose `aud` names more than
+  one audience is fine as long as this one is among them. Better Auth adds its
+  userinfo URL there.
 - **Include an `email` claim.** It is the identity: `author:` records it, so an
   issuer that lets somebody set an unverified address lets them author as that
   person ([server README](../server/README.md#deploying-it)).

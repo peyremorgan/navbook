@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { errorCode, type Harness, ok, startHarness } from "../helpers/harness.ts";
+import { AUDIENCE } from "../helpers/oidc.ts";
 
 const VIEWER = `query { viewer { name email } }`;
 
@@ -61,6 +62,21 @@ describe("authentication", () => {
   it("refuses a token minted for another audience", async () => {
     const elsewhere = await h.token({ audience: "some-other-service" });
     assert.equal(errorCode(await h.gql(VIEWER, undefined, elsewhere)), "UNAUTHENTICATED");
+  });
+
+  it("accepts a token whose audience is a list that includes this one", async () => {
+    // Better Auth appends its userinfo URL to `aud` whenever `openid` was
+    // asked for, so a token it mints for the API names two audiences.
+    const both = await h.token({
+      audience: [AUDIENCE, "https://id.example.invalid/api/auth/oauth2/userinfo"],
+    });
+    const data = ok<{ viewer: { email: string } }>(await h.gql(VIEWER, undefined, both));
+    assert.equal(data.viewer.email, "person@example.invalid");
+  });
+
+  it("refuses a token whose audience is a list that leaves this one out", async () => {
+    const others = await h.token({ audience: ["some-other-service", "and-another"] });
+    assert.equal(errorCode(await h.gql(VIEWER, undefined, others)), "UNAUTHENTICATED");
   });
 
   it("refuses a token claiming another issuer", async () => {
