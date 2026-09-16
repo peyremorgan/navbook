@@ -3,6 +3,7 @@ title: The pull request page edits only reviewers, and the README blames the API
 author: Claude <noreply@anthropic.com>
 created: 2026-09-16T06:00:20Z
 labels: [bug]
+assignee: noreply@anthropic.com
 feature: web
 ---
 
