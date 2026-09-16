@@ -14,6 +14,10 @@ revisions:
   - head: 62c7bde4ecc0e2a28617dd5bd2e2c7cfbaae444d
     base: 4be9a430f8bfc25f1b8a63f2eacebbbdbc1129aa
     date: 2026-09-16T07:46:08Z
+merged:
+  date: 2026-09-16T07:46:41Z
+  by: Claude <noreply@anthropic.com>
+  commit: 0af281e7f73abc73cc608e8734594ae37f4a6cdf
 ---
 
 Fixes #i3fyesqd.
