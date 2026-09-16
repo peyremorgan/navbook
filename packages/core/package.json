@@ -1,6 +1,6 @@
 {
   "name": "@navbook/core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The shared implementation behind Navbook's front ends: format logic, git plumbing, workspace I/O and operations",
   "keywords": [
     "issues",

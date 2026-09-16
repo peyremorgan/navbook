@@ -1,6 +1,6 @@
 {
   "name": "@navbook/server",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "GraphQL API server over @navbook/core, for the Navbook web client",
   "keywords": [
     "issues",

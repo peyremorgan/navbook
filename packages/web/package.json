@@ -1,6 +1,6 @@
 {
   "name": "@navbook/web",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Web UI for Navbook: a thin client of the @navbook/server GraphQL API",
   "license": "MIT",
