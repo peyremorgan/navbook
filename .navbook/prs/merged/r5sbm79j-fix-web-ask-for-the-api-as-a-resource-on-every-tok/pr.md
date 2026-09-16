@@ -10,6 +10,10 @@ revisions:
   - head: 2b176cbc8e024a48ff01a1f3840020c70b53f57d
     base: 71e01439e02c5d61a54414d3b912ce03dc328467
     date: 2026-09-16T17:06:22Z
+merged:
+  date: 2026-09-16T17:12:17Z
+  by: Claude <noreply@anthropic.com>
+  commit: e17b8bcfd88da4e9a6097153bb82282bd55481d0
 ---
 
 Fixes #i6nzbn1d. Against a provider that implements resource indicators (RFC 8707), and Better Auth in particular, the web client signed in and was then refused on every operation. The provider minted an opaque access token because no token request carried `resource`, and `nav-server` can only verify a JWT.
