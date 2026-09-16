@@ -2,6 +2,7 @@
 title: A pull request out of a long-lived branch leaves that branch a commit behind
 author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-08T14:45:05Z
+assignee: Claude <noreply@anthropic.com>
 labels: [enhancement]
 feature: [pull-requests, cli]
 parent: yoo6arff
