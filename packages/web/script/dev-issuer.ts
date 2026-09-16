@@ -181,7 +181,9 @@ export async function startDevIssuer(options: DevIssuerOptions = {}): Promise<De
         redirectUri,
         state: parameters.get("state") ?? "",
         nonce: parameters.get("nonce") ?? "",
-        audience: parameters.get("audience") ?? audienceDefault,
+        // `resource` is RFC 8707's spelling and `audience` Auth0's; the client
+        // sends both, and a provider reads whichever it knows.
+        audience: parameters.get("resource") ?? parameters.get("audience") ?? audienceDefault,
         codeChallenge: parameters.get("code_challenge") ?? "",
       }),
     );
@@ -223,7 +225,7 @@ export async function startDevIssuer(options: DevIssuerOptions = {}): Promise<De
       }
       // Rotated, as a provider that issues them should: the old one is spent.
       sessions.delete(presented);
-      json(response, 200, await mint(session, null));
+      json(response, 200, await mint(requested(form, session), null));
       return;
     }
 
@@ -255,12 +257,12 @@ export async function startDevIssuer(options: DevIssuerOptions = {}): Promise<De
       response,
       200,
       await mint(
-        {
+        requested(form, {
           name: record.name,
           email: record.email,
           audience: record.audience,
           clientId: record.clientId,
-        },
+        }),
         record.nonce,
       ),
     );
@@ -290,6 +292,22 @@ function authorizeProblem(parameters: URLSearchParams, clientId: string): string
   }
   if ((parameters.get("code_challenge") ?? "") === "") return "code_challenge is required";
   return null;
+}
+
+/**
+ * The session, with the audience a token request names in place of the one
+ * the sign-in asked for.
+ *
+ * Better Auth reads `resource` here, on the token request of every grant, and
+ * nowhere earlier, so this is where the spelling a real provider uses has to
+ * work. Without one, the audience the sign-in asked for stands: more lenient
+ * than Better Auth, which would mint an opaque token, so that a client in
+ * Auth0's mould still works in development. That the web client sends it on
+ * every grant is pinned by its own unit suite.
+ */
+function requested(form: URLSearchParams, session: Session): Session {
+  const resource = form.get("resource");
+  return resource === null || resource === "" ? session : { ...session, audience: resource };
 }
 
 /** The S256 challenge for a verifier, as RFC 7636 computes it. */
