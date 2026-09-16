@@ -7,16 +7,23 @@
  * under. That is why `author:` is data rather than derived from the committer —
  * the committer is the gateway, the author is the person.
  *
+ * Verifying is one question and admitting is another. A provider is often
+ * shared, so a verified token proves who is asking and nothing about whether
+ * they belong here; the authorization policy (`policy.ts`) is applied to the
+ * verified claims, after the identity has been read out of them.
+ *
  * Failures are deliberately uniform. A client learns that its token was not
- * accepted, never which of the checks rejected it.
+ * accepted, or that its account is not admitted, never which of the checks
+ * rejected it. The rule that refused a verified token goes to the log.
  */
 
 import type { Identity } from "@navbook/core";
 import { createRemoteJWKSet, type JWTPayload, type JWTVerifyGetKey, jwtVerify } from "jose";
-import { unauthenticated } from "./errors.ts";
+import { forbidden, unauthenticated } from "./errors.ts";
+import { type AuthPolicy, OPEN_POLICY, policyViolation } from "./policy.ts";
 
 export interface Authenticator {
-  /** The identity a request's headers prove, or a thrown 401. */
+  /** The identity a request's headers prove and the policy admits, or a thrown 401 or 403. */
   verify(header: string | null): Promise<Identity>;
 }
 
@@ -24,6 +31,10 @@ export interface AuthOptions {
   /** Where the provider is: its discovery document, or the issuer and its keys spelled out. */
   provider: OidcProvider;
   audience: string;
+  /** Who is admitted among those the provider vouches for; everyone, when absent. */
+  policy?: AuthPolicy;
+  /** Told why a verified token was refused, for the operator's log. */
+  report?: (line: string) => void;
   /** Key source, injected by tests that run their own issuer. */
   keys?: JWTVerifyGetKey;
 }
@@ -77,6 +88,8 @@ export async function makeAuthenticator(opts: AuthOptions): Promise<Authenticato
       ? await discoverProvider(opts.provider.discoveryUrl)
       : opts.provider;
   const keys = opts.keys ?? createRemoteJWKSet(new URL(jwksUrl));
+  const policy = opts.policy ?? OPEN_POLICY;
+  const report = opts.report ?? (() => undefined);
 
   return {
     async verify(header) {
@@ -98,7 +111,16 @@ export async function makeAuthenticator(opts: AuthOptions): Promise<Authenticato
         // failed is a detail an attacker would find more useful than a client.
         throw unauthenticated("the bearer token was not accepted");
       }
-      return identityFrom(payload);
+      const identity = identityFrom(payload);
+
+      // Admission comes after identity: a token with no email is not a person
+      // this server can act for, whatever else it carries.
+      const violation = policyViolation(payload, policy);
+      if (violation !== null) {
+        report(`refused ${identity.email}: ${violation}`);
+        throw forbidden("this account is not allowed on this repository");
+      }
+      return identity;
     },
   };
 }

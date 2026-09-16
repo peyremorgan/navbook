@@ -20,6 +20,7 @@ import { type Authenticator, makeAuthenticator } from "./auth.ts";
 import type { Config } from "./config.ts";
 import { makeGraphQLCtx } from "./context.ts";
 import { AuthorCache } from "./people.ts";
+import { isOpen } from "./policy.ts";
 import { makeSchema } from "./schema.ts";
 import { RepoSync } from "./sync.ts";
 
@@ -95,9 +96,23 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     report(`warning: no '${config.remote}' remote; running local-only, nothing will be pushed`);
   }
 
+  // An open deployment is a choice worth seeing made: with a shared provider
+  // it means everybody that provider knows, and nothing else would say so.
+  if (isOpen(config.policy)) {
+    report(
+      `warning: no authorization policy; every token the provider signs for '${config.audience}' may read and write`,
+    );
+  }
+
   const auth =
     opts.auth ??
-    (await makeAuthenticator({ provider: config.provider, audience: config.audience }));
+    (await makeAuthenticator({
+      provider: config.provider,
+      audience: config.audience,
+      policy: config.policy,
+      // Which rule refused whom is the operator's to know and the client's not to.
+      report,
+    }));
 
   const sync = new RepoSync({
     repoRoot,

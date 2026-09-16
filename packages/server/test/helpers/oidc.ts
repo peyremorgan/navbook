@@ -31,6 +31,8 @@ export interface SignOptions {
   noExpiry?: boolean;
   /** Sign with a key the issuer does not publish. */
   wrongKey?: boolean;
+  /** Anything else the token should carry — `roles`, `email_verified` — for the policy to read. */
+  claims?: Record<string, unknown>;
 }
 
 export interface StubIssuerOptions {
@@ -84,7 +86,7 @@ export async function startStubIssuer(options: StubIssuerOptions = {}): Promise<
     jwksUrl: `${issuer}/jwks`,
     async sign(opts: SignOptions = {}) {
       const now = Math.floor(Date.now() / 1000);
-      const claims: Record<string, unknown> = {};
+      const claims: Record<string, unknown> = { ...opts.claims };
       if (!opts.noEmail) claims.email = opts.email ?? "person@example.invalid";
       if (opts.name !== undefined) claims.name = opts.name;
 

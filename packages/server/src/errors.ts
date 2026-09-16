@@ -54,6 +54,17 @@ export function unauthenticated(message: string): GraphQLError {
   return apiError(message, "UNAUTHENTICATED", { http: { status: 401 } });
 }
 
+/**
+ * A person the provider vouches for, whom the policy does not admit.
+ *
+ * Distinct from {@link unauthenticated} on purpose: they *are* signed in, and
+ * a client that answered by sending them back to the provider would loop.
+ * Which rule refused them is the operator's log's to say, never this message's.
+ */
+export function forbidden(message: string): GraphQLError {
+  return apiError(message, "FORBIDDEN", { http: { status: 403 } });
+}
+
 /** Input this schema accepts but the format does not. */
 export function invalidInput(message: string, details: readonly string[] = []): GraphQLError {
   return apiError(message, "INVALID_INPUT", details.length > 0 ? { details } : {});

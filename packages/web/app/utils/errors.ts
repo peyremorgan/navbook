@@ -28,6 +28,7 @@ const HEADINGS: Record<string, string> = {
   AMBIGUOUS_ROOT: "The server's repository is ambiguous",
   BAD_ENV: "The server is misconfigured",
   DESTINATION_EXISTS: "Something is already there",
+  FORBIDDEN: "Not allowed on this repository",
   FRONTMATTER: "The file's frontmatter is not valid",
   GIT_ERROR: "A git command failed on the server",
   IDS_EXHAUSTED: "Could not mint an identifier",
@@ -106,6 +107,15 @@ function stringKeyedArray(value: unknown): unknown[] {
 /** True when the failure means the token is missing, expired or refused. */
 export function isUnauthenticated(failure: ApiFailure): boolean {
   return failure.code === "UNAUTHENTICATED";
+}
+
+/**
+ * True when the token was accepted but the account was not: the server's
+ * authorization policy refused it. Signing in again would change nothing,
+ * which is why this is not {@link isUnauthenticated}.
+ */
+export function isForbidden(failure: ApiFailure): boolean {
+  return failure.code === "FORBIDDEN";
 }
 
 /** The parent a `REPARENT_REQUIRED` refusal named, for the consent dialog. */

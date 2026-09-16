@@ -120,4 +120,104 @@ describe("loadConfig", () => {
   it("reports an unknown flag rather than ignoring it", () => {
     assert.throws(() => loadConfig({}, [...REQUIRED, "--wat"]), ConfigError);
   });
+
+  describe("the authorization policy", () => {
+    it("is open when nothing is given", () => {
+      assert.deepEqual(loadConfig({}, [...REQUIRED]).policy, {
+        requireClaims: [],
+        allowEmailDomains: [],
+        requireEmailVerified: false,
+      });
+    });
+
+    it("reads repeated claim flags, each as name=value", () => {
+      const { policy } = loadConfig({}, [
+        ...REQUIRED,
+        "--require-claim",
+        "roles=d3952bfb::developer",
+        "--require-claim",
+        "scope=navbook",
+      ]);
+      assert.deepEqual(policy.requireClaims, [
+        { name: "roles", value: "d3952bfb::developer" },
+        { name: "scope", value: "navbook" },
+      ]);
+    });
+
+    it("reads the claims from a comma-separated variable", () => {
+      const { policy } = loadConfig(
+        { NAV_SERVER_REQUIRE_CLAIMS: "roles=navbook::member, scope=navbook,," },
+        [...REQUIRED],
+      );
+      assert.deepEqual(policy.requireClaims, [
+        { name: "roles", value: "navbook::member" },
+        { name: "scope", value: "navbook" },
+      ]);
+    });
+
+    it("lets a flag replace the variable's list rather than join it", () => {
+      const { policy } = loadConfig({ NAV_SERVER_REQUIRE_CLAIMS: "roles=ignored" }, [
+        ...REQUIRED,
+        "--require-claim",
+        "roles=member",
+      ]);
+      assert.deepEqual(policy.requireClaims, [{ name: "roles", value: "member" }]);
+    });
+
+    it("refuses a claim requirement that is not name=value", () => {
+      for (const bad of ["roles", "=x", "roles="]) {
+        assert.throws(
+          () => loadConfig({}, [...REQUIRED, "--require-claim", bad]),
+          /--require-claim takes <name>=<value>/,
+        );
+      }
+      assert.throws(
+        () => loadConfig({ NAV_SERVER_REQUIRE_CLAIMS: "roles" }, [...REQUIRED]),
+        ConfigError,
+      );
+    });
+
+    it("reads the email domains, normalised, from flags or the variable", () => {
+      assert.deepEqual(
+        loadConfig({}, [...REQUIRED, "--allow-email-domain", "@Example.com"]).policy
+          .allowEmailDomains,
+        ["example.com"],
+      );
+      assert.deepEqual(
+        loadConfig({ NAV_SERVER_ALLOW_EMAIL_DOMAINS: "a.test, B.test" }, [...REQUIRED]).policy
+          .allowEmailDomains,
+        ["a.test", "b.test"],
+      );
+    });
+
+    it("refuses an address where a domain was wanted", () => {
+      assert.throws(
+        () => loadConfig({}, [...REQUIRED, "--allow-email-domain", "me@example.com"]),
+        /--allow-email-domain takes a domain/,
+      );
+    });
+
+    it("requires a verified email by flag or by variable, and only by 'true'", () => {
+      assert.equal(
+        loadConfig({}, [...REQUIRED, "--require-email-verified"]).policy.requireEmailVerified,
+        true,
+      );
+      assert.equal(
+        loadConfig({ NAV_SERVER_REQUIRE_EMAIL_VERIFIED: "true" }, [...REQUIRED]).policy
+          .requireEmailVerified,
+        true,
+      );
+      for (const off of ["false", ""]) {
+        assert.equal(
+          loadConfig({ NAV_SERVER_REQUIRE_EMAIL_VERIFIED: off }, [...REQUIRED]).policy
+            .requireEmailVerified,
+          false,
+        );
+      }
+      assert.throws(
+        () => loadConfig({ NAV_SERVER_REQUIRE_EMAIL_VERIFIED: "yes" }, [...REQUIRED]),
+        /NAV_SERVER_REQUIRE_EMAIL_VERIFIED takes true or false/,
+      );
+    });
+  });
 });

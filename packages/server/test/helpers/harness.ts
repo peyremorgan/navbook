@@ -56,6 +56,12 @@ export interface HarnessOptions extends FixtureOptions {
   prepare?: (fixture: Fixture) => void;
   /** Serve the GraphiQL explorer, as a default deployment does. */
   graphiql?: boolean;
+  /** An authorization policy, as its flags would be given; none admits everyone. */
+  policy?: {
+    requireClaims?: string[];
+    allowEmailDomains?: string[];
+    requireEmailVerified?: boolean;
+  };
 }
 
 /** Start a server, or report why it would not start. */
@@ -84,6 +90,12 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<Harness> 
       String(opts.pullIntervalMs ?? 0),
       ...(opts.gitTimeoutMs === undefined ? [] : ["--git-timeout-ms", String(opts.gitTimeoutMs)]),
       ...(opts.graphiql ? [] : ["--no-graphiql"]),
+      ...(opts.policy?.requireClaims ?? []).flatMap((claim) => ["--require-claim", claim]),
+      ...(opts.policy?.allowEmailDomains ?? []).flatMap((domain) => [
+        "--allow-email-domain",
+        domain,
+      ]),
+      ...(opts.policy?.requireEmailVerified ? ["--require-email-verified"] : []),
     ],
     { env: fixture.env, stdio: ["ignore", "pipe", "pipe"] },
   );

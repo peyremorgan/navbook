@@ -55,6 +55,7 @@ export interface DevIssuer {
 interface PendingCode {
   name: string;
   email: string;
+  roles: string[];
   nonce: string | null;
   audience: string;
   codeChallenge: string;
@@ -66,6 +67,8 @@ interface PendingCode {
 interface Session {
   name: string;
   email: string;
+  /** What the access token carries as `roles`, for trying the server's policy against. */
+  roles: string[];
   audience: string;
   clientId: string;
 }
@@ -87,8 +90,15 @@ export async function startDevIssuer(options: DevIssuerOptions = {}): Promise<De
   const mint = async (session: Session, nonce: string | null) => {
     const now = Math.floor(Date.now() / 1000);
     // The access token is the one `nav-server` verifies: its audience is the
-    // API's, and `email` is what every mutation records as the author.
-    const accessToken = await new SignJWT({ email: session.email, name: session.name })
+    // API's, and `email` is what every mutation records as the author. The
+    // roles, when the form gave any, are for a server started with a policy;
+    // `email_verified` is what a provider that checked the address would say.
+    const accessToken = await new SignJWT({
+      email: session.email,
+      email_verified: true,
+      name: session.name,
+      ...(session.roles.length === 0 ? {} : { roles: session.roles }),
+    })
       .setProtectedHeader({ alg: "RS256", kid: "dev-key" })
       .setIssuer(issuer)
       .setAudience(session.audience)
@@ -200,6 +210,7 @@ export async function startDevIssuer(options: DevIssuerOptions = {}): Promise<De
     pending.set(code, {
       name: (form.get("name") ?? "").trim(),
       email,
+      roles: (form.get("roles") ?? "").split(/\s+/).filter((role) => role !== ""),
       nonce: form.get("nonce") || null,
       audience: form.get("audience") || audienceDefault,
       codeChallenge: form.get("code_challenge") ?? "",
@@ -260,6 +271,7 @@ export async function startDevIssuer(options: DevIssuerOptions = {}): Promise<De
         requested(form, {
           name: record.name,
           email: record.email,
+          roles: record.roles,
           audience: record.audience,
           clientId: record.clientId,
         }),
@@ -328,7 +340,17 @@ export function discovery(issuer: string): Record<string, unknown> {
     id_token_signing_alg_values_supported: ["RS256"],
     scopes_supported: ["openid", "profile", "email", "offline_access"],
     token_endpoint_auth_methods_supported: ["none"],
-    claims_supported: ["sub", "iss", "aud", "exp", "iat", "email", "email_verified", "name"],
+    claims_supported: [
+      "sub",
+      "iss",
+      "aud",
+      "exp",
+      "iat",
+      "email",
+      "email_verified",
+      "name",
+      "roles",
+    ],
   };
 }
 
@@ -413,6 +435,9 @@ function loginPage(fields: LoginFields): string {
       <label for="email">Email</label>
       <input id="email" name="email" type="email" value="person@example.invalid"
              autocomplete="off" required>
+      <label for="roles">Roles <small>(optional, space-separated; for a server started with a policy)</small></label>
+      <input id="roles" name="roles" type="text" value="" autocomplete="off"
+             placeholder="navbook::member">
       <button type="submit">Sign in</button>
     </form>
   </body>

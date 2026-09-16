@@ -243,6 +243,9 @@ to exist first:
   header.
 - **An identity provider**, because authentication has no off switch. What it
   has to mint is in the [web client's README](packages/web/README.md#deploying-it).
+  If it is shared with other projects, also say who is allowed in — a claim,
+  an email domain or a verified address — since without a policy everybody it
+  knows may write ([server README](packages/server/README.md#who-is-allowed-in)).
 - **A repository, and a token that may push to it.** The token is what commits
   reach the remote as; the person a commit is *for* comes from their own token
   and is recorded as `author:`.

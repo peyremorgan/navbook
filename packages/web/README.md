@@ -101,7 +101,11 @@ client secret, no consent and no user database, so anyone may be anyone. It
 exists because authentication has no off switch — every operation the API
 answers, read or write, needs a token — and `nuxi dev` needs something to log
 into. It is grown from the server suite's stub issuer and keeps its shape, so
-both exercise the real verification path rather than a bypass.
+both exercise the real verification path rather than a bypass. Its form also
+takes a space-separated list of roles, minted into the access token as a
+`roles` array, and every token it mints says `email_verified`: that is how to
+try the server's [authorization policy](../server/README.md#who-is-allowed-in)
+and the refusal page against a `nav-server` started with one.
 
 ## Deploying it
 
@@ -165,8 +169,14 @@ What the identity provider has to do:
   hidden-iframe alternative depends on third-party cookies browsers no longer
   send.
 
-Authorization is out of scope here as it is on the server: any token the issuer
-signs for this audience may write. Put the policy you need in front.
+Who is allowed in is the server's decision, not this client's: it can be told
+to insist on a claim, an email domain or a verified address
+([server README](../server/README.md#who-is-allowed-in)), and a person the
+provider vouches for but the policy refuses is answered with `FORBIDDEN`. The
+client shows them a page saying the account is not allowed on this repository
+and offers to sign out, rather than sending them back to the provider — they
+are signed in, and that would loop. Without a policy, any token the issuer
+signs for this audience may write.
 
 [`compose.yaml`](../../compose.yaml) does both of the host's jobs in a
 container: nginx over the generated bundle, with `config.json` written from the

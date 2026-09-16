@@ -9,12 +9,17 @@
  * to rather than at the front page.
  */
 
+import { NOT_ALLOWED } from "~/utils/navigation";
+
 export default defineNuxtRouteMiddleware(async (to) => {
-  // Two routes are exempt, for opposite reasons. `/auth/callback` is where
-  // signing in finishes, and guarding it would send anyone completing a
-  // sign-in back to the provider to start another. `/signed-out` is where
-  // signing out lands, and guarding it would undo the signing out.
-  if (to.path === "/auth/callback" || to.path === "/signed-out") return;
+  // Three routes are exempt. `/auth/callback` is where signing in finishes,
+  // and guarding it would send anyone completing a sign-in back to the
+  // provider to start another. `/signed-out` is where signing out lands, and
+  // guarding it would undo the signing out. `/not-allowed` is where the
+  // server's refusal of a signed-in account is explained, and what it offers
+  // is signing out — a guard that sent them to the provider instead would
+  // bring them straight back with the same refused token.
+  if (to.path === "/auth/callback" || to.path === "/signed-out" || to.path === NOT_ALLOWED) return;
 
   const auth = useAuth();
   if (auth.signedIn.value) return;

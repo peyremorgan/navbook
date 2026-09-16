@@ -24,6 +24,14 @@
 export const HOME = "/issues?status=open";
 
 /**
+ * Where somebody the server's authorization policy refused is sent.
+ *
+ * Named here beside `HOME` because the Apollo error link navigates to it and
+ * the route guard exempts it, and the two have to agree on the spelling.
+ */
+export const NOT_ALLOWED = "/not-allowed";
+
+/**
  * A same-app path, or `HOME`.
  *
  * Accepts a path with its query and fragment; rejects anything that could name

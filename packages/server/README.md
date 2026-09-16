@@ -48,6 +48,9 @@ Every option has a flag and an environment variable. Flags win.
 | `--oidc-issuer <url>` | `NAV_SERVER_OIDC_ISSUER` | with `--oidc-jwks-url` | taken from the discovery document |
 | `--oidc-jwks-url <url>` | `NAV_SERVER_OIDC_JWKS_URL` | with `--oidc-issuer` | taken from the discovery document |
 | `--oidc-audience <aud>` | `NAV_SERVER_OIDC_AUDIENCE` | **yes** | — |
+| `--require-claim <name>=<value>` | `NAV_SERVER_REQUIRE_CLAIMS` | no | none; repeatable, comma-separated in the variable |
+| `--allow-email-domain <domain>` | `NAV_SERVER_ALLOW_EMAIL_DOMAINS` | no | none; repeatable, comma-separated in the variable |
+| `--require-email-verified` | `NAV_SERVER_REQUIRE_EMAIL_VERIFIED=true` | no | not required |
 | `--remote <name>` | `NAV_SERVER_REMOTE` | no | `origin` |
 | `--pull-interval-ms <n>` | `NAV_SERVER_PULL_INTERVAL_MS` | no | `10000` |
 | `--git-timeout-ms <n>` | `NAV_SERVER_GIT_TIMEOUT_MS` | no | `30000` (`0` waits as long as git does) |
@@ -69,6 +72,36 @@ fails with `SYNC_FAILED`, so a remote that has stopped answering costs one
 request rather than every request queued behind it. A stopped push leaves its
 commit in the clone, and the next push carries it. There is no way to turn
 authentication off: every operation, read or write, needs a valid token.
+
+### Who is allowed in
+
+A verified token proves who is asking; it says nothing about whether they
+belong on this repository. A provider is often shared — one sign-in for every
+project an organisation runs, sometimes with self-registration — and pointed
+at one, a server with no policy is open to everybody that provider knows. The
+three options above are the policy, applied after the token verifies and
+before any operation runs, `viewer` and introspection included. All are
+optional, and every one given has to hold:
+
+- `--require-claim roles=d3952bfb::developer` admits a token whose `roles`
+  claim carries that value: equal to it when the claim is a string, holding it
+  when the claim is an array, or containing it as a word when the claim is a
+  space-separated string — the shape `scope` always has and the one Better
+  Auth gives `roles`. Repeat the flag to require several claims. In the
+  variable, separate them with commas: `NAV_SERVER_REQUIRE_CLAIMS=roles=d3952bfb::developer,scope=navbook`.
+- `--allow-email-domain example.com` admits an `email` under that domain and
+  refuses every other, subdomains included. Repeat it for several.
+- `--require-email-verified` refuses a token whose `email_verified` is not
+  `true`. Without it, a provider that lets somebody set an unverified address
+  lets them author as that person.
+
+A token that verifies but fails the policy is refused with `FORBIDDEN` and a
+403, not `UNAUTHENTICATED`: the person is signed in, and a client that sent
+them back to the provider would loop. The refusal tells them their account is
+not allowed on this repository and nothing else; which rule refused whom is
+written to the server's log. Starting with no policy at all logs one warning
+line saying every token the provider signs for the audience may read and
+write, so an open deployment is a visible choice rather than an oversight.
 
 The server also honors `NAV_ROOT`, the variable that names the Navbook
 directory when a repository does not use `.navbook/` (see the
@@ -99,11 +132,14 @@ off if reaching it at all is more than you want to offer.
 - **Start it clean.** The server refuses to start on a dirty tree, a detached
   HEAD, or a repository with no `.navbook/` — each of those would otherwise
   surface as a puzzling failure on somebody's first mutation.
-- **Authorization is out of scope.** Any token the issuer signs for this
-  audience may write. Put the policy you need in front.
+- **Say who is allowed in.** Without a policy, any token the issuer signs for
+  this audience may read and write — everybody a shared provider knows. Give
+  the server the claim, domain or verification it should insist on
+  ([above](#who-is-allowed-in)).
 - **Identity is the `email` claim.** It is what `author:` records, so an issuer
-  that lets somebody set an unverified email lets them author as that person.
-  Tokens must carry an expiry; ones without are refused.
+  that lets somebody set an unverified email lets them author as that person;
+  `--require-email-verified` is the answer to that. Tokens must carry an
+  expiry; ones without are refused.
 
 [`compose.yaml`](../../compose.yaml) arranges all of that in a container: it
 makes the clone on the first start, gives it an identity through the
@@ -136,7 +172,7 @@ mutation {
 
 Failures carry a machine-readable `extensions.code`: every
 `WorkspaceErrorCode` from the core library (`NOT_FOUND`, `AMBIGUOUS`,
-`PRECONDITION`, …), plus `UNAUTHENTICATED`, `SYNC_CONFLICT`,
+`PRECONDITION`, …), plus `UNAUTHENTICATED`, `FORBIDDEN`, `SYNC_CONFLICT`,
 `SYNC_FAILED`, `SYNC_PUSH_REJECTED`, `REPARENT_REQUIRED`, `STALE_CONTENT`, and
 `GIT_ERROR`. A `GIT_ERROR` says only that a git command failed; what git
 actually said goes to the server's log, because its stderr can carry the

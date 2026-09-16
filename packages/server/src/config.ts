@@ -12,6 +12,12 @@
 
 import { parseArgs } from "node:util";
 import type { OidcProvider } from "./auth.ts";
+import {
+  type AuthPolicy,
+  type ClaimRequirement,
+  normalizeDomain,
+  parseClaimRequirement,
+} from "./policy.ts";
 
 export interface Config {
   /** The checkout the server operates on. */
@@ -21,6 +27,8 @@ export interface Config {
   provider: OidcProvider;
   /** The `aud` claim tokens must carry. */
   audience: string;
+  /** Who, among the people the provider vouches for, is allowed in. */
+  policy: AuthPolicy;
   /** Remote to synchronise with; local-only when the repository has none. */
   remote: string;
   /** How stale a read may let its view of the remote become, in milliseconds. */
@@ -39,6 +47,9 @@ const OPTIONS = {
   "oidc-issuer": { type: "string" },
   "oidc-jwks-url": { type: "string" },
   "oidc-audience": { type: "string" },
+  "require-claim": { type: "string", multiple: true },
+  "allow-email-domain": { type: "string", multiple: true },
+  "require-email-verified": { type: "boolean" },
   remote: { type: "string" },
   "pull-interval-ms": { type: "string" },
   "git-timeout-ms": { type: "string" },
@@ -57,6 +68,12 @@ export const USAGE = `Usage: nav-server [options]
   --oidc-jwks-url <url>      its JWKS endpoint; together with --oidc-issuer,
                              for a provider the server cannot discover
   --oidc-audience <aud>      audience tokens must carry (required)
+  --require-claim <name>=<value>
+                             only admit a token whose claim carries the value;
+                             repeatable, and every one must hold
+  --allow-email-domain <domain>
+                             only admit an email under this domain; repeatable
+  --require-email-verified   only admit a token whose email_verified is true
   --remote <name>            remote to synchronise with (default: origin)
   --pull-interval-ms <n>     how stale a read may be (default: 10000)
   --git-timeout-ms <n>       how long a fetch or push may take, 0 for as long
@@ -64,16 +81,20 @@ export const USAGE = `Usage: nav-server [options]
   --no-graphiql              do not serve the GraphiQL explorer
 
 Every option can also be given as an environment variable: --oidc-audience is
-NAV_SERVER_OIDC_AUDIENCE, and so on. Flags win over the environment.`;
+NAV_SERVER_OIDC_AUDIENCE, and so on. Flags win over the environment. The
+repeatable options are comma-separated there: NAV_SERVER_REQUIRE_CLAIMS and
+NAV_SERVER_ALLOW_EMAIL_DOMAINS; NAV_SERVER_REQUIRE_EMAIL_VERIFIED=true is the
+boolean. With no policy at all, every token the provider signs for the
+audience may read and write.`;
 
 export interface ParsedArgs {
-  values: Record<string, string | boolean | undefined>;
+  values: Record<string, string | string[] | boolean | undefined>;
   help: boolean;
 }
 
 /** Parse argv, reporting a bad flag as a {@link ConfigError}. */
 export function parseServerArgs(argv: readonly string[]): ParsedArgs {
-  let values: Record<string, string | boolean | undefined>;
+  let values: Record<string, string | string[] | boolean | undefined>;
   try {
     ({ values } = parseArgs({ args: [...argv], options: OPTIONS, allowPositionals: false }));
   } catch (error) {
@@ -104,6 +125,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, argv: readonly string[]): Con
     port: wholeNumber(read("port", "NAV_SERVER_PORT") ?? "4000", "--port"),
     provider: provider(read),
     audience: require("oidc-audience", "NAV_SERVER_OIDC_AUDIENCE"),
+    policy: policy(values, env),
     remote: read("remote", "NAV_SERVER_REMOTE") ?? "origin",
     pullIntervalMs: wholeNumber(
       read("pull-interval-ms", "NAV_SERVER_PULL_INTERVAL_MS") ?? "10000",
@@ -144,6 +166,60 @@ function provider(read: (flag: string, variable: string) => string | undefined):
   throw new ConfigError(
     "--oidc-issuer and --oidc-jwks-url go together; give both, or --oidc-discovery-url instead",
   );
+}
+
+/**
+ * The authorization policy, from three optional settings.
+ *
+ * A repeatable flag is a list of values; its variable is the same list with
+ * commas between, since an environment entry is one string. Flags win whole:
+ * a claim given on the command line replaces the variable's list rather than
+ * joining it, as every other setting's flag replaces its variable.
+ */
+function policy(
+  values: Record<string, string | string[] | boolean | undefined>,
+  env: NodeJS.ProcessEnv,
+): AuthPolicy {
+  const list = (flag: string, variable: string): string[] => {
+    const given = values[flag];
+    if (Array.isArray(given) && given.length > 0) return given;
+    const fromEnv = env[variable];
+    return fromEnv === undefined ? [] : fromEnv.split(",");
+  };
+
+  const requireClaims: ClaimRequirement[] = [];
+  for (const text of list("require-claim", "NAV_SERVER_REQUIRE_CLAIMS")) {
+    if (text.trim() === "") continue;
+    const requirement = parseClaimRequirement(text);
+    if (requirement === null) {
+      throw new ConfigError(`--require-claim takes <name>=<value>, got '${text}'`);
+    }
+    requireClaims.push(requirement);
+  }
+
+  const allowEmailDomains: string[] = [];
+  for (const text of list("allow-email-domain", "NAV_SERVER_ALLOW_EMAIL_DOMAINS")) {
+    if (text.trim() === "") continue;
+    const domain = normalizeDomain(text);
+    if (domain === null) {
+      throw new ConfigError(
+        `--allow-email-domain takes a domain such as example.com, got '${text}'`,
+      );
+    }
+    allowEmailDomains.push(domain);
+  }
+
+  const verified = env.NAV_SERVER_REQUIRE_EMAIL_VERIFIED;
+  if (verified !== undefined && verified !== "" && verified !== "true" && verified !== "false") {
+    throw new ConfigError(
+      `NAV_SERVER_REQUIRE_EMAIL_VERIFIED takes true or false, got '${verified}'`,
+    );
+  }
+  return {
+    requireClaims,
+    allowEmailDomains,
+    requireEmailVerified: values["require-email-verified"] === true || verified === "true",
+  };
 }
 
 function wholeNumber(value: string, what: string): number {

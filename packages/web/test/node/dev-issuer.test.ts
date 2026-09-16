@@ -42,10 +42,11 @@ function authorizeUrl(overrides: Record<string, string> = {}): URL {
 }
 
 /** Drive the login form the way a browser would, and return the code. */
-async function signIn(email = "person@example.invalid"): Promise<string> {
+async function signIn(email = "person@example.invalid", roles?: string): Promise<string> {
   const form = new URLSearchParams({
     name: "A Person",
     email,
+    ...(roles === undefined ? {} : { roles }),
     client_id: "navbook-web",
     redirect_uri: REDIRECT,
     state: "st8",
@@ -171,12 +172,32 @@ describe("the token endpoint", () => {
     assert.equal(access.email, "person@example.invalid");
     assert.equal(access.name, "A Person");
     assert.equal(typeof access.exp, "number");
+    // A provider that checked the address would say so, and a server told to
+    // insist on that must be satisfiable in development.
+    assert.equal(access.email_verified, true);
+    assert.equal(access.roles, undefined, "no roles were asked for");
 
     // oidc-client-ts checks the issuer, the client id and the nonce it sent.
     const identity = claims(tokens.id_token as string);
     assert.equal(identity.iss, issuer.issuer);
     assert.equal(identity.aud, "navbook-web");
     assert.equal(identity.nonce, "n0nce");
+  });
+
+  it("carries the roles the form named, for a server started with a policy", async () => {
+    const code = await signIn("person@example.invalid", " navbook::member  d3952bfb::developer ");
+    const { json } = await exchange({
+      grant_type: "authorization_code",
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: REDIRECT,
+      client_id: "navbook-web",
+    });
+    const tokens = json as unknown as Record<string, string>;
+    assert.deepEqual(claims(tokens.access_token as string).roles, [
+      "navbook::member",
+      "d3952bfb::developer",
+    ]);
   });
 
   it("refuses a code whose verifier does not match the challenge", async () => {

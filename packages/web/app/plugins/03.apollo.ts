@@ -20,7 +20,8 @@ import { setContext } from "@apollo/client/link/context";
 import { onError } from "@apollo/client/link/error";
 import { DefaultApolloClient } from "@vue/apollo-composable";
 import type { DocumentNode } from "graphql";
-import { describeApiError, errorHeading, isUnauthenticated } from "~/utils/errors";
+import { describeApiError, errorHeading, isForbidden, isUnauthenticated } from "~/utils/errors";
+import { NOT_ALLOWED } from "~/utils/navigation";
 
 /**
  * Codes a caller has said it will handle itself.
@@ -53,6 +54,9 @@ function isMutation(document: DocumentNode): boolean {
 export default defineNuxtPlugin((nuxtApp) => {
   const config = nuxtApp.$navConfig;
   const auth = useAuth();
+  // Taken here, in the plugin's own context: the error link runs outside any
+  // component and cannot ask for the router when it needs one.
+  const router = useRouter();
 
   const authLink = setContext(async (_operation, previous) => {
     const token = await auth.getAccessToken();
@@ -69,6 +73,15 @@ export default defineNuxtPlugin((nuxtApp) => {
       // no use to anybody. Dropping it means the next attempt signs in again
       // instead of retrying with the same rejected credential.
       void auth.forget().then(() => auth.login());
+      return;
+    }
+
+    if (isForbidden(failure)) {
+      // Signed in, and refused by the repository's policy. The token is good,
+      // so signing in again would only come back here; the page says so and
+      // offers to sign out. Every operation on a page fails the same way, so
+      // this fires several times for one visit — hence the check.
+      if (router.currentRoute.value.path !== NOT_ALLOWED) void router.replace(NOT_ALLOWED);
       return;
     }
 

@@ -13,6 +13,7 @@ import { describe, it } from "vitest";
 import {
   describeApiError,
   errorHeading,
+  isForbidden,
   isUnauthenticated,
   reparentConflict,
   staleEdit,
@@ -97,6 +98,7 @@ describe("errorHeading", () => {
       ["SYNC_CONFLICT", "The server's clone conflicts with the remote"],
       ["SYNC_PUSH_REJECTED", "The remote refused the push"],
       ["UNAUTHENTICATED", "Not signed in"],
+      ["FORBIDDEN", "Not allowed on this repository"],
       ["GIT_ERROR", "A git command failed on the server"],
     ] as const) {
       assert.equal(errorHeading(code), expected);
@@ -123,6 +125,22 @@ describe("isUnauthenticated", () => {
       false,
     );
     assert.equal(isUnauthenticated(describeApiError(new Error("offline"))), false);
+  });
+});
+
+describe("isForbidden", () => {
+  it("is the code the server sends with its 403, and not the 401's", () => {
+    assert.equal(isForbidden(describeApiError(apolloError("no", { code: "FORBIDDEN" }))), true);
+    assert.equal(
+      isForbidden(describeApiError(apolloError("no", { code: "UNAUTHENTICATED" }))),
+      false,
+    );
+    // The two are kept apart on purpose: one means sign in, the other means
+    // signing in would change nothing.
+    assert.equal(
+      isUnauthenticated(describeApiError(apolloError("no", { code: "FORBIDDEN" }))),
+      false,
+    );
   });
 });
 
