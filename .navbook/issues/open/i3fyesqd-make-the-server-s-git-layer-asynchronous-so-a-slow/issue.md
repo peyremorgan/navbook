@@ -2,6 +2,7 @@
 title: Make the server's git layer asynchronous, so a slow fetch or push stops blocking every other request
 author: Morgan PEYRE <morgan@peyre.info>
 created: 2026-09-16T06:09:56Z
+assignee: Claude <noreply@anthropic.com>
 labels: [enhancement]
 feature: [server, gateway]
 parent: tn7ptt6k
