@@ -10,7 +10,7 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { errorCode, type Harness, ok, startHarness } from "../helpers/harness.ts";
@@ -177,6 +177,33 @@ describe("a stale edit to an issue", () => {
       assert.deepEqual(moved(refused), ["title"]);
     }
     assert.equal((await show(issue.id)).title, "Unknown");
+  });
+
+  it("refuses a hash naming a blob that was never an entity file", async () => {
+    // A real object in the clone, just not one with frontmatter: the marker.
+    const issue = await open("Not a version");
+    const marker = h.fixture.server.git(["rev-parse", "HEAD:.navbook/navbook.json"]).stdout.trim();
+    assert.match(marker, SHA);
+    const refused = await h.gql(UPDATE, {
+      input: { ref: issue.id, title: "Mine", baseSha: marker },
+    });
+    assert.equal(errorCode(refused), "STALE_CONTENT");
+    assert.match(refused.errors[0]?.message ?? "", /a version this server does not have/);
+    assert.equal((await show(issue.id)).title, "Not a version");
+  });
+
+  it("is settled without git when the hash is the file's own", async () => {
+    // A hash that names the file as it is now needs no object lookup, so it
+    // holds even for a file whose blob was never written — which is the only
+    // way out for a served clone somebody has edited by hand.
+    const issue = await open("Hand edited");
+    const path = `${issue.path}/issue.md`;
+    const edited = fileOf(path).replace("Hand edited", "Hand edited, uncommitted");
+    writeFileSync(join(h.fixture.server.dir, path), edited);
+    const seen = await show(issue.id);
+    assert.equal(seen.title, "Hand edited, uncommitted");
+    const landed = await update({ ref: issue.id, labels: ["x"], baseSha: seen.baseSha });
+    assert.deepEqual(landed.labels, ["x"]);
   });
 
   it("refuses before anything is validated or written", async () => {

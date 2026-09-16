@@ -20,6 +20,7 @@ import {
   applyEntityEdit,
   bindReviewRevision,
   blobContent,
+  blobSha,
   type CommentRecord,
   closeEntity,
   createFeature,
@@ -30,6 +31,7 @@ import {
   editSpec,
   executeIssueLink,
   type FeatureRecord,
+  FrontmatterError,
   findEntity,
   findFeature,
   findParentIssue,
@@ -60,6 +62,7 @@ import {
   validateSpec,
   WorkspaceError,
 } from "@navbook/core";
+import type { GraphQLError } from "graphql";
 import { checkComposed, requireText } from "../compose.ts";
 import type { GraphQLCtx } from "../context.ts";
 import { apiError, invalidInput, run } from "../errors.ts";
@@ -573,17 +576,19 @@ async function patchEntity(
 /**
  * Refuse a patch to a field that has changed since the client read the file.
  *
- * The twin of core's `assertUnchanged`, per field rather than per file. The
- * hash names the version the client composed its edit against, and that blob
- * is still in the clone — every write here commits, so it is reachable for as
- * long as the hash came from this server. Two versions of the file are then
- * compared on the fields the patch names and nothing else (`movedFields`),
- * because a label set on an issue somebody has just retitled is not a conflict
- * with anybody.
+ * The twin of core's `assertUnchanged`, per field rather than per file. A hash
+ * of the file as it is now is the common case and is settled without git, the
+ * way core settles it: hash to hash. Otherwise the hash names the version the
+ * client composed its edit against, and that blob is still in the clone —
+ * every write here commits, so it is reachable for as long as the hash came
+ * from this server. The two versions are then compared on the fields the patch
+ * names and nothing else (`movedFields`), because a label set on an issue
+ * somebody has just retitled is not a conflict with anybody.
  *
- * A hash the clone cannot resolve — from a clone this one has not fetched, or
- * not a hash at all — is refused as stale rather than crashed on: there is no
- * way to tell what the client was looking at, and the refusal says so.
+ * A hash the clone cannot make sense of — one it has not fetched, one that is
+ * not a hash at all, or one naming a blob that was never an entity file — is
+ * refused as stale rather than crashed on: there is no way to tell what the
+ * client was looking at, and the refusal says so.
  */
 function assertFieldsUnmoved(
   ctx: GraphQLCtx,
@@ -592,24 +597,30 @@ function assertFieldsUnmoved(
   input: UpdateIssueInput | UpdatePrInput,
   baseSha: string,
 ): void {
+  if (blobSha(current) === baseSha) return;
+
+  const unknown = (): GraphQLError =>
+    stale(`#${entity.id} was read from a version this server does not have`, namedFields(input));
   const base = blobContent(ctx.ws.repoRoot, baseSha);
-  if (base === null) {
-    throw apiError(
-      `#${entity.id} was read from a version this server does not have`,
-      "STALE_CONTENT",
-      {
-        moved: namedFields(input),
-        details: ["reload it and apply your change to what it says now"],
-      },
-    );
+  if (base === null) throw unknown();
+
+  let moved: string[];
+  try {
+    moved = movedFields(base, current, input);
+  } catch (error) {
+    if (!(error instanceof FrontmatterError)) throw error;
+    throw unknown();
   }
-  const moved = movedFields(base, current, input);
   if (moved.length === 0) return;
-  throw apiError(
-    `${moved.join(", ")} of #${entity.id} changed since you opened it`,
-    "STALE_CONTENT",
-    { moved, details: ["reload it and apply your change to what it says now"] },
-  );
+  throw stale(`${moved.join(", ")} of #${entity.id} changed since you opened it`, moved);
+}
+
+/** The refusal, carrying the fields in doubt as the input spells them. */
+function stale(message: string, moved: string[]): GraphQLError {
+  return apiError(message, "STALE_CONTENT", {
+    moved,
+    details: ["reload it and apply your change to what it says now"],
+  });
 }
 
 type ReviewFields = Pick<NewCommentInput, "verdict" | "revision" | "file" | "line">;

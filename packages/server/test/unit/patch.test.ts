@@ -386,6 +386,21 @@ describe("movedFields", () => {
     assert.deepEqual(moved(junk, { deadline: "2026-10-01" }), []);
   });
 
+  it("does not count a null title or body, which the patch leaves alone", () => {
+    // `applyEntityPatch` writes a title or body only when given one; a null
+    // is not a clearing, so it is not a field to be refused over either.
+    assert.deepEqual(moved(RETITLED, { title: null, labels: ["x"] }), []);
+    assert.deepEqual(namedFields({ ref: "aa111111", title: null, body: null, labels: null }), [
+      "labels",
+    ]);
+  });
+
+  it("folds line endings before comparing the body", () => {
+    // A clean filter hands git LF and keeps CRLF on disk; same body.
+    const crlf = ORIGINAL.replace(/\n/g, "\r\n");
+    assert.deepEqual(movedFields(ORIGINAL, crlf, { ref: "aa111111", body: "Mine." }), []);
+  });
+
   it("names the pull request's reviewers by the input's spelling", () => {
     const asked = ORIGINAL.replace("milestone: v1", "milestone: v1\nreviewer: r@example.invalid");
     assert.deepEqual(moved(asked, { reviewers: [] }), ["reviewers"]);

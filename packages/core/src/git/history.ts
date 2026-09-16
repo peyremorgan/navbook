@@ -4,6 +4,7 @@
  * listings a feature's timeline is built from.
  */
 
+import { SHA_PATTERN } from "../core/files.ts";
 import { dedupePeople, type Person, parsePerson } from "../core/person.ts";
 import { git, gitMaybe, gitRun, gitRunAsync, splitLines } from "./exec.ts";
 
@@ -59,7 +60,7 @@ export function blobAt(cwd: string, sha: string, path: string): string | null {
  * caller may pass exactly what a client sent.
  */
 export function blobContent(cwd: string, sha: string): string | null {
-  if (!/^[0-9a-f]{40}([0-9a-f]{24})?$/i.test(sha)) return null;
+  if (!SHA_PATTERN.test(sha)) return null;
   const result = gitRun(["cat-file", "blob", sha], { cwd });
   return result.code === 0 ? result.stdout : null;
 }

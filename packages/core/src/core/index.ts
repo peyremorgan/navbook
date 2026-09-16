@@ -8,6 +8,7 @@
 export * from "./comments.ts";
 export * from "./files.ts";
 export * from "./frontmatter.ts";
+export * from "./hash.ts";
 export * from "./id.ts";
 export * from "./json.ts";
 export * from "./links.ts";

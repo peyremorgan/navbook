@@ -9,15 +9,14 @@
 
 import { useMutation } from "@vue/apollo-composable";
 import { ADD_SPEC, CREATE_FEATURE, UPDATE_FEATURE, UPDATE_SPEC } from "~/graphql/mutations";
-import { describeApiError } from "~/utils/errors";
+import { describeApiError, staleEdit } from "~/utils/errors";
 
 /** Codes a page answers itself, so the shared toast stays quiet about them. */
 const ASKED = { handledCodes: ["STALE_CONTENT"] } as const;
 
 /** The message a stale save was refused with, or null for any other failure. */
 export function staleContent(error: unknown): string | null {
-  const failure = describeApiError(error);
-  return failure.code === "STALE_CONTENT" ? failure.message : null;
+  return staleEdit(describeApiError(error))?.message ?? null;
 }
 
 export function useFeatureMutations() {

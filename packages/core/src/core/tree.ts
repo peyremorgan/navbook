@@ -8,6 +8,7 @@
 
 import { parseCommentFileName } from "./comments.ts";
 import { FEATURE_FILE, type ParsedFile, parseFile, readMerged, readPersonList } from "./files.ts";
+import { blobSha } from "./hash.ts";
 import { dedupePeople, type Person, parsePerson } from "./person.ts";
 import { parseReviewPolicy, type ReviewPolicyReading } from "./policy.ts";
 import { parseDirName, SLUG_PATTERN } from "./slug.ts";
@@ -65,6 +66,14 @@ export interface EntityRecord {
   dirPath: string;
   /** Path of `issue.md` or `pr.md`, relative to the Navbook directory. */
   filePath: string;
+  /**
+   * The git blob hash of that file's text, exactly as it was parsed.
+   *
+   * What an editor hands back to say which version it started from. It is of
+   * the text this record was built from, so a record and its hash can never
+   * disagree — which a hash taken from the file afterwards could.
+   */
+  blobSha: string;
   parsed: ParsedFile;
   fm: Record<string, unknown>;
   body: string;
@@ -499,6 +508,7 @@ function materialize(
     archiveYear: draft.archiveYear,
     dirPath: draft.dirPath,
     filePath: draft.entityFile,
+    blobSha: blobSha(files.get(draft.entityFile) ?? ""),
     parsed,
     fm: parsed.fm,
     body: parsed.body,

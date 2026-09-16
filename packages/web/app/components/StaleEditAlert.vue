@@ -1,5 +1,5 @@
 <!--
-  An edit the server refused because somebody changed that field first.
+  An edit the server refused as stale, kept until the person decides.
 
   The field editors close on save, so by the time the refusal arrives the words
   are no longer in an input; this is where they are kept. What was typed is the
@@ -7,29 +7,29 @@
   doing the losing the refusal exists to prevent. The page behind this alert
   has been fetched again, so it shows what the file says now.
 
+  Why it was refused is said in the server's words, because they are the
+  accurate ones: usually that somebody changed the field first, sometimes that
+  the version the page was read from is one the server cannot find, which is
+  not the same thing and must not be reported as if it were.
+
   Then the decision is the person's, which is the point of surfacing a conflict
   rather than resolving it (spec 06 §6.3): save theirs over what is there,
   having seen it, or leave it. Nothing here picks one.
 -->
 <script setup lang="ts">
-import { describeEntityEdit, type EntityEdit, fieldLabel } from "~/utils/patch";
+import { describeEntityEdit, type EntityEdit } from "~/utils/patch";
 
 const props = defineProps<{
-  /** The fields the server said had moved, as the mutation names them. */
-  moved: string[];
+  /** The server's own sentence about the refusal. */
+  message: string;
   /** The edit that was refused, as it was sent. */
   change: Partial<EntityEdit>;
+  /** True while a save is out, or the page is still being read again. */
   saving?: boolean;
 }>();
 
 const emit = defineEmits<{ reapply: []; dismiss: [] }>();
 
-const fields = computed(() => {
-  const names = props.moved.map(fieldLabel);
-  if (names.length === 0) return "this";
-  if (names.length === 1) return `the ${names[0]}`;
-  return `the ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-});
 const mine = computed(() => describeEntityEdit(props.change));
 </script>
 
@@ -43,9 +43,9 @@ const mine = computed(() => describeEntityEdit(props.change));
   >
     <template #description>
       <div class="space-y-3">
-        <p>
-          Somebody changed {{ fields }} while you were editing. Yours was not saved; the page now
-          shows what it says. Save yours over it, or leave theirs.
+        <p data-testid="stale-why">
+          {{ props.message }}. What you typed was not saved; the page now shows what the file
+          says. Save yours over it, or leave theirs.
         </p>
         <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm" data-testid="stale-mine">
           <template v-for="line in mine" :key="line.field">
@@ -60,6 +60,7 @@ const mine = computed(() => describeEntityEdit(props.change));
             size="xs"
             color="warning"
             :loading="props.saving"
+            :disabled="props.saving"
             data-testid="stale-reapply"
             @click="emit('reapply')"
           >

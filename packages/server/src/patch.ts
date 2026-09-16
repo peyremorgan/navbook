@@ -145,7 +145,9 @@ const FIELD_READINGS: Record<
   (fm: Record<string, unknown>, body: string) => unknown
 > = {
   title: (fm) => (typeof fm.title === "string" ? fm.title : ""),
-  body: (_fm, body) => body.trim(),
+  // Line endings folded: a clone with a clean filter hands git LF and keeps
+  // CRLF on disk, and the two are one body to everybody but a byte comparison.
+  body: (_fm, body) => body.replace(/\r\n/g, "\n").trim(),
   labels: (fm) => readLabels(fm),
   assignees: (fm) => readAssignees(fm),
   reviewers: (fm) => readReviewers(fm),
@@ -155,6 +157,17 @@ const FIELD_READINGS: Record<
   rank: (fm) => readRank(fm),
   deadline: (fm) => readDeadline(fm),
 };
+
+/**
+ * Whether a patch would write a field — the same reading `applyEntityPatch`
+ * makes of it. A null title or body is left alone rather than cleared, so it
+ * is not a field the patch names, and must not be one it is refused over.
+ */
+function names(input: EntityPatch, field: string): boolean {
+  const value = input[field as keyof EntityPatch];
+  if (value === undefined) return false;
+  return !((field === "title" || field === "body") && value === null);
+}
 
 /**
  * The fields a patch names whose value differs between two versions of a file.
@@ -171,7 +184,7 @@ export function movedFields(base: string, current: string, input: EntityPatch): 
   const after = parseFile(current);
   const moved: string[] = [];
   for (const [field, read] of Object.entries(FIELD_READINGS)) {
-    if (input[field as keyof EntityPatch] === undefined) continue;
+    if (!names(input, field)) continue;
     const was = JSON.stringify(read(before.fm, before.body));
     const is = JSON.stringify(read(after.fm, after.body));
     if (was !== is) moved.push(field);
@@ -181,9 +194,7 @@ export function movedFields(base: string, current: string, input: EntityPatch): 
 
 /** The fields a patch names, in the same order and spelling. */
 export function namedFields(input: EntityPatch): string[] {
-  return Object.keys(FIELD_READINGS).filter(
-    (field) => input[field as keyof EntityPatch] !== undefined,
-  );
+  return Object.keys(FIELD_READINGS).filter((field) => names(input, field));
 }
 
 /** True when a patch names nothing to change. */

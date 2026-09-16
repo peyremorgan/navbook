@@ -15,10 +15,10 @@
   nobody. The alert says which branch to serve instead, because that is the
   actual remedy and nothing this client does can substitute for it.
 
-  The other refusal is `STALE_CONTENT`, handled as the issue page handles it:
-  every save names the version it was edited from, a field somebody else
-  changed since is refused, and the refused edit is kept beside what the page
-  now says until the person decides between them.
+  The other refusal is `STALE_CONTENT`, and it is `useStaleEdit`'s, as on the
+  issue page: every save names the version it was edited from, a field somebody
+  else changed since is refused, and the refused edit is kept beside what the
+  page now says until the person decides between them.
 -->
 <script setup lang="ts">
 import { useMutation, useQuery } from "@vue/apollo-composable";
@@ -26,8 +26,8 @@ import { ADD_COMMENT, UPDATE_PR } from "~/graphql/mutations";
 import { FEATURES_QUERY, PR_QUERY, PRS_QUERY, REVIEW_POLICY_QUERY } from "~/graphql/queries";
 import { buildCommentTree, countComments } from "~/utils/comments";
 import { distinctValues, newestFirst, shortSha } from "~/utils/entities";
-import { describeApiError, staleEdit, unservedBranch } from "~/utils/errors";
-import { buildEntityPatch, type EntityEdit, PatchError } from "~/utils/patch";
+import { describeApiError, unservedBranch } from "~/utils/errors";
+import { buildEntityPatch, type EntityEdit, fieldLabel, PatchError } from "~/utils/patch";
 import type { Verdict } from "~~/src/generated/gql/graphql";
 
 const route = useRoute();
@@ -146,8 +146,7 @@ async function submit(input: {
 const { mutate: patch, loading: patching } = useMutation(UPDATE_PR, {
   context: { handledCodes: ["PRECONDITION", "STALE_CONTENT"] },
 });
-/** An edit refused because its field had moved, kept until the person decides. */
-const stale = ref<{ change: Partial<EntityEdit>; moved: string[]; wrote: string } | null>(null);
+const staleEdits = useStaleEdit({ refetch, resend: (change) => save(change) });
 // Asking somebody new to review is how they become somebody the repository
 // knows of, and the answer that listed everybody was fetched before they were.
 const refreshListings = useListingRefresh();
@@ -163,6 +162,13 @@ const current = computed<EntityEdit>(() => ({
   reviewers: [...(pr.value?.reviewers ?? [])],
 }));
 
+/** What the toast calls a save of these fields: "Title updated". */
+function wroteOf(change: Partial<EntityEdit>): string {
+  const [first] = Object.keys(change);
+  const label = fieldLabel(first ?? "field");
+  return `${label.charAt(0).toUpperCase()}${label.slice(1)} updated`;
+}
+
 /**
  * Patch one field, and say which one was written.
  *
@@ -172,7 +178,7 @@ const current = computed<EntityEdit>(() => ({
  * an explicit null, so sending the whole form would rewrite frontmatter nobody
  * touched.
  */
-async function save(change: Partial<EntityEdit>, wrote: string): Promise<void> {
+async function save(change: Partial<EntityEdit>): Promise<void> {
   if (pr.value === null) return;
 
   let built: ReturnType<typeof buildEntityPatch>;
@@ -184,31 +190,26 @@ async function save(change: Partial<EntityEdit>, wrote: string): Promise<void> {
     return;
   }
   // Nothing moved, so there is nothing to send: the server refuses an empty
-  // patch, and this is also what a closed editor should do.
+  // patch, and this is also what a closed editor should do. It does settle a
+  // refused edit of the same field: the page already says what was typed.
   if (built === null) {
-    stale.value = null;
+    staleEdits.settle(change);
     return;
   }
 
+  const { id, baseSha } = pr.value;
   try {
-    const written = await patch({
-      input: { ref: pr.value.id, ...built, baseSha: pr.value.baseSha },
-    });
-    const payload = written?.data?.updatePr;
-    if (payload) {
-      commitToast.report(payload.commit, wrote);
+    await staleEdits.attempt(change, async () => {
+      const written = await patch({ input: { ref: id, ...built, baseSha } });
+      const payload = written?.data?.updatePr;
+      if (!payload) return false;
+      commitToast.report(payload.commit, wroteOf(change));
       refreshListings();
       refusedOn.value = null;
-      stale.value = null;
-    }
+      return true;
+    });
   } catch (failure) {
     const described = describeApiError(failure);
-    const conflict = staleEdit(described);
-    if (conflict !== null) {
-      stale.value = { change, moved: conflict.moved, wrote };
-      await refetch();
-      return;
-    }
     const branch = unservedBranch(described);
     if (branch === null) {
       toast.add({ title: "Could not save", description: described.message, color: "error" });
@@ -216,13 +217,6 @@ async function save(change: Partial<EntityEdit>, wrote: string): Promise<void> {
     }
     refusedOn.value = branch;
   }
-}
-
-/** Send the refused edit again, against the version the page now shows. */
-async function reapply(): Promise<void> {
-  const pending = stale.value;
-  if (pending === null) return;
-  await save(pending.change, pending.wrote);
 }
 
 /**
@@ -249,7 +243,7 @@ const branchHint = computed(() => refusedOn.value);
           required
           :saving="patching"
           :disabled="branchHint !== null"
-          @save="(title: string) => save({ title }, 'Title updated')"
+          @save="(title: string) => save({ title })"
         >
           <h1 class="text-2xl font-semibold" data-testid="pr-title">{{ pr.title }}</h1>
         </EditableText>
@@ -277,12 +271,12 @@ const branchHint = computed(() => refusedOn.value);
       </header>
 
       <StaleEditAlert
-        v-if="stale"
-        :moved="stale.moved"
-        :change="stale.change"
-        :saving="patching"
-        @reapply="reapply"
-        @dismiss="stale = null"
+        v-if="staleEdits.stale.value"
+        :message="staleEdits.stale.value.message"
+        :change="staleEdits.stale.value.change"
+        :saving="patching || staleEdits.refetching.value"
+        @reapply="staleEdits.reapply"
+        @dismiss="staleEdits.dismiss"
       />
 
       <UAlert
@@ -310,7 +304,7 @@ const branchHint = computed(() => refusedOn.value);
             required
             :saving="patching"
             :disabled="branchHint !== null"
-            @save="(body: string) => save({ body }, 'Description updated')"
+            @save="(body: string) => save({ body })"
           >
             <MarkdownBody :source="pr.body" />
           </EditableText>
@@ -373,7 +367,7 @@ const branchHint = computed(() => refusedOn.value);
             :suggestions="people"
             :saving="patching"
             :disabled="branchHint !== null"
-            @save="(reviewers: string[]) => save({ reviewers }, 'Reviewers updated')"
+            @save="(reviewers: string[]) => save({ reviewers })"
           >
             <template #display>
               <ReviewList :reviews="pr.reviews" />
@@ -389,7 +383,7 @@ const branchHint = computed(() => refusedOn.value);
             :suggestions="known.labels"
             :saving="patching"
             :disabled="branchHint !== null"
-            @save="(labels: string[]) => save({ labels }, 'Labels updated')"
+            @save="(labels: string[]) => save({ labels })"
           />
           <LabelEditor
             title="Assignees"
@@ -399,7 +393,7 @@ const branchHint = computed(() => refusedOn.value);
             :suggestions="people"
             :saving="patching"
             :disabled="branchHint !== null"
-            @save="(assignees: string[]) => save({ assignees }, 'Assignees updated')"
+            @save="(assignees: string[]) => save({ assignees })"
           >
             <!--
               Kept as the avatars this page already showed rather than the
@@ -422,7 +416,7 @@ const branchHint = computed(() => refusedOn.value);
             :suggestions="known.features"
             :saving="patching"
             :disabled="branchHint !== null"
-            @save="(features: string[]) => save({ features }, 'Features updated')"
+            @save="(features: string[]) => save({ features })"
           />
           <LabelEditor
             title="Milestone"
@@ -433,7 +427,7 @@ const branchHint = computed(() => refusedOn.value);
             :suggestions="known.milestones"
             :saving="patching"
             :disabled="branchHint !== null"
-            @save="(values: string[]) => save({ milestone: values[0] ?? null }, 'Milestone updated')"
+            @save="(values: string[]) => save({ milestone: values[0] ?? null })"
           />
 
           <p class="break-all border-t border-default pt-4 text-xs text-muted">{{ pr.path }}</p>
