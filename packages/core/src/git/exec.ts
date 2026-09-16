@@ -154,9 +154,15 @@ export function gitRunAsync(args: string[], opts: GitAsyncOptions = {}): Promise
       clearTimeout(killer);
       outcome();
     };
+    // Ask first, insist later: what `spawnSync` does by default, and what lets
+    // git remove its lock files on the way out.
+    const stop = (): void => {
+      child.kill("SIGTERM");
+      killer ??= setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+    };
     const fail = (error: Error): void => {
       if (failure === null) failure = error;
-      child.kill("SIGKILL");
+      stop();
     };
 
     const stdout = collect(child.stdout, maxBuffer, () =>
@@ -169,8 +175,7 @@ export function gitRunAsync(args: string[], opts: GitAsyncOptions = {}): Promise
     if (opts.timeoutMs) {
       timer = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGTERM");
-        killer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+        stop();
       }, opts.timeoutMs);
     }
 
@@ -187,15 +192,12 @@ export function gitRunAsync(args: string[], opts: GitAsyncOptions = {}): Promise
       // `receive-pack`, a credential helper — keeps the pipes open until it
       // finishes, which is the wait the timeout exists to avoid.
       clearTimeout(timer);
-      if (!timedOut) return;
+      if (!timedOut && failure === null) return;
       dropOutput(child);
-      settle(() => reject(new GitTimeoutError(args, opts.timeoutMs ?? 0)));
+      settle(() => reject(failure ?? new GitTimeoutError(args, opts.timeoutMs ?? 0)));
     });
     child.on("close", (code) =>
-      settle(() => {
-        if (failure !== null) return reject(failure);
-        resolve({ code: code ?? 1, stdout: stdout(), stderr: stderr() });
-      }),
+      settle(() => resolve({ code: code ?? 1, stdout: stdout(), stderr: stderr() })),
     );
   });
 }
