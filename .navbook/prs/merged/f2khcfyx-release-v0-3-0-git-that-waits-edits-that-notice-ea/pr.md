@@ -10,6 +10,9 @@ revisions:
   - head: a7942c997148706b4dc154d69b19dcf3a7a89d3b
     base: eb7fb51b11700489c0a8c13354b3b6ee579b35ff
     date: 2026-09-16T21:27:50Z
+merged:
+  date: 2026-09-16T21:46:56Z
+  by: Morgan PEYRE <morgan.peyre@brickcode.tech>
 ---
 
 Releases v0.3.0: everything on `dev` since v0.2.0, 77 commits and 146 files, of which 48 are tracker records. Six pull requests landed: #zhbkqxr1, #oifeg19c, #k3hxjngm, #qwq7iwe9, #r5sbm79j and #kpz5ow8j. The last commit bumps all five `package.json` files from 0.2.0 to 0.3.0, so the `v0.3.0` tag matches what `release.yml` checks.
