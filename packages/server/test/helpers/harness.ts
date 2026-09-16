@@ -48,8 +48,10 @@ export interface HarnessOptions extends FixtureOptions {
   pullIntervalMs?: number;
   /** How long a fetch or push may take before the server stops it. */
   gitTimeoutMs?: number;
-  /** Discover the JWKS through the issuer rather than being told where it is. */
+  /** Point the server at the discovery document rather than spelling the issuer and its keys out. */
   discover?: boolean;
+  /** Put the issuer under a path its discovery document is not under; see the stub issuer. */
+  issuerPath?: string;
   /** Set the clone up before the server is started, e.g. onto another branch. */
   prepare?: (fixture: Fixture) => void;
   /** Serve the GraphiQL explorer, as a default deployment does. */
@@ -60,7 +62,9 @@ export interface HarnessOptions extends FixtureOptions {
 export async function startHarness(opts: HarnessOptions = {}): Promise<Harness> {
   const fixture = makeFixture(opts);
   opts.prepare?.(fixture);
-  const issuer = await startStubIssuer();
+  const issuer = await startStubIssuer(
+    opts.issuerPath === undefined ? {} : { issuerPath: opts.issuerPath },
+  );
 
   const [command, ...leading] = serverCommand();
   const child = spawn(
@@ -71,11 +75,11 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<Harness> 
       fixture.server.dir,
       "--port",
       "0",
-      "--oidc-issuer",
-      issuer.issuer,
       "--oidc-audience",
       AUDIENCE,
-      ...(opts.discover ? [] : ["--oidc-jwks-url", issuer.jwksUrl]),
+      ...(opts.discover
+        ? ["--oidc-discovery-url", issuer.discoveryUrl]
+        : ["--oidc-issuer", issuer.issuer, "--oidc-jwks-url", issuer.jwksUrl]),
       "--pull-interval-ms",
       String(opts.pullIntervalMs ?? 0),
       ...(opts.gitTimeoutMs === undefined ? [] : ["--git-timeout-ms", String(opts.gitTimeoutMs)]),

@@ -144,12 +144,13 @@ describe("the GraphiQL explorer", () => {
   });
 });
 
-describe("authentication with a discovered JWKS", () => {
+describe("authentication with a discovered provider", () => {
   let h: Harness;
 
   before(async () => {
-    // Told only the issuer, so the server must fetch its discovery document
-    // and find the key set the way it would from a real provider.
+    // Told only where the discovery document is, so the server must fetch it
+    // and take both the issuer and the key set from it, the way it would from
+    // a real provider.
     h = await startHarness({ discover: true });
   });
 
@@ -157,7 +158,37 @@ describe("authentication with a discovered JWKS", () => {
     await h.stop();
   });
 
-  it("finds the key set through OpenID discovery", async () => {
+  it("finds the issuer and the key set through OpenID discovery", async () => {
+    const data = ok<{ viewer: { email: string } }>(await h.gql(VIEWER));
+    assert.equal(data.viewer.email, "person@example.invalid");
+  });
+
+  it("still checks the issuer the document declared", async () => {
+    const response = await h.gql(
+      VIEWER,
+      undefined,
+      await h.token({ issuer: "https://other.invalid" }),
+    );
+    assert.equal(errorCode(response), "UNAUTHENTICATED");
+  });
+});
+
+describe("a provider whose discovery document is not under its issuer", () => {
+  let h: Harness;
+
+  before(async () => {
+    // The issuer is `http://host/api/auth`; `http://host/api/auth/.well-known/…`
+    // is a 404, and the document sits at the host root. Discovery by issuer
+    // cannot find it, discovery by URL can.
+    h = await startHarness({ discover: true, issuerPath: "/api/auth" });
+  });
+
+  after(async () => {
+    await h.stop();
+  });
+
+  it("accepts its tokens", async () => {
+    assert.match(h.issuer.issuer, /\/api\/auth$/);
     const data = ok<{ viewer: { email: string } }>(await h.gql(VIEWER));
     assert.equal(data.viewer.email, "person@example.invalid");
   });

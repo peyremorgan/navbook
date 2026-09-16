@@ -61,7 +61,7 @@ function settings() {
   const store = new WebStorageStateStore({ store: new InMemoryWebStorage() });
   return {
     ...oidcSettings({
-      issuer,
+      discoveryUrl: `${issuer}/.well-known/openid-configuration`,
       clientId: "navbook-web",
       audience: AUDIENCE,
       origin: "http://app.example.invalid",

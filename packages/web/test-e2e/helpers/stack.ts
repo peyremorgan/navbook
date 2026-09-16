@@ -80,12 +80,10 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       repo.dir,
       "--port",
       "0",
-      "--oidc-issuer",
-      issuer.issuer,
+      "--oidc-discovery-url",
+      `${issuer.issuer}/.well-known/openid-configuration`,
       "--oidc-audience",
       AUDIENCE,
-      "--oidc-jwks-url",
-      `${issuer.issuer}/jwks`,
       // Every read fetches, so a change made through one request is visible to
       // the next without waiting out a staleness window.
       "--pull-interval-ms",
@@ -106,7 +104,11 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
 
   const { url: appUrl, close: closeStatic } = await serveBundle({
     graphqlUrl: apiUrl,
-    oidc: { issuer: issuer.issuer, clientId: "navbook-web", audience: AUDIENCE },
+    oidc: {
+      discoveryUrl: `${issuer.issuer}/.well-known/openid-configuration`,
+      clientId: "navbook-web",
+      audience: AUDIENCE,
+    },
   });
 
   return {

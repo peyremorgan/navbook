@@ -10,7 +10,7 @@ ship to a browser: clients send fields, and the server composes the files.
 ```sh
 npx @navbook/server \
   --repo /srv/navbook-clone \
-  --oidc-issuer https://accounts.example.com \
+  --oidc-discovery-url https://accounts.example.com/.well-known/openid-configuration \
   --oidc-audience navbook
 ```
 
@@ -44,13 +44,23 @@ Every option has a flag and an environment variable. Flags win.
 |---|---|---|---|
 | `--repo <path>` | `NAV_SERVER_REPO` | no | the working directory |
 | `--port <n>` | `NAV_SERVER_PORT` | no | `4000` (`0` binds any free port) |
-| `--oidc-issuer <url>` | `NAV_SERVER_OIDC_ISSUER` | **yes** | — |
+| `--oidc-discovery-url <url>` | `NAV_SERVER_OIDC_DISCOVERY_URL` | **yes**, unless the next two | — |
+| `--oidc-issuer <url>` | `NAV_SERVER_OIDC_ISSUER` | with `--oidc-jwks-url` | taken from the discovery document |
+| `--oidc-jwks-url <url>` | `NAV_SERVER_OIDC_JWKS_URL` | with `--oidc-issuer` | taken from the discovery document |
 | `--oidc-audience <aud>` | `NAV_SERVER_OIDC_AUDIENCE` | **yes** | — |
-| `--oidc-jwks-url <url>` | `NAV_SERVER_OIDC_JWKS_URL` | no | discovered from the issuer |
 | `--remote <name>` | `NAV_SERVER_REMOTE` | no | `origin` |
 | `--pull-interval-ms <n>` | `NAV_SERVER_PULL_INTERVAL_MS` | no | `10000` |
 | `--git-timeout-ms <n>` | `NAV_SERVER_GIT_TIMEOUT_MS` | no | `30000` (`0` waits as long as git does) |
 | `--no-graphiql` | `NAV_SERVER_GRAPHIQL=false` | no | the explorer is served |
+
+The provider is named by its discovery document, which declares both the
+issuer a token must carry as `iss` and where the keys are published. That is
+the one address that works for every provider, including one whose issuer
+carries a path its document does not sit under (`https://auth.example/api/auth`
+publishing at `https://auth.example/.well-known/openid-configuration`). A
+provider the server cannot reach at start is spelled out instead, with
+`--oidc-issuer` and `--oidc-jwks-url` together; giving one without the other,
+or either alongside the discovery document, is refused rather than guessed at.
 
 `--pull-interval-ms` is how stale a *read* may let its view of the remote
 become; a mutation always fetches first. `--git-timeout-ms` is how long any

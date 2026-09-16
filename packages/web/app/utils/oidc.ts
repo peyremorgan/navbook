@@ -43,7 +43,8 @@ export class ApiUserManager extends UserManager {
 }
 
 export interface OidcOptions {
-  issuer: string;
+  /** The provider's discovery document; see `OidcConfig` for why not its issuer. */
+  discoveryUrl: string;
   clientId: string;
   audience: string;
   /** The app's own origin, which both redirects come back to. */
@@ -52,9 +53,14 @@ export interface OidcOptions {
 
 /** The settings that differ from oidc-client-ts's defaults, and why. */
 export function oidcSettings(options: OidcOptions): UserManagerSettings {
-  const { issuer, clientId, audience, origin } = options;
+  const { discoveryUrl, clientId, audience, origin } = options;
   return {
-    authority: issuer,
+    // The document's address is given outright rather than derived from an
+    // issuer, since a provider's document need not sit under its issuer. The
+    // authority is then only a name: the key the session is stored under, and
+    // what a sign-in state is checked against on the way back.
+    authority: discoveryUrl,
+    metadataUrl: discoveryUrl,
     client_id: clientId,
     redirect_uri: `${origin}/auth/callback`,
     post_logout_redirect_uri: origin,

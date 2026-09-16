@@ -33,14 +33,27 @@ export interface SignOptions {
   wrongKey?: boolean;
 }
 
+export interface StubIssuerOptions {
+  /**
+   * A path the issuer carries that its discovery document does not sit under:
+   * the document stays at the host root while `issuer`, and everything else,
+   * moves beneath the path. That is the shape of a provider such as
+   * `https://auth.example/api/auth`, and the case discovery by URL exists for.
+   */
+  issuerPath?: string;
+}
+
 export interface StubIssuer {
   issuer: string;
+  /** Where the discovery document is: at the host root, whatever the issuer's path. */
+  discoveryUrl: string;
   jwksUrl: string;
   sign(opts?: SignOptions): Promise<string>;
   close(): Promise<void>;
 }
 
-export async function startStubIssuer(): Promise<StubIssuer> {
+export async function startStubIssuer(options: StubIssuerOptions = {}): Promise<StubIssuer> {
+  const path = options.issuerPath ?? "";
   const pair = await generateKeyPair("RS256", { extractable: true });
   const stranger = await generateKeyPair("RS256", { extractable: true });
   const publicJwk: JWK = { ...(await exportJWK(pair.publicKey)), alg: "RS256", kid: "test-key" };
@@ -52,7 +65,7 @@ export async function startStubIssuer(): Promise<StubIssuer> {
       respond(response, { issuer, jwks_uri: `${issuer}/jwks` });
       return;
     }
-    if (url.startsWith("/jwks")) {
+    if (url.startsWith(`${path}/jwks`)) {
       respond(response, { keys: [publicJwk] });
       return;
     }
@@ -62,10 +75,12 @@ export async function startStubIssuer(): Promise<StubIssuer> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : 0;
-  issuer = `http://127.0.0.1:${port}`;
+  const host = `http://127.0.0.1:${port}`;
+  issuer = `${host}${path}`;
 
   return {
     issuer,
+    discoveryUrl: `${host}/.well-known/openid-configuration`,
     jwksUrl: `${issuer}/jwks`,
     async sign(opts: SignOptions = {}) {
       const now = Math.floor(Date.now() / 1000);
