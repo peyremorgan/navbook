@@ -20,11 +20,13 @@ tree of subtasks beneath it, filing, editing in place, closing with a
 resolution, reopening, commenting and replying, and linking or unlinking
 subtasks.
 
-**Pull requests**, read and reviewed: the listing, with a toggle for the
+**Pull requests**, read, reviewed and edited: the listing, with a toggle for the
 branches this checkout does not hold and one for the reviews you owe; the
 detail with its target, source, revisions and merge; comments or reviews bound
-to a revision; and who was asked to review, what each of them has said about
-the latest revision, and the decision that reading adds up to.
+to a revision; who was asked to review, what each of them has said about the
+latest revision, and the decision that reading adds up to; and the title,
+description, labels, assignees, features and milestone, each edited in place as
+an issue's are.
 
 **An inbox**, which is the one page about a person rather than about the
 repository: what is assigned to you, the pull requests you opened, and the
@@ -40,10 +42,14 @@ prose several people work on. A save carries the version it started from, so a
 save made against a version somebody has since replaced is refused and offered
 a reload rather than landing on top of their paragraph.
 
-Opening, updating and merging a pull request are not here, and neither is
-deleting anything — renaming or removing a feature or one of its documents
-included. They are checkout-centric maintainer actions and the API does not
-expose them ([server README](../server/README.md#what-it-does-not-do)).
+Opening a pull request, appending a revision to one and merging it are not
+here, and neither is deleting anything — renaming or removing a feature or one
+of its documents included. They are checkout-centric maintainer actions and the
+API does not expose them ([server README](../server/README.md#what-it-does-not-do)).
+
+Appending a revision is what `nav pr update` does, which is worth spelling out
+because that verb reads like the ordinary word: patching a pull request's fields
+is a different operation, it is `nav pr edit` and `updatePr`, and it is here.
 
 **Where you were**, when you come back: each listing remembers the filter it
 was last showing, so the Issues and Pull requests links reopen their listing

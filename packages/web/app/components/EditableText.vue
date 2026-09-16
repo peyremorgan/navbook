@@ -4,6 +4,10 @@
   Saving emits the new value and nothing else; whether it is a change at all is
   `buildEntityPatch`'s question, and an edit that changed nothing must not be
   sent — the mutation refuses an empty patch, and rightly.
+
+  `disabled` withdraws the offer to edit, as it does on `LabelEditor`, for the
+  one case where the server has already said it cannot take the write: a pull
+  request whose branch this checkout does not hold.
 -->
 <script setup lang="ts">
 const props = defineProps<{
@@ -14,6 +18,8 @@ const props = defineProps<{
   testid?: string;
   /** The format needs a title and the server refuses an empty body. */
   required?: boolean;
+  /** Set when this cannot be written at all; the field reads but does not offer. */
+  disabled?: boolean;
 }>();
 
 const emit = defineEmits<{ save: [string] }>();
@@ -62,6 +68,7 @@ function save(): void {
         <slot />
       </div>
       <UButton
+        v-if="!props.disabled"
         size="xs"
         color="neutral"
         variant="ghost"

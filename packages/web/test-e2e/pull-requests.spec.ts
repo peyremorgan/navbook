@@ -135,6 +135,46 @@ test("asks somebody else to review, and shows them as pending", async ({ signedI
   await expect(signedIn.getByTestId(`reviewer-${who}`)).toContainText("Pending");
 });
 
+test("edits the fields updatePr takes, not only the reviewers", async ({ signedIn, stack }) => {
+  // A fresh value each run, for the reason the reviewer test gives: the suite
+  // shares one repository across runs.
+  const label = `triaged-${Date.now()}`;
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0001`);
+
+  await signedIn.getByTestId("edit-labels").click();
+  await chooseOrCreate(signedIn, "input-labels", label);
+  await signedIn.getByTestId("save-labels").click();
+  await expect(toasts(signedIn)).toContainText("docs(pr): edit #bbbb0001");
+  await expect(signedIn.getByTestId(`chip-labels-${label}`)).toBeVisible();
+
+  // A milestone is the field the server has a test for and the page had no
+  // control for at all, which is the whole of this bug.
+  const milestone = `v${Date.now()}`;
+  await signedIn.getByTestId("edit-milestone").click();
+  await chooseOrCreate(signedIn, "input-milestone", milestone);
+  await signedIn.getByTestId("save-milestone").click();
+  await expect(signedIn.getByTestId(`chip-milestone-${milestone}`)).toBeVisible();
+
+  // And it survives a reload, so what is on screen is what was written rather
+  // than what the cache was told.
+  await signedIn.reload();
+  await expect(signedIn.getByTestId(`chip-labels-${label}`)).toBeVisible();
+  await expect(signedIn.getByTestId(`chip-milestone-${milestone}`)).toBeVisible();
+});
+
+test("edits a pull request's title in place", async ({ signedIn, stack }) => {
+  const title = `Raise the sign-in deadline (${Date.now()})`;
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0001`);
+
+  await signedIn.getByTestId("edit-title").click();
+  await signedIn.getByTestId("input-title").fill(title);
+  await signedIn.getByTestId("save-title").click();
+
+  await expect(signedIn.getByTestId("pr-title")).toHaveText(title);
+  await signedIn.reload();
+  await expect(signedIn.getByTestId("pr-title")).toHaveText(title);
+});
+
 test("records a review that judges nothing", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/prs/bbbb0001`);
   await signedIn.getByTestId("review-body").fill("Read it through; nothing to add.");
@@ -202,7 +242,11 @@ test("refuses to change the reviewers of a branch it does not serve", async ({
 
   // And it stops offering, as the comment form does: a second attempt would be
   // refused the same way, and typing into one is worse than not being asked.
-  await expect(signedIn.getByTestId("edit-reviewers")).toHaveCount(0);
+  // Every field goes, not just the one that was refused — the refusal is about
+  // the branch, which is the same answer for all of them.
+  for (const field of ["reviewers", "labels", "assignees", "features", "milestone", "title"]) {
+    await expect(signedIn.getByTestId(`edit-${field}`)).toHaveCount(0);
+  }
 });
 
 test("says so when there is no such pull request", async ({ signedIn, stack }) => {

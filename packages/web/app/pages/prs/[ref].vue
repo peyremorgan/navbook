@@ -2,11 +2,12 @@
   One pull request: what it proposes, which revisions it has had, and the
   review it has attracted.
 
-  Read apart from commenting and asking for a review. Opening a pull request,
-  appending a revision to one and merging it are checkout-centric — they need a
-  branch, a working tree and a merge — and the API deliberately does not expose
-  them, so neither does this. Its metadata is another matter: asking somebody to
-  review is a patch to one file, and it is exposed exactly as an issue's is.
+  Opening a pull request, appending a revision to one and merging it are
+  checkout-centric — they need a branch, a working tree and a merge — and the
+  API deliberately does not expose them, so neither does this. Its metadata is
+  another matter: every field `updatePr` takes is a patch to one file, and is
+  edited here exactly as an issue's is. Only `rank` and `deadline` are missing
+  from the sidebar, because they are an issue's alone (spec 02 §2.5).
 
   The refusal worth designing for is `PRECONDITION`. A pull request's files
   live on the branch it proposes to merge, so `allRefs` can find one this
@@ -17,11 +18,11 @@
 <script setup lang="ts">
 import { useMutation, useQuery } from "@vue/apollo-composable";
 import { ADD_COMMENT, UPDATE_PR } from "~/graphql/mutations";
-import { PR_QUERY, REVIEW_POLICY_QUERY } from "~/graphql/queries";
+import { FEATURES_QUERY, PR_QUERY, PRS_QUERY, REVIEW_POLICY_QUERY } from "~/graphql/queries";
 import { buildCommentTree, countComments } from "~/utils/comments";
-import { newestFirst, shortSha } from "~/utils/entities";
+import { distinctValues, newestFirst, shortSha } from "~/utils/entities";
 import { describeApiError, unservedBranch } from "~/utils/errors";
-import { buildEntityPatch, type EntityEdit } from "~/utils/patch";
+import { buildEntityPatch, type EntityEdit, PatchError } from "~/utils/patch";
 import type { Verdict } from "~~/src/generated/gql/graphql";
 
 const route = useRoute();
@@ -45,6 +46,35 @@ const reviewPolicy = computed(() => policyResult.value?.reviewPolicy ?? null);
 // which is precisely what offering only the people already asked cannot help
 // with. The repository knows who is around; this asks it.
 const people = usePeople();
+
+/*
+ * Suggestions for the sidebar's menus, exactly as the issue page gets them.
+ *
+ * Labels and milestones have no registry to read — the format keeps none — so
+ * a listing is fetched purely to have something to offer, and being incomplete
+ * costs nothing because every menu takes a value that is not in it. Features
+ * are real directories, so their list is the registry itself.
+ *
+ * The listing is the served checkout's, not `allRefs`: this is a menu, and the
+ * cheaper answer is the right one for a menu. It is also the same cache entry
+ * the listing page fills, so the common path asks for nothing new.
+ */
+const { result: listing } = useQuery(
+  PRS_QUERY,
+  { filter: {}, allRefs: false },
+  { fetchPolicy: "cache-first" },
+);
+const { result: featureList } = useQuery(FEATURES_QUERY, undefined, {
+  fetchPolicy: "cache-first",
+});
+const known = computed(() => {
+  const prs = listing.value?.prs ?? [];
+  return {
+    labels: distinctValues(prs, (item) => item.labels),
+    milestones: distinctValues(prs, (item) => (item.milestone ? [item.milestone] : [])),
+    features: (featureList.value?.features ?? []).map((feature) => feature.slug),
+  };
+});
 
 const comments = computed(() => buildCommentTree(pr.value?.comments ?? []));
 const commentCount = computed(() => countComments(comments.value));
@@ -106,7 +136,7 @@ async function submit(input: {
   }
 }
 
-/* ---------------------------------------------------------- review requests */
+/* ----------------------------------------------------------------- metadata */
 
 const { mutate: patch, loading: patching } = useMutation(UPDATE_PR, {
   context: { handledCodes: ["PRECONDITION"] },
@@ -115,33 +145,46 @@ const { mutate: patch, loading: patching } = useMutation(UPDATE_PR, {
 // knows of, and the answer that listed everybody was fetched before they were.
 const refreshListings = useListingRefresh();
 
+/** The pull request as the patch builder compares against. */
+const current = computed<EntityEdit>(() => ({
+  title: pr.value?.title ?? "",
+  body: pr.value?.body ?? "",
+  labels: [...(pr.value?.labels ?? [])],
+  assignees: [...(pr.value?.assignees ?? [])],
+  milestone: pr.value?.milestone ?? null,
+  features: [...(pr.value?.features ?? [])],
+  reviewers: [...(pr.value?.reviewers ?? [])],
+}));
+
 /**
- * Ask somebody to review, or take them off the list.
+ * Patch one field, and say which one was written.
  *
- * Only `reviewers` is editable here, so the patch is built against a `before`
- * that names only what this page can change: the shared builder still does the
- * work of sending nothing when nothing moved, which is what keeps a closed
- * editor from committing an empty edit.
+ * `rank` and `deadline` are absent because they are an issue's alone (spec 02
+ * §2.5); everything else `UpdatePrInput` takes is here. One field at a time
+ * for the reason the issue page gives: the mutation tells an absent key from
+ * an explicit null, so sending the whole form would rewrite frontmatter nobody
+ * touched.
  */
-async function saveReviewers(reviewers: string[]): Promise<void> {
+async function save(change: Partial<EntityEdit>, wrote: string): Promise<void> {
   if (pr.value === null) return;
-  const before: EntityEdit = {
-    title: pr.value.title,
-    body: pr.value.body,
-    labels: [...pr.value.labels],
-    assignees: [...pr.value.assignees],
-    milestone: pr.value.milestone ?? null,
-    features: [...pr.value.features],
-    reviewers: [...pr.value.reviewers],
-  };
-  const built = buildEntityPatch(before, { reviewers });
+
+  let built: ReturnType<typeof buildEntityPatch>;
+  try {
+    built = buildEntityPatch(current.value, change);
+  } catch (failure) {
+    if (!(failure instanceof PatchError)) throw failure;
+    toast.add({ title: "That will not do", description: failure.message, color: "error" });
+    return;
+  }
+  // Nothing moved, so there is nothing to send: the server refuses an empty
+  // patch, and this is also what a closed editor should do.
   if (built === null) return;
 
   try {
     const written = await patch({ input: { ref: pr.value.id, ...built } });
     const payload = written?.data?.updatePr;
     if (payload) {
-      commitToast.report(payload.commit, "Reviewers updated");
+      commitToast.report(payload.commit, wrote);
       refreshListings();
       refusedOn.value = null;
     }
@@ -173,7 +216,17 @@ const branchHint = computed(() => refusedOn.value);
   <QueryState :loading="loading && pr === null" :error="error" :skeleton-rows="5" @retry="refetch()">
     <article v-if="pr" class="space-y-6" data-testid="pr-detail">
       <header class="space-y-2">
-        <h1 class="text-2xl font-semibold" data-testid="pr-title">{{ pr.title }}</h1>
+        <EditableText
+          :value="pr.title"
+          label="title"
+          testid="title"
+          required
+          :saving="patching"
+          :disabled="branchHint !== null"
+          @save="(title: string) => save({ title }, 'Title updated')"
+        >
+          <h1 class="text-2xl font-semibold" data-testid="pr-title">{{ pr.title }}</h1>
+        </EditableText>
         <div class="flex flex-wrap items-center gap-2 text-sm text-muted">
           <StatusBadge :status="pr.status" :draft="pr.draft" />
           <code data-testid="pr-id">#{{ pr.id }}</code>
@@ -214,7 +267,18 @@ const branchHint = computed(() => refusedOn.value);
 
       <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
         <div class="space-y-6">
-          <MarkdownBody :source="pr.body" />
+          <EditableText
+            :value="pr.body"
+            label="description"
+            testid="body"
+            multiline
+            required
+            :saving="patching"
+            :disabled="branchHint !== null"
+            @save="(body: string) => save({ body }, 'Description updated')"
+          >
+            <MarkdownBody :source="pr.body" />
+          </EditableText>
 
           <section class="space-y-3">
             <h2 class="font-semibold">Discussion</h2>
@@ -274,7 +338,7 @@ const branchHint = computed(() => refusedOn.value);
             :suggestions="people"
             :saving="patching"
             :disabled="branchHint !== null"
-            @save="saveReviewers"
+            @save="(reviewers: string[]) => save({ reviewers }, 'Reviewers updated')"
           >
             <template #display>
               <ReviewList :reviews="pr.reviews" />
@@ -282,26 +346,60 @@ const branchHint = computed(() => refusedOn.value);
             </template>
           </LabelEditor>
 
-          <section v-if="pr.labels.length" class="space-y-1.5">
-            <h3 class="text-xs font-semibold uppercase tracking-wide text-muted">Labels</h3>
-            <div class="flex flex-wrap gap-1">
-              <UBadge v-for="label in pr.labels" :key="label" color="neutral" variant="subtle" size="sm">
-                {{ label }}
-              </UBadge>
-            </div>
-          </section>
-
-          <section v-if="pr.assignees.length" class="space-y-1.5">
-            <h3 class="text-xs font-semibold uppercase tracking-wide text-muted">Assignees</h3>
-            <div class="space-y-1 text-sm">
-              <PersonLabel v-for="who in pr.assignees" :key="who" :person="who" avatar />
-            </div>
-          </section>
-
-          <section v-if="pr.milestone" class="space-y-1.5">
-            <h3 class="text-xs font-semibold uppercase tracking-wide text-muted">Milestone</h3>
-            <p class="text-sm">{{ pr.milestone }}</p>
-          </section>
+          <LabelEditor
+            title="Labels"
+            icon="i-lucide-tag"
+            testid="labels"
+            :values="pr.labels"
+            :suggestions="known.labels"
+            :saving="patching"
+            :disabled="branchHint !== null"
+            @save="(labels: string[]) => save({ labels }, 'Labels updated')"
+          />
+          <LabelEditor
+            title="Assignees"
+            icon="i-lucide-user"
+            testid="assignees"
+            :values="pr.assignees"
+            :suggestions="people"
+            :saving="patching"
+            :disabled="branchHint !== null"
+            @save="(assignees: string[]) => save({ assignees }, 'Assignees updated')"
+          >
+            <!--
+              Kept as the avatars this page already showed rather than the
+              default chips: the display slot suppresses the component's own
+              "None", so the empty case has to be said here too.
+            -->
+            <template #display>
+              <div v-if="pr.assignees.length" class="space-y-1 text-sm">
+                <PersonLabel v-for="who in pr.assignees" :key="who" :person="who" avatar />
+              </div>
+              <p v-else class="text-sm text-muted">None</p>
+            </template>
+          </LabelEditor>
+          <LabelEditor
+            title="Features"
+            icon="i-lucide-layers"
+            testid="features"
+            link-to="/features/"
+            :values="pr.features"
+            :suggestions="known.features"
+            :saving="patching"
+            :disabled="branchHint !== null"
+            @save="(features: string[]) => save({ features }, 'Features updated')"
+          />
+          <LabelEditor
+            title="Milestone"
+            icon="i-lucide-flag"
+            testid="milestone"
+            single
+            :values="pr.milestone ? [pr.milestone] : []"
+            :suggestions="known.milestones"
+            :saving="patching"
+            :disabled="branchHint !== null"
+            @save="(values: string[]) => save({ milestone: values[0] ?? null }, 'Milestone updated')"
+          />
 
           <p class="break-all border-t border-default pt-4 text-xs text-muted">{{ pr.path }}</p>
         </aside>
