@@ -1,5 +1,5 @@
 ---
-title: "docs(issue): close #hc9g6iog"
+title: Name the OIDC provider by its discovery document
 author: Claude <noreply@anthropic.com>
 created: 2026-09-16T17:17:13Z
 target: dev
