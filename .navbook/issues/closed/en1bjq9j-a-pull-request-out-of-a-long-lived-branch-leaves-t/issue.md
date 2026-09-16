@@ -6,6 +6,7 @@ assignee: Claude <noreply@anthropic.com>
 labels: [enhancement]
 feature: [pull-requests, cli]
 parent: yoo6arff
+resolution: fixed
 ---
 
 `nav pr merge` records the merge as a commit on the target branch: the directory move from `prs/open/` to `prs/merged/`, and the `merged:` block appended to `pr.md`. That commit lands on the target and nowhere else.
