@@ -5,6 +5,7 @@ created: 2026-09-17T20:59:29Z
 labels: [enhancement]
 assignee: Claude <noreply@anthropic.com>
 feature: web
+resolution: fixed
 ---
 
 The format defines a cross-reference in prose as `#<id>` (spec 02 §2.9), and
