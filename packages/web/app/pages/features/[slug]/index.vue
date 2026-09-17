@@ -12,6 +12,7 @@ import { useQuery } from "@vue/apollo-composable";
 import { staleContent } from "~/composables/useFeatureMutations";
 import { FEATURE_QUERY } from "~/graphql/queries";
 import { mergeTimeline } from "~/utils/timeline";
+import { pageTitle } from "~/utils/title";
 
 const route = useRoute();
 const toast = useToast();
@@ -22,6 +23,9 @@ const { result, loading, error, refetch } = useQuery(FEATURE_QUERY, () => ({ slu
   fetchPolicy: "cache-and-network",
 });
 const feature = computed(() => result.value?.feature ?? null);
+
+// The slug until the feature arrives, then the title people gave it.
+useHead({ title: computed(() => pageTitle(feature.value?.title ?? slug.value)) });
 
 const timeline = computed(() =>
   mergeTimeline({

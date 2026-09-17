@@ -7,7 +7,11 @@
   bouncing straight back to the provider would loop.
 -->
 <script setup lang="ts">
+import { pageTitle } from "~/utils/title";
+
 definePageMeta({ layout: false });
+
+useHead({ title: pageTitle("Signing in") });
 
 const auth = useAuth();
 const failure = ref<string | null>(null);

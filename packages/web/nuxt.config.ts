@@ -21,6 +21,11 @@ export default defineNuxtConfig({
   devtools: { enabled: false },
   app: {
     head: {
+      // The shell's title, and the only one until the route resolves: with
+      // `ssr: false` this same HTML is served for every address, so it has to
+      // be the name that is true of all of them. Each page then names itself
+      // with `useHead` (`app/utils/title.ts`), which is what makes a browser
+      // history readable — without it every entry said `Navbook`.
       title: "Navbook",
       meta: [{ name: "viewport", content: "width=device-width, initial-scale=1" }],
     },

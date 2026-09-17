@@ -7,7 +7,12 @@
   again without asking. This page asks.
 -->
 <script setup lang="ts">
+import { pageTitle } from "~/utils/title";
+
 definePageMeta({ layout: false });
+
+useHead({ title: pageTitle("Signed out") });
+
 const auth = useAuth();
 </script>
 

@@ -17,8 +17,12 @@
 -->
 <script setup lang="ts">
 import { HOME } from "~/utils/navigation";
+import { pageTitle } from "~/utils/title";
 
 definePageMeta({ layout: false });
+
+useHead({ title: pageTitle("Account not allowed") });
+
 const auth = useAuth();
 </script>
 

@@ -16,6 +16,9 @@ import { FEATURES_QUERY, ISSUES_QUERY } from "~/graphql/queries";
 import { distinctValues } from "~/utils/entities";
 import { DEADLINE_STATES, ISSUE_STATUSES } from "~/utils/filter-params";
 import { isSortOrder, type SortOrder, sortRows } from "~/utils/sort";
+import { pageTitle } from "~/utils/title";
+
+useHead({ title: pageTitle("Issues") });
 
 const route = useRoute();
 const router = useRouter();

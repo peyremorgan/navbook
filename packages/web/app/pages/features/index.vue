@@ -8,6 +8,9 @@
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
 import { FEATURES_QUERY } from "~/graphql/queries";
+import { pageTitle } from "~/utils/title";
+
+useHead({ title: pageTitle("Features") });
 
 const mutations = useFeatureMutations();
 

@@ -28,6 +28,9 @@
 <script setup lang="ts">
 import { type InboxSelection, narrowInbox, railCounts, sortInbox } from "~/utils/inbox";
 import type { SortOrder } from "~/utils/sort";
+import { pageTitle } from "~/utils/title";
+
+useHead({ title: pageTitle("Inbox") });
 
 const view = useInboxView();
 const mutations = useIssueMutations();

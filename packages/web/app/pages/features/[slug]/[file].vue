@@ -9,6 +9,7 @@
 import { useQuery } from "@vue/apollo-composable";
 import { staleContent } from "~/composables/useFeatureMutations";
 import { FEATURE_QUERY } from "~/graphql/queries";
+import { pageTitle } from "~/utils/title";
 
 const route = useRoute();
 const mutations = useFeatureMutations();
@@ -22,6 +23,14 @@ const feature = computed(() => result.value?.feature ?? null);
 const spec = computed(
   () => feature.value?.specs.find((candidate) => candidate.fileName === fileName.value) ?? null,
 );
+
+// The document, then the feature it describes — the same order the breadcrumb
+// reads in, and the same order a narrowing tab drops.
+useHead({
+  title: computed(() =>
+    pageTitle(spec.value?.title ?? fileName.value, feature.value?.title ?? slug.value),
+  ),
+});
 
 const stale = ref<string | null>(null);
 

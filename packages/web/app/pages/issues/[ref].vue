@@ -26,6 +26,7 @@ import {
   parseRankInput,
 } from "~/utils/patch";
 import { countSubtasks } from "~/utils/subtasks";
+import { entityTitle } from "~/utils/title";
 
 const route = useRoute();
 const toast = useToast();
@@ -39,6 +40,16 @@ const { result, loading, error, refetch } = useQuery(
   { fetchPolicy: "cache-and-network" },
 );
 const issue = computed(() => result.value?.issue ?? null);
+
+// Named from the address at once and from the issue when it arrives, so a
+// history entry carries the title rather than the reference somebody clicked.
+useHead({
+  title: computed(() =>
+    issue.value === null
+      ? entityTitle(reference.value)
+      : entityTitle(issue.value.id, issue.value.title),
+  ),
+});
 
 /*
  * Suggestions for the sidebar's menus.

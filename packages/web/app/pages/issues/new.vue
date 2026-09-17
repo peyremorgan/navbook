@@ -10,6 +10,9 @@ import { useQuery } from "@vue/apollo-composable";
 import { FEATURES_QUERY, ISSUES_QUERY } from "~/graphql/queries";
 import { distinctValues } from "~/utils/entities";
 import { normalizeList, normalizeOptional, parseRankInput } from "~/utils/patch";
+import { pageTitle } from "~/utils/title";
+
+useHead({ title: pageTitle("New issue") });
 
 const route = useRoute();
 const toast = useToast();

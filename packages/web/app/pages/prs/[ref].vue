@@ -28,6 +28,7 @@ import { buildCommentTree, countComments } from "~/utils/comments";
 import { distinctValues, newestFirst, shortSha } from "~/utils/entities";
 import { describeApiError, unservedBranch } from "~/utils/errors";
 import { buildEntityPatch, type EntityEdit, fieldLabel, PatchError } from "~/utils/patch";
+import { entityTitle } from "~/utils/title";
 import type { Verdict } from "~~/src/generated/gql/graphql";
 
 const route = useRoute();
@@ -40,6 +41,14 @@ const { result, loading, error, refetch } = useQuery(PR_QUERY, () => ({ ref: ref
   fetchPolicy: "cache-and-network",
 });
 const pr = computed(() => result.value?.pr ?? null);
+
+// As on the issue page: the reference is known from the address, the title
+// when the query answers.
+useHead({
+  title: computed(() =>
+    pr.value === null ? entityTitle(reference.value) : entityTitle(pr.value.id, pr.value.title),
+  ),
+});
 
 // A property of the repository rather than of this pull request, so it is its
 // own query: it explains the decision beside it, and a page that failed to
