@@ -28,7 +28,14 @@
 <script setup lang="ts">
 import { useMutation, useQuery } from "@vue/apollo-composable";
 import { ADD_COMMENT, UPDATE_PR } from "~/graphql/mutations";
-import { FEATURES_QUERY, PR_QUERY, PRS_QUERY, REVIEW_POLICY_QUERY } from "~/graphql/queries";
+import {
+  FEATURES_QUERY,
+  PR_CHANGES_QUERY,
+  PR_COMMITS_QUERY,
+  PR_QUERY,
+  PRS_QUERY,
+  REVIEW_POLICY_QUERY,
+} from "~/graphql/queries";
 import { buildCommentTree, countComments } from "~/utils/comments";
 import { distinctValues, newestFirst, shortSha } from "~/utils/entities";
 import { describeApiError, unservedBranch } from "~/utils/errors";
@@ -37,10 +44,77 @@ import { entityTitle } from "~/utils/title";
 import type { Verdict } from "~~/src/generated/gql/graphql";
 
 const route = useRoute();
+const router = useRouter();
 const toast = useToast();
 const commitToast = useCommitToast();
 
 const reference = computed(() => String(route.params.ref ?? ""));
+
+/*
+ * Three tabs, as every forge has them: the conversation, the commits the
+ * branch brings, and what they change. The tab is in the address, as the
+ * listing's filters are, so a link to the changes opens on the changes and
+ * the back button returns to where somebody was; `replace`, not `push`, so
+ * switching tabs does not pile history entries up (`useEntityFilter`).
+ *
+ * The conversation is the default and carries no parameter, so an address
+ * that predates the tabs still means what it did.
+ */
+type Tab = "conversation" | "commits" | "changes";
+const TABS: { key: Tab; label: string; icon: string }[] = [
+  { key: "conversation", label: "Conversation", icon: "i-lucide-message-square" },
+  { key: "commits", label: "Commits", icon: "i-lucide-git-commit-horizontal" },
+  { key: "changes", label: "Changes", icon: "i-lucide-file-diff" },
+];
+const tab = computed<Tab>({
+  get: () =>
+    route.query.tab === "commits" || route.query.tab === "changes"
+      ? route.query.tab
+      : "conversation",
+  set: (value) => {
+    const { tab: _tab, ...rest } = route.query;
+    void router.replace({ query: value === "conversation" ? rest : { ...rest, tab: value } });
+  },
+});
+
+/*
+ * Each of the two extra tabs is its own query, sent the first time its tab
+ * is opened and not before: the page must open as fast as it did with one
+ * tab, and a diff is the one thing on it that can be large. `cache-first`,
+ * because both are functions of the revision's two SHAs, which do not change
+ * under a page — a new revision is a new pull request read, and a reload.
+ */
+const COMMIT_LIMIT = 250;
+const {
+  result: commitsResult,
+  loading: commitsLoading,
+  error: commitsError,
+  refetch: refetchCommits,
+} = useQuery(
+  PR_COMMITS_QUERY,
+  () => ({ ref: reference.value, limit: COMMIT_LIMIT }),
+  () => ({ enabled: tab.value === "commits", fetchPolicy: "cache-first" }),
+);
+const commits = computed(() => commitsResult.value?.pr.commits ?? null);
+
+const {
+  result: changesResult,
+  loading: changesLoading,
+  error: changesError,
+  refetch: refetchChanges,
+} = useQuery(
+  PR_CHANGES_QUERY,
+  () => ({ ref: reference.value }),
+  () => ({ enabled: tab.value === "changes", fetchPolicy: "cache-first" }),
+);
+const changes = computed(() => changesResult.value?.pr.changes ?? null);
+
+/** What each tab's button says beside its name, once the tab has been read. */
+const tabCount = (key: Tab): number | null => {
+  if (key === "commits") return commits.value?.total ?? null;
+  if (key === "changes") return changes.value?.files.length ?? null;
+  return null;
+};
 
 const { result, loading, error, refetch } = useQuery(PR_QUERY, () => ({ ref: reference.value }), {
   fetchPolicy: "cache-and-network",
@@ -349,7 +423,47 @@ const branchHint = computed(() => refusedOn.value);
         </template>
       </UAlert>
 
-      <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
+      <nav class="flex items-center gap-1 border-b border-default" aria-label="Pull request sections" data-testid="pr-tabs">
+        <UButton
+          v-for="item in TABS"
+          :key="item.key"
+          :icon="item.icon"
+          color="neutral"
+          :variant="tab === item.key ? 'soft' : 'ghost'"
+          size="sm"
+          class="rounded-b-none"
+          :aria-current="tab === item.key ? 'page' : undefined"
+          :data-testid="`pr-tab-${item.key}`"
+          @click="tab = item.key"
+        >
+          {{ item.label }}
+          <UBadge v-if="tabCount(item.key) !== null" color="neutral" variant="subtle" size="sm">
+            {{ tabCount(item.key) }}
+          </UBadge>
+        </UButton>
+      </nav>
+
+      <QueryState
+        v-if="tab === 'commits'"
+        :loading="commitsLoading && commits === null"
+        :error="commitsError"
+        :skeleton-rows="4"
+        @retry="refetchCommits()"
+      >
+        <CommitTable v-if="commits" :commits="commits.commits" :total="commits.total" />
+      </QueryState>
+
+      <QueryState
+        v-else-if="tab === 'changes'"
+        :loading="changesLoading && changes === null"
+        :error="changesError"
+        :skeleton-rows="6"
+        @retry="refetchChanges()"
+      >
+        <DiffView v-if="changes" :pr-ref="pr.id" :changes="changes" />
+      </QueryState>
+
+      <div v-else class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
         <div class="space-y-6">
           <EditableText
             :value="shown.body"

@@ -20,6 +20,7 @@ import {
   readReviewPolicy,
   type WsCtx,
 } from "@navbook/core";
+import type { RevisionCache } from "./changes.ts";
 import type { Config } from "./config.ts";
 import type { AuthorCache } from "./people.ts";
 import type { RepoSync } from "./sync.ts";
@@ -55,6 +56,11 @@ export interface GraphQLCtx {
    * one: unlike the tree, it changes only when a commit lands.
    */
   authors: AuthorCache;
+  /**
+   * What each pull request revision changes, remembered across requests:
+   * two SHAs name an answer that never changes.
+   */
+  revisions: RevisionCache;
   config: Config;
 }
 
@@ -63,6 +69,7 @@ export interface MakeContextOptions {
   config: Config;
   sync: RepoSync;
   authors: AuthorCache;
+  revisions: RevisionCache;
   env?: NodeJS.ProcessEnv;
   /**
    * The Navbook directory, already resolved at startup.
@@ -99,6 +106,7 @@ export function makeGraphQLCtx(opts: MakeContextOptions): GraphQLCtx {
     },
     sync: opts.sync,
     authors: opts.authors,
+    revisions: opts.revisions,
     config: opts.config,
   };
 }

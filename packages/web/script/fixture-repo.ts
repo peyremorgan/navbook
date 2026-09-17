@@ -587,7 +587,14 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
   /** The same, on a branch of its own with a commit for it to propose. */
   const openPrOn = (date: string, id: string, branch: string, input: PrInput): void => {
     git(dir, ["checkout", "--quiet", "-b", branch]);
-    write(`${branch.replaceAll("/", "-")}.txt`, `work on ${branch}\n`);
+    const name = branch.replaceAll("/", "-");
+    write(`${name}.txt`, `work on ${branch}\n`);
+    // And one file past the size the server sends inline, so the Changes tab
+    // has a "Load diff" to click (`INLINE_FILE_LINES` in the server).
+    write(
+      `generated/${name}.txt`,
+      `${Array.from({ length: 1_200 }, (_, i) => `line ${i + 1} of ${branch}`).join("\n")}\n`,
+    );
     git(dir, ["add", "-A"]);
     git(dir, ["commit", "--quiet", "-m", `feat: ${input.title}`], {
       GIT_AUTHOR_DATE: date,

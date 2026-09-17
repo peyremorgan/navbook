@@ -12,6 +12,7 @@ import {
   type EntityRecord,
   parentNode,
   type ReviewSummary,
+  type Revision,
   readAssignees,
   readDeadline,
   readFeatures,
@@ -24,8 +25,10 @@ import {
   subtaskTree,
 } from "@navbook/core";
 import type { GraphQLCtx } from "../context.ts";
-import { invalidInput } from "../errors.ts";
+import { invalidInput, run } from "../errors.ts";
 import type {
+  ChangedFileResolvers,
+  ChangeStatus,
   CommentResolvers,
   DiagnosticResolvers,
   EntityResolvers,
@@ -33,7 +36,13 @@ import type {
   LinkNodeResolvers,
   PrResolvers,
 } from "../generated/resolver-types.ts";
-import { type EntityParent, type IssueParent, type PrParent, recordOf } from "../mappers.ts";
+import {
+  type ChangedFileParent,
+  type EntityParent,
+  type IssueParent,
+  type PrParent,
+  recordOf,
+} from "../mappers.ts";
 import {
   toGqlDecision,
   toGqlKind,
@@ -124,6 +133,40 @@ export const Pr: PrResolvers = {
     })),
   reviewDecision: async (pr, _args, ctx) => toGqlDecision((await summaryOf(pr, ctx)).decision),
   approvals: async (pr, _args, ctx) => (await summaryOf(pr, ctx)).approvals,
+
+  // Both read the object store by the SHAs the file pins, and neither takes
+  // the lock: see `changes.ts` for why that is safe, and why the answers are
+  // kept across requests.
+  commits: (pr, args, ctx) => {
+    if (!Number.isInteger(args.limit) || args.limit < 0) {
+      throw invalidInput("limit takes a whole number of commits");
+    }
+    const latest = latestRevision(pr);
+    if (latest === null) return { total: 0, commits: [] };
+    return run(() => ctx.revisions.commitsOf(latest.base, latest.head, args.limit));
+  },
+  changes: (pr, args, ctx) => {
+    const latest = latestRevision(pr);
+    if (latest === null) return { base: "", head: "", files: [], additions: 0, deletions: 0 };
+    return run(() => ctx.revisions.changesOf(latest.base, latest.head, args.paths ?? undefined));
+  },
+};
+
+/** The revision under review: the last one appended (spec 02 §2.7). */
+function latestRevision(pr: PrParent): Revision | null {
+  return readRevisions(pr.entity.fm).at(-1) ?? null;
+}
+
+export const ChangedFile: ChangedFileResolvers = {
+  status: (file) => STATUS[file.status],
+};
+
+const STATUS: Record<ChangedFileParent["status"], ChangeStatus> = {
+  added: "ADDED",
+  modified: "MODIFIED",
+  deleted: "DELETED",
+  renamed: "RENAMED",
+  copied: "COPIED",
 };
 
 /** A pull request's review state, counted by the request's policy. */

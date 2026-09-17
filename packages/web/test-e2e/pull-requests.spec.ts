@@ -253,3 +253,74 @@ test("says so when there is no such pull request", async ({ signedIn, stack }) =
   await signedIn.goto(`${stack.appUrl}/prs/zzzz9999`);
   await expect(signedIn.getByText("Not found")).toBeVisible();
 });
+
+/*
+ * The three tabs. The conversation is what the page always was; the other two
+ * read the revision's commits and diff from the object store, which is what
+ * makes them work for the unserved pull request too.
+ */
+
+test("opens on the conversation, and puts the tab in the address bar", async ({
+  signedIn,
+  stack,
+}) => {
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0001`);
+  await expect(signedIn.getByTestId("pr-tab-conversation")).toHaveAttribute("aria-current", "page");
+  await expect(signedIn.getByTestId("pr-comment-thread")).toBeVisible();
+
+  await signedIn.getByTestId("pr-tab-commits").click();
+  await expect(signedIn).toHaveURL(/tab=commits/);
+  await expect(signedIn.getByTestId("pr-commits")).toBeVisible();
+  await expect(signedIn.getByTestId("pr-comment-thread")).toHaveCount(0);
+
+  await signedIn.getByTestId("pr-tab-conversation").click();
+  await expect(signedIn).not.toHaveURL(/tab=/);
+  await expect(signedIn.getByTestId("pr-comment-thread")).toBeVisible();
+});
+
+test("lists the commits the branch brings, oldest first", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0001?tab=commits`);
+  const table = signedIn.getByTestId("pr-commits");
+  await expect(table).toContainText("feat: Raise the sign-in deadline");
+  await expect(table).toContainText("Navbook Dev Server");
+  // The tab says how many once it has read them.
+  await expect(signedIn.getByTestId("pr-tab-commits")).toContainText("1");
+});
+
+test("shows what the branch changes, file by file", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0001?tab=changes`);
+  await expect(signedIn.getByTestId("changes-summary")).toContainText("2 files changed");
+  const file = signedIn.getByTestId("diff-file-feat-served.txt");
+  await expect(file).toContainText("feat-served.txt");
+  await expect(file).toContainText("+1");
+  await expect(file).toContainText("work on feat/served");
+  // A file folds away and comes back.
+  await file.getByRole("button", { name: "Collapse" }).click();
+  await expect(file).not.toContainText("work on feat/served");
+  await file.getByRole("button", { name: "Expand" }).click();
+  await expect(file).toContainText("work on feat/served");
+});
+
+test("withholds a large file until it is asked for", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0001?tab=changes`);
+  const big = signedIn.getByTestId("diff-file-generated/feat-served.txt");
+  // Listed with its counts, but its lines are not on the page.
+  await expect(big).toContainText("+1200");
+  await expect(big).toContainText("Large diff not shown by default");
+  await expect(big).not.toContainText("line 1200 of feat/served");
+
+  await signedIn.getByTestId("load-diff-generated/feat-served.txt").click();
+  await expect(big).toContainText("line 1200 of feat/served");
+  await expect(big).not.toContainText("Large diff not shown by default");
+});
+
+test("reads the diff of a pull request on a branch it does not serve", async ({
+  signedIn,
+  stack,
+}) => {
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0002?tab=changes`);
+  await expect(signedIn.getByTestId("changes-summary")).toContainText("2 files changed");
+  await expect(signedIn.getByTestId("diff-file-feat-unserved.txt")).toContainText(
+    "work on feat/unserved",
+  );
+});

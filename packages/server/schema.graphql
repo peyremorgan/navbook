@@ -177,6 +177,73 @@ type Pr implements Entity {
   reviewDecision: ReviewDecision!
   "How many approvals stand, against how many the policy asks for."
   approvals: Approvals!
+
+  """
+  The commits the latest revision introduces: `base..head`, oldest first.
+
+  Read from the clone's objects rather than from any branch, so a pull request
+  found on a fetched branch answers as well as one on the served one. Empty
+  for a pull request with no revision recorded. Refused with `MISSING_COMMIT`
+  when the clone lacks either commit.
+  """
+  commits(limit: Int! = 250): CommitRange!
+  """
+  What the latest revision changes, file by file.
+
+  `base` is the merge base with the target at the time (spec 02 §2.7), so
+  this is the diff a forge shows for a pull request, and it stays right after
+  the target moves on. Every file is listed; a patch comes inline while the
+  diff is of ordinary size, and a file listed without one (`patch: null`) is
+  asked for again by `paths`, which answers those files whatever their size,
+  cut at a hard limit and marked `truncated` when it is.
+  """
+  changes(paths: [String!]): Changes!
+}
+
+"The commits of a revision range, oldest first."
+type CommitRange {
+  "How many the range holds, whatever the limit kept."
+  total: Int!
+  commits: [Commit!]!
+}
+
+enum ChangeStatus {
+  ADDED
+  MODIFIED
+  DELETED
+  RENAMED
+  COPIED
+}
+
+"The diff of one revision against its merge base."
+type Changes {
+  base: String!
+  head: String!
+  "By path, except that the tracker's own files come last."
+  files: [ChangedFile!]!
+  additions: Int!
+  deletions: Int!
+}
+
+"One file of a diff, as `git diff` reports it."
+type ChangedFile {
+  "Path after the change; for a deleted file, the path it had."
+  path: String!
+  "Where a renamed or copied file came from."
+  oldPath: String
+  status: ChangeStatus!
+  additions: Int!
+  deletions: Int!
+  binary: Boolean!
+  "How many lines the patch holds, whether or not it was sent."
+  lines: Int!
+  """
+  The unified hunks, from the first `@@`, without the file header. Null for a
+  binary file, a pure rename or a mode change, and when withheld for size.
+  """
+  patch: String
+  "True when the patch was cut at the server's hard limit."
+  truncated: Boolean!
 }
 
 "Approvals counted against the number the review policy asks for."

@@ -1,5 +1,5 @@
 import type { GraphQLResolveInfo } from 'graphql';
-import type { IssueParent, PrParent, EntityParent, CommentParent, LinkNodeParent, DiagnosticParent, FeatureParent, SpecParent, CommitParent } from '../mappers.ts';
+import type { IssueParent, PrParent, EntityParent, CommentParent, LinkNodeParent, DiagnosticParent, FeatureParent, SpecParent, CommitParent, CommitRangeParent, ChangesParent, ChangedFileParent } from '../mappers.ts';
 import type { GraphQLCtx } from '../context.ts';
 export type Maybe<T> = T | null;
 export type InputMaybe<T> = Maybe<T>;
@@ -68,6 +68,46 @@ export type Approvals = {
   required: Scalars['Int']['output'];
 };
 
+export type ChangeStatus =
+  | 'ADDED'
+  | 'COPIED'
+  | 'DELETED'
+  | 'MODIFIED'
+  | 'RENAMED';
+
+/** One file of a diff, as `git diff` reports it. */
+export type ChangedFile = {
+  __typename?: 'ChangedFile';
+  additions: Scalars['Int']['output'];
+  binary: Scalars['Boolean']['output'];
+  deletions: Scalars['Int']['output'];
+  /** How many lines the patch holds, whether or not it was sent. */
+  lines: Scalars['Int']['output'];
+  /** Where a renamed or copied file came from. */
+  oldPath?: Maybe<Scalars['String']['output']>;
+  /**
+   * The unified hunks, from the first `@@`, without the file header. Null for a
+   * binary file, a pure rename or a mode change, and when withheld for size.
+   */
+  patch?: Maybe<Scalars['String']['output']>;
+  /** Path after the change; for a deleted file, the path it had. */
+  path: Scalars['String']['output'];
+  status: ChangeStatus;
+  /** True when the patch was cut at the server's hard limit. */
+  truncated: Scalars['Boolean']['output'];
+};
+
+/** The diff of one revision against its merge base. */
+export type Changes = {
+  __typename?: 'Changes';
+  additions: Scalars['Int']['output'];
+  base: Scalars['String']['output'];
+  deletions: Scalars['Int']['output'];
+  /** By path, except that the tracker's own files come last. */
+  files: Array<ChangedFile>;
+  head: Scalars['String']['output'];
+};
+
 export type CloseIssueInput = {
   /** ID or prefix of the issue this one duplicates. */
   duplicateOf?: InputMaybe<Scalars['ID']['input']>;
@@ -121,6 +161,14 @@ export type CommitInfo = {
   /** False when the server runs without a remote, or committed nothing. */
   pushed: Scalars['Boolean']['output'];
   subject: Scalars['String']['output'];
+};
+
+/** The commits of a revision range, oldest first. */
+export type CommitRange = {
+  __typename?: 'CommitRange';
+  commits: Array<Commit>;
+  /** How many the range holds, whatever the limit kept. */
+  total: Scalars['Int']['output'];
 };
 
 export type CreateFeatureInput = {
@@ -509,7 +557,27 @@ export type Pr = Entity & {
   /** The blob hash of `pr.md` as it now stands; see `Issue.baseSha`. */
   baseSha: Scalars['String']['output'];
   body: Scalars['String']['output'];
+  /**
+   * What the latest revision changes, file by file.
+   *
+   * `base` is the merge base with the target at the time (spec 02 §2.7), so
+   * this is the diff a forge shows for a pull request, and it stays right after
+   * the target moves on. Every file is listed; a patch comes inline while the
+   * diff is of ordinary size, and a file listed without one (`patch: null`) is
+   * asked for again by `paths`, which answers those files whatever their size,
+   * cut at a hard limit and marked `truncated` when it is.
+   */
+  changes: Changes;
   comments: Array<Comment>;
+  /**
+   * The commits the latest revision introduces: `base..head`, oldest first.
+   *
+   * Read from the clone's objects rather than from any branch, so a pull request
+   * found on a fetched branch answers as well as one on the served one. Empty
+   * for a pull request with no revision recorded. Refused with `MISSING_COMMIT`
+   * when the clone lacks either commit.
+   */
+  commits: CommitRange;
   created: Scalars['String']['output'];
   draft: Scalars['Boolean']['output'];
   features: Array<Scalars['String']['output']>;
@@ -541,6 +609,16 @@ export type Pr = Entity & {
   /** Branch the pull request proposes to merge into. */
   target: Scalars['String']['output'];
   title: Scalars['String']['output'];
+};
+
+
+export type PrChangesArgs = {
+  paths?: InputMaybe<Array<Scalars['String']['input']>>;
+};
+
+
+export type PrCommitsArgs = {
+  limit?: Scalars['Int']['input'];
 };
 
 export type Query = {
@@ -914,11 +992,15 @@ export type ResolversTypes = {
   AddSpecPayload: ResolverTypeWrapper<Omit<AddSpecPayload, 'feature' | 'spec'> & { feature: ResolversTypes['Feature'], spec: ResolversTypes['Spec'] }>;
   Approvals: ResolverTypeWrapper<Approvals>;
   Boolean: ResolverTypeWrapper<Scalars['Boolean']['output']>;
+  ChangeStatus: ChangeStatus;
+  ChangedFile: ResolverTypeWrapper<ChangedFileParent>;
+  Changes: ResolverTypeWrapper<ChangesParent>;
   CloseIssueInput: CloseIssueInput;
   CloseIssuePayload: ResolverTypeWrapper<Omit<CloseIssuePayload, 'issue'> & { issue: ResolversTypes['Issue'] }>;
   Comment: ResolverTypeWrapper<CommentParent>;
   Commit: ResolverTypeWrapper<CommitParent>;
   CommitInfo: ResolverTypeWrapper<CommitInfo>;
+  CommitRange: ResolverTypeWrapper<CommitRangeParent>;
   CreateFeatureInput: CreateFeatureInput;
   CreateFeaturePayload: ResolverTypeWrapper<Omit<CreateFeaturePayload, 'feature'> & { feature: ResolversTypes['Feature'] }>;
   DeadlineState: DeadlineState;
@@ -972,11 +1054,14 @@ export type ResolversParentTypes = {
   AddSpecPayload: Omit<AddSpecPayload, 'feature' | 'spec'> & { feature: ResolversParentTypes['Feature'], spec: ResolversParentTypes['Spec'] };
   Approvals: Approvals;
   Boolean: Scalars['Boolean']['output'];
+  ChangedFile: ChangedFileParent;
+  Changes: ChangesParent;
   CloseIssueInput: CloseIssueInput;
   CloseIssuePayload: Omit<CloseIssuePayload, 'issue'> & { issue: ResolversParentTypes['Issue'] };
   Comment: CommentParent;
   Commit: CommitParent;
   CommitInfo: CommitInfo;
+  CommitRange: CommitRangeParent;
   CreateFeatureInput: CreateFeatureInput;
   CreateFeaturePayload: Omit<CreateFeaturePayload, 'feature'> & { feature: ResolversParentTypes['Feature'] };
   Diagnostic: DiagnosticParent;
@@ -1032,6 +1117,26 @@ export type ApprovalsResolvers<ContextType = GraphQLCtx, ParentType extends Reso
   required?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
 };
 
+export type ChangedFileResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['ChangedFile'] = ResolversParentTypes['ChangedFile']> = {
+  additions?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  binary?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
+  deletions?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  lines?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  oldPath?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  patch?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  path?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  status?: Resolver<ResolversTypes['ChangeStatus'], ParentType, ContextType>;
+  truncated?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
+};
+
+export type ChangesResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['Changes'] = ResolversParentTypes['Changes']> = {
+  additions?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  base?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  deletions?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+  files?: Resolver<Array<ResolversTypes['ChangedFile']>, ParentType, ContextType>;
+  head?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+};
+
 export type CloseIssuePayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['CloseIssuePayload'] = ResolversParentTypes['CloseIssuePayload']> = {
   commit?: Resolver<ResolversTypes['CommitInfo'], ParentType, ContextType>;
   destination?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
@@ -1062,6 +1167,11 @@ export type CommitInfoResolvers<ContextType = GraphQLCtx, ParentType extends Res
   committed?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   pushed?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   subject?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+};
+
+export type CommitRangeResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['CommitRange'] = ResolversParentTypes['CommitRange']> = {
+  commits?: Resolver<Array<ResolversTypes['Commit']>, ParentType, ContextType>;
+  total?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
 };
 
 export type CreateFeaturePayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['CreateFeaturePayload'] = ResolversParentTypes['CreateFeaturePayload']> = {
@@ -1175,7 +1285,9 @@ export type PrResolvers<ContextType = GraphQLCtx, ParentType extends ResolversPa
   author?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   baseSha?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   body?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  changes?: Resolver<ResolversTypes['Changes'], ParentType, ContextType, Partial<PrChangesArgs>>;
   comments?: Resolver<Array<ResolversTypes['Comment']>, ParentType, ContextType>;
+  commits?: Resolver<ResolversTypes['CommitRange'], ParentType, ContextType, RequireFields<PrCommitsArgs, 'limit'>>;
   created?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   draft?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   features?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
@@ -1281,10 +1393,13 @@ export type Resolvers<ContextType = GraphQLCtx> = {
   AddCommentPayload?: AddCommentPayloadResolvers<ContextType>;
   AddSpecPayload?: AddSpecPayloadResolvers<ContextType>;
   Approvals?: ApprovalsResolvers<ContextType>;
+  ChangedFile?: ChangedFileResolvers<ContextType>;
+  Changes?: ChangesResolvers<ContextType>;
   CloseIssuePayload?: CloseIssuePayloadResolvers<ContextType>;
   Comment?: CommentResolvers<ContextType>;
   Commit?: CommitResolvers<ContextType>;
   CommitInfo?: CommitInfoResolvers<ContextType>;
+  CommitRange?: CommitRangeResolvers<ContextType>;
   CreateFeaturePayload?: CreateFeaturePayloadResolvers<ContextType>;
   Diagnostic?: DiagnosticResolvers<ContextType>;
   DoctorReport?: DoctorReportResolvers<ContextType>;

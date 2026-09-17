@@ -160,3 +160,58 @@ export const INBOX_QUERY = graphql(`
     }
   }
 `);
+
+/*
+ * The two tabs beside the conversation, each its own query so that the page
+ * opens as fast as it did when it had only the one: neither is sent until its
+ * tab is, and both are functions of the revision's two SHAs, so the cache
+ * keeps them for as long as the page does.
+ */
+
+export const PR_COMMITS_QUERY = graphql(`
+  query PrCommits($ref: ID!, $limit: Int!) {
+    pr(ref: $ref) {
+      id
+      commits(limit: $limit) {
+        total
+        commits {
+          sha
+          subject
+          author
+          date
+        }
+      }
+    }
+  }
+`);
+
+export const PR_CHANGES_QUERY = graphql(`
+  query PrChanges($ref: ID!) {
+    pr(ref: $ref) {
+      id
+      changes {
+        base
+        head
+        additions
+        deletions
+        files {
+          ...ChangedFileFields
+        }
+      }
+    }
+  }
+`);
+
+/** The patches the listing withheld, for the files somebody asked to see. */
+export const PR_FILE_CHANGES_QUERY = graphql(`
+  query PrFileChanges($ref: ID!, $paths: [String!]!) {
+    pr(ref: $ref) {
+      id
+      changes(paths: $paths) {
+        files {
+          ...ChangedFileFields
+        }
+      }
+    }
+  }
+`);

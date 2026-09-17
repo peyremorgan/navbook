@@ -70,6 +70,17 @@ Appending a revision is what `nav pr update` does, which is worth spelling out
 because that verb reads like the ordinary word: patching a pull request's fields
 is a different operation, it is `nav pr edit` and `updatePr`, and it is here.
 
+A pull request's page has the three tabs a forge has — Conversation, Commits
+and Changes — and the tab is in the address (`?tab=commits`, `?tab=changes`),
+so a link to a diff opens on the diff. The commits and the diff are those of
+the latest revision, read from the two SHAs it pins rather than from the
+branch, and neither is fetched until its tab is opened. A large diff is listed
+whole with the patches of the first ten thousand lines inline; a file past
+that, or over a thousand lines on its own, is loaded on demand. Rendering is
+plain table rows under `content-visibility: auto`, filled in progressively
+below the fold, which is how a five-thousand-line diff paints in about half a
+second on an ordinary laptop.
+
 **References**, followed rather than retyped: a `#<id>` written in an issue
 body, a pull request's description or a comment is a link to what it names. An
 id says nothing about its kind — issues and pull requests are minted from one
@@ -236,3 +247,11 @@ scripts, which never reach the browser.
 `script/fixture-repo.ts` is the only file here that imports `@navbook/core`,
 and it may because it never reaches the browser either: it stands in for the
 person who would otherwise have run `nav` a dozen times.
+
+`script/bench-changes.ts` times the Changes tab of a pull request page against
+any repository — the fixture's pull requests are a file apiece, which says
+nothing about a diff of five thousand lines. Point it at a clone of a large
+project holding a Navbook tree and a `pr.md` whose revision pins two commits,
+and it reports when the request left and returned and when the summary and
+every row were painted, from the click; `PROFILE=1` adds a CPU profile of the
+click. See its header for what the repository needs.
