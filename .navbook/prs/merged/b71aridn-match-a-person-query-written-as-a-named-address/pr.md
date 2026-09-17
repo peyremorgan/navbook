@@ -11,6 +11,9 @@ revisions:
   - head: 39f18a03765bd410d8fa56e50564b80d4f815d33
     base: cec5460d224676d9c646ce364b19651f3f06caac
     date: 2026-09-17T17:16:24Z
+merged:
+  date: 2026-09-17T17:30:05Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #rciuob4x.
