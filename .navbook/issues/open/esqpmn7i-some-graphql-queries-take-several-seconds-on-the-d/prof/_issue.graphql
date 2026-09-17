@@ -1,0 +1,92 @@
+query Issue($ref: ID!) {
+  issue(ref: $ref) {
+    ...IssueDetail
+    __typename
+  }
+}
+
+fragment EntityCore on Entity {
+  id
+  slug
+  kind
+  status
+  path
+  archived
+  title
+  author
+  created
+  labels
+  assignees
+  milestone
+  features
+  __typename
+}
+
+fragment IssueListItem on Issue {
+  ...EntityCore
+  resolution
+  rank
+  deadline
+  __typename
+}
+
+fragment LinkNodeCore on LinkNode {
+  id
+  notAnIssue
+  cycle
+  repeated
+  issue {
+    id
+    title
+    status
+    __typename
+  }
+  __typename
+}
+
+fragment LinkNodeTree on LinkNode {
+  ...LinkNodeCore
+  children {
+    ...LinkNodeCore
+    children {
+      ...LinkNodeCore
+      __typename
+    }
+    __typename
+  }
+  __typename
+}
+
+fragment CommentFields on Comment {
+  id
+  path
+  created
+  author
+  replyTo
+  verdict
+  revision
+  file
+  line
+  body
+  __typename
+}
+
+fragment IssueDetail on Issue {
+  ...IssueListItem
+  body
+  baseSha
+  duplicateOf
+  parent {
+    ...LinkNodeCore
+    __typename
+  }
+  subtasks(depth: 3) {
+    ...LinkNodeTree
+    __typename
+  }
+  comments {
+    ...CommentFields
+    __typename
+  }
+  __typename
+}
