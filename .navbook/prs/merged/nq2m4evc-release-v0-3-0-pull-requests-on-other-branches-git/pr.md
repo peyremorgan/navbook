@@ -10,6 +10,9 @@ revisions:
   - head: b0aa45aadc817e1f7fa245aa14a88044b90682c1
     base: 46f7536cabffa826d42fe6d6a06d0325d03468c1
     date: 2026-09-17T11:02:05Z
+merged:
+  date: 2026-09-17T11:13:54Z
+  by: Morgan PEYRE <morgan.peyre@brickcode.tech>
 ---
 
 Releases v0.3.0: everything on `dev` since v0.2.0, the last version on npm.
