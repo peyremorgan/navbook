@@ -14,6 +14,9 @@ revisions:
   - head: 5c003856cefa47e46ce493b8f9b4dca7dadc96d6
     base: 65ee88db8bdfb13647a9950880d30f54aa430107
     date: 2026-09-17T22:39:08Z
+merged:
+  date: 2026-09-17T22:39:55Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #fa19dlvj: an edit in the web client showed the *old* value until the API answered, with nothing to say a save was out, and a refused save lost what was typed to a toast.
