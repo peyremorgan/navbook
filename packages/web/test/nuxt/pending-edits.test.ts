@@ -9,6 +9,7 @@
 
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, vi } from "vitest";
+import { effectScope } from "vue";
 import { SLOW_SAVE_MS, usePendingEdits } from "../../app/composables/usePendingEdits";
 
 interface Edit {
@@ -124,6 +125,62 @@ describe("usePendingEdits", () => {
     });
   });
 
+  it("compares a new save against what the file is about to say", async () => {
+    const edits = usePendingEdits<Edit>({ resend: async () => {} });
+    const answer = deferred<boolean>();
+    const landing = edits.attempt({ title: "New" }, () => answer.promise);
+    // In flight: the file is about to say "New", so "Old" is a revert to send.
+    assert.equal(edits.basis(base).title, "New");
+    // Saying "New" again while it is out is not an answer to it.
+    edits.settle({ title: "New" });
+    assert.equal(edits.overlay(base).title, "New");
+    assert.equal(edits.field("title").saving, true);
+
+    answer.reject(refusal("GIT_ERROR", "git commit failed"));
+    await landing;
+    // Refused: the file does not hold it, so it is not a basis, and saving
+    // the file's own value settles it.
+    assert.equal(edits.basis(base).title, "Old");
+    assert.equal(edits.overlay(base).title, "New");
+    edits.settle({ title: "Old" });
+    assert.equal(edits.field("title").failure, null);
+    assert.equal(edits.overlay(base).title, "Old");
+  });
+
+  it("says a refusal that arrives after the page is gone", async () => {
+    // Without a scope nothing is disposed, so the lost path is reached by
+    // the one thing a page's disposal would do here: mark it gone.
+    const lost: string[] = [];
+    const scope = effectScope();
+    const edits = scope.run(() =>
+      usePendingEdits<Edit>({
+        resend: async () => {},
+        lost: (failure) => lost.push(failure.heading),
+      }),
+    );
+    assert.ok(edits);
+    const answer = deferred<boolean>();
+    const landing = edits.attempt({ title: "New" }, () => answer.promise);
+    scope.stop();
+    answer.reject(refusal("SYNC_PUSH_REJECTED", "the remote refused the push"));
+    await landing;
+    assert.deepEqual(lost, ["The remote refused the push"]);
+    assert.equal(edits.field("title").failure, null);
+  });
+
+  it("hands an editor the same object until its own field changes", async () => {
+    const edits = usePendingEdits<Edit>({ resend: async () => {} });
+    const before = edits.field("title");
+    await edits.attempt({ rank: 5 }, async () => true);
+    assert.equal(edits.field("title"), before);
+    const answer = deferred<boolean>();
+    const landing = edits.attempt({ title: "New" }, () => answer.promise);
+    assert.notEqual(edits.field("title"), before);
+    answer.resolve(true);
+    await landing;
+    assert.equal(edits.field("title").saving, false);
+  });
+
   it("sends the kept edit again on retry, through the page's own save", async () => {
     const resent: Partial<Edit>[] = [];
     const edits = usePendingEdits<Edit>({
@@ -199,5 +256,6 @@ describe("usePendingEdits", () => {
     const edits = usePendingEdits<Edit>({ resend: async () => {} });
     assert.equal(await edits.attempt({}, async () => true), true);
     assert.equal(edits.saving.value, false);
+    assert.equal(edits.pending.value, false);
   });
 });

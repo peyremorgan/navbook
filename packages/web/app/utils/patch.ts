@@ -35,6 +35,8 @@ export interface EntityEdit {
   rank?: number | null;
   /** When the work is wanted, `YYYY-MM-DD`; issues only. */
   deadline?: string | null;
+  /** A feature's card alone (spec 02 §2.11); never sent to an entity. */
+  summary?: string | null;
 }
 
 /** An update input without the `ref`, which the caller knows. */
@@ -87,6 +89,11 @@ export function parseRankInput(value: string | number | null | undefined): numbe
   const trimmed = (value ?? "").trim();
   if (trimmed === "") return null;
   return Number(trimmed);
+}
+
+/** The fields an edit names: every key it holds a value for, absent ones aside. */
+export function fieldsOf<E extends object>(change: Partial<E>): (keyof E)[] {
+  return (Object.keys(change) as (keyof E)[]).filter((key) => change[key] !== undefined);
 }
 
 function sameList(a: readonly string[], b: readonly string[]): boolean {
@@ -176,6 +183,7 @@ const FIELD_LABELS: Record<keyof EntityEdit, string> = {
   reviewers: "reviewers",
   rank: "rank",
   deadline: "deadline",
+  summary: "summary",
 };
 
 /** The page's name for a field, given the mutation's — `body` is the description. */

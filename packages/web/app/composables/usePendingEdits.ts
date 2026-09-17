@@ -30,20 +30,20 @@
  * Nothing here writes to Apollo's cache. When a write lands, the payload has
  * already been normalised into it, so lifting the overlay reveals the same
  * value it was covering.
+ *
+ * The edits and their states are two stores on purpose. A page's `shown` is a
+ * computed over the edits alone, so the timer that turns one field's spinner
+ * on does not recompute the page and hand every editor a new value.
  */
 
-import { computed, getCurrentScope, onScopeDispose, ref } from "vue";
-import { describeApiError, errorHeading } from "~/utils/errors";
+import { type ComputedRef, computed, getCurrentScope, onScopeDispose, shallowRef } from "vue";
+import { describeApiError, type SaidFailure, sayFailure } from "~/utils/errors";
+import { fieldsOf } from "~/utils/patch";
 
 /** How long a save is out before the page admits it is still waiting. */
 export const SLOW_SAVE_MS = 1750;
 
-export interface SaveFailure {
-  /** The short heading for the code, as the toast would have used it. */
-  heading: string;
-  /** The server's own sentence, with its details. */
-  message: string;
-}
+export type SaveFailure = SaidFailure;
 
 /** One field's save, as its editor shows it. */
 export interface FieldSave {
@@ -59,9 +59,8 @@ export interface FieldSave {
   discard(): void;
 }
 
-interface Entry<E> {
-  /** The edit, as it was sent; every field it names is overlaid. */
-  change: Partial<E>;
+/** The state of one field's save; the edit itself is kept apart. */
+interface State {
   /** Which attempt this is, so a slow answer cannot settle a newer edit. */
   attempt: number;
   saving: boolean;
@@ -72,45 +71,63 @@ interface Entry<E> {
 export interface PendingEditsOptions<E> {
   /** Save a kept edit again, through the same path the page saves by. */
   resend: (change: Partial<E>) => Promise<void>;
+  /**
+   * Say a refusal that arrived after the page was left.
+   *
+   * The field it would have been shown beside is gone with the page, and a
+   * refusal nobody hears is the one thing a client of this server must not
+   * produce (spec 06 §6.3). A toast is the usual answer.
+   */
+  lost?: (failure: SaveFailure) => void;
   /** For tests; the default is {@link SLOW_SAVE_MS}. */
   slowAfterMs?: number;
 }
 
-function fieldsOf<E>(change: Partial<E>): (keyof E)[] {
-  return (Object.keys(change) as (keyof E)[]).filter((key) => change[key] !== undefined);
-}
-
 export function usePendingEdits<E extends object>(opts: PendingEditsOptions<E>) {
   const slowAfter = opts.slowAfterMs ?? SLOW_SAVE_MS;
-  const entries = ref(new Map<keyof E, Entry<E>>());
+  // Shallow, and replaced wholesale on every change: nothing reads a key of
+  // either map reactively, and a deep proxy would hand the page's editors
+  // proxies of the values they were given.
+  const changes = shallowRef(new Map<keyof E, Partial<E>>());
+  const states = shallowRef(new Map<keyof E, State>());
   const timers = new Map<keyof E, ReturnType<typeof setTimeout>>();
+  const fields = new Map<keyof E, ComputedRef<FieldSave>>();
   let attempts = 0;
+  let gone = false;
 
   /** Every pending timer, dropped with the page: a spinner for nobody. */
   if (getCurrentScope()) {
     onScopeDispose(() => {
+      gone = true;
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear();
     });
   }
 
-  // `ref` on a Map is deep by default, but a Map is replaced wholesale here
-  // on every change so that a computed reading it is sure to be told.
-  function set(field: keyof E, entry: Entry<E> | null): void {
-    const next = new Map(entries.value as Map<keyof E, Entry<E>>);
-    if (entry === null) next.delete(field);
-    else next.set(field, entry);
-    entries.value = next;
+  function setChange(field: keyof E, change: Partial<E> | null): void {
+    const next = new Map(changes.value);
+    if (change === null) next.delete(field);
+    else next.set(field, change);
+    changes.value = next;
   }
 
-  function get(field: keyof E): Entry<E> | null {
-    return (entries.value as Map<keyof E, Entry<E>>).get(field) ?? null;
+  function setState(field: keyof E, state: State | null): void {
+    const next = new Map(states.value);
+    if (state === null) next.delete(field);
+    else next.set(field, state);
+    states.value = next;
   }
 
   function stopTimer(field: keyof E): void {
     const timer = timers.get(field);
     if (timer !== undefined) clearTimeout(timer);
     timers.delete(field);
+  }
+
+  function forget(field: keyof E): void {
+    stopTimer(field);
+    setChange(field, null);
+    setState(field, null);
   }
 
   /**
@@ -122,8 +139,23 @@ export function usePendingEdits<E extends object>(opts: PendingEditsOptions<E>) 
    */
   function overlay(base: E): E {
     let out: E = base;
-    for (const entry of (entries.value as Map<keyof E, Entry<E>>).values()) {
-      out = { ...out, ...entry.change };
+    for (const change of changes.value.values()) out = { ...out, ...change };
+    return out;
+  }
+
+  /**
+   * The base with only the edits in flight laid over it: what the file is
+   * about to say, which is what a new save should be compared against.
+   *
+   * Against the cache alone, typing the old value back while the new one is
+   * still out would look like no change, and the revert would never be sent.
+   * A refused edit is left out: the file does not hold it, so saving it again
+   * is a change worth sending.
+   */
+  function basis(base: E): E {
+    let out: E = base;
+    for (const [field, change] of changes.value) {
+      if (states.value.get(field)?.saving) out = { ...out, ...change };
     }
     return out;
   }
@@ -139,94 +171,113 @@ export function usePendingEdits<E extends object>(opts: PendingEditsOptions<E>) 
    * changes anything.
    */
   async function attempt(change: Partial<E>, run: () => Promise<boolean>): Promise<boolean> {
-    const fields = fieldsOf(change);
-    if (fields.length === 0) return run();
+    const named = fieldsOf(change);
+    if (named.length === 0) return run();
     attempts += 1;
     const attempt = attempts;
-    for (const field of fields) {
+    for (const field of named) {
       stopTimer(field);
-      set(field, { change, attempt, saving: true, slow: false, failure: null });
+      setChange(field, change);
+      setState(field, { attempt, saving: true, slow: false, failure: null });
       timers.set(
         field,
         setTimeout(() => {
-          const current = get(field);
-          if (current?.attempt === attempt) set(field, { ...current, slow: true });
+          const state = states.value.get(field);
+          if (state?.attempt === attempt) setState(field, { ...state, slow: true });
         }, slowAfter),
       );
     }
 
-    const mine = (field: keyof E): Entry<E> | null => {
-      const current = get(field);
-      return current?.attempt === attempt ? current : null;
-    };
+    /** The fields this attempt still owns: a newer save may have taken some. */
+    const mine = (): (keyof E)[] =>
+      named.filter((field) => states.value.get(field)?.attempt === attempt);
 
     try {
       const landed = await run();
       // Landed, or handled: either way the overlay comes off, since the page
       // now shows what the file says — the new value, or theirs.
-      for (const field of fields) {
-        if (mine(field) !== null) {
-          stopTimer(field);
-          set(field, null);
-        }
-      }
+      for (const field of mine()) forget(field);
       return landed;
     } catch (error) {
-      const described = describeApiError(error);
-      const failure: SaveFailure = {
-        heading: errorHeading(described.code),
-        message: [described.message, ...described.details].join(" — "),
-      };
-      for (const field of fields) {
-        const current = mine(field);
-        if (current === null) continue;
+      const failure = sayFailure(describeApiError(error));
+      if (gone) {
+        opts.lost?.(failure);
+        return false;
+      }
+      for (const field of mine()) {
+        const state = states.value.get(field);
+        if (state === undefined) continue;
         stopTimer(field);
-        set(field, { ...current, saving: false, slow: false, failure });
+        setState(field, { ...state, saving: false, slow: false, failure });
       }
       return false;
     }
   }
 
-  /** Forget what is kept for the fields `change` names: a save that turned out to change nothing. */
+  /**
+   * Forget a refused edit of the fields `change` names, because a save just
+   * said what the file already says. A save still in flight is left alone:
+   * saying its value again is not an answer to it.
+   */
   function settle(change: Partial<E>): void {
     for (const field of fieldsOf(change)) {
-      stopTimer(field);
-      set(field, null);
+      if (states.value.get(field)?.saving) continue;
+      forget(field);
     }
   }
 
   function discard(field: keyof E): void {
-    const current = get(field);
-    if (current === null) return;
-    settle(current.change);
+    const change = changes.value.get(field);
+    if (change !== undefined) settle(change);
   }
 
   function retry(field: keyof E): void {
-    const current = get(field);
-    if (current === null || current.failure === null) return;
-    void opts.resend(current.change);
+    const change = changes.value.get(field);
+    if (change === undefined || states.value.get(field)?.failure == null) return;
+    void opts.resend(change);
   }
 
-  /** One field's save, live: read it in a template and it follows the entry. */
+  /**
+   * One field's save, live.
+   *
+   * Cached per field, so a page handing it to an editor hands the same object
+   * until that field's state changes, and the editor is not re-rendered for a
+   * spinner on some other field.
+   */
   function field(name: keyof E): FieldSave {
-    const entry = get(name);
-    return {
-      saving: entry?.saving ?? false,
-      slow: entry?.slow ?? false,
-      failure: entry?.failure ?? null,
-      retry: () => retry(name),
-      discard: () => discard(name),
-    };
+    let live = fields.get(name);
+    if (live === undefined) {
+      // The map is replaced for any field's change, so the computed runs for
+      // all of them; it hands back the object it made last time unless this
+      // field's own state — itself replaced, never mutated — is a new one.
+      let last: { state: State | undefined; save: FieldSave } | null = null;
+      live = computed<FieldSave>(() => {
+        const state = states.value.get(name);
+        if (last !== null && last.state === state) return last.save;
+        const save: FieldSave = {
+          saving: state?.saving ?? false,
+          slow: state?.slow ?? false,
+          failure: state?.failure ?? null,
+          retry: () => retry(name),
+          discard: () => discard(name),
+        };
+        last = { state, save };
+        return save;
+      });
+      fields.set(name, live);
+    }
+    return live.value;
   }
 
   return {
     overlay,
+    basis,
     attempt,
     settle,
     field,
     /** True while any save is out. */
-    saving: computed(() =>
-      [...(entries.value as Map<keyof E, Entry<E>>).values()].some((entry) => entry.saving),
-    ),
+    saving: computed(() => [...states.value.values()].some((state) => state.saving)),
+    /** True while any edit is kept: out, or refused and not yet answered. */
+    pending: computed(() => changes.value.size > 0),
   };
 }

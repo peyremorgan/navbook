@@ -102,7 +102,12 @@ const current = computed<EntityEdit>(() => ({
 }));
 
 const staleEdits = useStaleEdit({ refetch, resend: (change) => save(change) });
-const edits = usePendingEdits<EntityEdit>({ resend: (change) => save(change) });
+const edits = usePendingEdits<EntityEdit>({
+  resend: (change) => save(change),
+  // A refusal that arrives after leaving the page has no field to sit under.
+  lost: (failure) =>
+    toast.add({ title: failure.heading, description: failure.message, color: "error" }),
+});
 
 /** The issue as the page shows it: the file, with every edit in flight over it. */
 const shown = computed(() => edits.overlay(current.value));
@@ -111,7 +116,9 @@ async function save(change: Partial<EntityEdit>): Promise<void> {
   if (issue.value === null) return;
   let patch: ReturnType<typeof buildEntityPatch>;
   try {
-    patch = buildEntityPatch(current.value, change);
+    // Against what the file is about to say, not only what it says: typing
+    // the old value back while the new one is still out is a change to send.
+    patch = buildEntityPatch(edits.basis(current.value), change);
   } catch (failure) {
     if (!(failure instanceof PatchError)) throw failure;
     toast.add({ title: "That will not do", description: failure.message, color: "error" });

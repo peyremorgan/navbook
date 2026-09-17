@@ -59,6 +59,25 @@ export function errorHeading(code: string | null): string {
   return HEADINGS[code] ?? "The operation failed";
 }
 
+/** A failure as it is shown: a heading for the code, the sentence with its details. */
+export interface SaidFailure {
+  heading: string;
+  message: string;
+}
+
+/**
+ * What is said about a failure, wherever it is said.
+ *
+ * The toast and the alert beside a field show the same two lines, so they are
+ * composed once: the server's sentence, then its details after a dash.
+ */
+export function sayFailure(failure: ApiFailure): SaidFailure {
+  return {
+    heading: errorHeading(failure.code),
+    message: [failure.message, ...failure.details].join(" — "),
+  };
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
 }

@@ -162,7 +162,12 @@ const { mutate: patch, loading: patching } = useMutation(UPDATE_PR, {
   context: { handled: true },
 });
 const staleEdits = useStaleEdit({ refetch, resend: (change) => save(change) });
-const edits = usePendingEdits<EntityEdit>({ resend: (change) => save(change) });
+const edits = usePendingEdits<EntityEdit>({
+  resend: (change) => save(change),
+  // A refusal that arrives after leaving the page has no field to sit under.
+  lost: (failure) =>
+    toast.add({ title: failure.heading, description: failure.message, color: "error" }),
+});
 // Asking somebody new to review is how they become somebody the repository
 // knows of, and the answer that listed everybody was fetched before they were.
 const refreshListings = useListingRefresh();
@@ -182,20 +187,26 @@ const current = computed<EntityEdit>(() => ({
 const shown = computed(() => edits.overlay(current.value));
 
 /**
- * The reviewer states as they will read once the save lands.
+ * The reviewer states as they will read once a pending save lands.
  *
- * `reviews` is derived on the server from `reviewer:` and the reviews given,
- * so a reviewer just asked has no row until the answer comes back. They are
- * shown pending meanwhile, and somebody just taken off the list goes unless
- * they reviewed anyway — which is what the server will say too.
+ * `reviews` is derived on the server from `reviewer:` and the reviews given
+ * (`packages/core`'s `reviewSummary`), so a reviewer just asked has no row
+ * until the answer comes back. Only the difference a pending edit makes is
+ * applied here: somebody newly asked is shown pending, and somebody just
+ * taken off the list loses their pending row — never a verdict, which stands
+ * whether they were asked or not. With no edit out, this is the server's list
+ * untouched, rules and all.
  */
 const reviewsShown = computed(() => {
   const reviews = pr.value?.reviews ?? [];
-  const asked = new Set(shown.value.reviewers ?? []);
+  const before = new Set(current.value.reviewers ?? []);
+  const after = new Set(shown.value.reviewers ?? []);
+  const removed = new Set([...before].filter((person) => !after.has(person)));
+  const added = [...after].filter((person) => !before.has(person));
   const named = new Set(reviews.map((review) => review.person));
   return [
-    ...reviews.filter((review) => review.volunteer || asked.has(review.person)),
-    ...[...asked]
+    ...reviews.filter((review) => review.state !== "PENDING" || !removed.has(review.person)),
+    ...added
       .filter((person) => !named.has(person))
       .map((person) => ({ person, state: "PENDING" as const, volunteer: false, comment: null })),
   ];
@@ -222,7 +233,8 @@ async function save(change: Partial<EntityEdit>): Promise<void> {
 
   let built: ReturnType<typeof buildEntityPatch>;
   try {
-    built = buildEntityPatch(current.value, change);
+    // Against what the file is about to say, as on the issue page.
+    built = buildEntityPatch(edits.basis(current.value), change);
   } catch (failure) {
     if (!(failure instanceof PatchError)) throw failure;
     toast.add({ title: "That will not do", description: failure.message, color: "error" });

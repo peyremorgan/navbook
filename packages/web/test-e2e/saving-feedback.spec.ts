@@ -190,7 +190,11 @@ test("keeps a refused drop where it landed, until it is retried or let go", asyn
   await expect(failed).toBeVisible();
   await expect(failed).toContainText("The remote refused the push");
   // Still where it was dropped, not sprung back: the person has not answered.
+  // And every handle is inert until they do, because the list on screen is
+  // no longer the one a drop's arithmetic would read.
   await expect(rows.nth(1)).toHaveAttribute("data-testid", "inbox-row-aaaa0008");
+  await expect(grip).toBeDisabled();
+  await expect(signedIn.getByTestId("inbox-grip-aaaa0009")).toBeDisabled();
 
   await signedIn.getByTestId("discard-reorder").click();
   await expect(failed).toHaveCount(0);
@@ -199,5 +203,29 @@ test("keeps a refused drop where it landed, until it is retried or let go", asyn
   );
   expect(after).toEqual(before);
   await expect(toasts(signedIn)).not.toContainText("Saved");
+  await expect(grip).toBeEnabled();
+
+  // Again, and this time the retry is let through: the row stays put, the
+  // file agrees, and the handles come back.
+  await grip.focus();
+  await signedIn.keyboard.press("Space");
+  await signedIn.keyboard.press("ArrowDown");
+  await signedIn.keyboard.press("Space");
+  await expect(failed).toBeVisible();
   await signedIn.unroute(stack.apiUrl, refuse);
+  await signedIn.getByTestId("retry-reorder").click();
+  await expect(toasts(signedIn)).toContainText("Saved");
+  await expect(failed).toHaveCount(0);
+  await expect(rows.nth(1)).toHaveAttribute("data-testid", "inbox-row-aaaa0008");
+  await expect(grip).toBeEnabled();
+  await signedIn.reload();
+  await expect(rows.nth(1)).toHaveAttribute("data-testid", "inbox-row-aaaa0008");
+
+  // Put it back for whoever reads the queue next.
+  await grip.focus();
+  await signedIn.keyboard.press("Space");
+  await signedIn.keyboard.press("ArrowUp");
+  await signedIn.keyboard.press("Space");
+  await expect(rows.nth(0)).toHaveAttribute("data-testid", "inbox-row-aaaa0008");
+  await expect(signedIn.getByTestId("inbox-grip-aaaa0009")).toBeEnabled();
 });

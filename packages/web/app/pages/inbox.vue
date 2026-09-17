@@ -34,6 +34,7 @@ useHead({ title: pageTitle("Inbox") });
 
 const view = useInboxView();
 const mutations = useIssueMutations();
+const toast = useToast();
 
 const scope = computed(() => ({
   finished: view.params.value.finished,
@@ -72,6 +73,8 @@ const reorder = useInboxReorder(
   async (id, rank) => {
     await mutations.updateIssue(id, { rank });
   },
+  // A refusal that arrives after leaving the page has no list to sit under.
+  (failure) => toast.add({ title: failure.heading, description: failure.message, color: "error" }),
 );
 
 const finished = computed({

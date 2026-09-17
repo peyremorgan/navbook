@@ -9,12 +9,13 @@
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
-import { staleContent } from "~/composables/useFeatureMutations";
 import { FEATURE_QUERY } from "~/graphql/queries";
+import type { EntityEdit } from "~/utils/patch";
 import { mergeTimeline } from "~/utils/timeline";
 import { pageTitle } from "~/utils/title";
 
 const route = useRoute();
+const toast = useToast();
 const mutations = useFeatureMutations();
 const slug = computed(() => String(route.params.slug ?? ""));
 
@@ -47,35 +48,35 @@ const prById = computed(() => new Map((feature.value?.prs ?? []).map((pr) => [pr
 /* --------------------------------------------------------------- editing */
 
 /** The two fields of the card, as they are edited. */
-interface CardEdit {
-  title: string;
-  summary: string | null;
-}
+type CardEdit = Pick<EntityEdit, "title" | "summary">;
 
 /*
- * As on the issue page, a save is shown from the moment it is sent and any
- * refusal is kept beside the field with a Retry. A stale refusal is one of
- * them here rather than `useStaleEdit`'s: the page is read again first, so
- * that a Retry sends against what the file says now — over theirs, having
- * been told — and a Discard shows theirs.
+ * Exactly as on the issue page. A save is shown from the moment it is sent
+ * and any refusal is kept beside the field with a Retry (`usePendingEdits`);
+ * a stale one is kept beside what the file says now instead, once the page
+ * has been read again, and answered from the alert (`useStaleEdit`).
  */
-const edits = usePendingEdits<CardEdit>({ resend: (change) => saveCard(change) });
-const shown = computed(() =>
-  edits.overlay({ title: feature.value?.title ?? "", summary: feature.value?.summary ?? null }),
-);
+const staleEdits = useStaleEdit({ refetch, resend: (change) => saveCard(change) });
+const edits = usePendingEdits<CardEdit>({
+  resend: (change) => saveCard(change),
+  lost: (failure) =>
+    toast.add({ title: failure.heading, description: failure.message, color: "error" }),
+});
+const current = computed<CardEdit>(() => ({
+  title: feature.value?.title ?? "",
+  summary: feature.value?.summary ?? null,
+}));
+const shown = computed(() => edits.overlay(current.value));
 
 async function saveCard(change: Partial<CardEdit>): Promise<void> {
-  const current = feature.value;
-  if (!current) return;
-  await edits.attempt(change, async () => {
-    try {
-      await mutations.updateFeature({ slug: current.slug, ...change, baseSha: current.baseSha });
+  const held = feature.value;
+  if (!held) return;
+  await edits.attempt(change, () =>
+    staleEdits.attempt(change, async () => {
+      await mutations.updateFeature({ slug: held.slug, ...change, baseSha: held.baseSha });
       return true;
-    } catch (failure) {
-      if (staleContent(failure) !== null) await refetch();
-      throw failure;
-    }
-  });
+    }),
+  );
 }
 
 const adding = ref(false);
@@ -119,6 +120,15 @@ async function addSpec(): Promise<void> {
             </EditableText>
             <code class="text-xs text-muted">{{ feature.slug }}</code>
           </header>
+
+          <StaleEditAlert
+            v-if="staleEdits.stale.value"
+            :message="staleEdits.stale.value.message"
+            :change="staleEdits.stale.value.change"
+            :saving="edits.saving.value || staleEdits.refetching.value"
+            @reapply="staleEdits.reapply"
+            @dismiss="staleEdits.dismiss"
+          />
 
           <EditableText
             :value="shown.summary ?? ''"

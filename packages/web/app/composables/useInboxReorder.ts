@@ -27,7 +27,7 @@
  * lets it spring back, which is the truth: the file did not change.
  */
 
-import { type FieldSave, usePendingEdits } from "~/composables/usePendingEdits";
+import { type FieldSave, type SaveFailure, usePendingEdits } from "~/composables/usePendingEdits";
 import type { InboxItem } from "~/utils/inbox";
 
 /** How far clear of the end of the queue a row dropped past it is placed. */
@@ -50,7 +50,7 @@ export interface InboxReorderHandle {
   /** The rows to render: what was given, with any move in progress applied. */
   items: ComputedRef<InboxItem[]>;
   rowState: (item: InboxItem) => ReorderRow;
-  /** True while a write is in flight; every handle is inert until it lands. */
+  /** True while a drop is out or refused; every handle is inert until it is answered. */
   busy: ComputedRef<boolean>;
   /** The write in flight or refused, for the page to say beside the list. */
   save: ComputedRef<FieldSave>;
@@ -132,51 +132,55 @@ interface Placement {
 
 /**
  * `commit` writes the rank and throws when the server refuses it; what it
- * threw is what the page shows beside the list.
+ * threw is what the page shows beside the list. `lost` is for a refusal that
+ * arrives once the page has been left, which the list can no longer show.
  */
 export function useInboxReorder(
   shown: ComputedRef<InboxItem[]>,
   enabled: ComputedRef<boolean>,
   commit: (id: string, rank: number) => Promise<void>,
+  lost?: (failure: SaveFailure) => void,
 ): InboxReorderHandle {
   const mode = ref<Mode>({ kind: "idle" });
   const over = ref<{ key: string; edge: Edge } | null>(null);
-  /** Where a row is being shown while its write is out, or kept after a refusal. */
-  const pending = ref<Placement | null>(null);
   const announcement = ref("");
 
-  const edits = usePendingEdits<{ rank: number }>({
-    resend: async () => {
-      const held = pending.value;
-      if (held !== null) await write(held);
+  /*
+   * The placement is the edit. Kept by `usePendingEdits` exactly as a field's
+   * value is on a detail page, so a drop that lands, is discarded or is
+   * settled clears it through the one store, and there is no second copy to
+   * forget. `pending` reads it back: where a row is being shown while its
+   * write is out, or kept after a refusal.
+   */
+  const edits = usePendingEdits<{ placement: Placement | null }>({
+    resend: async (change) => {
+      if (change.placement) await write(change.placement);
     },
+    ...(lost === undefined ? {} : { lost }),
   });
-  const busy = computed(() => edits.saving.value);
+  const pending = computed(() => edits.overlay({ placement: null }).placement);
+  const save = computed(() => edits.field("placement"));
+  // Inert while a drop is out *and* while a refusal is kept: the preview then
+  // differs from the list every drop's arithmetic reads, and a second drop
+  // would land somewhere else and quietly replace the refusal unanswered.
+  const busy = edits.pending;
 
   /** Write a placement, keeping the row where it was dropped until the answer. */
   const write = async (held: Placement): Promise<void> => {
     announcement.value = `Moved ${held.title} to position ${held.index + 1} of ${shown.value.length}.`;
-    const landed = await edits.attempt({ rank: held.rank }, async () => {
+    const landed = await edits.attempt({ placement: held }, async () => {
       await commit(held.id, held.rank);
       return true;
     });
-    if (landed) {
-      if (pending.value === held) pending.value = null;
-      return;
-    }
-    announcement.value = `${held.title} could not be moved.`;
+    if (!landed) announcement.value = `${held.title} could not be moved.`;
   };
 
-  // Discarding a refused drop is also letting the row go back where it was.
-  const save = computed<FieldSave>(() => {
-    const field = edits.field("rank");
-    return {
-      ...field,
-      discard: () => {
-        field.discard();
-        pending.value = null;
-      },
-    };
+  // A refusal is kept only where it can be shown: in the order that has a
+  // place for the row, and while the row is still in the list.
+  watch([enabled, shown], ([offered, rows]) => {
+    const held = pending.value;
+    if (held === null || save.value.saving) return;
+    if (!offered || !rows.some((row) => keyOf(row) === held.key)) save.value.discard();
   });
 
   const reset = (): void => {
@@ -251,9 +255,7 @@ export function useInboxReorder(
     const rank = rankForPosition(rest, target);
     if (rank === rankOf(item)) return;
 
-    const held: Placement = { key, index: target, id: item.id, rank, title: item.entity.title };
-    pending.value = held;
-    await write(held);
+    await write({ key, index: target, id: item.id, rank, title: item.entity.title });
   };
 
   /** Where a drop on `item` would put the row, given which half was hovered. */

@@ -16,7 +16,7 @@
 
 import { computed, ref } from "vue";
 import { describeApiError, staleEdit } from "~/utils/errors";
-import type { EntityEdit } from "~/utils/patch";
+import { type EntityEdit, fieldsOf } from "~/utils/patch";
 
 export interface StaleEdit {
   /** What was typed, as it was sent. */
@@ -37,10 +37,6 @@ export interface StaleEditOptions {
   refetch: () => Promise<unknown> | undefined;
   /** Save the kept edit again, against what the page now shows. */
   resend: (change: Partial<EntityEdit>) => Promise<void>;
-}
-
-function fieldsOf(change: Partial<EntityEdit>): string[] {
-  return Object.keys(change).filter((key) => change[key as keyof EntityEdit] !== undefined);
 }
 
 export function useStaleEdit(opts: StaleEditOptions) {

@@ -20,7 +20,7 @@ import { setContext } from "@apollo/client/link/context";
 import { onError } from "@apollo/client/link/error";
 import { DefaultApolloClient } from "@vue/apollo-composable";
 import type { DocumentNode } from "graphql";
-import { describeApiError, errorHeading, isForbidden, isUnauthenticated } from "~/utils/errors";
+import { describeApiError, isForbidden, isUnauthenticated, sayFailure } from "~/utils/errors";
 
 /**
  * Failures a caller has said it will report itself.
@@ -33,6 +33,9 @@ import { describeApiError, errorHeading, isForbidden, isUnauthenticated } from "
  * toast could. `handled` names all of them, for a write whose every refusal is
  * kept beside the field it was about, with the server's words and a Retry
  * (`usePendingEdits`); a toast on top would be the same sentence said twice.
+ * Except one: a refusal by the repository's policy sends the person to the
+ * page that explains it, and the field the refusal would have been kept
+ * beside leaves with the page they were on, so that one is still announced.
  */
 export interface HandledContext {
   handledCodes?: readonly string[];
@@ -95,14 +98,15 @@ export default defineNuxtPlugin((nuxtApp) => {
     }
 
     const context = operation.getContext() as HandledContext;
-    if (context.handled === true) return;
+    if (context.handled === true && !isForbidden(failure)) return;
     if (context.handledCodes?.includes(failure.code ?? "")) return;
     if (!isMutation(operation.query)) return;
 
+    const said = sayFailure(failure);
     const toast = useToast();
     toast.add({
-      title: errorHeading(failure.code),
-      description: [failure.message, ...failure.details].join(" — "),
+      title: said.heading,
+      description: said.message,
       color: "error",
       icon: "i-lucide-triangle-alert",
       duration: 8000,
