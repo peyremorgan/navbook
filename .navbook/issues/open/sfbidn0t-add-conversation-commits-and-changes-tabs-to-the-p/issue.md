@@ -2,6 +2,7 @@
 title: Add Conversation, Commits and Changes tabs to the pull request page
 author: Claude <noreply@anthropic.com>
 created: 2026-09-17T22:18:59Z
+assignee: Claude <noreply@anthropic.com>
 labels: [enhancement]
 feature: [web, pull-requests, server]
 ---
