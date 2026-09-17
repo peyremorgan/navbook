@@ -17,6 +17,10 @@ revisions:
     base: 46501d696f5d1af53f8bf67626c373ee136d12a2
     date: 2026-09-16T22:29:33Z
 reviewer: copilot@github.com
+merged:
+  date: 2026-09-17T00:49:48Z
+  by: Morgan PEYRE <morgan.peyre@brickcode.tech>
+  commit: 090f5ad1f29229a7c6b629434fe0f2a213d90607
 ---
 
 Makes pull requests on other branches both visible and usable from any checkout, the case that matters when every branch sits in its own worktree. It fixes #t4mwvm2j, where an agent could find its assigned PR with `nav pr list --all-refs` but not show or review it using any ID the listing printed.
