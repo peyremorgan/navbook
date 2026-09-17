@@ -14,6 +14,9 @@ revisions:
   - head: 398d97499fe604e180f825d6785ced8484383370
     base: bd171bbd8d04912327d45f5e0587961b7b6b84a6
     date: 2026-09-17T18:20:50Z
+merged:
+  date: 2026-09-17T18:22:04Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Closes #umalw0cy.
