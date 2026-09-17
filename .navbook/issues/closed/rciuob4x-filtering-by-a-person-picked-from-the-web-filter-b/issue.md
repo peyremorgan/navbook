@@ -5,6 +5,7 @@ created: 2026-09-17T17:12:18Z
 labels: [bug]
 assignee: Claude <noreply@anthropic.com>
 feature: [web, server]
+resolution: fixed
 ---
 
 Reported by Morgan on https://tracker.infra.brickcode.tech/: filtering the issue listing by an assignee picked from the filter bar shows nothing, although that person is assigned open issues (e.g. `/issues/epo4xcgf` on the deployment). The URL the filter bar produced:
