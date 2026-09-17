@@ -113,6 +113,17 @@ describe("renderMarkdown", () => {
     }
   });
 
+  it("leaves an escaped reference to the author who escaped it", () => {
+    // Backslash and numeric entity are both ways of writing a literal `#`.
+    // They survive as `text_special` tokens only until `text_join`, which is
+    // why the rule runs before it.
+    for (const source of ["a literal \\#t4mwvm2j", "a literal &#35;t4mwvm2j"]) {
+      const html = renderMarkdown(source);
+      assert.ok(!html.includes("/ref/"), `${source} produced ${html}`);
+      assert.match(html, /#t4mwvm2j/);
+    }
+  });
+
   it("never puts a link inside a link", () => {
     const html = renderMarkdown("[see #t4mwvm2j](https://example.invalid)");
     assert.ok(!html.includes("/ref/"), html);

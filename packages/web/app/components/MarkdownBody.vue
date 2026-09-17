@@ -25,6 +25,15 @@ const html = computed(() => renderMarkdown(props.source));
  * `safeReturnPath` marks the same ones it left without `target="_blank"`. A
  * click asking for a new tab or a new window is a click asking for the
  * browser, so those are handed to it untouched.
+ *
+ * Following one leaves a page that may hold unsaved work — `SpecEditor`'s
+ * preview renders a draft, and a reference is the sort of thing such a draft
+ * is full of. Nothing here guards that, because nothing in this app does: the
+ * sidebar discards the same draft with the same click. Opening a tab instead
+ * was tried and is worse, since the token lives in `sessionStorage` on
+ * purpose (`plugins/02.auth.ts`) and a new tab therefore signs in again. The
+ * guard belongs to whatever page owns the unsaved work, for every way out of
+ * it rather than this one.
  */
 function follow(event: MouseEvent): void {
   if (event.defaultPrevented || event.button !== 0) return;

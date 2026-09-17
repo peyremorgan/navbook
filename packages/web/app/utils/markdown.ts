@@ -37,11 +37,18 @@ const renderer = new MarkdownIt({
  * and is left as written. The one thing left to check is links — a reference
  * inside one would nest an anchor in an anchor — which is what `depth` is for.
  *
+ * Before `text_join` rather than after it, which is what makes `\#t4mwvm2j`
+ * work. An escape and a numeric entity are `text_special` tokens until
+ * `text_join` folds them into the text around them; after that they are
+ * indistinguishable from a `#` somebody typed, and an author who went to the
+ * trouble of escaping one would get a link anyway. Running first, the rule
+ * only ever sees `text`, so an escaped reference is not one.
+ *
  * Only `text` tokens are rewritten, and only when a reference is found in one,
  * so a body with none comes out of here as the same tokens it went in as.
  */
 renderer.use((md: typeof renderer) => {
-  md.core.ruler.push("navbook_reference", (state) => {
+  md.core.ruler.before("text_join", "navbook_reference", (state) => {
     for (const block of state.tokens) {
       const children = block.children;
       if (block.type !== "inline" || children === null) continue;

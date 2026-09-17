@@ -55,44 +55,58 @@ async function found(
   }
 }
 
-async function resolve(): Promise<void> {
-  const ref = reference.value;
-  failure.value = null;
-  dangling.value = false;
+/** What a lookup settled on: somewhere to go, a failure to show, or neither. */
+type Outcome = { path: string } | { failure: ApiFailure } | { dangling: true };
 
+async function lookUp(ref: string): Promise<Outcome> {
   const issue = await found(ISSUE_QUERY, ref);
-  if (issue === null) {
-    await navigateTo(`/issues/${ref}`, { replace: true });
-    return;
-  }
+  if (issue === null) return { path: `/issues/${ref}` };
   // `WRONG_KIND` is the id resolving to something that is not an issue, and
   // there is only one other thing it could be. That is the usual answer for a
   // reference to a pull request, and it arrives without asking twice.
-  if (issue.code === "WRONG_KIND") {
-    await navigateTo(`/prs/${ref}`, { replace: true });
-    return;
-  }
+  if (issue.code === "WRONG_KIND") return { path: `/prs/${ref}` };
   // Anything but `NOT_FOUND` — an ambiguous prefix, a prefix too short, a
   // server that cannot be reached — is an answer about the reference itself,
   // and asking the other kind would only produce the same one twice.
-  if (issue.code !== "NOT_FOUND") {
-    failure.value = issue;
-    return;
-  }
+  if (issue.code !== "NOT_FOUND") return { failure: issue };
 
   // Nothing in the working tree carries the id. A pull request on a branch
   // this server has fetched but is not standing on is exactly that, and
   // `pr(ref:)` looks at the branches too.
   const pr = await found(PR_QUERY, ref);
-  if (pr === null) {
-    await navigateTo(`/prs/${ref}`, { replace: true });
-    return;
-  }
-  if (pr.code !== "NOT_FOUND" && pr.code !== "WRONG_KIND") {
-    failure.value = pr;
-    return;
-  }
-  dangling.value = true;
+  if (pr === null) return { path: `/prs/${ref}` };
+  if (pr.code !== "NOT_FOUND" && pr.code !== "WRONG_KIND") return { failure: pr };
+  return { dangling: true };
+}
+
+/**
+ * Which lookup is the one anybody is still waiting for.
+ *
+ * A lookup is two awaits at worst, and a person who does not want to wait for
+ * them presses Back. If its answer still navigated when it arrived, it would
+ * pull them out of the page they had just returned to — and this route
+ * redirects, so it would not even leave a way back. The count settles it:
+ * every start claims a number, leaving the page burns one, and an answer acts
+ * only if its number is still the current one.
+ */
+let current = 0;
+onScopeDispose(() => {
+  current += 1;
+});
+
+async function resolve(): Promise<void> {
+  current += 1;
+  const mine = current;
+  const ref = reference.value;
+  failure.value = null;
+  dangling.value = false;
+
+  const outcome = await lookUp(ref);
+  if (mine !== current) return;
+
+  if ("path" in outcome) await navigateTo(outcome.path, { replace: true });
+  else if ("failure" in outcome) failure.value = outcome.failure;
+  else dangling.value = true;
 }
 
 // `ssr: false`, so this runs in the browser and nothing here needs to have
