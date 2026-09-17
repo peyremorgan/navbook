@@ -11,6 +11,9 @@ revisions:
   - head: e9bf19a5b69f0eb9dcf85222800e3f3f9cf1fdf1
     base: 60f829ec46e33f9dda6550870bfe121a4ad53bbf
     date: 2026-09-17T21:44:13Z
+  - head: 5c003856cefa47e46ce493b8f9b4dca7dadc96d6
+    base: 65ee88db8bdfb13647a9950880d30f54aa430107
+    date: 2026-09-17T22:39:08Z
 ---
 
 Fixes #fa19dlvj: an edit in the web client showed the *old* value until the API answered, with nothing to say a save was out, and a refused save lost what was typed to a toast.
