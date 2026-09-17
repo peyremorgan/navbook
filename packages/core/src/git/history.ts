@@ -98,6 +98,11 @@ export function objectExists(cwd: string, sha: string): boolean {
   return gitRun(["cat-file", "-e", `${sha}^{commit}`], { cwd }).code === 0;
 }
 
+/** {@link objectExists}, without blocking. */
+export async function objectExistsAsync(cwd: string, sha: string): Promise<boolean> {
+  return (await gitRunAsync(["cat-file", "-e", `${sha}^{commit}`], { cwd })).code === 0;
+}
+
 /** Commit messages of the given revision range, newest first. */
 export function commitMessages(cwd: string, range: string, limit = 100): string[] {
   const output = gitMaybe(["log", "--format=%B%x00", "-n", String(limit), range], { cwd });
@@ -153,16 +158,33 @@ export interface CommitSearch {
  * not get to be a second, differently-spelled definition of a reference.
  */
 export function searchCommits(cwd: string, search: CommitSearch): CommitSummary[] {
-  const args = ["log", `--format=%x01%H%x02%aI%x02%an <%ae>%x02%s%x02%B`];
+  const args = ["log", ...COMMIT_LOG_ARGS];
   if (search.limit !== undefined) args.push("-n", String(search.limit));
   if (search.grep !== undefined) args.push("--extended-regexp", `--grep=${search.grep}`);
   if (search.paths?.length) args.push("--", ...search.paths);
 
   const result = gitRun(args, { cwd });
   if (result.code !== 0) return [];
+  return parseCommitLog(result.stdout);
+}
 
+/**
+ * The `git log` arguments every commit listing shares, and the reader of what
+ * they print: one record per commit, the message last because it alone may
+ * hold the field separator.
+ *
+ * `%aN`/`%aE` so that `.mailmap` is honoured, as {@link commitAuthors} does,
+ * and no signature block, which `log.showSignature` would otherwise put
+ * between the records.
+ */
+export const COMMIT_LOG_ARGS = [
+  "--no-show-signature",
+  "--format=%x01%H%x02%aI%x02%aN <%aE>%x02%s%x02%B",
+] as const;
+
+export function parseCommitLog(output: string): CommitSummary[] {
   const out: CommitSummary[] = [];
-  for (const record of result.stdout.split(RECORD_SEPARATOR)) {
+  for (const record of output.split(RECORD_SEPARATOR)) {
     if (record === "") continue;
     const [sha, authored, author, subject, ...rest] = record.split(FIELD_SEPARATOR);
     if (!sha || !authored || subject === undefined) continue;

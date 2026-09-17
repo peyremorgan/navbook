@@ -19,11 +19,7 @@
  */
 
 import { type GitAsyncOptions, GitError, git, gitRun, gitRunAsync } from "./exec.ts";
-import type { CommitSummary } from "./history.ts";
-
-/** ASCII SOH/STX: separators that cannot occur in a commit message or path. */
-const RECORD_SEPARATOR = "";
-const FIELD_SEPARATOR = "";
+import { COMMIT_LOG_ARGS, type CommitSummary, parseCommitLog } from "./history.ts";
 
 /**
  * A budget for the patch itself, sized so that a diff git takes a second to
@@ -50,7 +46,10 @@ export interface ChangedFile {
    * file, a pure rename, a mode change, and when patches were not asked for.
    */
   patch: string;
-  /** How many lines `patch` holds, so a size decision needs no second pass. */
+  /**
+   * How many lines `patch` holds, so a size decision needs no second pass.
+   * When patches were not read, a lower bound: the additions and deletions.
+   */
   lines: number;
 }
 
@@ -86,11 +85,11 @@ export interface CommitRange {
 /**
  * The commits a revision introduces: `base..head`, oldest first.
  *
- * `%aN`/`%aE` so that `.mailmap` is honoured, as it is for the people list.
  * One walk with no `-n`: git applies a limit before it reverses, so limiting
  * here is what keeps the oldest rather than the newest. The whole walk is
  * cheap — a line per commit — and a range with more commits than fit in the
- * default buffer is not a pull request.
+ * default buffer is not a pull request. Throws a `GitError` when git cannot
+ * walk the range, which a caller must not mistake for an empty one.
  */
 export function commitsBetween(
   cwd: string,
@@ -98,35 +97,34 @@ export function commitsBetween(
   head: string,
   limit?: number,
 ): CommitRange {
-  const result = gitRun(
-    [
-      "log",
-      "--no-show-signature",
-      "--reverse",
-      `--format=%x01%H%x02%aI%x02%aN <%aE>%x02%s%x02%B`,
-      `${base}..${head}`,
-    ],
-    { cwd },
-  );
-  if (result.code !== 0) return { total: 0, commits: [] };
-  const commits = parseCommits(result.stdout);
+  const args = commitsArgs(base, head);
+  const result = gitRun(args, { cwd });
+  if (result.code !== 0) throw new GitError(args, result);
+  return limitRange(parseCommitLog(result.stdout), limit);
+}
+
+/** {@link commitsBetween}, without blocking. */
+export async function commitsBetweenAsync(
+  cwd: string,
+  base: string,
+  head: string,
+  limit?: number,
+): Promise<CommitRange> {
+  const args = commitsArgs(base, head);
+  const result = await gitRunAsync(args, { cwd });
+  if (result.code !== 0) throw new GitError(args, result);
+  return limitRange(parseCommitLog(result.stdout), limit);
+}
+
+function commitsArgs(base: string, head: string): string[] {
+  return ["log", "--reverse", ...COMMIT_LOG_ARGS, `${base}..${head}`];
+}
+
+function limitRange(commits: CommitSummary[], limit: number | undefined): CommitRange {
   return {
     total: commits.length,
     commits: limit === undefined ? commits : commits.slice(0, limit),
   };
-}
-
-function parseCommits(output: string): CommitSummary[] {
-  const out: CommitSummary[] = [];
-  for (const record of output.split(RECORD_SEPARATOR)) {
-    if (record === "") continue;
-    const [sha, authored, author, subject, ...rest] = record.split(FIELD_SEPARATOR);
-    if (!sha || !authored || subject === undefined) continue;
-    const date = new Date(authored);
-    if (Number.isNaN(date.getTime())) continue;
-    out.push({ sha, subject, author: author ?? "", date, message: rest.join(FIELD_SEPARATOR) });
-  }
-  return out;
 }
 
 /**
@@ -155,7 +153,9 @@ function diffArgs(base: string, head: string, opts: DiffOptions): string[] {
   if (opts.patches === false) args.push("--raw", "--numstat", "-z");
   else args.push("--unified=3");
   args.push(base, head);
-  if (opts.paths?.length) args.push("--", ...opts.paths);
+  // Literal, because a path is what the listing said and not a pattern: a
+  // name beginning with `:` would otherwise be read as pathspec magic.
+  if (opts.paths?.length) args.push("--", ...opts.paths.map((path) => `:(literal)${path}`));
   return args;
 }
 
@@ -468,6 +468,9 @@ export function parseRawNumstat(text: string): ChangedFile[] {
     }
     file.additions = Number.parseInt(added ?? "0", 10) || 0;
     file.deletions = Number.parseInt(deleted ?? "0", 10) || 0;
+    // No hunks were read, but the patch would hold at least this many lines,
+    // and a caller deciding whether there is anything to ask for needs that.
+    file.lines = file.additions + file.deletions;
   }
   return files;
 }

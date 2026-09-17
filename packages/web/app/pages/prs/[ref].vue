@@ -109,6 +109,16 @@ const {
 );
 const changes = computed(() => changesResult.value?.pr.changes ?? null);
 
+/** Which tabs have been opened, and so are mounted and stay so. */
+const visited = reactive({ commits: false, changes: false });
+watch(
+  tab,
+  (value) => {
+    if (value !== "conversation") visited[value] = true;
+  },
+  { immediate: true },
+);
+
 /** What each tab's button says beside its name, once the tab has been read. */
 const tabCount = (key: Tab): number | null => {
   if (key === "commits") return commits.value?.total ?? null;
@@ -443,8 +453,15 @@ const branchHint = computed(() => refusedOn.value);
         </UButton>
       </nav>
 
+      <!--
+        Shown and hidden rather than mounted and unmounted: a review half
+        typed, a description being edited and every patch loaded by path are
+        component state, and switching tabs to check a file must not throw
+        them away. A tab is mounted the first time it is opened and kept.
+      -->
       <QueryState
-        v-if="tab === 'commits'"
+        v-if="visited.commits"
+        v-show="tab === 'commits'"
         :loading="commitsLoading && commits === null"
         :error="commitsError"
         :skeleton-rows="4"
@@ -454,7 +471,8 @@ const branchHint = computed(() => refusedOn.value);
       </QueryState>
 
       <QueryState
-        v-else-if="tab === 'changes'"
+        v-if="visited.changes"
+        v-show="tab === 'changes'"
         :loading="changesLoading && changes === null"
         :error="changesError"
         :skeleton-rows="6"
@@ -463,7 +481,7 @@ const branchHint = computed(() => refusedOn.value);
         <DiffView v-if="changes" :pr-ref="pr.id" :changes="changes" />
       </QueryState>
 
-      <div v-else class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
+      <div v-show="tab === 'conversation'" class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
         <div class="space-y-6">
           <EditableText
             :value="shown.body"

@@ -30,13 +30,13 @@
 import {
   type ChangedFile,
   type CommitRange,
-  commitsBetween,
+  commitsBetweenAsync,
   type Diff,
   diffBetweenAsync,
   GitError,
-  objectExists,
+  objectExistsAsync,
 } from "@navbook/core";
-import { apiError } from "./errors.ts";
+import { apiError, invalidInput } from "./errors.ts";
 
 /**
  * A file whose patch is longer than this is listed with its counts but
@@ -70,6 +70,16 @@ const KEEP_PATCHES_UP_TO_CHARS = 24 * 1024 * 1024;
 
 /** How long git gets for one diff before the answer is a listing instead. */
 const DIFF_TIMEOUT_MS = 30_000;
+
+/**
+ * How many files one by-path request may name. The client asks for one at a
+ * time; the cap is what keeps a request from naming every file of a diff and
+ * being answered with the whole patch text in one body.
+ */
+export const MAX_PATHS_PER_REQUEST = 20;
+
+/** What a file costs the cache beyond its patch: its record and its path. */
+const FILE_OVERHEAD_CHARS = 128;
 
 /** A file of a projected diff: what the API says about it. */
 export interface ChangedFileView extends Omit<ChangedFile, "patch"> {
@@ -107,39 +117,49 @@ export interface RevisionCacheOptions {
   navDir?: string;
   /** Injectable, so a test can count the reads. */
   readDiff?: typeof diffBetweenAsync;
-  readCommits?: typeof commitsBetween;
-  exists?: typeof objectExists;
+  readCommits?: typeof commitsBetweenAsync;
+  exists?: typeof objectExistsAsync;
 }
 
 export class RevisionCache {
   private readonly diffs = new Map<string, Entry>();
   private readonly inflight = new Map<string, Promise<Entry>>();
-  private readonly commits = new Map<string, CommitRange>();
+  private readonly commits = new Map<string, Promise<CommitRange>>();
   private chars = 0;
   private readonly opts: RevisionCacheOptions;
   private readonly readDiff: typeof diffBetweenAsync;
-  private readonly readCommits: typeof commitsBetween;
-  private readonly exists: typeof objectExists;
+  private readonly readCommits: typeof commitsBetweenAsync;
+  private readonly exists: typeof objectExistsAsync;
 
   constructor(opts: RevisionCacheOptions) {
     this.opts = opts;
     this.readDiff = opts.readDiff ?? diffBetweenAsync;
-    this.readCommits = opts.readCommits ?? commitsBetween;
-    this.exists = opts.exists ?? objectExists;
+    this.readCommits = opts.readCommits ?? commitsBetweenAsync;
+    this.exists = opts.exists ?? objectExistsAsync;
   }
 
-  /** The commits `base..head`, oldest first, walked once per pair. */
-  commitsOf(base: string, head: string, limit: number): CommitRange {
+  /**
+   * The commits `base..head`, oldest first, walked once per pair.
+   *
+   * The promise is what is remembered, so concurrent askers share one walk;
+   * a walk that fails is forgotten, so the next asker tries again rather
+   * than being served the failure.
+   */
+  async commitsOf(base: string, head: string, limit: number): Promise<CommitRange> {
     const key = pairKey(base, head);
-    let range = this.commits.get(key);
-    if (range === undefined) {
-      this.require(base, head);
-      range = this.readCommits(this.opts.repoRoot, base, head);
+    let pending = this.commits.get(key);
+    if (pending === undefined) {
+      pending = this.require(base, head).then(() =>
+        this.readCommits(this.opts.repoRoot, base, head),
+      );
       // A walk is a line per commit; a thousand pairs is a few megabytes.
-      if (this.commits.size >= 1_000)
+      if (this.commits.size >= 1_000) {
         this.commits.delete(this.commits.keys().next().value as string);
-      this.commits.set(key, range);
+      }
+      this.commits.set(key, pending);
+      pending.catch(() => this.commits.delete(key));
     }
+    const range = await pending;
     return { total: range.total, commits: range.commits.slice(0, limit) };
   }
 
@@ -151,10 +171,16 @@ export class RevisionCache {
    * the hard limit — the follow-up a client makes for a withheld file.
    */
   async changesOf(base: string, head: string, paths?: readonly string[]): Promise<ChangesView> {
+    if (paths !== undefined && paths.length > MAX_PATHS_PER_REQUEST) {
+      throw invalidInput(`paths names at most ${MAX_PATHS_PER_REQUEST} files at a time`);
+    }
     const entry = await this.entryOf(base, head);
     if (paths === undefined) return inline(entry.diff);
     const wanted = new Set(paths);
     const files = entry.diff.files.filter((file) => wanted.has(file.path));
+    // Nothing named is in the diff: nothing to read, and in particular not
+    // the whole diff, which an empty pathspec would ask git for.
+    if (files.length === 0) return { ...entry.diff, files: [] };
     if (entry.withPatches) return { ...entry.diff, files: files.map(cut) };
     // Kept as a listing, so the hunks are read now, for these files only.
     const fresh = await this.readDiff(this.opts.repoRoot, base, head, {
@@ -191,26 +217,27 @@ export class RevisionCache {
   }
 
   private async load(base: string, head: string): Promise<Entry> {
-    this.require(base, head);
+    await this.require(base, head);
     const cwd = this.opts.repoRoot;
     try {
       const diff = this.ordered(
         await this.readDiff(cwd, base, head, { timeoutMs: DIFF_TIMEOUT_MS }),
       );
-      const chars = sizeOf(diff);
-      if (chars <= KEEP_PATCHES_UP_TO_CHARS) return { diff, withPatches: true, chars };
+      if (patchChars(diff) <= KEEP_PATCHES_UP_TO_CHARS) {
+        return { diff, withPatches: true, chars: sizeOf(diff) };
+      }
       // Too much to keep: the listing is what is remembered, and the hunks
       // are dropped rather than held for a "Load diff" nobody may click.
-      return { diff: listingOf(diff), withPatches: false, chars: 0 };
+      const listing = listingOf(diff);
+      return { diff: listing, withPatches: false, chars: sizeOf(listing) };
     } catch (error) {
       // Git refusing is the client's news; git overflowing or running out of
       // time is the size of the diff, and the listing is the answer to that.
       if (error instanceof GitError) throw error;
-      const diff = await this.readDiff(cwd, base, head, {
-        patches: false,
-        timeoutMs: DIFF_TIMEOUT_MS,
-      });
-      return { diff: this.ordered(diff), withPatches: false, chars: 0 };
+      const diff = this.ordered(
+        await this.readDiff(cwd, base, head, { patches: false, timeoutMs: DIFF_TIMEOUT_MS }),
+      );
+      return { diff, withPatches: false, chars: sizeOf(diff) };
     }
   }
 
@@ -240,15 +267,13 @@ export class RevisionCache {
    * has not fetched them cannot say what they changed; the remedy is a
    * fetch, which is nothing this server can do for the client.
    */
-  private require(base: string, head: string): void {
+  private async require(base: string, head: string): Promise<void> {
     for (const sha of [base, head]) {
-      if (!this.exists(this.opts.repoRoot, sha)) {
+      if (!(await this.exists(this.opts.repoRoot, sha))) {
         throw apiError(
           `this clone does not have commit ${sha}; fetch the branch first`,
           "MISSING_COMMIT",
-          {
-            sha,
-          },
+          { sha },
         );
       }
     }
@@ -259,9 +284,20 @@ function pairKey(base: string, head: string): string {
   return `${base}..${head}`;
 }
 
-function sizeOf(diff: Diff): number {
+function patchChars(diff: Diff): number {
   let chars = 0;
   for (const file of diff.files) chars += file.patch.length;
+  return chars;
+}
+
+/**
+ * What an entry costs to keep: its patches, and its records and paths, so a
+ * listing of three thousand files is charged for what it is rather than kept
+ * for free and forever.
+ */
+function sizeOf(diff: Diff): number {
+  let chars = patchChars(diff);
+  for (const file of diff.files) chars += FILE_OVERHEAD_CHARS + file.path.length;
   return chars;
 }
 

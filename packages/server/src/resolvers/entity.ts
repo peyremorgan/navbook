@@ -142,7 +142,7 @@ export const Pr: PrResolvers = {
       throw invalidInput("limit takes a whole number of commits");
     }
     const latest = latestRevision(pr);
-    if (latest === null) return { total: 0, commits: [] };
+    if (latest === null) return Promise.resolve({ total: 0, commits: [] });
     return run(() => ctx.revisions.commitsOf(latest.base, latest.head, args.limit));
   },
   changes: (pr, args, ctx) => {

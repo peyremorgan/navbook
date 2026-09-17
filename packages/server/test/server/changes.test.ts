@@ -14,6 +14,7 @@ import {
   HARD_FILE_LINES,
   INLINE_FILE_LINES,
   INLINE_LINE_BUDGET,
+  MAX_PATHS_PER_REQUEST,
   RevisionCache,
 } from "../../src/changes.ts";
 
@@ -58,8 +59,8 @@ function fake(files: ChangedFile[], opts: { fail?: () => Error; navDir?: string 
   state.cache = new RevisionCache({
     repoRoot: "/nowhere",
     ...(opts.navDir === undefined ? {} : { navDir: opts.navDir }),
-    exists: () => true,
-    readCommits: () => {
+    exists: async () => true,
+    readCommits: async () => {
       state.commitCalls += 1;
       return {
         total: 3,
@@ -77,7 +78,9 @@ function fake(files: ChangedFile[], opts: { fail?: () => Error; navDir?: string 
       if (opts.fail && o.patches !== false && o.paths === undefined) throw opts.fail();
       const chosen = o.paths === undefined ? files : files.filter((f) => o.paths?.includes(f.path));
       return diffOf(
-        o.patches === false ? chosen.map((f) => ({ ...f, patch: "", lines: 0 })) : chosen,
+        o.patches === false
+          ? chosen.map((f) => ({ ...f, patch: "", lines: f.additions + f.deletions }))
+          : chosen,
       );
     },
   });
@@ -145,17 +148,32 @@ describe("RevisionCache.changesOf", () => {
       diffCalls.map((c) => c.patches),
       [undefined, false],
     );
+    // Withheld, and known to hold something: what makes the client offer them.
     assert.deepEqual(
-      view.files.map((f) => [f.path, f.patch]),
+      view.files.map((f) => [f.path, f.patch, f.lines]),
       [
-        ["a.ts", null],
-        ["b.ts", null],
+        ["a.ts", null, 4],
+        ["b.ts", null, 2],
       ],
     );
     // A file asked for by path is then diffed on its own.
     const one = await cache.changesOf(BASE, HEAD, ["b.ts"]);
     assert.deepEqual(diffCalls.at(-1)?.paths, ["b.ts"]);
     assert.equal(one.files[0]?.patch, "+0\n+1\n");
+    // A path that is not in the diff reads nothing, least of all the whole diff.
+    const before = diffCalls.length;
+    assert.deepEqual((await cache.changesOf(BASE, HEAD, ["nope.ts"])).files, []);
+    assert.deepEqual((await cache.changesOf(BASE, HEAD, [])).files, []);
+    assert.equal(diffCalls.length, before);
+  });
+
+  it("caps how many paths one request may name", async () => {
+    const { cache } = fake([file("a.ts", 1)]);
+    const paths = Array.from({ length: MAX_PATHS_PER_REQUEST + 1 }, (_, i) => `f${i}.ts`);
+    await assert.rejects(cache.changesOf(BASE, HEAD, paths), (error: unknown) => {
+      assert.equal((error as { extensions?: { code?: string } }).extensions?.code, "INVALID_INPUT");
+      return true;
+    });
   });
 
   it("lists the tracker's own files after everything else", async () => {
@@ -173,7 +191,7 @@ describe("RevisionCache.changesOf", () => {
   it("refuses a pair the clone does not have, naming the commit", async () => {
     const cache = new RevisionCache({
       repoRoot: "/nowhere",
-      exists: (_cwd, sha) => sha !== HEAD,
+      exists: async (_cwd, sha) => sha !== HEAD,
     });
     await assert.rejects(cache.changesOf(BASE, HEAD), (error: unknown) => {
       const gql = error as { extensions?: { code?: string; sha?: string } };
@@ -185,10 +203,12 @@ describe("RevisionCache.changesOf", () => {
 });
 
 describe("RevisionCache.commitsOf", () => {
-  it("walks once per pair and keeps the oldest when limited", () => {
+  it("walks once per pair and keeps the oldest when limited", async () => {
     const state = fake([]);
-    const first = state.cache.commitsOf(BASE, HEAD, 2);
-    const again = state.cache.commitsOf(BASE, HEAD, 10);
+    const [first, again] = await Promise.all([
+      state.cache.commitsOf(BASE, HEAD, 2),
+      state.cache.commitsOf(BASE, HEAD, 10),
+    ]);
     assert.equal(first.total, 3);
     assert.deepEqual(
       first.commits.map((c) => c.subject),
@@ -196,5 +216,21 @@ describe("RevisionCache.commitsOf", () => {
     );
     assert.equal(again.commits.length, 3);
     assert.equal(state.commitCalls, 1);
+  });
+
+  it("forgets a walk that failed, so the next asker tries again", async () => {
+    let calls = 0;
+    const cache = new RevisionCache({
+      repoRoot: "/nowhere",
+      exists: async () => true,
+      readCommits: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("git log failed");
+        return { total: 0, commits: [] };
+      },
+    });
+    await assert.rejects(cache.commitsOf(BASE, HEAD, 10), /failed/);
+    assert.deepEqual(await cache.commitsOf(BASE, HEAD, 10), { total: 0, commits: [] });
+    assert.equal(calls, 2);
   });
 });

@@ -271,7 +271,8 @@ test("opens on the conversation, and puts the tab in the address bar", async ({
   await signedIn.getByTestId("pr-tab-commits").click();
   await expect(signedIn).toHaveURL(/tab=commits/);
   await expect(signedIn.getByTestId("pr-commits")).toBeVisible();
-  await expect(signedIn.getByTestId("pr-comment-thread")).toHaveCount(0);
+  // Hidden, not gone: what is typed there survives the visit (below).
+  await expect(signedIn.getByTestId("pr-comment-thread")).toBeHidden();
 
   await signedIn.getByTestId("pr-tab-conversation").click();
   await expect(signedIn).not.toHaveURL(/tab=/);
@@ -323,4 +324,16 @@ test("reads the diff of a pull request on a branch it does not serve", async ({
   await expect(signedIn.getByTestId("diff-file-feat-unserved.txt")).toContainText(
     "work on feat/unserved",
   );
+});
+
+test("keeps a half-written review while the other tabs are visited", async ({
+  signedIn,
+  stack,
+}) => {
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0001`);
+  await signedIn.getByTestId("review-body").fill("Still writing this one.");
+  await signedIn.getByTestId("pr-tab-changes").click();
+  await expect(signedIn.getByTestId("changes-summary")).toBeVisible();
+  await signedIn.getByTestId("pr-tab-conversation").click();
+  await expect(signedIn.getByTestId("review-body")).toHaveValue("Still writing this one.");
 });

@@ -79,11 +79,19 @@ const after = (row: DiffRow): string => (row.mark ? row.text.slice(row.mark[1]) 
 /** What the body says when there are no rows to show. */
 const empty = computed<string | null>(() => {
   if (props.file.binary) return "Binary file, not shown.";
-  if (props.file.patch !== null) return null;
-  if (props.file.lines === 0) {
-    return props.file.status === "RENAMED" ? "Renamed without changes." : "No content change.";
+  if (props.file.patch !== null || props.file.lines > 0) return null;
+  switch (props.file.status) {
+    case "ADDED":
+      return "Empty file added.";
+    case "DELETED":
+      return "Empty file deleted.";
+    case "RENAMED":
+      return "Renamed without changes.";
+    case "COPIED":
+      return "Copied without changes.";
+    default:
+      return "No content change.";
   }
-  return null;
 });
 </script>
 

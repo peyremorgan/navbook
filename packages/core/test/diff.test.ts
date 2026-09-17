@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import {
   commitsBetween,
+  commitsBetweenAsync,
   diffBetween,
   diffBetweenAsync,
   parseRawNumstat,
@@ -154,19 +155,34 @@ describe("diffBetween", () => {
         files.map(({ patch: _patch, lines: _lines, ...rest }) => rest);
       assert.deepEqual(strip(listing.files), strip(full.files));
       assert.equal(
-        listing.files.every((f) => f.patch === "" && f.lines === 0),
+        listing.files.every((f) => f.patch === ""),
         true,
+      );
+      // Without the hunks, the line count is what the counts add up to.
+      assert.deepEqual(
+        listing.files.map((f) => f.lines),
+        full.files.map((f) => f.additions + f.deletions),
       );
       assert.equal(listing.additions, full.additions);
     }));
 
-  it("narrows to the paths asked for", () =>
+  it("narrows to the paths asked for, read literally", () =>
     inRepo((repo) => {
       const { base, head } = story(repo);
       const diff = diffBetween(repo.dir, base, head, { paths: ["src/new.ts", "src/gone.ts"] });
       assert.deepEqual(
         diff.files.map((f) => f.path),
         ["src/gone.ts", "src/new.ts"],
+      );
+      // A name that would be pathspec magic if it were read as a pattern.
+      repo.write(":colon.txt", "x\n");
+      repo.write("star*.txt", "y\n");
+      const odd = repo.commit("odd names");
+      assert.deepEqual(
+        diffBetween(repo.dir, head, odd, { paths: [":colon.txt", "star*.txt"] }).files.map(
+          (f) => f.path,
+        ),
+        [":colon.txt", "star*.txt"],
       );
     }));
 
@@ -229,10 +245,20 @@ describe("commitsBetween", () => {
       );
     }));
 
-  it("is empty for a range git cannot walk", () =>
-    inRepo((repo) => {
+  it("refuses a range git cannot walk, rather than calling it empty", () =>
+    inRepo(async (repo) => {
       const { head } = story(repo);
-      assert.deepEqual(commitsBetween(repo.dir, "nope", head), { total: 0, commits: [] });
+      assert.throws(() => commitsBetween(repo.dir, "nope", head), /failed/);
+      await assert.rejects(commitsBetweenAsync(repo.dir, "nope", head), /failed/);
+    }));
+
+  it("is the same answer awaited", () =>
+    inRepo(async (repo) => {
+      const { base, head } = story(repo);
+      assert.deepEqual(
+        await commitsBetweenAsync(repo.dir, base, head, 1),
+        commitsBetween(repo.dir, base, head, 1),
+      );
     }));
 });
 
