@@ -204,6 +204,14 @@ What the identity provider has to do:
 - **Issue refresh tokens** (`offline_access`), because renewal uses them. The
   hidden-iframe alternative depends on third-party cookies browsers no longer
   send.
+- **End its session when the app signs out.** Signing out forgets the token
+  and, when discovery names an `end_session_endpoint`, sends the browser there
+  with the id token as `id_token_hint` and `<app origin>/signed-out` as
+  `post_logout_redirect_uri`. Register that address exactly, next to
+  `<app origin>/auth/callback`. Better Auth also needs `enableEndSession` on the
+  client, and without the registered address it ends the session and then
+  stays on its own page. A provider with no end-session endpoint keeps its
+  session, and the next sign-in there is automatic, as the same person.
 
 Who is allowed in is the server's decision, not this client's: it can be told
 to insist on a claim, an email domain or a verified address

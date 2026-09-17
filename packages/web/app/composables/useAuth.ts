@@ -86,14 +86,24 @@ export function useAuth(): Auth {
     },
 
     async logout() {
-      // `removeUser` rather than `signoutRedirect`: ending the session at the
-      // provider is the provider's business, and one without an end-session
-      // endpoint would refuse anyway.
+      // Forgetting the token is not enough on its own: the provider still
+      // holds a session cookie, and the next sign-in would come straight back
+      // as the same person without asking. So the provider is asked to end
+      // its session too, whenever it says it can; it forgets the token first
+      // and sends the browser back to `SIGNED_OUT` afterwards.
+      if (await manager.endsSessions()) {
+        try {
+          await manager.signoutRedirect();
+          return;
+        } catch {
+          // The token is already gone; land where a provider without the
+          // endpoint would.
+        }
+      }
       await manager.removeUser();
       // Somewhere the route guard will not immediately bounce back out of.
       // Every other page needs a token, so navigating to one of those would
-      // send the person straight back to the provider — which, against a
-      // provider holding a session cookie, signs them back in at once.
+      // send the person straight back to the provider.
       await navigateTo(SIGNED_OUT);
     },
 

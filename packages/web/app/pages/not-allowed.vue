@@ -8,8 +8,8 @@
   the account so that a person with two knows which one this is, and offers
   two things. Trying again, for the person whose access was granted while they
   sat here, since the token is still good and nothing on this page re-asks the
-  server; and signing out, for signing in as somebody else — as far as the
-  provider allows, since ending its session is its business, not this app's.
+  server; and signing out, for signing in as somebody else — which ends the
+  provider's session too, where the provider offers a way to.
 
   The route is exempt from the guard, so it also renders for somebody with no
   session at all — back from `/signed-out`, or from a bookmark. They are

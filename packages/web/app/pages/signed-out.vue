@@ -3,8 +3,10 @@
 
   It exists because everything else needs a token: sending somebody to a
   guarded page after removing theirs would bounce them straight back to the
-  provider, and a provider still holding a session cookie would sign them in
-  again without asking. This page asks.
+  provider. This page asks first. It is also the `post_logout_redirect_uri`, so
+  a provider that ended its own session sends the browser back here — and one
+  that could not would sign them in again without asking, whatever this page
+  offers.
 -->
 <script setup lang="ts">
 import { pageTitle } from "~/utils/title";

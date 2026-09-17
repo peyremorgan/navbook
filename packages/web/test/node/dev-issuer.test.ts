@@ -91,6 +91,7 @@ describe("discovery", () => {
     assert.equal(document.jwks_uri, `${issuer.issuer}/jwks`);
     assert.equal(document.authorization_endpoint, `${issuer.issuer}/authorize`);
     assert.equal(document.token_endpoint, `${issuer.issuer}/token`);
+    assert.equal(document.end_session_endpoint, `${issuer.issuer}/end-session`);
     assert.deepEqual(document.response_types_supported, ["code"]);
     assert.deepEqual(document.code_challenge_methods_supported, ["S256"]);
     assert.deepEqual(document.grant_types_supported, ["authorization_code", "refresh_token"]);
@@ -324,5 +325,54 @@ describe("the token endpoint", () => {
     const { status, json } = await exchange({ grant_type: "password", username: "a" });
     assert.equal(status, 400);
     assert.equal((json as unknown as Record<string, string>).error, "unsupported_grant_type");
+  });
+});
+
+describe("end session", () => {
+  function endSessionUrl(parameters: Record<string, string>): URL {
+    const url = new URL(`${issuer.issuer}/end-session`);
+    for (const [key, value] of Object.entries(parameters)) url.searchParams.set(key, value);
+    return url;
+  }
+
+  it("sends the browser back where the client asked, with its state", async () => {
+    const code = await signIn();
+    const { json } = await exchange({
+      grant_type: "authorization_code",
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: REDIRECT,
+      client_id: "navbook-web",
+    });
+    const idToken = (json as unknown as Record<string, string>).id_token as string;
+    // The shape the web client sends: the id token as the hint, no client_id.
+    const response = await fetch(
+      endSessionUrl({
+        id_token_hint: idToken,
+        post_logout_redirect_uri: "http://localhost:3000/signed-out",
+        state: "st8",
+      }),
+      { redirect: "manual" },
+    );
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get("location"), "http://localhost:3000/signed-out?state=st8");
+  });
+
+  it("says so itself when there is nowhere to go back to", async () => {
+    const response = await fetch(endSessionUrl({ client_id: "navbook-web" }));
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /Signed out/);
+  });
+
+  it("refuses a logout that names no known client", async () => {
+    const cases: [string, Record<string, string>][] = [
+      ["no client at all", { post_logout_redirect_uri: "http://localhost:3000/signed-out" }],
+      ["another client", { client_id: "somebody-else" }],
+      ["a hint that is not a token", { id_token_hint: "not-a-token" }],
+    ];
+    for (const [what, parameters] of cases) {
+      const response = await fetch(endSessionUrl(parameters), { redirect: "manual" });
+      assert.equal(response.status, 400, `${what} should be refused`);
+    }
   });
 });

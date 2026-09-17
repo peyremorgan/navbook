@@ -74,12 +74,19 @@ test("keeps the session across a reload rather than signing in again", async ({
 });
 
 test("stays signed out after signing out", async ({ signedIn }) => {
+  // Through the provider's end-session endpoint, with the id token as the hint:
+  // forgetting the token alone leaves the provider's session cookie behind, and
+  // the next sign-in would come straight back as the same person.
+  const endSession = signedIn.waitForRequest((request) =>
+    new URL(request.url()).pathname.endsWith("/end-session"),
+  );
   await signedIn.getByRole("banner").getByRole("button").last().click();
   await signedIn.getByRole("menuitem", { name: "Sign out" }).click();
+  const hint = new URL((await endSession).url()).searchParams.get("id_token_hint");
+  expect(hint).toBeTruthy();
 
-  // Not back at the provider: every other route needs a token, so landing on
-  // one would bounce straight there — and a provider holding a session cookie
-  // would sign the person back in without asking.
+  // Back from the provider, but not at it: every other route needs a token, so
+  // landing on one would bounce straight there.
   await expect(signedIn.getByTestId("signed-out")).toBeVisible();
   expect(signedIn.url()).not.toContain("/authorize");
 
