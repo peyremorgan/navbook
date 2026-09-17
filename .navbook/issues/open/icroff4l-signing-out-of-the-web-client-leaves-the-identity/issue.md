@@ -3,6 +3,7 @@ title: Signing out of the web client leaves the identity provider session active
 author: Claude <noreply@anthropic.com>
 created: 2026-09-17T16:54:56Z
 labels: [bug]
+assignee: Claude <noreply@anthropic.com>
 feature: web
 ---
 
