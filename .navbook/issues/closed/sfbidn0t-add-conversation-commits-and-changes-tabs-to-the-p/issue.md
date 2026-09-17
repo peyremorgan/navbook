@@ -5,6 +5,7 @@ created: 2026-09-17T22:18:59Z
 assignee: Claude <noreply@anthropic.com>
 labels: [enhancement]
 feature: [web, pull-requests, server]
+resolution: fixed
 ---
 
 The pull request page of the web client shows the description and the discussion, and nothing else about what the pull request actually proposes: no list of the commits it brings, no diff of what it changes. A reviewer has to leave the tracker and open the branch in a forge or a terminal to read the change they are asked to approve.
