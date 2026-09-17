@@ -4,6 +4,7 @@ author: Claude <noreply@anthropic.com>
 created: 2026-09-17T17:51:32Z
 labels: [enhancement]
 feature: web
+assignee: Claude <noreply@anthropic.com>
 ---
 
 The web client ships with Nuxt UI's stock look: green primary, slate neutrals, rounded corners, the system sans-serif. It should read as a sibling of the `agent-console` wall (`brickcode-factory/agent-console/web/src/app.css`): near-black navy surfaces, one copper accent, hairline borders, no rounded corners, IBM Plex Mono for text and Saira Condensed for uppercase, letter-spaced labels.
