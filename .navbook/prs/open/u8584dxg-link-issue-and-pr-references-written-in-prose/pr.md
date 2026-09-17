@@ -78,3 +78,5 @@ digit rule fails three tests.
   4 of them new: following a reference from a PR body to the issue it names,
   proving the navigation is the router's and not a page load, resolving an id
   that turns out to be a pull request, and the dangling case.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
