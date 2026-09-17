@@ -14,6 +14,9 @@ revisions:
   - head: b88956138bcb8aba1e665c4b2744bcf86ade3547
     base: c93e558dd6815b3566d78e8a1a4a477c34b5c392
     date: 2026-09-17T22:04:34Z
+merged:
+  date: 2026-09-17T22:06:10Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Closes #ll18jzkz.
