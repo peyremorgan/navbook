@@ -11,6 +11,9 @@ revisions:
   - head: 4a20cd14222978671945571b26894091cb91ae70
     base: 908e234c92b3ae7eddb8dc9c5588f25c1455e588
     date: 2026-09-17T17:34:18Z
+merged:
+  date: 2026-09-17T17:51:07Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #qb86kmp0. The navbar's theme control could say light or dark but never system, so the first press stopped the page following `prefers-color-scheme` for good.
