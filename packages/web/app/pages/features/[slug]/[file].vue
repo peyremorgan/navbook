@@ -25,10 +25,12 @@ const spec = computed(
 );
 
 // The document, then the feature it describes — the same order the breadcrumb
-// reads in, and the same order a narrowing tab drops.
+// reads in, and the same order a narrowing tab drops. `||` for the same reason
+// as on the feature page: an empty title is what a document with no usable one
+// is served with, and the address knows both names either way.
 useHead({
   title: computed(() =>
-    pageTitle(spec.value?.title ?? fileName.value, feature.value?.title ?? slug.value),
+    pageTitle(spec.value?.title || fileName.value, feature.value?.title || slug.value),
   ),
 });
 

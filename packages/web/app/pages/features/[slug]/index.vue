@@ -24,8 +24,11 @@ const { result, loading, error, refetch } = useQuery(FEATURE_QUERY, () => ({ slu
 });
 const feature = computed(() => result.value?.feature ?? null);
 
-// The slug until the feature arrives, then the title people gave it.
-useHead({ title: computed(() => pageTitle(feature.value?.title ?? slug.value)) });
+// The slug until the feature arrives, then the title people gave it. `||`
+// rather than `??` because a feature whose frontmatter has no usable `title`
+// is served with an empty one rather than without the field (`core`'s
+// `tree.ts`), and the slug from the address is still better than nothing.
+useHead({ title: computed(() => pageTitle(feature.value?.title || slug.value)) });
 
 const timeline = computed(() =>
   mergeTimeline({

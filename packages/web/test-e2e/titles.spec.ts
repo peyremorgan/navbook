@@ -51,6 +51,12 @@ test("names a feature, and a document within it", async ({ signedIn, stack }) =>
 
 test("gives two different pages two different titles", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/issues`);
+  // Waited for, not merely read: `goto` resolves on load and the app mounts
+  // after it (the config plugin fetches `config.json` first), so reading the
+  // title here would capture the shell's `Navbook` — and this test would then
+  // pass even if in-app navigation stopped retitling, which is the one
+  // regression it exists to catch.
+  await expect(signedIn).toHaveTitle("Issues · Navbook");
   const listing = await signedIn.title();
 
   await signedIn.getByTestId("issue-row-aaaa0001").click();
