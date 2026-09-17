@@ -3,6 +3,7 @@ title: Filtering by a person picked from the web filter bar matches nothing
 author: Claude <noreply@anthropic.com>
 created: 2026-09-17T17:12:18Z
 labels: [bug]
+assignee: Claude <noreply@anthropic.com>
 feature: [web, server]
 ---
 
