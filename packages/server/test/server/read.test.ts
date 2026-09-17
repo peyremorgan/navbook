@@ -137,6 +137,25 @@ describe("reads", () => {
     assert.deepEqual(await ids(`{ authors: ["person@example.invalid"] }`), [theme, bug].sort());
   });
 
+  it("filters by a person exactly as the people query names them", async () => {
+    // The web client's filter menus offer `people` verbatim, `Name <email>`.
+    const { people } = ok<{ people: string[] }>(await h.gql(`query { people }`));
+    const dev = people.find((person) => person.endsWith("<dev@example.invalid>"));
+    const author = people.find((person) => person.endsWith("<person@example.invalid>"));
+    assert.equal(dev, "Dev <dev@example.invalid>");
+    assert.equal(author, "A Person <person@example.invalid>");
+
+    const ids = async (filter: Record<string, string[]>): Promise<string[]> =>
+      ok<{ issues: { id: string }[] }>(
+        await h.gql(`query Issues($filter: EntityFilter) { issues(filter: $filter) { id } }`, {
+          filter,
+        }),
+      ).issues.map((issue) => issue.id);
+
+    assert.deepEqual(await ids({ assignees: [dev] }), [bug]);
+    assert.deepEqual(await ids({ authors: [author] }), [theme, bug].sort());
+  });
+
   /**
    * Naming no status means no status filter, so a closed issue is in the
    * listing until something asks otherwise. The CLI's `status:open` default is

@@ -138,6 +138,7 @@ describe("matchesQuery", () => {
     assert.deepEqual(matching(entities, "assignee:ked@example.com"), ["aaaaaaa1"]);
     assert.deepEqual(matching(entities, "assignee:example.com"), ["aaaaaaa1"]);
     assert.deepEqual(matching(entities, "assignee:nobody@example.com"), []);
+    assert.deepEqual(matching(entities, "assignee:Ked <ked@example.com>"), ["aaaaaaa1"]);
   });
 
   it("matches milestones exactly", () => {
@@ -287,6 +288,14 @@ describe("the review query terms", () => {
 
   it("finds the pull requests that asked one person", () => {
     assert.deepEqual(prMatching(entities, "reviewer:alice@example.com"), [
+      "aaaaaaa1",
+      "bbbbbbb2",
+      "eeeeeee5",
+    ]);
+  });
+
+  it("matches a reviewer written as a named address, as a listing names them", () => {
+    assert.deepEqual(prMatching(entities, "reviewer:Alice <alice@example.com>"), [
       "aaaaaaa1",
       "bbbbbbb2",
       "eeeeeee5",

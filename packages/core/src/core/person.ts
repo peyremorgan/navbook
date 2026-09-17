@@ -37,13 +37,20 @@ export function sameEmail(a: string, b: string): boolean {
 }
 
 /**
- * Match a person against an `author:`/`assignee:` query value: the full address
- * matches case-insensitively, and a bare domain fragment matches as a substring
- * of the part after `@` (spec 04, query grammar).
+ * Match a person against an `author:`/`assignee:` query value: an address,
+ * bare or named, matches by its address case-insensitively, and a bare domain
+ * fragment matches as a substring of the part after `@` (spec 04, query
+ * grammar).
+ *
+ * A named value is matched by its address alone, because the address is the
+ * identity key (§2.4) — and because it is the form every person field is
+ * written and listed in, so a value picked from a listing has to find the
+ * people it came from.
  */
 export function personMatches(queryValue: string, personField: string): boolean {
-  const needle = queryValue.trim().toLowerCase();
-  if (needle === "") return false;
+  const text = queryValue.trim();
+  if (text === "") return false;
+  const needle = (parsePerson(text)?.email ?? text).toLowerCase();
   const person = parsePerson(personField);
   const email = (person?.email ?? personField).trim().toLowerCase();
   if (email === needle) return true;

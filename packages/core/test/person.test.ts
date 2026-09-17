@@ -69,6 +69,18 @@ describe("personMatches", () => {
     assert.equal(personMatches("ALICE@EXAMPLE.COM", "alice@example.com"), true);
   });
 
+  it("matches a named address by its address alone", () => {
+    assert.equal(personMatches("Alice Smith <alice@example.com>", "alice@example.com"), true);
+    assert.equal(
+      personMatches("A. Smith <ALICE@example.com>", "Alice Smith <alice@example.com>"),
+      true,
+    );
+    assert.equal(
+      personMatches("Alice Smith <bob@example.com>", "Alice Smith <alice@example.com>"),
+      false,
+    );
+  });
+
   it("matches a fragment of the domain", () => {
     assert.equal(personMatches("example.com", "alice@example.com"), true);
     assert.equal(personMatches("example", "alice@example.com"), true);

@@ -329,7 +329,7 @@ kind. Terms AND together:
 |------|---------|
 | `status:open\|closed\|merged` | Entity status (path); `merged` applies to PRs only |
 | `label:L` | `L` ∈ `labels` |
-| `assignee:EMAIL` | Assignee address (case-insensitive; substring after `@` allowed) |
+| `assignee:EMAIL` | Assignee address (case-insensitive; substring after `@` allowed). A named address, `Name <EMAIL>`, matches by `EMAIL` alone |
 | `author:EMAIL` | Author address (same matching) |
 | `reviewer:EMAIL` | `EMAIL` ∈ the PR's `reviewer` ([02 §2.7](02-data-model.md)); same matching. PRs only |
 | `review:pending\|approved\|changes-requested` | The PR's derived decision ([02 §2.7](02-data-model.md)). PRs only |
