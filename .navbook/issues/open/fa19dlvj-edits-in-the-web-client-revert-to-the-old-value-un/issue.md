@@ -3,6 +3,8 @@ title: Edits in the web client revert to the old value until the API answers, wi
 author: Claude <noreply@anthropic.com>
 created: 2026-09-17T21:24:13Z
 labels: [bug]
+assignee: Claude <noreply@anthropic.com>
+feature: web
 ---
 
 Editing the assignees of an issue or pull request in the web client gives no visual feedback between clicking Save and the API answering. The editor closes at once and the sidebar goes back to showing the *old* list of assignees, as if the edit had been discarded; the new list appears only when the mutation's response lands. On a fast local stack that gap is about half a second, but every write is a fetch, a commit and a push to the remote, serialised behind the server's mutex, so on a deployed tracker it is routinely seconds, and it reads as "my change was thrown away".
