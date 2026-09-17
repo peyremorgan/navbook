@@ -306,6 +306,25 @@ describe("ops: deleting", () => {
       );
     }, "aaa11111");
   });
+  it("refuses to plan a delete --commit on a detached HEAD", () => {
+    inWorkspace((ws, dir) => {
+      openIssue(
+        ws,
+        { content: issueText(ws, "Broken", "It broke."), fallbackTitle: "Broken" },
+        { commit: true },
+      );
+      git(["checkout", "--quiet", "--detach", "HEAD"], { cwd: dir });
+
+      assert.throws(
+        () => planEntityDelete(ws, "issue", "aaa1", { commit: true }),
+        (error: unknown) =>
+          error instanceof WorkspaceError &&
+          error.code === "precondition" &&
+          /HEAD is detached/.test(error.message),
+      );
+      assert.ok(existsSync(join(dir, ".navbook/issues/open/aaa11111-broken")));
+    }, "aaa11111");
+  });
 });
 
 describe("ops: doctor and ids", () => {

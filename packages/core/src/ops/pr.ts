@@ -8,6 +8,7 @@
  */
 
 import { type Revision, readRevisions } from "../core/files.ts";
+import { parseDoc, stringAt } from "../core/frontmatter.ts";
 import { MIN_PREFIX_LENGTH, resolvePrefix } from "../core/id.ts";
 import {
   type MergedBlock,
@@ -22,7 +23,7 @@ import { parsePerson, sameEmail } from "../core/person.ts";
 import type { ReviewPolicyReading } from "../core/policy.ts";
 import { matchesQuery, type Query } from "../core/query.ts";
 import { type ReviewSummary, reviewSummary } from "../core/review.ts";
-import { allEntities, type EntityRecord, parseTree } from "../core/tree.ts";
+import { allEntities, type EntityRecord, parseTree, type Repo } from "../core/tree.ts";
 import { gitMaybe } from "../git/exec.ts";
 import { isAncestor, mergeBase, objectExists } from "../git/history.ts";
 import { add, commit, composeMessage } from "../git/index-ops.ts";
@@ -36,9 +37,11 @@ import {
   mergeNoCommit,
 } from "../git/merge.ts";
 import {
+  batchResolve,
   catBlobs,
   listBranchRefs,
   lsTreeNames,
+  lsTreeNamesOfTree,
   lsTreeRecursive,
   type Ref,
 } from "../git/refscan.ts";
@@ -61,14 +64,15 @@ import {
   readReviewPolicy,
   repoPath,
   requireNavbook,
+  resolveEntity,
   runPlan,
   stage,
+  WorkspaceError,
   type WsCtx,
   wsFail,
 } from "../workspace/index.ts";
 import {
   type CommitOptions,
-  findEntity,
   type OpenEntityResult,
   type OpenInput,
   openEntity,
@@ -76,6 +80,8 @@ import {
 } from "./entity.ts";
 
 const PR_OPEN_DIR = "prs/open";
+/** Where a pull request sits once it is no longer in flight (spec 02 §2.1). */
+const PR_SETTLED_DIRS = ["prs/merged", "prs/closed"] as const;
 
 /* --------------------------------------------------------------------- open */
 
@@ -159,7 +165,7 @@ export interface PrUpdateResult {
 
 /** Append a revision pinning the current HEAD (spec 02 §2.7). */
 export function updatePr(ws: WsCtx, ref: string, opts: CommitOptions): PrUpdateResult {
-  const entity = findEntity(ws, "pr", ref);
+  const entity = findPrToWrite(ws, ref);
   if (entity.status !== "open") {
     wsFail(
       "precondition",
@@ -222,7 +228,7 @@ export function requestReview(
   people: readonly string[],
   opts: CommitOptions & { remove?: boolean },
 ): RequestReviewResult {
-  const entity = findEntity(ws, "pr", ref);
+  const entity = findPrToWrite(ws, ref);
   const author = typeof entity.fm.author === "string" ? entity.fm.author : "";
   if (!opts.remove) {
     // Only what this command is being asked to write: a `reviewer` entry
@@ -316,12 +322,20 @@ export interface FoundPr {
   refs: Ref[];
 }
 
-/** Open pull requests on any fetched branch, matching a query. */
+/**
+ * Open pull requests on any fetched branch, matching a query.
+ *
+ * The enumeration is filtered before the query runs: a listing answers "what is
+ * still in flight?", so a pull request its target branch has already merged or
+ * closed does not belong in it, however many source branches still carry the
+ * copy that was current before the merge.
+ */
 export function listPrsAcrossRefs(ws: WsCtx, query: Query): FoundPr[] {
   // Read once for the whole scan, and from here rather than from each ref: a
   // pull request is counted by how this checkout counts (spec 02 §2.10).
   const { policy } = readReviewPolicy(ws);
-  return scanRefsForOpenPrs(ws).filter((entry) => matchesQuery(query, entry.entity, policy));
+  const found = dropSettledOnTarget(ws, listBranchRefs(ws.repoRoot), scanRefsForOpenPrs(ws));
+  return found.filter((entry) => matchesQuery(query, entry.entity, policy));
 }
 
 /**
@@ -331,6 +345,12 @@ export function listPrsAcrossRefs(ws: WsCtx, query: Query): FoundPr[] {
  * — so this is how they are discovered (spec 03 §3.5). Local refs win when the
  * same PR appears on several, and every ref it was found on is reported: this
  * is the state of the branches you have fetched, not an aggregate truth.
+ *
+ * Deliberately unfiltered — it reports what the refs say, including the open
+ * copy a source branch still carries after its merge. Listing drops those
+ * ({@link dropSettledOnTarget}); merging wants to see them, so that a second
+ * `nav pr merge` can say the branch is already contained rather than that the
+ * pull request cannot be found.
  */
 export function scanRefsForOpenPrs(ws: WsCtx): FoundPr[] {
   const cwd = ws.repoRoot;
@@ -372,6 +392,180 @@ export function scanRefsForOpenPrs(ws: WsCtx): FoundPr[] {
     }
   }
   return [...byId.values()];
+}
+
+/**
+ * The ref entitled to answer for a pull request: the branch it targets, which
+ * is where the merge files it as merged (spec 03 §3.5). The local copy is
+ * preferred, then any remote-tracking one.
+ */
+function targetRefOf(refs: readonly Ref[], target: string): string | undefined {
+  if (target === "") return undefined;
+  const local = refs.find((ref) => !ref.remote && ref.short === target);
+  if (local) return local.full;
+  // A remote-tracking copy is `<remote>/<target>`, the remote being the first
+  // path segment — so `origin/release/dev` is not the branch `dev`.
+  return refs.find((ref) => ref.remote && ref.short.slice(ref.short.indexOf("/") + 1) === target)
+    ?.full;
+}
+
+/**
+ * Drop pull requests that the branch answering for them has already settled.
+ *
+ * Not an aggregation of tracker state — spec 03 §3.1 forbids that — but the
+ * opposite: each pull request's status is read from the one branch entitled to
+ * report it, its target, plus the default branch that is the tracker of record.
+ * The copy under `prs/open/` on a source branch is a snapshot taken before the
+ * merge, so a branch that has not merged or rebased since has simply not heard
+ * the news; it is the stale half of the "exactly one status directory"
+ * invariant (spec 03 §3.4), and reading it as current is what made every
+ * branch left behind after its merge report its pull request as still in
+ * flight. Consulting only those two refs is also what keeps a speculative
+ * close on some unrelated feature branch from settling anything.
+ */
+function dropSettledOnTarget(ws: WsCtx, refs: readonly Ref[], found: FoundPr[]): FoundPr[] {
+  if (found.length === 0) return found;
+  const settled = settledOnTargets(
+    ws,
+    refs,
+    found.map((entry) => stringField(entry.entity, "target")),
+  );
+  return settled.size === 0 ? found : found.filter((entry) => !settled.has(entry.entity.id));
+}
+
+/**
+ * The IDs settled on the default branch or on any of `targets`.
+ *
+ * Shared by the listing and by the count that points at it, so the two cannot
+ * disagree about what is still in flight.
+ */
+function settledOnTargets(
+  ws: WsCtx,
+  refs: readonly Ref[],
+  targets: readonly string[],
+): Set<string> {
+  const consult = new Set<string>();
+  const record = defaultBranch(ws.repoRoot);
+  const recordRef = record === null ? undefined : targetRefOf(refs, record);
+  if (recordRef) consult.add(recordRef);
+  for (const target of targets) {
+    const ref = targetRefOf(refs, target);
+    if (ref) consult.add(ref);
+  }
+  // IDs are unique across the tracker (spec 02 §2.2), so an ID any of these
+  // refs files as settled is settled, whichever of them was asked for it.
+  return consult.size === 0 ? new Set() : settledPrIds(ws, [...consult]);
+}
+
+/**
+ * The IDs that the given refs record as merged or closed.
+ *
+ * One `cat-file --batch-check` resolves every status directory asked for, and
+ * only the distinct trees that come back are listed, so refs sharing a
+ * merge-base cost one read between them. No `pr.md` is parsed: the directory a
+ * pull request sits in is its status (spec 02 §2.1), so the price does not
+ * grow with the number of pull requests.
+ */
+function settledPrIds(ws: WsCtx, refs: readonly string[]): Set<string> {
+  const cwd = ws.repoRoot;
+  const trees = batchResolve(
+    cwd,
+    refs.flatMap((ref) => PR_SETTLED_DIRS.map((dir) => `${ref}:${ws.navDir}/${dir}`)),
+  );
+
+  const ids = new Set<string>();
+  const seen = new Set<string>();
+  for (const tree of trees.values()) {
+    if (seen.has(tree)) continue;
+    seen.add(tree);
+    for (const name of lsTreeNamesOfTree(cwd, tree)) {
+      // Directories are `<id>-<slug>` and the ID alone is the reference.
+      const id = name === ".gitkeep" ? undefined : name.split("-")[0];
+      if (id) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * How many open pull requests sit on branches other than the one checked out.
+ *
+ * A count, and deliberately nothing more: spec 03 §3.1 forbids aggregating
+ * tracker state across branches, so this answers only "is there something
+ * `--all-refs` would show you?". Without it an empty listing reads as "there
+ * are none" when the pull requests are merely on their own source branches,
+ * which is where spec 03 §3.5 puts them — the usual shape of a repository
+ * whose branches are checked out in separate worktrees.
+ *
+ * It must agree with that listing, so a pull request is settled by the same
+ * refs {@link dropSettledOnTarget} asks: its target and the default branch.
+ *
+ * Cheap by construction: one `cat-file --batch-check` resolves every branch's
+ * `prs/open` directory at once, and only the distinct trees that come back are
+ * listed, so branches sharing a merge-base cost one read between them. Only
+ * each pull request's `pr.md` is read, for its target, once per distinct tree.
+ */
+export function countOpenPrsOnOtherRefs(ws: WsCtx): number {
+  const cwd = ws.repoRoot;
+  const dir = `${ws.navDir}/${PR_OPEN_DIR}`;
+  const refs = listBranchRefs(cwd);
+
+  // HEAD rather than the branch's name: a detached HEAD has no name, and its
+  // tree still holds whatever pull requests it holds.
+  const trees = batchResolve(cwd, [`HEAD:${dir}`, ...refs.map((ref) => `${ref.full}:${dir}`)]);
+  const listed = new Map<string, string[]>();
+  const namesOf = (tree: string): string[] => {
+    const cached = listed.get(tree);
+    if (cached) return cached;
+    const names = lsTreeNamesOfTree(cwd, tree).filter((name) => name !== ".gitkeep");
+    listed.set(tree, names);
+    return names;
+  };
+  // Directories are `<id>-<slug>` and the ID alone is the reference (spec 02
+  // §2.2), so one pull request on ten branches is still one.
+  const idOf = (name: string): string => name.split("-")[0] as string;
+
+  const headTree = trees.get(`HEAD:${dir}`);
+  const mine = new Set(headTree === undefined ? [] : namesOf(headTree).map(idOf));
+
+  // Where each pull request elsewhere was first seen, a local branch's copy
+  // preferred, as the scan behind the listing prefers it.
+  const elsewhere = new Map<string, { tree: string; name: string; remote: boolean }>();
+  for (const ref of refs) {
+    const tree = trees.get(`${ref.full}:${dir}`);
+    if (tree === undefined) continue;
+    for (const name of namesOf(tree)) {
+      const id = idOf(name);
+      // A pull request this tree holds is not elsewhere, however many other
+      // refs — its own `origin/` copy, most often — also carry it.
+      if (id === "" || mine.has(id)) continue;
+      const seen = elsewhere.get(id);
+      if (!seen || (seen.remote && !ref.remote)) {
+        elsewhere.set(id, { tree, name, remote: ref.remote });
+      }
+    }
+  }
+  if (elsewhere.size === 0) return 0;
+
+  const blobs = catBlobs(
+    cwd,
+    [...elsewhere.values()].map(({ tree, name }) => ({ ref: tree, path: `${name}/pr.md` })),
+  );
+  const targets = [...elsewhere.values()].map(({ tree, name }) =>
+    targetOf(blobs.get(`${tree}:${name}/pr.md`)),
+  );
+  const settled = settledOnTargets(ws, refs, targets);
+  return [...elsewhere.keys()].filter((id) => !settled.has(id)).length;
+}
+
+/** The `target:` a `pr.md` names, or "" when it names none or does not parse. */
+function targetOf(text: string | undefined): string {
+  if (text === undefined) return "";
+  try {
+    return stringAt(parseDoc(text), ["target"]) ?? "";
+  } catch {
+    return "";
+  }
 }
 
 export function stringField(entity: EntityRecord, key: string): string {
@@ -628,7 +822,7 @@ function pendingMergePr(ws: WsCtx, ref: string | undefined): LocatedPr {
       "pass the ID: nav pr merge --continue <id>",
     ]);
   }
-  return { entity: first.entity, sourceRef: sourceRefOf(first) };
+  return { entity: first.entity, ...sourceOf(first) };
 }
 
 /**
@@ -703,6 +897,8 @@ function conflictStop(ws: WsCtx, id: string): never {
 export interface LocatedPr {
   entity: EntityRecord;
   sourceRef: string;
+  /** Whether {@link sourceRef} is a remote-tracking branch rather than a local one. */
+  sourceRemote: boolean;
 }
 
 /**
@@ -739,19 +935,91 @@ export function locatePr(ws: WsCtx, ref: string): LocatedPr {
   }
 
   const entry = found.find((candidate) => candidate.entity.id === resolution.id) as FoundPr;
-  return { entity: entry.entity, sourceRef: sourceRefOf(entry) };
+  return { entity: entry.entity, ...sourceOf(entry) };
 }
 
 /** The ref a pull request is merged from, out of those carrying it. */
-function sourceRefOf(entry: FoundPr): string {
+function sourceOf(entry: FoundPr): Omit<LocatedPr, "entity"> {
   // `source:` is only SHOULD, so fall back to a local ref before a remote one:
   // a local branch is the copy the user can actually merge.
   const declared = stringField(entry.entity, "source");
-  return (
-    entry.refs.find((candidate) => candidate.short === declared)?.short ??
-    entry.refs.find((candidate) => !candidate.remote)?.short ??
-    (entry.refs[0]?.short as string)
+  const source =
+    entry.refs.find((candidate) => candidate.short === declared) ??
+    entry.refs.find((candidate) => !candidate.remote) ??
+    (entry.refs[0] as Ref);
+  return { sourceRef: source.short, sourceRemote: source.remote };
+}
+
+export interface ReadablePr {
+  entity: EntityRecord;
+  /** The branch it was read from, or null when the working tree holds it. */
+  ref: string | null;
+}
+
+/**
+ * Find a pull request to read, wherever it is.
+ *
+ * The working tree first: that copy is the one with whatever has not been
+ * committed yet. Only when it is not here is the scan across branches worth
+ * its cost, and it is almost never here, because a pull request's files live
+ * on its source branch (spec 03 §3.5). Without this, `nav pr list --all-refs`
+ * would list IDs that `show` answers "no pull request matches" to.
+ */
+export function readPr(ws: WsCtx, ref: string, repo: Repo = loadRepo(ws)): ReadablePr {
+  const here = prInTree(repo, ref);
+  if (here) return { entity: here, ref: null };
+  const located = locatePr(ws, ref);
+  return { entity: located.entity, ref: located.sourceRef };
+}
+
+/**
+ * Find a pull request to write to, and refuse one this checkout does not hold.
+ *
+ * A comment or review is a file in the pull request's directory, so written
+ * here it would land beside no `pr.md` — the stranded comment of spec 03
+ * §3.3.1 — rather than on the branch under review. The scan can still see
+ * where the pull request lives, so the refusal says that, and the worktree to
+ * run in when one already has the branch, instead of claiming it does not
+ * exist.
+ */
+export function findPrToWrite(ws: WsCtx, ref: string): EntityRecord {
+  const here = prInTree(loadRepo(ws), ref);
+  if (here) return here;
+
+  const { entity, sourceRef, sourceRemote } = locatePr(ws, ref);
+  const why =
+    "a pull request is written on its source branch, beside the files it proposes to merge";
+  // A remote-tracking copy is `<remote>/<branch>`; `git switch <branch>` makes
+  // the local branch that tracks it.
+  const branch = sourceRemote ? sourceRef.slice(sourceRef.indexOf("/") + 1) : sourceRef;
+  const tree = sourceRemote ? null : worktreeHolding(ws.repoRoot, branch);
+  if (!sourceRemote && branch === currentBranch(ws.repoRoot)) {
+    wsFail(
+      "precondition",
+      `#${entity.id} is committed on '${branch}' but missing from the working tree`,
+      [`restore it with 'git checkout HEAD -- ${ws.navDir}/${entity.dirPath}'`],
+    );
+  }
+  wsFail(
+    "precondition",
+    `#${entity.id} is on '${sourceRef}', which is not checked out here`,
+    tree
+      ? [why, `'${branch}' is checked out in ${tree}; run the command there`]
+      : [
+          why,
+          `check out '${branch}' first: 'git switch ${branch}', or 'git worktree add <dir> ${branch}'`,
+        ],
   );
+}
+
+/** The pull request in this tree, or null when only another branch could hold it. */
+function prInTree(repo: Repo, ref: string): EntityRecord | null {
+  try {
+    return resolveEntity(repo, ref, "pr");
+  } catch (error) {
+    if (error instanceof WorkspaceError && error.code === "not-found") return null;
+    throw error;
+  }
 }
 
 /* --------------------------------------------------------------------- close */

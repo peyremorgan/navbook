@@ -147,6 +147,15 @@ function branchName(name: string | null): string | null {
   return name === null || name === "" ? null : name;
 }
 
+/** Local branches whose tip is `rev`, by name. */
+export function branchesAt(cwd: string, rev: string): string[] {
+  const listed = gitMaybe(
+    ["for-each-ref", "--points-at", rev, "--format=%(refname:short)", "refs/heads"],
+    { cwd },
+  );
+  return listed === null ? [] : splitLines(listed).sort();
+}
+
 /** Resolve a revision to a full 40-hex SHA, or null when it does not exist. */
 export function resolveSha(cwd: string, rev: string): string | null {
   return fullSha(gitMaybe(resolveArgs(rev), { cwd }));

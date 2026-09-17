@@ -10,7 +10,7 @@ import { issueById, linkRefusal, listersOf, parentOf } from "../core/links.ts";
 import { linkRepairOps, type Plan, planLink, planPaths, planUnlink } from "../core/ops.ts";
 import type { EntityRecord, Repo } from "../core/tree.ts";
 import {
-  assertNoUnrelatedStaged,
+  assertCommittable,
   loadRepo,
   type RunPlanResult,
   repoPaths,
@@ -147,7 +147,7 @@ export function planIssueLink(
   if (plan.ops.length === 0) {
     wsFail("precondition", `#${child.id} is already a subtask of #${parent.id}`);
   }
-  if (opts.commit) assertNoUnrelatedStaged(ws, repoPaths(ws.navDir, planPaths(plan)));
+  if (opts.commit) assertCommittable(ws, repoPaths(ws.navDir, planPaths(plan)));
 
   return {
     child,

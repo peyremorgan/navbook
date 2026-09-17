@@ -4,12 +4,14 @@
  * Without it, a mutating command leaves its changes staged for the user's own
  * commit. With it, the change is wrapped in a well-formed `docs` commit — but
  * only if nothing unrelated is staged, so the user never has work swept into a
- * tracker commit by accident.
+ * tracker commit by accident, and only on a branch, so the commit is never one
+ * that no ref reaches.
  */
 
 import type { Plan } from "../core/ops.ts";
 import { planPaths } from "../core/ops.ts";
 import { commit, composeMessage, stagedPaths } from "../git/index-ops.ts";
+import { branchesAt, currentBranch, worktreeHolding } from "../git/repo.ts";
 import type { WsCtx } from "./ctx.ts";
 import { wsFail } from "./errors.ts";
 import { applyOps, repoPaths } from "./workspace.ts";
@@ -36,6 +38,37 @@ export function assertNoUnrelatedStaged(ws: WsCtx, allowedPaths: readonly string
   ]);
 }
 
+/**
+ * Refuse to commit on a detached HEAD, where the commit would be reachable
+ * from no branch.
+ *
+ * Detaching is the obvious way to reach files on a branch another worktree
+ * holds, and a commit made there is reported as committed while no branch,
+ * and no other worktree, ever sees it. `nav pr open` and `nav pr merge`
+ * already refuse a detached HEAD; this is the same rule for every verb that
+ * commits. Without `--commit` nothing is refused: a staged change loses
+ * nothing, and the commit that records it is the user's to place.
+ */
+export function assertOnBranch(ws: WsCtx): void {
+  if (currentBranch(ws.repoRoot) !== null) return;
+  const branch = branchesAt(ws.repoRoot, "HEAD")[0];
+  const tree = branch === undefined ? null : worktreeHolding(ws.repoRoot, branch);
+  wsFail("precondition", "HEAD is detached; --commit would record this on no branch", [
+    branch === undefined
+      ? "check out a branch first"
+      : tree
+        ? `HEAD is at '${branch}', which is checked out in ${tree}; run the command there`
+        : `HEAD is at '${branch}'; check it out first: 'git switch ${branch}'`,
+    "or omit --commit, and commit the staged change where it belongs",
+  ]);
+}
+
+/** Every refusal `--commit` makes, before any file is written. */
+export function assertCommittable(ws: WsCtx, allowedPaths: readonly string[]): void {
+  assertOnBranch(ws);
+  assertNoUnrelatedStaged(ws, allowedPaths);
+}
+
 export interface RunPlanOptions {
   commit?: boolean;
 }
@@ -52,7 +85,7 @@ export interface RunPlanResult {
 /** Apply a plan and, with `--commit`, wrap it in its `docs` commit. */
 export function runPlan(ws: WsCtx, plan: Plan, opts: RunPlanOptions): RunPlanResult {
   const allowed = repoPaths(ws.navDir, planPaths(plan));
-  if (opts.commit) assertNoUnrelatedStaged(ws, allowed);
+  if (opts.commit) assertCommittable(ws, allowed);
 
   const { touched } = applyOps(ws, plan.ops);
   const message = composeMessage(plan.message, plan.trailers);

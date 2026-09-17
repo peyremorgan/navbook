@@ -21,12 +21,17 @@ with the user's confirmation).
 ## 4.2 Global behavior
 
 - **ID arguments** accept any unambiguous prefix (≥ 4 chars); ambiguity is an
-  error listing the candidates.
+  error listing the candidates. They also accept what the tools print for an
+  entity: `#<id>` as a listing shows it, an `<id>-<slug>` directory name, and
+  the `path` that `--json` reports.
 - `--commit` on any mutating command wraps the change in a well-formed commit
   (`docs(issue): <action> #<id>` or `docs(pr): <action> #<id>` message per
   §3.2, `Refs:`/`Closes:` trailer as appropriate).
   Without it, changes are left staged in the working tree for the user's own
-  commit. `--commit` MUST refuse to run with unrelated changes already staged.
+  commit. `--commit` MUST refuse to run with unrelated changes already staged,
+  and on a detached HEAD, where the commit would be reachable from no branch;
+  when a branch points at HEAD the refusal names it, and the worktree that has
+  it checked out if there is one. Both refusals come before any file is written.
 - Author identity is taken from `git config user.name` / `user.email`.
 - Machine output: every listing command accepts `--json` (one JSON object per
   entity, schema mirroring the frontmatter plus `id`, `slug`, `status`,
@@ -166,12 +171,33 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   entry pinning `head` = current `HEAD` SHA and `base` = `git merge-base HEAD
   <target>`.
 - `nav pr list [query]... [--all-refs]` — open PRs found on the current
-  branch; `--all-refs` scans all local and fetched remote branches. Same
-  query grammar.
+  branch; `--all-refs` scans all local and fetched remote branches, skipping
+  any PR that the branch answering for it — its `target`, or the default
+  branch ([03 §3.1](03-merge-and-branches.md)) — already files under
+  `prs/merged/` or `prs/closed/`, because a source branch left behind after
+  its merge still carries the `prs/open/` copy that was current before it.
+  Same query grammar. When the checked-out tree matches none and other branches
+  carry open PRs that `--all-refs` would list — so neither one the tree already
+  holds nor one settled as above — their count is written to stderr with a
+  pointer to `--all-refs`: a signpost, not a listing, because a checkout of the target
+  branch legitimately has nothing to show ([03 §3.5](03-merge-and-branches.md))
+  and silence there reads as "there are none".
 - `nav pr show <id>`, `nav pr edit <id>`, `nav pr comment <id> ...` — as the
   corresponding `issue` verbs, operating on `pr.md`. `show` reports the review
   decision, how many approvals stand against the number required when that is
   more than one, and the declared policy itself ([02 §2.10](02-data-model.md)).
+
+  Every ID `nav pr list --all-refs` prints MUST resolve for these verbs and for
+  `update`, `request` and `review`. When the checked-out tree does not hold the
+  pull request, `show` reads it from the ref that carries it, as `close` does,
+  names that ref on stderr, and adds it as `refs` to `--json`. The verbs that
+  write into its directory (`edit`, `comment`, `update`, `request`, `review`)
+  MUST instead refuse with exit 1, naming the branch and, when another
+  worktree has it checked out, that worktree. Written here, the file would sit
+  beside no `pr.md`, the stranded comment of
+  [03 §3.3.1](03-merge-and-branches.md), rather than on the branch under review.
+  "No pull request matches" is reserved for an ID that no fetched branch
+  carries.
 - `nav pr close <id> [--resolution declined]` — record the PR under
   `prs/closed/` on the current branch. A PR's files normally live on its source
   branch, so when the ID is not present in the checked-out tree the directory is

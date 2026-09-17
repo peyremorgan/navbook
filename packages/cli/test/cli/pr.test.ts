@@ -4,10 +4,30 @@
  */
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { FIXTURE_IDENTITY, makeNavRepo, type TempRepo } from "../helpers/temprepo.ts";
+import {
+  deterministicEnv,
+  FIXTURE_IDENTITY,
+  makeNavRepo,
+  navCommand,
+  type RunResult,
+  type TempRepo,
+} from "../helpers/temprepo.ts";
+
+/** Run the CLI somewhere other than the repository root — a worktree, say. */
+function navIn(cwd: string, home: string, args: string[]): RunResult {
+  const command = navCommand();
+  const result = spawnSync(command[0] as string, [...command.slice(1), ...args], {
+    cwd,
+    encoding: "utf8",
+    env: deterministicEnv(home),
+  });
+  if (result.error) throw result.error;
+  return { code: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+}
 
 interface Scenario {
   repo: TempRepo;
@@ -621,6 +641,65 @@ describe("nav pr list --all-refs", () => {
     }
   });
 
+  it("drops a pull request the target branch has merged, stale source branch and all", () => {
+    const { repo } = withOpenPr({ advanceMain: true });
+    try {
+      // A branch left behind after the merge: it still carries the copy of the
+      // pull request that was current when it was open.
+      repo.git(["branch", "backup/auth", "feat/auth"]);
+      repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      assert.match(repo.git(["ls-tree", "-r", "--name-only", "feat/auth"]).stdout, /prs\/open/);
+
+      const all = repo.nav(["pr", "list", "--all-refs"]);
+      assert.equal(all.code, 0, all.stderr);
+      assert.equal(all.stdout.includes("dk3mp2x9"), false, "main files it as merged");
+      assert.match(all.stdout, /No pull requests match/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("drops one the target branch has closed", () => {
+    const { repo } = withOpenPr();
+    try {
+      // Declining from the target branch brings the directory over and files it
+      // under prs/closed/ there, while feat/auth keeps its open copy.
+      const closed = repo.nav(["pr", "close", "dk3m", "--resolution", "declined", "--commit"], {
+        NAV_NOW: "2026-08-07T12:00:00Z",
+      });
+      assert.equal(closed.code, 0, closed.stderr);
+      assert.match(repo.git(["ls-tree", "-r", "--name-only", "feat/auth"]).stdout, /prs\/open/);
+
+      assert.equal(repo.nav(["pr", "list", "--all-refs"]).stdout.includes("dk3mp2x9"), false);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("keeps a pull request the target branch says nothing about", () => {
+    const { repo } = withOpenPr();
+    try {
+      // The guard reads the target branch only; an unrelated branch filing some
+      // other pull request as merged must not settle this one.
+      assert.match(repo.nav(["pr", "list", "--all-refs"]).stdout, /#dk3mp2x9/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("still lists one whose merge was never archived on the target", () => {
+    const { repo } = withOpenPr();
+    try {
+      // Merged by hand, so the directory never moved: doctor's "merged but not
+      // archived" case (spec 03 §3.5), and still in flight as far as the
+      // tracker is concerned.
+      repo.git(["merge", "--quiet", "--no-ff", "-m", "land it", "feat/auth"]);
+      assert.match(repo.nav(["pr", "list", "--all-refs"]).stdout, /#dk3mp2x9/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("ignores branches that have no .navbook at all", () => {
     const { repo } = withOpenPr();
     try {
@@ -632,6 +711,403 @@ describe("nav pr list --all-refs", () => {
       const all = repo.nav(["pr", "list", "--all-refs"]);
       assert.equal(all.code, 0, all.stderr);
       assert.match(all.stdout, /#dk3mp2x9/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+describe("nav pr list points at --all-refs", () => {
+  /** Open a second pull request on a new branch, and stay on that branch. */
+  function secondPrOnItsOwnBranch(repo: TempRepo): void {
+    repo.git(["checkout", "--quiet", "-b", "feat/search", "main"]);
+    repo.write("search.txt", "indexing\n");
+    repo.commitAll("feat: add search");
+    const opened = repo.nav(["pr", "open", "--title", "Add search", "-m", "Body.", "--commit"], {
+      NAV_IDS: "qq77ww88",
+      NAV_NOW: "2026-08-05T09:00:00Z",
+    });
+    assert.equal(opened.code, 0, opened.stderr);
+  }
+
+  it("names the count and the flag when this branch has nothing to show", () => {
+    const { repo } = withOpenPr();
+    try {
+      const listed = repo.nav(["pr", "list"]);
+      assert.equal(listed.code, 0, listed.stderr);
+      // The listing itself still reports the checked-out tree and no more.
+      assert.match(listed.stdout, /No pull requests match/);
+      assert.equal(listed.stdout.includes("dk3mp2x9"), false);
+      assert.match(listed.stderr, /1 open pull request on other branches/);
+      assert.match(listed.stderr, /--all-refs/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("counts each pull request once however many branches carry it", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["branch", "backup/auth", "feat/auth"]);
+      assert.match(repo.nav(["pr", "list"]).stderr, /1 open pull request on other branches/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("does not count a pull request that lives on the branch checked out", () => {
+    const { repo } = withOpenPr();
+    try {
+      secondPrOnItsOwnBranch(repo);
+      // Standing on feat/search, whose own PR simply does not match the query:
+      // only the one on feat/auth is somewhere `--all-refs` would reach.
+      const listed = repo.nav(["pr", "list", "label:no-such-label"]);
+      assert.match(listed.stdout, /No pull requests match/);
+      assert.match(listed.stderr, /1 open pull request on other branches/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("does not count one its own target has merged, where --all-refs would not list it", () => {
+    const repo = makeNavRepo();
+    try {
+      // The target is not the default branch: main has never heard of the pull
+      // request, and only dev files it as merged.
+      repo.write("app.txt", "original\n");
+      repo.commitAll("feat: initial code");
+      repo.git(["branch", "dev"]);
+      repo.git(["checkout", "--quiet", "-b", "feat/auth"]);
+      repo.write("auth.txt", "token handling\n");
+      repo.commitAll("feat: rework auth tokens");
+      const opened = repo.nav(
+        ["pr", "open", "--target", "dev", "--title", "Refactor auth", "-m", "Body.", "--commit"],
+        {
+          NAV_IDS: "dk3mp2x9",
+          NAV_NOW: "2026-08-04T16:40:00Z",
+        },
+      );
+      assert.equal(opened.code, 0, opened.stderr);
+      repo.git(["checkout", "--quiet", "dev"]);
+      const merged = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      assert.equal(merged.code, 0, merged.stderr);
+      repo.git(["checkout", "--quiet", "main"]);
+
+      assert.match(repo.nav(["pr", "list", "--all-refs"]).stdout, /No pull requests match/);
+      const listed = repo.nav(["pr", "list"]);
+      assert.match(listed.stdout, /No pull requests match/);
+      assert.equal(listed.stderr.trim(), "", "the hint and the listing agree");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("does not count a pull request the detached HEAD holds", () => {
+    const { repo } = withOpenPr();
+    try {
+      // No branch is checked out, but the tree is feat/auth's: its pull request
+      // is here, not somewhere --all-refs would have to reach.
+      repo.git(["checkout", "--quiet", "--detach", "feat/auth"]);
+      const listed = repo.nav(["pr", "list", "label:no-such-label"]);
+      assert.match(listed.stdout, /No pull requests match/);
+      assert.equal(listed.stderr.trim(), "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("says nothing when there is no pull request anywhere", () => {
+    const repo = makeNavRepo();
+    try {
+      const listed = repo.nav(["pr", "list"]);
+      assert.match(listed.stdout, /No pull requests match/);
+      assert.equal(listed.stderr.trim(), "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("stays out of --json, which a pipeline reads as an empty result", () => {
+    const { repo } = withOpenPr();
+    try {
+      const listed = repo.nav(["pr", "list", "--json"]);
+      assert.equal(listed.code, 0, listed.stderr);
+      assert.equal(listed.stdout, "");
+      assert.equal(listed.stderr.trim(), "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("reaches a pull request opened in another worktree", () => {
+    const { repo } = withOpenPr();
+    const tree = join(repo.dir, "..", "worktree-auth");
+    try {
+      // The shape that prompted this: the branch carrying the PR is checked
+      // out somewhere else, so the main checkout can never see it in its tree.
+      repo.git(["worktree", "add", "--quiet", tree, "feat/auth"]);
+
+      const fromMain = repo.nav(["pr", "list"]);
+      assert.match(fromMain.stdout, /No pull requests match/);
+      assert.match(fromMain.stderr, /1 open pull request on other branches/);
+
+      // The worktree is an ordinary checkout of that branch: it lists its own
+      // pull request outright, and has nothing to point elsewhere for.
+      const fromTree = navIn(tree, repo.home, ["pr", "list"]);
+      assert.equal(fromTree.code, 0, fromTree.stderr);
+      assert.match(fromTree.stdout, /#dk3mp2x9/);
+      assert.equal(fromTree.stderr.trim(), "");
+
+      const all = navIn(tree, repo.home, ["pr", "list", "--all-refs"]);
+      assert.match(all.stdout, /#dk3mp2x9/);
+    } finally {
+      repo.git(["worktree", "remove", "--force", tree]);
+      repo.cleanup();
+    }
+  });
+});
+
+describe("a pull request that only another branch holds", () => {
+  /** What `nav pr list --all-refs --json` hands a script to act on. */
+  function listedAcrossRefs(repo: TempRepo): Array<{ id: string; path: string }> {
+    const listed = repo.nav(["pr", "list", "--all-refs", "--json"]);
+    assert.equal(listed.code, 0, listed.stderr);
+    return listed.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+  }
+
+  it("shows every pull request the cross-ref listing returns, by any form it prints", () => {
+    const { repo } = withOpenPr();
+    try {
+      const listed = listedAcrossRefs(repo);
+      assert.equal(listed.length, 1);
+      const { id, path } = listed[0] as { id: string; path: string };
+
+      // The bare ID, the `#<id>` the table prints, and the `path` from --json.
+      for (const form of [id, `#${id}`, path, `${path}/`]) {
+        const shown = repo.nav(["pr", "show", form]);
+        assert.equal(shown.code, 0, `${form}: ${shown.stderr}`);
+        assert.match(shown.stdout, /Refactor auth/);
+        assert.match(shown.stderr, /read from 'feat\/auth'/);
+      }
+
+      const json = JSON.parse(repo.nav(["pr", "show", id, "--json"]).stdout);
+      assert.equal(json.id, id);
+      assert.deepEqual(json.refs, ["feat/auth"]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("carries its reviews across, so show reports the decision the branch holds", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      approveAs(repo, "rev@example.com", "rv11aa22");
+      repo.git(["checkout", "--quiet", "main"]);
+
+      const json = JSON.parse(repo.nav(["pr", "show", "dk3m", "--json"]).stdout);
+      assert.equal(json.comments.length, 1);
+      assert.equal(json.review.approvals.given, 1);
+      assert.equal(json.review.decision, "approved");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("does not show one from the tree it is not in when a copy is here", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      const shown = repo.nav(["pr", "show", "dk3m", "--json"]);
+      assert.equal(shown.code, 0, shown.stderr);
+      assert.equal(JSON.parse(shown.stdout).refs, undefined);
+      assert.equal(shown.stderr.includes("read from"), false);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("still says an unknown ID matches nothing", () => {
+    const { repo } = withOpenPr();
+    try {
+      const shown = repo.nav(["pr", "show", "zzzz9999"]);
+      assert.equal(shown.code, 1);
+      assert.match(shown.stderr, /no open pull request matches 'zzzz9999'/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses to review it here, naming the branch to review it on", () => {
+    const { repo, head } = withOpenPr();
+    try {
+      const reviewed = repo.nav([
+        "pr",
+        "review",
+        "dk3mp2x9",
+        "--revision",
+        head,
+        "--request-changes",
+        "-m",
+        "Not yet.",
+      ]);
+      assert.equal(reviewed.code, 1);
+      assert.match(reviewed.stderr, /#dk3mp2x9 is on 'feat\/auth', which is not checked out here/);
+      assert.match(reviewed.stderr, /git switch feat\/auth/);
+      // Nothing written: a review here would sit beside no pr.md.
+      assert.equal(repo.git(["status", "--porcelain"]).stdout, "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses every verb that writes into its directory", () => {
+    const { repo } = withOpenPr();
+    try {
+      for (const args of [
+        ["pr", "comment", "dk3m", "-m", "A thought."],
+        ["pr", "update", "dk3m"],
+        ["pr", "request", "dk3m", "rev@example.com"],
+        ["pr", "edit", "dk3m"],
+      ]) {
+        const result = repo.nav(args, { EDITOR: "true", VISUAL: "true" });
+        assert.equal(result.code, 1, `${args[1]}: ${result.stdout}`);
+        assert.match(result.stderr, /is on 'feat\/auth'/, `${args[1]}: ${result.stderr}`);
+      }
+      assert.equal(repo.git(["status", "--porcelain"]).stdout, "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("points at the worktree that has the branch, and reviews from there", () => {
+    const { repo } = withOpenPr();
+    const tree = join(repo.dir, "..", "worktree-review");
+    try {
+      repo.git(["worktree", "add", "--quiet", tree, "feat/auth"]);
+
+      const { id } = listedAcrossRefs(repo)[0] as { id: string };
+      const refused = repo.nav(["pr", "review", id, "--comment", "-m", "Read it."]);
+      assert.equal(refused.code, 1);
+      assert.match(
+        refused.stderr,
+        /'feat\/auth' is checked out in .*worktree-review; run the command there/,
+      );
+
+      const shown = JSON.parse(navIn(tree, repo.home, ["pr", "show", id, "--json"]).stdout);
+      const revision = shown.revisions.at(-1).head;
+      const reviewed = navIn(tree, repo.home, [
+        "pr",
+        "review",
+        id,
+        "--revision",
+        revision,
+        "--comment",
+        "-m",
+        "test review",
+        "--commit",
+      ]);
+      assert.equal(reviewed.code, 0, reviewed.stderr);
+      assert.match(reviewed.stdout, /Reviewed \(comment\) #dk3mp2x9/);
+    } finally {
+      repo.git(["worktree", "remove", "--force", tree]);
+      repo.cleanup();
+    }
+  });
+
+  it("names the local branch to make when only a remote-tracking one carries it", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["update-ref", "refs/remotes/origin/feat/auth", "feat/auth"]);
+      repo.git(["branch", "--quiet", "-D", "feat/auth"]);
+
+      assert.equal(repo.nav(["pr", "show", "dk3m"]).code, 0);
+      const reviewed = repo.nav(["pr", "review", "dk3m", "-m", "Read it."]);
+      assert.equal(reviewed.code, 1);
+      assert.match(reviewed.stderr, /is on 'origin\/feat\/auth'/);
+      assert.match(reviewed.stderr, /git switch feat\/auth/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+describe("--commit on a detached HEAD", () => {
+  /** Detach at the pull request's branch, as a reviewer barred from it would. */
+  function detachAtFeature(repo: TempRepo): string {
+    repo.git(["checkout", "--quiet", "--detach", "feat/auth"]);
+    return repo.git(["rev-parse", "HEAD"]).stdout.trim();
+  }
+
+  it("refuses to commit a review there, naming the worktree that has the branch", () => {
+    const { repo } = withOpenPr();
+    const tree = join(repo.dir, "..", "worktree-detached");
+    try {
+      repo.git(["worktree", "add", "--quiet", tree, "feat/auth"]);
+      const head = detachAtFeature(repo);
+
+      const reviewed = repo.nav([
+        "pr",
+        "review",
+        "dk3m",
+        "--comment",
+        "-m",
+        "Read it.",
+        "--commit",
+      ]);
+      assert.equal(reviewed.code, 1);
+      assert.match(reviewed.stderr, /HEAD is detached/);
+      assert.match(
+        reviewed.stderr,
+        /HEAD is at 'feat\/auth', which is checked out in .*worktree-detached; run the command there/,
+      );
+      // Refused before anything was written, let alone committed.
+      assert.equal(repo.git(["status", "--porcelain"]).stdout, "");
+      assert.equal(repo.git(["rev-parse", "HEAD"]).stdout.trim(), head);
+    } finally {
+      repo.git(["worktree", "remove", "--force", tree]);
+      repo.cleanup();
+    }
+  });
+
+  it("names the branch to check out when no worktree has it", () => {
+    const { repo } = withOpenPr();
+    try {
+      detachAtFeature(repo);
+      const reviewed = repo.nav(["pr", "review", "dk3m", "--approve", "-m", "Fine.", "--commit"]);
+      assert.equal(reviewed.code, 1);
+      assert.match(reviewed.stderr, /git switch feat\/auth/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses on a commit no branch points at, and for an issue too", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "--detach", "main~1"]);
+      const opened = repo.nav(["issue", "open", "Stray", "-m", "Body.", "--commit"]);
+      assert.equal(opened.code, 1);
+      assert.match(opened.stderr, /HEAD is detached/);
+      assert.match(opened.stderr, /check out a branch first/);
+      assert.equal(repo.git(["status", "--porcelain"]).stdout, "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("still writes and stages without --commit, leaving the commit to be placed", () => {
+    const { repo } = withOpenPr();
+    try {
+      detachAtFeature(repo);
+      const reviewed = repo.nav(["pr", "review", "dk3m", "--comment", "-m", "Read it."], {
+        NAV_IDS: "dtc11111",
+      });
+      assert.equal(reviewed.code, 0, reviewed.stderr);
+      assert.match(repo.git(["diff", "--cached", "--name-only"]).stdout, /dtc11111\.md/);
     } finally {
       repo.cleanup();
     }
@@ -703,7 +1179,13 @@ describe("nav pr merge", () => {
       assert.doesNotMatch(result.stdout, /Fast-forwarded/);
       assert.equal(result.stderr, "");
       assert.equal(branchesApart(repo, "main", "feat/auth"), "1\t0");
-      assert.match(repo.nav(["pr", "list", "--all-refs"]).stdout, /dk3mp2x9 +open/);
+      // The source branch keeps its open copy. `--all-refs` no longer lists it,
+      // because `main` files the pull request as merged.
+      assert.match(
+        repo.git(["ls-tree", "-r", "--name-only", "feat/auth"]).stdout,
+        /prs\/open\/dk3mp2x9-[^/]+\/pr\.md/,
+      );
+      assert.doesNotMatch(repo.nav(["pr", "list", "--all-refs"]).stdout, /dk3mp2x9/);
     } finally {
       repo.cleanup();
     }

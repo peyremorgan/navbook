@@ -12,11 +12,12 @@ import {
   bindReviewRevision,
   commitReport,
   continuePrMerge,
+  countOpenPrsOnOtherRefs,
   currentAuthor,
   type EntityRecord,
   entityJson,
   executePrMerge,
-  findEntity,
+  findPrToWrite,
   listEntities,
   listPrsAcrossRefs,
   type MergeResult,
@@ -161,7 +162,7 @@ export interface ReviewOptions extends GlobalFlags {
 }
 
 export function cmdPrReview(ctx: Ctx, prefix: string, opts: ReviewOptions): void {
-  const entity = findEntity(ctx, "pr", prefix);
+  const entity = findPrToWrite(ctx, prefix);
   const chosen = [opts.approve, opts.requestChanges, opts.comment].filter(Boolean).length;
   if (chosen > 1) {
     fail("choose one of --approve, --request-changes or --comment, not several");
@@ -277,7 +278,9 @@ export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void 
   const query = parseListQuery(ctx, terms, "pr");
 
   if (!opts.allRefs) {
-    reportList(ctx, "pr", listEntities(ctx, "pr", query), { ...opts, extraColumns });
+    const here = listEntities(ctx, "pr", query);
+    reportList(ctx, "pr", here, { ...opts, extraColumns });
+    if (here.length === 0) hintOtherRefs(ctx, opts);
     return;
   }
 
@@ -315,6 +318,30 @@ export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void 
         },
       ],
     },
+  );
+}
+
+/**
+ * Point at `--all-refs` when this checkout has nothing to show and other
+ * branches do.
+ *
+ * An open pull request's files live on its source branch (spec 03 §3.5), so a
+ * listing run from the default branch — or from any worktree but the one the
+ * work is on — is empty however many are in flight, and "No pull requests
+ * match this query." reads as "there are none". The hint is a signpost, not a
+ * listing: the count is all it says, the table still reports this branch and
+ * this branch only, and it goes to stderr so a pipe sees the same bytes as
+ * before.
+ */
+function hintOtherRefs(ctx: Ctx, opts: PrListOptions): void {
+  if (opts.json) return;
+  const count = countOpenPrsOnOtherRefs(ctx);
+  if (count === 0) return;
+  ctx.stderr.write(
+    `${ctx.colors.dim(
+      `${count} open pull ${count === 1 ? "request" : "requests"} on other branches; ` +
+        "nav pr list --all-refs to see them",
+    )}\n`,
   );
 }
 

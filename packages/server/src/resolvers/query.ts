@@ -15,13 +15,12 @@ import {
   listFeatures,
   listPrsAcrossRefs,
   loadRepo,
-  locatePr,
   mergePeople,
+  readPr,
   readReviewPolicy,
   resolveSha,
   runDoctor,
   treePeople,
-  WorkspaceError,
 } from "@navbook/core";
 import type { GraphQLCtx } from "../context.ts";
 import { invalidInput, run } from "../errors.ts";
@@ -73,15 +72,10 @@ export const Query: QueryResolvers = {
   pr: (_parent, args, ctx) =>
     run(() =>
       ctx.sync.read((): PrParent => {
-        // The working tree first: that copy has its comments read from disk.
-        // Only when it is not here is the scan across branches worth its cost.
-        try {
-          return { entity: findEntity(ctx.ws, "pr", args.ref), refs: [] };
-        } catch (error) {
-          if (!(error instanceof WorkspaceError) || error.code !== "not-found") throw error;
-          const located = locatePr(ctx.ws, args.ref);
-          return { entity: located.entity, refs: [located.sourceRef] };
-        }
+        // The working tree first, then the branch that carries it — the same
+        // lookup as `nav pr show`.
+        const { entity, ref } = readPr(ctx.ws, args.ref);
+        return { entity, refs: ref === null ? [] : [ref] };
       }),
     ),
 

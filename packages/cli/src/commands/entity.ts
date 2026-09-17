@@ -8,6 +8,7 @@
  */
 
 import {
+  absPath,
   applyComment,
   applyEntityEdit,
   type CloseInput,
@@ -21,6 +22,7 @@ import {
   entityJson,
   executeEntityDelete,
   findEntity,
+  findPrToWrite,
   listEntities,
   loadRepo,
   type NewCommentInput,
@@ -31,11 +33,11 @@ import {
   readAssignees,
   readDeadline,
   readLabels,
+  readPr,
   readRank,
   reopenEntity,
   resolveComment,
   resolveEntity,
-  resolveEntityForEdit,
   revalidateEntityFile,
   reviewSummary,
   subtaskTree,
@@ -180,7 +182,12 @@ export interface ShowOptions extends GlobalFlags {
 
 export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOptions): void {
   const repo = loadRepo(ctx);
-  const entity = resolveEntity(repo, prefix, kind);
+  // A pull request is usually on its source branch rather than in this tree
+  // (spec 03 §3.5), and `nav pr list --all-refs` has just printed its ID.
+  const { entity, ref } =
+    kind === "pr"
+      ? readPr(ctx, prefix, repo)
+      : { entity: resolveEntity(repo, prefix, kind), ref: null };
   const reading = repo.reviewPolicy;
   if (kind === "pr") warnPolicyProblems(ctx, reading);
   if (opts.json) {
@@ -194,6 +201,7 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
         entityJson(ctx.navDir, entity, {
           ...(kind === "pr"
             ? {
+                ...(ref === null ? {} : { refs: [ref] }),
                 review: reviewSummary(entity, reading.policy),
                 reviewPolicy: {
                   selfReview: reading.policy.selfReview,
@@ -210,6 +218,12 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
   }
   const depth = opts.depth ?? 1;
   if (!Number.isInteger(depth) || depth < 0) fail("--depth takes a whole number of levels");
+  // To stderr, so the detail itself reads the same wherever it came from.
+  if (ref !== null) {
+    ctx.stderr.write(
+      `${ctx.colors.dim(`read from '${ref}'; this checkout does not hold #${entity.id}`)}\n`,
+    );
+  }
   ctx.stdout.write(
     `${renderDetail(entity, {
       colors: ctx.colors,
@@ -226,7 +240,8 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
 /* --------------------------------------------------------------------- edit */
 
 export function cmdEdit(ctx: Ctx, kind: EntityKind, prefix: string, opts: GlobalFlags): void {
-  const { entity, path } = resolveEntityForEdit(ctx, kind, prefix);
+  const entity = writeTarget(ctx, kind, prefix);
+  const path = absPath(ctx, entity.filePath);
   openInEditor(ctx, path);
 
   for (const problem of revalidateEntityFile(path, kind)) {
@@ -248,7 +263,7 @@ export interface CommentOptions extends GlobalFlags {
 }
 
 export function cmdComment(ctx: Ctx, kind: EntityKind, prefix: string, opts: CommentOptions): void {
-  const entity = findEntity(ctx, kind, prefix);
+  const entity = writeTarget(ctx, kind, prefix);
   const replyTo = opts.replyTo ? resolveComment(entity, opts.replyTo) : undefined;
   const isReview = opts.review?.verdict !== undefined;
   const noun = isReview ? "review" : "comment";
@@ -279,6 +294,14 @@ export function cmdComment(ctx: Ctx, kind: EntityKind, prefix: string, opts: Com
     `${isReview ? "Reviewed" : "Commented on"} #${entity.id}  ${ctx.navDir}/${path}  (#${id})\n`,
   );
   if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
+}
+
+/**
+ * The entity a verb writes into. A pull request that only another branch holds
+ * is refused with where it lives, rather than reported as not existing.
+ */
+function writeTarget(ctx: Ctx, kind: EntityKind, prefix: string): EntityRecord {
+  return kind === "pr" ? findPrToWrite(ctx, prefix) : findEntity(ctx, kind, prefix);
 }
 
 /* ------------------------------------------------------------ close/reopen */
