@@ -5,6 +5,7 @@ created: 2026-09-17T18:00:35Z
 labels: [bug]
 assignee: Claude <noreply@anthropic.com>
 feature: web
+resolution: fixed
 ---
 
 Every page of the web client puts the same thing in the browser's title bar: `Navbook`. The issue you are reading, the pull request you reviewed, the features listing and the sign-out page are all called `Navbook`, so a browser history, a bookmark bar and a row of open tabs are all rows of identical entries. Searching history for the issue you read yesterday cannot work, because its title never mentioned it.
