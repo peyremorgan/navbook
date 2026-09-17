@@ -65,10 +65,12 @@ the address bar — a bare `/issues`, typed or sent to you, is still the whole
 open list — and the memory lasts as long as the browser tab.
 
 **Dark or light**, without being asked: the theme starts at whatever the
-browser says about `prefers-color-scheme`, and the button in the navbar is
-there for disagreeing with it. A disagreement is remembered in the browser it
-was made in and nowhere else — it is a display preference, not an account
-setting, so none of it reaches the repository.
+browser says about `prefers-color-scheme`, and the menu in the navbar is there
+for disagreeing with it — light, dark, or back to system, which follows the
+browser again, including when its scheme changes while the page is open. The
+choice is remembered in the browser it was made in and nowhere else — it is a
+display preference, not an account setting, so none of it reaches the
+repository.
 
 ## Running it while developing
 

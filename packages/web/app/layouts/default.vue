@@ -75,10 +75,11 @@ watch(
             The theme, which nobody has to set: `@nuxtjs/color-mode` — already
             here as a dependency of Nuxt UI — starts at the `system`
             preference, so the first visit matches whatever the browser says
-            about `prefers-color-scheme`. This button is for disagreeing with
-            it, and the disagreement is what gets stored.
+            about `prefers-color-scheme`. The menu is for disagreeing with it,
+            and for taking the disagreement back: `system` is one of its three
+            entries, not only where the page starts.
           -->
-          <UColorModeButton data-testid="theme-toggle" size="sm" />
+          <ThemeMenu />
 
           <!--
             The inbox is here rather than beside the other three, because it is
