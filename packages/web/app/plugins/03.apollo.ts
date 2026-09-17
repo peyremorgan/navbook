@@ -23,16 +23,20 @@ import type { DocumentNode } from "graphql";
 import { describeApiError, errorHeading, isForbidden, isUnauthenticated } from "~/utils/errors";
 
 /**
- * Codes a caller has said it will handle itself.
+ * Failures a caller has said it will report itself.
  *
- * Set it in an operation's context — `context: { handledCodes: [...] }` — and
- * the shared error toast stays quiet, leaving the failure to whatever raised
- * the operation. `REPARENT_REQUIRED` and the pull request `PRECONDITION` are
- * not really errors so much as questions, and each has a place in the page
- * that answers it better than a toast could.
+ * Set in an operation's context. `handledCodes` names some — `context:
+ * { handledCodes: [...] }` — and the shared error toast stays quiet about
+ * those, leaving them to whatever raised the operation: `REPARENT_REQUIRED`
+ * and the pull request `PRECONDITION` are not really errors so much as
+ * questions, and each has a place in the page that answers it better than a
+ * toast could. `handled` names all of them, for a write whose every refusal is
+ * kept beside the field it was about, with the server's words and a Retry
+ * (`usePendingEdits`); a toast on top would be the same sentence said twice.
  */
 export interface HandledContext {
   handledCodes?: readonly string[];
+  handled?: boolean;
 }
 
 /**
@@ -91,6 +95,7 @@ export default defineNuxtPlugin((nuxtApp) => {
     }
 
     const context = operation.getContext() as HandledContext;
+    if (context.handled === true) return;
     if (context.handledCodes?.includes(failure.code ?? "")) return;
     if (!isMutation(operation.query)) return;
 

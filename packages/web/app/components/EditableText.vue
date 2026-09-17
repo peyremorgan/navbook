@@ -8,13 +8,20 @@
   `disabled` withdraws the offer to edit, as it does on `LabelEditor`, for the
   one case where the server has already said it cannot take the write: a pull
   request whose branch this checkout does not hold.
+
+  Saving closes the editor at once, so the slot is expected to already show
+  what was saved — the page overlays the pending edit — and `save` is where
+  the wait and any refusal are read from (`usePendingEdits`).
 -->
 <script setup lang="ts">
+import type { FieldSave } from "~/composables/usePendingEdits";
+
 const props = defineProps<{
   value: string;
   label: string;
   multiline?: boolean;
-  saving?: boolean;
+  /** The field's save in flight or refused, shown beneath the text. */
+  save?: FieldSave;
   testid?: string;
   /** The format needs a title and the server refuses an empty body. */
   required?: boolean;
@@ -104,7 +111,7 @@ function save(): void {
       <div class="flex gap-2">
         <UButton
           size="sm"
-          :loading="props.saving"
+          :loading="props.save?.saving"
           :data-testid="props.testid ? `save-${props.testid}` : undefined"
           @click="save"
         >
@@ -113,5 +120,7 @@ function save(): void {
         <UButton size="sm" color="neutral" variant="ghost" @click="cancel">Cancel</UButton>
       </div>
     </div>
+
+    <SaveStatus v-if="props.save" :save="props.save" :testid="props.testid" class="mt-1.5" />
   </div>
 </template>

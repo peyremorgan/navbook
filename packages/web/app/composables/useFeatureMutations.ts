@@ -1,10 +1,12 @@
 /**
  * The four feature writes, wrapped the way the issue writes are.
  *
- * `STALE_CONTENT` is handled here rather than toasted: it is the one failure a
- * page can do something about — show what the file says now, and let the
- * author reapply their change — so the shared error toast is told to leave it
- * alone and the rejection is passed through to the caller.
+ * `STALE_CONTENT` on a document is handled by its page rather than toasted: it
+ * is the one failure the editor can do something about — show what the file
+ * says now, and let the author reapply their change — so the shared error
+ * toast is told to leave it alone and the rejection is passed through. An
+ * edit of the feature's card goes further: every refusal of it is kept beside
+ * the field with a Retry (`usePendingEdits`), so nothing about it is toasted.
  */
 
 import { useMutation } from "@vue/apollo-composable";
@@ -13,6 +15,8 @@ import { describeApiError, staleEdit } from "~/utils/errors";
 
 /** Codes a page answers itself, so the shared toast stays quiet about them. */
 const ASKED = { handledCodes: ["STALE_CONTENT"] } as const;
+/** Every failure is the page's, kept beside the field it was about. */
+const EDITED = { handled: true } as const;
 
 /** The message a stale save was refused with, or null for any other failure. */
 export function staleContent(error: unknown): string | null {
@@ -21,7 +25,7 @@ export function staleContent(error: unknown): string | null {
 
 export function useFeatureMutations() {
   const create = useMutation(CREATE_FEATURE);
-  const updateFeature = useMutation(UPDATE_FEATURE, () => ({ context: ASKED }));
+  const updateFeature = useMutation(UPDATE_FEATURE, () => ({ context: EDITED }));
   const addSpec = useMutation(ADD_SPEC);
   const updateSpec = useMutation(UPDATE_SPEC, () => ({ context: ASKED }));
   const commit = useCommitToast();

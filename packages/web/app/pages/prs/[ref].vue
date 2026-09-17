@@ -19,6 +19,11 @@
   issue page: every save names the version it was edited from, a field somebody
   else changed since is refused, and the refused edit is kept beside what the
   page now says until the person decides between them.
+
+  Everything else about a save is `usePendingEdits`'s, as on the issue page:
+  the page renders `shown`, the file with each edit in flight laid over it, so
+  a save shows at once; and any refusal but the two above is kept beside the
+  field it was about, with a Retry.
 -->
 <script setup lang="ts">
 import { useMutation, useQuery } from "@vue/apollo-composable";
@@ -152,10 +157,12 @@ async function submit(input: {
 
 /* ----------------------------------------------------------------- metadata */
 
+// Every failure is the page's own to report, so the shared toast stays quiet.
 const { mutate: patch, loading: patching } = useMutation(UPDATE_PR, {
-  context: { handledCodes: ["PRECONDITION", "STALE_CONTENT"] },
+  context: { handled: true },
 });
 const staleEdits = useStaleEdit({ refetch, resend: (change) => save(change) });
+const edits = usePendingEdits<EntityEdit>({ resend: (change) => save(change) });
 // Asking somebody new to review is how they become somebody the repository
 // knows of, and the answer that listed everybody was fetched before they were.
 const refreshListings = useListingRefresh();
@@ -170,6 +177,29 @@ const current = computed<EntityEdit>(() => ({
   features: [...(pr.value?.features ?? [])],
   reviewers: [...(pr.value?.reviewers ?? [])],
 }));
+
+/** The pull request as the page shows it: the file, with every edit in flight over it. */
+const shown = computed(() => edits.overlay(current.value));
+
+/**
+ * The reviewer states as they will read once the save lands.
+ *
+ * `reviews` is derived on the server from `reviewer:` and the reviews given,
+ * so a reviewer just asked has no row until the answer comes back. They are
+ * shown pending meanwhile, and somebody just taken off the list goes unless
+ * they reviewed anyway — which is what the server will say too.
+ */
+const reviewsShown = computed(() => {
+  const reviews = pr.value?.reviews ?? [];
+  const asked = new Set(shown.value.reviewers ?? []);
+  const named = new Set(reviews.map((review) => review.person));
+  return [
+    ...reviews.filter((review) => review.volunteer || asked.has(review.person)),
+    ...[...asked]
+      .filter((person) => !named.has(person))
+      .map((person) => ({ person, state: "PENDING" as const, volunteer: false, comment: null })),
+  ];
+});
 
 /** What the toast calls a save of these fields: "Title updated". */
 function wroteOf(change: Partial<EntityEdit>): string {
@@ -203,29 +233,33 @@ async function save(change: Partial<EntityEdit>): Promise<void> {
   // refused edit of the same field: the page already says what was typed.
   if (built === null) {
     staleEdits.settle(change);
+    edits.settle(change);
     return;
   }
 
   const { id, baseSha } = pr.value;
-  try {
-    await staleEdits.attempt(change, async () => {
-      const written = await patch({ input: { ref: id, ...built, baseSha } });
-      const payload = written?.data?.updatePr;
-      if (!payload) return false;
-      commitToast.report(payload.commit, wroteOf(change));
-      refreshListings();
-      refusedOn.value = null;
-      return true;
-    });
-  } catch (failure) {
-    const described = describeApiError(failure);
-    const branch = unservedBranch(described);
-    if (branch === null) {
-      toast.add({ title: "Could not save", description: described.message, color: "error" });
-      return;
-    }
-    refusedOn.value = branch;
-  }
+  // Three things a refusal can be. Stale: kept by `staleEdits`, beside what
+  // the file says now. Not from here: the branch is named beside the form and
+  // every editor withdraws, so the edit is let go. Anything else: kept by
+  // `edits`, beside the value it tried to set, with a Retry.
+  await edits.attempt(change, () =>
+    staleEdits.attempt(change, async () => {
+      try {
+        const written = await patch({ input: { ref: id, ...built, baseSha } });
+        const payload = written?.data?.updatePr;
+        if (!payload) return false;
+        commitToast.report(payload.commit, wroteOf(change));
+        refreshListings();
+        refusedOn.value = null;
+        return true;
+      } catch (failure) {
+        const branch = unservedBranch(describeApiError(failure));
+        if (branch === null) throw failure;
+        refusedOn.value = branch;
+        return false;
+      }
+    }),
+  );
 }
 
 /**
@@ -246,15 +280,15 @@ const branchHint = computed(() => refusedOn.value);
     <article v-if="pr" class="space-y-6" data-testid="pr-detail">
       <header class="space-y-2">
         <EditableText
-          :value="pr.title"
+          :value="shown.title"
           label="title"
           testid="title"
           required
-          :saving="patching"
+          :save="edits.field('title')"
           :disabled="branchHint !== null"
           @save="(title: string) => save({ title })"
         >
-          <h1 class="text-2xl font-semibold" data-testid="pr-title">{{ pr.title }}</h1>
+          <h1 class="text-2xl font-semibold" data-testid="pr-title">{{ shown.title }}</h1>
         </EditableText>
         <div class="flex flex-wrap items-center gap-2 text-sm text-muted">
           <StatusBadge :status="pr.status" :draft="pr.draft" />
@@ -306,16 +340,16 @@ const branchHint = computed(() => refusedOn.value);
       <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
         <div class="space-y-6">
           <EditableText
-            :value="pr.body"
+            :value="shown.body"
             label="description"
             testid="body"
             multiline
             required
-            :saving="patching"
+            :save="edits.field('body')"
             :disabled="branchHint !== null"
             @save="(body: string) => save({ body })"
           >
-            <MarkdownBody :source="pr.body" />
+            <MarkdownBody :source="shown.body" />
           </EditableText>
 
           <section class="space-y-3">
@@ -372,14 +406,14 @@ const branchHint = computed(() => refusedOn.value);
             title="Reviewers"
             icon="i-lucide-eye"
             testid="reviewers"
-            :values="pr.reviewers"
+            :values="shown.reviewers ?? []"
             :suggestions="people"
-            :saving="patching"
+            :save="edits.field('reviewers')"
             :disabled="branchHint !== null"
             @save="(reviewers: string[]) => save({ reviewers })"
           >
             <template #display>
-              <ReviewList :reviews="pr.reviews" />
+              <ReviewList :reviews="reviewsShown" />
               <ReviewPolicyNote :policy="reviewPolicy" class="mt-2" />
             </template>
           </LabelEditor>
@@ -388,9 +422,9 @@ const branchHint = computed(() => refusedOn.value);
             title="Labels"
             icon="i-lucide-tag"
             testid="labels"
-            :values="pr.labels"
+            :values="shown.labels"
             :suggestions="known.labels"
-            :saving="patching"
+            :save="edits.field('labels')"
             :disabled="branchHint !== null"
             @save="(labels: string[]) => save({ labels })"
           />
@@ -398,9 +432,9 @@ const branchHint = computed(() => refusedOn.value);
             title="Assignees"
             icon="i-lucide-user"
             testid="assignees"
-            :values="pr.assignees"
+            :values="shown.assignees"
             :suggestions="people"
-            :saving="patching"
+            :save="edits.field('assignees')"
             :disabled="branchHint !== null"
             @save="(assignees: string[]) => save({ assignees })"
           >
@@ -410,8 +444,8 @@ const branchHint = computed(() => refusedOn.value);
               "None", so the empty case has to be said here too.
             -->
             <template #display>
-              <div v-if="pr.assignees.length" class="space-y-1 text-sm">
-                <PersonLabel v-for="who in pr.assignees" :key="who" :person="who" avatar />
+              <div v-if="shown.assignees.length" class="space-y-1 text-sm">
+                <PersonLabel v-for="who in shown.assignees" :key="who" :person="who" avatar />
               </div>
               <p v-else class="text-sm text-muted">None</p>
             </template>
@@ -421,9 +455,9 @@ const branchHint = computed(() => refusedOn.value);
             icon="i-lucide-layers"
             testid="features"
             link-to="/features/"
-            :values="pr.features"
+            :values="shown.features"
             :suggestions="known.features"
-            :saving="patching"
+            :save="edits.field('features')"
             :disabled="branchHint !== null"
             @save="(features: string[]) => save({ features })"
           />
@@ -432,9 +466,9 @@ const branchHint = computed(() => refusedOn.value);
             icon="i-lucide-flag"
             testid="milestone"
             single
-            :values="pr.milestone ? [pr.milestone] : []"
+            :values="shown.milestone ? [shown.milestone] : []"
             :suggestions="known.milestones"
-            :saving="patching"
+            :save="edits.field('milestone')"
             :disabled="branchHint !== null"
             @save="(values: string[]) => save({ milestone: values[0] ?? null })"
           />

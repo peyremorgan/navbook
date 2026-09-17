@@ -52,6 +52,15 @@ file says now, and the choice — save yours over it, or leave theirs — is mad
 by clicking rather than by whoever happened to save last. A field somebody else
 changed that you did not touch is not a conflict, and your save lands beside it.
 
+A save is shown from the moment it is made. Every write is a fetch, a commit
+and a push, so the server's answer can be seconds away, and a page that showed
+the old value until it arrived would look as though it had thrown the edit
+away. The field shows what was saved at once, admits to still waiting only
+once the wait has been long, and keeps any other refusal — a rejected push, a
+git failure, a server that could not be reached — beside the field in the
+server's own words, with the value still shown and a Retry and a Discard. The
+same is true of a row dropped somewhere in the inbox.
+
 Opening a pull request, appending a revision to one and merging it are not
 here, and neither is deleting anything — renaming or removing a feature or one
 of its documents included. They are checkout-centric maintainer actions and the

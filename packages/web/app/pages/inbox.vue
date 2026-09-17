@@ -69,7 +69,9 @@ const page = usePagedList(shown);
 const reorder = useInboxReorder(
   page.shown,
   computed(() => view.params.value.sort === "priority"),
-  async (id, rank) => (await mutations.updateIssue(id, { rank })) !== null,
+  async (id, rank) => {
+    await mutations.updateIssue(id, { rank });
+  },
 );
 
 const finished = computed({
@@ -179,6 +181,8 @@ const emptyDescription = computed(() => {
           <p aria-live="polite" class="sr-only" data-testid="inbox-reorder-status">
             {{ reorder.announcement.value }}
           </p>
+          <!-- And for one who is: a slow write, or a refused one with a Retry. -->
+          <SaveStatus :save="reorder.save.value" testid="reorder" class="mt-2" />
           <div class="mt-3 flex items-center justify-between text-sm text-muted">
             <span data-testid="inbox-count">
               Showing {{ page.shown.value.length }} of {{ page.total.value }}

@@ -18,8 +18,14 @@
   already said it cannot take the write: a pull request whose branch this
   checkout does not hold. Letting somebody type a second thing that will be
   refused the same way is not better than not offering.
+
+  Saving closes the editor at once, so `values` is expected to already say
+  what was saved — the page overlays the pending edit — and `save` is where
+  the wait and any refusal are read from (`usePendingEdits`).
 -->
 <script setup lang="ts">
+import type { FieldSave } from "~/composables/usePendingEdits";
+
 const props = defineProps<{
   title: string;
   icon: string;
@@ -29,7 +35,8 @@ const props = defineProps<{
   /** Route prefix that makes each chip a link, e.g. `/features/`. */
   linkTo?: string;
   testid: string;
-  saving?: boolean;
+  /** The field's save in flight or refused, shown beneath the values. */
+  save?: FieldSave;
   /** Set when this cannot be written at all; the field reads but does not offer. */
   disabled?: boolean;
 }>();
@@ -95,7 +102,7 @@ function save(): void {
       <div class="flex gap-1.5">
         <UButton
           size="xs"
-          :loading="props.saving"
+          :loading="props.save?.saving"
           :data-testid="`save-${props.testid}`"
           @click="save"
         >
@@ -135,5 +142,7 @@ function save(): void {
       </component>
     </div>
     <p v-else class="text-sm text-muted">None</p>
+
+    <SaveStatus v-if="props.save" :save="props.save" :testid="props.testid" />
   </section>
 </template>

@@ -11,6 +11,11 @@
   server refuses one whose field somebody else changed in the meantime. What
   happens then is `useStaleEdit`'s: the refused edit is kept and shown beside
   what the page now says, and the decision is the person's.
+
+  Every other outcome of a save is `usePendingEdits`'s. The page renders
+  `shown` rather than the issue — the file with each edit in flight laid over
+  it — so a save shows at once and stays shown while the server is busy
+  committing and pushing it; a refusal is kept beside the field with a Retry.
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
@@ -97,6 +102,10 @@ const current = computed<EntityEdit>(() => ({
 }));
 
 const staleEdits = useStaleEdit({ refetch, resend: (change) => save(change) });
+const edits = usePendingEdits<EntityEdit>({ resend: (change) => save(change) });
+
+/** The issue as the page shows it: the file, with every edit in flight over it. */
+const shown = computed(() => edits.overlay(current.value));
 
 async function save(change: Partial<EntityEdit>): Promise<void> {
   if (issue.value === null) return;
@@ -113,14 +122,17 @@ async function save(change: Partial<EntityEdit>): Promise<void> {
   // edit of the same field, though — the page already says what was typed.
   if (patch === null) {
     staleEdits.settle(change);
+    edits.settle(change);
     return;
   }
   const { id, baseSha } = issue.value;
-  // Every failure but a stale one has already been said by the error link and
-  // comes back as null, so nothing is thrown past here.
-  await staleEdits.attempt(
-    change,
-    async () => (await mutations.updateIssue(id, patch, baseSha)) !== null,
+  // A stale refusal is kept by `staleEdits`, beside what the file says now;
+  // any other is kept by `edits`, beside the value it tried to set.
+  await edits.attempt(change, () =>
+    staleEdits.attempt(
+      change,
+      async () => (await mutations.updateIssue(id, patch, baseSha)) !== null,
+    ),
   );
 }
 
@@ -132,11 +144,14 @@ const duplicateOf = ref("");
 
 async function confirmClose(): Promise<void> {
   if (issue.value === null) return;
-  await mutations.closeIssue(
+  const closed = await mutations.closeIssue(
     issue.value.id,
     normalizeOptional(resolution.value),
     normalizeOptional(duplicateOf.value),
   );
+  // Only once it landed: a refusal has been toasted, and the dialog stays up
+  // holding the resolution that was typed rather than closing on it.
+  if (closed === null) return;
   closing.value = false;
   resolution.value = "";
   duplicateOf.value = "";
@@ -192,11 +207,23 @@ async function link(child: string, allowReparent: boolean): Promise<void> {
   }
 }
 
+/** The subtask being taken out, hidden from the tree until it has been read again. */
+const unlinking = ref<string | null>(null);
+const subtasksShown = computed(() =>
+  (issue.value?.subtasks ?? []).filter((node) => node.id !== unlinking.value),
+);
+
 async function unlink(child: string): Promise<void> {
-  await mutations.unlinkIssue(child);
-  // `unlinkIssue` returns the child alone, so this issue's own tree — the
-  // thing on screen — is only correct once it has been read again.
-  await refetch();
+  unlinking.value = child;
+  try {
+    const done = await mutations.unlinkIssue(child);
+    // `unlinkIssue` returns the child alone, so this issue's own tree — the
+    // thing on screen — is only correct once it has been read again. A
+    // refusal has been toasted, and the row comes back.
+    if (done !== null) await refetch();
+  } finally {
+    unlinking.value = null;
+  }
 }
 </script>
 
@@ -218,14 +245,14 @@ async function unlink(child: string): Promise<void> {
         </div>
 
         <EditableText
-          :value="issue.title"
+          :value="shown.title"
           label="title"
           testid="title"
           required
-          :saving="mutations.busy.value"
+          :save="edits.field('title')"
           @save="(title: string) => save({ title })"
         >
-          <h1 class="text-2xl font-semibold" data-testid="issue-title">{{ issue.title }}</h1>
+          <h1 class="text-2xl font-semibold" data-testid="issue-title">{{ shown.title }}</h1>
         </EditableText>
 
         <div class="flex flex-wrap items-center gap-2 text-sm text-muted">
@@ -242,7 +269,7 @@ async function unlink(child: string): Promise<void> {
         v-if="staleEdits.stale.value"
         :message="staleEdits.stale.value.message"
         :change="staleEdits.stale.value.change"
-        :saving="mutations.busy.value || staleEdits.refetching.value"
+        :saving="mutations.loading.update.value || staleEdits.refetching.value"
         @reapply="staleEdits.reapply"
         @dismiss="staleEdits.dismiss"
       />
@@ -270,15 +297,15 @@ async function unlink(child: string): Promise<void> {
       <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
         <div class="space-y-6">
           <EditableText
-            :value="issue.body"
+            :value="shown.body"
             label="description"
             testid="body"
             multiline
             required
-            :saving="mutations.busy.value"
+            :save="edits.field('body')"
             @save="(body: string) => save({ body })"
           >
-            <MarkdownBody :source="issue.body" />
+            <MarkdownBody :source="shown.body" />
           </EditableText>
 
           <section class="space-y-2">
@@ -298,8 +325,8 @@ async function unlink(child: string): Promise<void> {
               </UButton>
             </div>
             <SubtaskTree
-              v-if="issue.subtasks.length"
-              :nodes="issue.subtasks"
+              v-if="subtasksShown.length"
+              :nodes="subtasksShown"
               unlinkable
               @unlink="unlink"
             />
@@ -322,7 +349,7 @@ async function unlink(child: string): Promise<void> {
               ref="commentForm"
               :reply-to="replyTo"
               :reply-to-author="replyToAuthor"
-              :saving="mutations.busy.value"
+              :saving="mutations.loading.comment.value"
               @submit="addComment"
               @cancel-reply="replyTo = null"
             />
@@ -334,18 +361,18 @@ async function unlink(child: string): Promise<void> {
             title="Labels"
             icon="i-lucide-tag"
             testid="labels"
-            :values="issue.labels"
+            :values="shown.labels"
             :suggestions="known.labels"
-            :saving="mutations.busy.value"
+            :save="edits.field('labels')"
             @save="(labels: string[]) => save({ labels })"
           />
           <LabelEditor
             title="Assignees"
             icon="i-lucide-user"
             testid="assignees"
-            :values="issue.assignees"
+            :values="shown.assignees"
             :suggestions="people"
-            :saving="mutations.busy.value"
+            :save="edits.field('assignees')"
             @save="(assignees: string[]) => save({ assignees })"
           />
           <LabelEditor
@@ -353,9 +380,9 @@ async function unlink(child: string): Promise<void> {
             icon="i-lucide-layers"
             testid="features"
             link-to="/features/"
-            :values="issue.features"
+            :values="shown.features"
             :suggestions="known.features"
-            :saving="mutations.busy.value"
+            :save="edits.field('features')"
             @save="(features: string[]) => save({ features })"
           />
           <LabelEditor
@@ -363,9 +390,9 @@ async function unlink(child: string): Promise<void> {
             icon="i-lucide-flag"
             testid="milestone"
             single
-            :values="issue.milestone ? [issue.milestone] : []"
+            :values="shown.milestone ? [shown.milestone] : []"
             :suggestions="known.milestones"
-            :saving="mutations.busy.value"
+            :save="edits.field('milestone')"
             @save="(values: string[]) => save({ milestone: values[0] ?? null })"
           />
           <!--
@@ -378,8 +405,8 @@ async function unlink(child: string): Promise<void> {
             icon="i-lucide-list-ordered"
             testid="rank"
             type="number"
-            :value="issue.rank === null || issue.rank === undefined ? '' : String(issue.rank)"
-            :saving="mutations.busy.value"
+            :value="shown.rank === null || shown.rank === undefined ? '' : String(shown.rank)"
+            :save="edits.field('rank')"
             @save="(text: string) => save({ rank: parseRankInput(text) })"
           />
           <FieldEditor
@@ -387,12 +414,12 @@ async function unlink(child: string): Promise<void> {
             icon="i-lucide-calendar"
             testid="deadline"
             type="date"
-            :value="issue.deadline ?? ''"
-            :saving="mutations.busy.value"
+            :value="shown.deadline ?? ''"
+            :save="edits.field('deadline')"
             @save="(text: string) => save({ deadline: normalizeOptional(text) })"
           >
             <template #display>
-              <DueDate v-if="issue.deadline" :deadline="issue.deadline" />
+              <DueDate v-if="shown.deadline" :deadline="shown.deadline" />
             </template>
           </FieldEditor>
 
@@ -414,7 +441,7 @@ async function unlink(child: string): Promise<void> {
               color="neutral"
               variant="subtle"
               icon="i-lucide-rotate-ccw"
-              :loading="mutations.busy.value"
+              :loading="mutations.loading.reopen.value"
               data-testid="reopen-issue"
               @click="mutations.reopenIssue(issue.id)"
             >
@@ -455,7 +482,7 @@ async function unlink(child: string): Promise<void> {
         <div class="flex justify-end gap-2">
           <UButton color="neutral" variant="ghost" @click="closing = false">Cancel</UButton>
           <UButton
-            :loading="mutations.busy.value"
+            :loading="mutations.loading.close.value"
             data-testid="confirm-close"
             @click="confirmClose"
           >
@@ -486,7 +513,7 @@ async function unlink(child: string): Promise<void> {
           <UButton color="neutral" variant="ghost" @click="linking = false">Cancel</UButton>
           <UButton
             :disabled="childRef.trim() === ''"
-            :loading="mutations.busy.value"
+            :loading="mutations.loading.link.value"
             data-testid="confirm-link"
             @click="link(childRef, false)"
           >
@@ -513,7 +540,7 @@ async function unlink(child: string): Promise<void> {
         <div class="flex justify-end gap-2">
           <UButton color="neutral" variant="ghost" @click="reparent = null">Leave it</UButton>
           <UButton
-            :loading="mutations.busy.value"
+            :loading="mutations.loading.link.value"
             data-testid="confirm-reparent"
             @click="reparent && link(reparent.child, true)"
           >

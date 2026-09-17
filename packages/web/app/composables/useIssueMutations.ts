@@ -20,7 +20,6 @@ import {
   UNLINK_ISSUE,
   UPDATE_ISSUE,
 } from "~/graphql/mutations";
-import { describeApiError, staleEdit } from "~/utils/errors";
 import type { EntityPatch } from "~/utils/patch";
 
 /**
@@ -30,11 +29,16 @@ import type { EntityPatch } from "~/utils/patch";
  * whether you meant to move a subtask out from under the issue that holds it —
  * a question with a dialog behind it. `PRECONDITION` on a comment names the
  * branch to serve, which belongs beside the form, not in a toast that
- * disappears. `STALE_CONTENT` on an edit says somebody changed that field
- * first, and only the page can show what it says now.
+ * disappears.
+ *
+ * An edit is different: every refusal of one is kept beside the field it was
+ * about, with the server's words and a Retry (`usePendingEdits`), and a
+ * `STALE_CONTENT` refusal is shown against what the file says now
+ * (`useStaleEdit`). So `updateIssue` reports nothing here and rethrows
+ * everything.
  */
 const ASKED = { handledCodes: ["REPARENT_REQUIRED", "PRECONDITION"] };
-const EDITED = { handledCodes: ["STALE_CONTENT"] };
+const EDITED = { handled: true };
 
 /**
  * Run a write, and return null rather than throwing when it fails.
@@ -44,8 +48,10 @@ const EDITED = { handledCodes: ["STALE_CONTENT"] };
  * an unhandled promise into an event handler, and every caller would have to
  * write the same empty catch to stop it.
  *
- * `linkIssue` is the exception and rethrows: its failure is a question with a
- * dialog behind it, and the caller has to see it.
+ * `linkIssue` and `updateIssue` are the exceptions and rethrow: the first
+ * because its failure is a question with a dialog behind it, the second
+ * because its failure is kept beside the field that was edited, and the
+ * caller has to see both.
  */
 async function reported<T>(run: () => Promise<T | null | undefined>): Promise<T | null> {
   try {
@@ -79,7 +85,21 @@ export function useIssueMutations() {
   );
 
   return {
+    /** Any write at all in flight, for a page with one button that writes. */
     busy,
+    /**
+     * Each write on its own, for a page with several. A spinner on the comment
+     * button while an assignee is being saved is a spinner on the wrong thing.
+     */
+    loading: {
+      open: open.loading,
+      update: update.loading,
+      close: close.loading,
+      reopen: reopen.loading,
+      comment: comment.loading,
+      link: link.loading,
+      unlink: unlink.loading,
+    },
 
     openIssue(input: {
       title: string;
@@ -106,27 +126,24 @@ export function useIssueMutations() {
      * Patch some fields, saying which version of the file they were read from.
      *
      * `baseSha` is what lets the server refuse a field somebody else changed
-     * after the page was rendered, and that refusal is the one failure this
-     * lets through: it is a question — theirs or yours? — that only the page
-     * can put, beside what the file says now. A caller that edits from no
-     * rendered value, the inbox placing a row it dragged, sends no hash and is
-     * never asked.
+     * after the page was rendered: a question — theirs or yours? — that only
+     * the page can put, beside what the file says now. A caller that edits
+     * from no rendered value, the inbox placing a row it dragged, sends no
+     * hash and is never asked.
+     *
+     * Every failure is thrown, and none is toasted: the caller keeps the edit
+     * it was about to lose and says what happened beside it.
      */
     async updateIssue(ref: string, patch: EntityPatch, baseSha?: string) {
-      try {
-        const input = { ref, ...patch, ...(baseSha === undefined ? {} : { baseSha }) };
-        const payload = (await update.mutate({ input }))?.data?.updateIssue;
-        if (payload) {
-          commit.report(payload.commit, "Saved");
-          // A label, an assignee or a milestone decides which listings hold it,
-          // and a rank or a deadline decides where in one it sits.
-          refreshListings();
-        }
-        return payload ?? null;
-      } catch (failure) {
-        if (staleEdit(describeApiError(failure)) !== null) throw failure;
-        return null;
+      const input = { ref, ...patch, ...(baseSha === undefined ? {} : { baseSha }) };
+      const payload = (await update.mutate({ input }))?.data?.updateIssue;
+      if (payload) {
+        commit.report(payload.commit, "Saved");
+        // A label, an assignee or a milestone decides which listings hold it,
+        // and a rank or a deadline decides where in one it sits.
+        refreshListings();
       }
+      return payload ?? null;
     },
 
     closeIssue(ref: string, resolution: string | null, duplicateOf: string | null) {

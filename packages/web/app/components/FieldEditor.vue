@@ -13,6 +13,8 @@
   one place that decides what those words mean.
 -->
 <script setup lang="ts">
+import type { FieldSave } from "~/composables/usePendingEdits";
+
 const props = defineProps<{
   title: string;
   icon: string;
@@ -22,7 +24,8 @@ const props = defineProps<{
   /** What the read-only half says when the value is blank. */
   placeholder?: string;
   testid: string;
-  saving?: boolean;
+  /** The field's save in flight or refused, shown beneath the value. */
+  save?: FieldSave;
 }>();
 
 const emit = defineEmits<{ save: [string] }>();
@@ -88,7 +91,7 @@ function save(): void {
       <div class="flex gap-1.5">
         <UButton
           size="xs"
-          :loading="props.saving"
+          :loading="props.save?.saving"
           :data-testid="`save-${props.testid}`"
           @click="save"
         >
@@ -103,5 +106,7 @@ function save(): void {
     <slot v-else-if="$slots.display && props.value !== ''" name="display" />
     <p v-else-if="props.value !== ''" class="text-sm">{{ props.value }}</p>
     <p v-else class="text-sm text-muted">{{ props.placeholder ?? "None" }}</p>
+
+    <SaveStatus v-if="props.save" :save="props.save" :testid="props.testid" />
   </section>
 </template>

@@ -15,7 +15,6 @@ import { mergeTimeline } from "~/utils/timeline";
 import { pageTitle } from "~/utils/title";
 
 const route = useRoute();
-const toast = useToast();
 const mutations = useFeatureMutations();
 const slug = computed(() => String(route.params.slug ?? ""));
 
@@ -47,17 +46,36 @@ const prById = computed(() => new Map((feature.value?.prs ?? []).map((pr) => [pr
 
 /* --------------------------------------------------------------- editing */
 
-async function saveCard(change: { title?: string; summary?: string | null }): Promise<void> {
+/** The two fields of the card, as they are edited. */
+interface CardEdit {
+  title: string;
+  summary: string | null;
+}
+
+/*
+ * As on the issue page, a save is shown from the moment it is sent and any
+ * refusal is kept beside the field with a Retry. A stale refusal is one of
+ * them here rather than `useStaleEdit`'s: the page is read again first, so
+ * that a Retry sends against what the file says now — over theirs, having
+ * been told — and a Discard shows theirs.
+ */
+const edits = usePendingEdits<CardEdit>({ resend: (change) => saveCard(change) });
+const shown = computed(() =>
+  edits.overlay({ title: feature.value?.title ?? "", summary: feature.value?.summary ?? null }),
+);
+
+async function saveCard(change: Partial<CardEdit>): Promise<void> {
   const current = feature.value;
   if (!current) return;
-  try {
-    await mutations.updateFeature({ slug: current.slug, ...change, baseSha: current.baseSha });
-  } catch (failure) {
-    const stale = staleContent(failure);
-    if (stale === null) return;
-    toast.add({ title: "Changed since you opened it", description: stale, color: "warning" });
-    await refetch();
-  }
+  await edits.attempt(change, async () => {
+    try {
+      await mutations.updateFeature({ slug: current.slug, ...change, baseSha: current.baseSha });
+      return true;
+    } catch (failure) {
+      if (staleContent(failure) !== null) await refetch();
+      throw failure;
+    }
+  });
 }
 
 const adding = ref(false);
@@ -90,27 +108,27 @@ async function addSpec(): Promise<void> {
         <div class="space-y-6">
           <header class="space-y-2">
             <EditableText
-              :value="feature.title"
+              :value="shown.title"
               label="title"
               testid="title"
               required
-              :saving="mutations.busy.value"
+              :save="edits.field('title')"
               @save="(title: string) => saveCard({ title })"
             >
-              <h1 class="text-2xl font-semibold" data-testid="feature-title">{{ feature.title }}</h1>
+              <h1 class="text-2xl font-semibold" data-testid="feature-title">{{ shown.title }}</h1>
             </EditableText>
             <code class="text-xs text-muted">{{ feature.slug }}</code>
           </header>
 
           <EditableText
-            :value="feature.summary"
+            :value="shown.summary ?? ''"
             label="summary"
             multiline
             testid="summary"
-            :saving="mutations.busy.value"
+            :save="edits.field('summary')"
             @save="(summary: string) => saveCard({ summary: summary.trim() === '' ? null : summary })"
           >
-            <MarkdownBody :source="feature.summary" />
+            <MarkdownBody :source="shown.summary ?? ''" />
           </EditableText>
 
           <section class="space-y-2">
