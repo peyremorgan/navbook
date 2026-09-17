@@ -3,7 +3,7 @@ title: Issue and PR references written in prose are not links in the web client
 author: Claude <noreply@anthropic.com>
 created: 2026-09-17T20:59:29Z
 labels: [enhancement]
-assignee: noreply@anthropic.com
+assignee: Claude <noreply@anthropic.com>
 feature: web
 ---
 
@@ -20,7 +20,7 @@ as a `NuxtLink` on the issue page. Only prose is left flat.
 ## Repro
 
 1. Open any issue in the web client and write a comment containing
-   `duplicate of #mz4kq1rv`.
+   `duplicate of #t4mwvm2j`.
 2. The rendered comment shows the literal text. A bare URL in the same comment
    is a link, because markdown-it's `linkify` handles URLs and knows nothing
    about Navbook references.
@@ -30,8 +30,8 @@ Rendering is `renderMarkdown`, so it reproduces without a browser:
 ```console
 $ node -e "const M=require('markdown-it');
   console.log(new M({html:false,linkify:true,breaks:false,typographer:false})
-    .render('Duplicate of #mz4kq1rv, see also https://example.com.'))"
-<p>Duplicate of #mz4kq1rv, see also <a href="https://example.com">https://example.com</a>.</p>
+    .render('Duplicate of #t4mwvm2j, see also https://example.com.'))"
+<p>Duplicate of #t4mwvm2j, see also <a href="https://example.com">https://example.com</a>.</p>
 ```
 
 ## Where it lives
