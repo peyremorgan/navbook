@@ -69,14 +69,39 @@ from being mistaken for IDs"), `PROSE_REF` alone only describes the shape, and
 my first version linked `#deadline`, `#reverted` and `#manifest`. Removing the
 digit rule fails three tests.
 
+## What review changed
+
+Two fixes, in a second commit:
+
+- The rule ran after `text_join`, so `\#t4mwvm2j` and `&#35;t4mwvm2j` were
+  linked like an unescaped `#`. An author had no way to opt out short of a
+  code span. It now runs before `text_join`, where an escape is still a
+  `text_special` token.
+- `/ref/:id` navigated whenever its lookup answered. Pressing Back off the
+  skeleton returned to the page the reference was on and was then yanked
+  forward again — and since the route redirects, with no way back. A lookup
+  now acts only while it is the current one.
+
+A third finding is filed rather than fixed, as #x8otoby0: following a
+reference in `SpecEditor`'s preview discards the draft. It is real, and it is
+one way out of an editor that guards none of them — the sidebar loses the same
+draft to the same click. I tried the narrow fix of opening a tab there and
+backed it out: the token lives in `sessionStorage` on purpose, so a new tab
+signs in again instead of landing on the reference. That guard belongs to the
+page that owns the unsaved work, for every way out of it.
+
 ## Verified
 
-- `vitest run` — 341 tests, up from 330: 11 new ones for the rendering and the
+- `vitest run` — 342 tests, up from 330: 12 new ones for the rendering and the
   grammar.
 - `nuxi typecheck`, `tsc -p tsconfig.tools.json`, `biome check` — clean.
 - `playwright test` — 139 tests against a real browser, server and repository,
   4 of them new: following a reference from a PR body to the issue it names,
   proving the navigation is the router's and not a page load, resolving an id
   that turns out to be a pull request, and the dangling case.
+
+Each new test was checked against the bug it describes: removing the digit
+rule fails three, and moving the rule back after `text_join` fails the escape
+one.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
