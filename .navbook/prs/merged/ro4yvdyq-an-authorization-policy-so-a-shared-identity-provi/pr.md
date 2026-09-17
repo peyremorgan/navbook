@@ -13,6 +13,9 @@ revisions:
   - head: 1cc9dd977c22444c4ceb59bfa374d1bd68023914
     base: 49ac11fa10f1994857e328358132bb0e272aaa0b
     date: 2026-09-17T11:38:30Z
+merged:
+  date: 2026-09-17T11:38:38Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #gkbu9yhp: `nav-server` admitted every token its provider signed for the audience, so a deployment against a shared provider was open to everybody that provider knows, and there was nothing to "put in front" that would not have to verify the same JWT again.
