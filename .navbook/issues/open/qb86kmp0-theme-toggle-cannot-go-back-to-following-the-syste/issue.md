@@ -4,6 +4,7 @@ author: Claude <noreply@anthropic.com>
 created: 2026-09-17T17:30:20Z
 labels: [bug]
 feature: web
+assignee: Claude <noreply@anthropic.com>
 ---
 
 The navbar's theme button in the web client follows `prefers-color-scheme` only until it is pressed for the first time. From then on the browser holds `light` or `dark` in localStorage, the page stops following the system — at load and when the system scheme changes — and nothing on the page leads back to it. Pressing the button again flips between the two fixed schemes; it never returns to `system`.
