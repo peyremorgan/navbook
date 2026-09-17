@@ -7,7 +7,10 @@ The browser interface to Navbook — a thin client of the
 It is a static single-page app. `nuxi generate` emits a shell that any file
 server can hand out, and every byte of data comes from the API at runtime.
 Nothing about the format is reimplemented here and no Navbook logic ships to
-the browser: the client sends fields, and the server composes the files.
+the browser: the client sends fields, and the server composes the files. The
+single exception is what a reference *looks like* — `#<id>` — which the client
+recognises in order to link it, and which is held to `@navbook/core`'s own
+reading by a unit test. What a reference means is still asked of the server.
 
 The audience is everyone on a project who is not working from a checkout.
 Filing an issue, commenting and reviewing do not need a terminal — but the
@@ -57,6 +60,16 @@ API does not expose them ([server README](../server/README.md#what-it-does-not-d
 Appending a revision is what `nav pr update` does, which is worth spelling out
 because that verb reads like the ordinary word: patching a pull request's fields
 is a different operation, it is `nav pr edit` and `updatePr`, and it is here.
+
+**References**, followed rather than retyped: a `#<id>` written in an issue
+body, a pull request's description or a comment is a link to what it names. An
+id says nothing about its kind — issues and pull requests are minted from one
+space of 8 random characters — so the link goes to `/ref/<id>`, which asks the
+server and redirects to the issue or the pull request it turns out to be. A
+reference that matches nothing this server has fetched is not a failure: it is
+what a reference to a branch the clone does not hold looks like
+([spec 02 §2.9](../../doc/spec/02-data-model.md)), so that page says so and
+offers the listings.
 
 **Where you were**, when you come back: each listing remembers the filter it
 was last showing, so the Issues and Pull requests links reopen their listing

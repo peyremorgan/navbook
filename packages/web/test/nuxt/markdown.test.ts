@@ -79,6 +79,52 @@ describe("renderMarkdown", () => {
     assert.match(html, /rel="noopener noreferrer nofollow"/);
   });
 
+  it("links a reference written in prose", () => {
+    const html = renderMarkdown("Duplicate of #t4mwvm2j, probably.");
+    assert.match(html, /<a href="\/ref\/t4mwvm2j" class="nav-reference">#t4mwvm2j<\/a>/);
+    assert.match(html, /^<p>Duplicate of <a /);
+    assert.match(html, /<\/a>, probably\.<\/p>/);
+  });
+
+  it("keeps a reference in the app rather than opening a tab away from it", () => {
+    const html = renderMarkdown("see #t4mwvm2j");
+    assert.ok(!html.includes("_blank"), html);
+    assert.ok(!html.includes("nofollow"), html);
+  });
+
+  it("links every reference in a body, wherever it sits", () => {
+    const html = renderMarkdown("#t4mwvm2j opens it; #mdftn010 and #icroff4l follow.");
+    for (const id of ["t4mwvm2j", "mdftn010", "icroff4l"]) {
+      assert.match(html, new RegExp(`href="/ref/${id}"`), html);
+    }
+  });
+
+  it("leaves alone what the format does not call a reference", () => {
+    for (const source of [
+      "`#t4mwvm2j` in a code span",
+      "```\n#t4mwvm2j in a fence\n```",
+      "a fragment: https://example.invalid/page#t4mwvm2j",
+      "#short, #TOOLOUD, #0digitfirst",
+      // Eight letters and no digit: a word, which is what the digit in the
+      // grammar is for (spec 02 §2.2).
+      "#deadline is a word, not an id",
+    ]) {
+      assert.ok(!renderMarkdown(source).includes("/ref/"), source);
+    }
+  });
+
+  it("never puts a link inside a link", () => {
+    const html = renderMarkdown("[see #t4mwvm2j](https://example.invalid)");
+    assert.ok(!html.includes("/ref/"), html);
+    assert.equal(html.match(/<a /g)?.length, 1, html);
+  });
+
+  it("does not send a hand-written in-app link away either", () => {
+    const html = renderMarkdown("[the listing](/issues?status=open)");
+    assert.match(html, /href="\/issues\?status=open"/);
+    assert.ok(!html.includes("_blank"), html);
+  });
+
   it("escapes text that looks like markup", () => {
     const html = renderMarkdown("compare `a < b` and a <b> tag");
     assert.match(html, /a &lt; b/);

@@ -10,10 +10,16 @@
  * This is the one place in the client that produces HTML from data. Keeping it
  * one place is what makes the rule checkable: `v-html` appears in
  * `MarkdownBody.vue` and nowhere else.
+ *
+ * It is also where a `#id` written in prose becomes a link, which is the one
+ * thing about the format that reaches the browser; `app/utils/references.ts`
+ * holds the grammar and says why it is allowed to.
  */
 
 import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
+import { safeReturnPath } from "~/utils/navigation";
+import { findProseReferences, referencePath } from "~/utils/references";
 
 const renderer = new MarkdownIt({
   html: false,
@@ -23,15 +29,104 @@ const renderer = new MarkdownIt({
 });
 
 /**
- * Links leave the app, so they open away from it and cannot reach back.
+ * `#t4mwvm2j` in prose becomes a link to whatever it names.
+ *
+ * A core rule rather than an inline one, for the same reason markdown-it's own
+ * `linkify` is: it runs over the text that survived inline parsing, so a
+ * reference inside a code span or a fence is not text by the time it gets here
+ * and is left as written. The one thing left to check is links — a reference
+ * inside one would nest an anchor in an anchor — which is what `depth` is for.
+ *
+ * Only `text` tokens are rewritten, and only when a reference is found in one,
+ * so a body with none comes out of here as the same tokens it went in as.
+ */
+renderer.use((md: typeof renderer) => {
+  md.core.ruler.push("navbook_reference", (state) => {
+    for (const block of state.tokens) {
+      const children = block.children;
+      if (block.type !== "inline" || children === null) continue;
+
+      const rebuilt: typeof children = [];
+      let depth = 0;
+      let rewrote = false;
+
+      for (const token of children) {
+        if (token.type === "link_open") depth += 1;
+        else if (token.type === "link_close") depth -= 1;
+        if (token.type !== "text" || depth > 0) {
+          rebuilt.push(token);
+          continue;
+        }
+
+        const text = token.content;
+        let level = token.level;
+        let cursor = 0;
+
+        for (const { id, start, end } of findProseReferences(text)) {
+          if (start > cursor) {
+            const lead = new state.Token("text", "", 0);
+            lead.content = text.slice(cursor, start);
+            lead.level = level;
+            rebuilt.push(lead);
+          }
+
+          const open = new state.Token("link_open", "a", 1);
+          open.attrSet("href", referencePath(id));
+          open.attrSet("class", "nav-reference");
+          open.markup = "reference";
+          open.level = level;
+          level += 1;
+
+          const label = new state.Token("text", "", 0);
+          label.content = `#${id}`;
+          label.level = level;
+
+          level -= 1;
+          const close = new state.Token("link_close", "a", -1);
+          close.markup = "reference";
+          close.level = level;
+
+          rebuilt.push(open, label, close);
+          cursor = end;
+        }
+
+        if (cursor === 0) {
+          rebuilt.push(token);
+          continue;
+        }
+        if (cursor < text.length) {
+          const tail = new state.Token("text", "", 0);
+          tail.content = text.slice(cursor);
+          tail.level = level;
+          rebuilt.push(tail);
+        }
+        rewrote = true;
+      }
+
+      if (rewrote) block.children = rebuilt;
+    }
+  });
+});
+
+/**
+ * Links that leave the app open away from it and cannot reach back.
  *
  * `noopener` is the part that matters: without it a rendered link hands the
  * page it opens a handle on this one.
+ *
+ * A link that stays in the app gets neither. Opening a new tab to move within
+ * a tracker is not what anybody following a reference meant, and `nofollow`
+ * describes a destination this app is not. `safeReturnPath` decides which is
+ * which — it is the check the sign-in flow already trusts to tell a path in
+ * this app from a URL somewhere else wearing a leading slash.
  */
 renderer.renderer.rules.link_open = (tokens, index, options, _env, self) => {
   const token = tokens[index];
-  token?.attrSet("target", "_blank");
-  token?.attrSet("rel", "noopener noreferrer nofollow");
+  const href = token?.attrGet("href") ?? "";
+  if (safeReturnPath(href, "") === "") {
+    token?.attrSet("target", "_blank");
+    token?.attrSet("rel", "noopener noreferrer nofollow");
+  }
   return self.renderToken(tokens, index, options);
 };
 
@@ -64,7 +159,14 @@ export function renderMarkdown(source: string): string {
   return sanitize(renderer.render(source));
 }
 
-/** A single line of Markdown — a title, a table cell — as inline HTML. */
+/**
+ * A single line of Markdown — a title, a table cell — as inline HTML.
+ *
+ * References are linked here too, which is right for a line of prose and wrong
+ * inside something that is already a link: an anchor within an anchor is not
+ * markup a browser will keep. Nothing nests it today; a caller that wants to
+ * should render the text without this.
+ */
 export function renderMarkdownInline(source: string): string {
   return sanitize(renderer.renderInline(source));
 }
