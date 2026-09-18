@@ -85,12 +85,10 @@ function save(): void {
 }
 
 /** Whether the viewer is already on the list, by address rather than spelling. */
-const mine = computed(
-  () =>
-    props.self !== null &&
-    props.self !== undefined &&
-    findPerson(props.values, props.self) !== undefined,
-);
+const mine = computed(() => {
+  const self = props.self;
+  return self !== null && self !== undefined && props.values.some((v) => namesPerson(v, self));
+});
 
 /*
  * The toggle saves against `values` rather than against the draft: it is

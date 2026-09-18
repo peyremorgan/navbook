@@ -6,6 +6,8 @@
  * poor way to say "mine". So what is proved here is a round trip in two
  * clicks, on both pages that have the panel, for somebody the repository has
  * never heard of — which is also the case the spelling has to be composed for.
+ * Each half is read back from a reloaded page, so what is proved is a write to
+ * the file rather than the optimistic overlay agreeing with the click.
  *
  * The identity is fresh each run because the suite shares one repository and
  * every mutation commits: a name minted here is on no entity and in no
@@ -27,7 +29,16 @@ function stranger(what: string): { name: string; email: string } {
   return { name: `Taking On ${what} ${stamp}`, email: `mine-${what}-${stamp}@example.invalid` };
 }
 
-/** Assign, read it back, unassign, read that back. */
+/**
+ * Assign, read it back, unassign, read that back — each half through a reload.
+ *
+ * The reload is the whole point of the assertion and not ceremony around it.
+ * The page overlays a pending edit, so the panel says what was clicked before
+ * the server has answered: a test that stopped at the overlay would end there,
+ * abort the request it never waited for, and pass whether or not anything was
+ * ever written — leaving the fixture dirty for whatever runs next. Reading it
+ * back from a fresh page is what distinguishes a save from a hope.
+ */
 async function roundTrip(page: Page, url: string, name: string): Promise<void> {
   await page.goto(url);
   const panel = page.getByTestId("sidebar-assignees");
@@ -35,9 +46,13 @@ async function roundTrip(page: Page, url: string, name: string): Promise<void> {
 
   await page.getByTestId("self-assignees").click();
   await expect(panel).toContainText(name);
+  await page.reload();
+  await expect(panel).toContainText(name);
 
   // The same control, now offering the opposite: one button, not two.
   await page.getByTestId("self-assignees").click();
+  await expect(panel).not.toContainText(name);
+  await page.reload();
   await expect(panel).not.toContainText(name);
 }
 
@@ -51,21 +66,4 @@ test("does the same for a pull request", async ({ page, stack }) => {
   const who = stranger("pr");
   await signIn(page, stack, who);
   await roundTrip(page, `${stack.appUrl}/prs/bbbb0001`, who.name);
-});
-
-test("survives a reload, because it wrote to the file", async ({ page, stack }) => {
-  const who = stranger("kept");
-  await signIn(page, stack, who);
-  const panel = page.getByTestId("sidebar-assignees");
-
-  await page.goto(`${stack.appUrl}/issues/aaaa0001`);
-  await page.getByTestId("self-assignees").click();
-  await expect(panel).toContainText(who.name);
-
-  await page.reload();
-  await expect(panel).toContainText(who.name);
-
-  // Leave the fixture as it was found.
-  await page.getByTestId("self-assignees").click();
-  await expect(panel).not.toContainText(who.name);
 });

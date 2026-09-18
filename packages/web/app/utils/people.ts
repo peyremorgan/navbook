@@ -3,8 +3,8 @@
  *
  * `author:` is an RFC 5322 address on disk — `Alice <alice@example.com>` or a
  * bare address (spec 02 §2.4) — and a list row wants the short half of that.
- * This splits it for display, and picks out of a list of such fields the one
- * that carries a given address. It does not validate an address, decide that
+ * This splits it for display, and says whether two such fields name the same
+ * person by carrying the same address. It does not validate an address, decide that
  * two different addresses are one person, or match one against a filter. Those
  * are format questions, and format questions are the server's (spec 06 §6.3);
  * the filter sends the string the person typed and lets the server answer, and
@@ -60,7 +60,7 @@ export interface Viewer {
 }
 
 /**
- * Find, among values that name people, the one that names this person.
+ * Whether a value that names a person names this one.
  *
  * Matched on the address rather than on the whole string, because the same
  * person is written both ways: `nav` writes whatever `user.name` says, the
@@ -74,17 +74,23 @@ export interface Viewer {
  * one the server itself dedupes people on (`dedupePeople`, core). A value
  * carrying no address at all is only ever its own exact self.
  */
-export function findPerson(values: readonly string[], person: string): string | undefined {
+export function namesPerson(value: string, person: string): boolean {
   const wanted = displayPerson(person);
-  if (wanted.email === null) return values.find((value) => value.trim() === person.trim());
-  const needle = wanted.email.toLowerCase();
-  return values.find((value) => displayPerson(value).email?.toLowerCase() === needle);
+  if (wanted.email === null) return value.trim() === person.trim();
+  return displayPerson(value).email?.toLowerCase() === wanted.email.toLowerCase();
 }
 
-/** The list with this person added, or — if they are already on it — removed. */
+/**
+ * The list with this person added, or — if they are already on it — removed.
+ *
+ * Removing takes out every entry that names them, not the first one found: a
+ * list that has come by both spellings of one address — the bare one `nav`
+ * writes beside the named one the token claims — is one assignee twice, and
+ * taking half of it off would leave the button still offering to remove you.
+ */
 export function togglePerson(values: readonly string[], person: string): string[] {
-  const found = findPerson(values, person);
-  return found === undefined ? [...values, person] : values.filter((value) => value !== found);
+  const kept = values.filter((value) => !namesPerson(value, person));
+  return kept.length === values.length ? [...values, person] : kept;
 }
 
 /**
@@ -107,7 +113,7 @@ export function togglePerson(values: readonly string[], person: string): string[
 export function viewerField(people: readonly string[], viewer: Viewer | null): string | null {
   if (viewer === null || viewer.email.trim() === "") return null;
   if (people.length === 0) return null;
-  return findPerson(people, viewer.email) ?? formatViewer(viewer);
+  return people.find((who) => namesPerson(who, viewer.email)) ?? formatViewer(viewer);
 }
 
 function formatViewer(viewer: Viewer): string {

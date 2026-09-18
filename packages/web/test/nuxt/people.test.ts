@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import {
   displayPerson,
-  findPerson,
+  namesPerson,
   personInitials,
   personLabel,
   togglePerson,
@@ -76,29 +76,31 @@ describe("personInitials", () => {
   });
 });
 
-describe("findPerson", () => {
-  const values = ["A Person <person@example.invalid>", "other@example.invalid"];
+describe("namesPerson", () => {
+  const named = "A Person <person@example.invalid>";
 
-  it("finds the entry carrying an address, however it is spelled", () => {
+  it("reads a value as naming somebody however either is spelled", () => {
     // The same assignee written three ways: nav writes `user.name`, the web
     // client writes the token's claim, and a hand edit may write neither.
-    assert.equal(findPerson(values, "person@example.invalid"), values[0]);
-    assert.equal(findPerson(values, "<person@example.invalid>"), values[0]);
-    assert.equal(findPerson(values, "P. Erson <person@example.invalid>"), values[0]);
+    assert.equal(namesPerson(named, "person@example.invalid"), true);
+    assert.equal(namesPerson(named, "<person@example.invalid>"), true);
+    assert.equal(namesPerson(named, "P. Erson <person@example.invalid>"), true);
+    assert.equal(namesPerson("person@example.invalid", named), true);
   });
 
   it("ignores the case of the address, as the server's dedupe does", () => {
-    assert.equal(findPerson(values, "PERSON@Example.Invalid"), values[0]);
+    assert.equal(namesPerson(named, "PERSON@Example.Invalid"), true);
   });
 
   it("never reads two different addresses as one person", () => {
-    assert.equal(findPerson(values, "A Person <someone.else@example.invalid>"), undefined);
-    assert.equal(findPerson(values, "nobody@example.invalid"), undefined);
+    assert.equal(namesPerson(named, "A Person <someone.else@example.invalid>"), false);
+    assert.equal(namesPerson(named, "nobody@example.invalid"), false);
   });
 
   it("matches a value with no address only against itself", () => {
-    assert.equal(findPerson(["somebody"], "somebody"), "somebody");
-    assert.equal(findPerson(["somebody"], "someone"), undefined);
+    assert.equal(namesPerson("somebody", "somebody"), true);
+    assert.equal(namesPerson("somebody", "someone"), false);
+    assert.equal(namesPerson(named, "somebody"), false);
   });
 });
 
@@ -117,6 +119,19 @@ describe("togglePerson", () => {
     assert.deepEqual(togglePerson(values, "P. Erson <person@example.invalid>"), [
       "other@example.invalid",
     ]);
+  });
+
+  it("takes off every entry that names them, not just the first", () => {
+    // One assignee written twice — the bare address beside the named one —
+    // is still one assignee: taking half of it off would leave the button
+    // still offering to remove you.
+    assert.deepEqual(
+      togglePerson(
+        ["A Person <person@example.invalid>", "person@example.invalid", "x@y.invalid"],
+        "person@example.invalid",
+      ),
+      ["x@y.invalid"],
+    );
   });
 
   it("leaves the original alone", () => {
