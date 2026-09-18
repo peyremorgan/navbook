@@ -58,6 +58,7 @@ import {
   reportList,
 } from "./entity.ts";
 import { describeShortfall, mergeAction, warnPolicyProblems } from "./policy.ts";
+import { type PrWriteOptions, prWriteSite, reportMove } from "./pr-elsewhere.ts";
 
 /* --------------------------------------------------------------------- open */
 
@@ -112,17 +113,24 @@ export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
 
 /* ------------------------------------------------------------------- update */
 
-export function cmdPrUpdate(ctx: Ctx, prefix: string, opts: GlobalFlags): void {
-  const { entity, head, revisionCount, run } = updatePr(ctx, prefix, { commit: opts.commit });
+export interface PrUpdateOptions extends GlobalFlags, PrWriteOptions {}
+
+export function cmdPrUpdate(ctx: Ctx, prefix: string, opts: PrUpdateOptions): void {
+  // The revision pinned is the HEAD of wherever this runs, so moving the write
+  // to the worktree that has the source branch is what pins the right one —
+  // this checkout's HEAD was never the head under review.
+  const { ctx: at, movedTo } = prWriteSite(ctx, prefix, opts);
+  const { entity, head, revisionCount, run } = updatePr(at, prefix, { commit: opts.commit });
   ctx.stdout.write(
     `Recorded revision ${revisionCount} of #${entity.id}  head ${head.slice(0, 12)}\n`,
   );
+  reportMove(ctx, movedTo);
   if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
 
 /* ------------------------------------------------------------------ request */
 
-export interface RequestOptions extends GlobalFlags {
+export interface RequestOptions extends GlobalFlags, PrWriteOptions {
   remove?: boolean;
 }
 
@@ -132,7 +140,8 @@ export function cmdPrRequest(
   people: string[],
   opts: RequestOptions,
 ): void {
-  const { entity, changed, unchanged, run } = requestReview(ctx, prefix, people, {
+  const { ctx: at, movedTo } = prWriteSite(ctx, prefix, opts);
+  const { entity, changed, unchanged, run } = requestReview(at, prefix, people, {
     commit: opts.commit,
     remove: opts.remove,
   });
@@ -146,12 +155,13 @@ export function cmdPrRequest(
       `${ctx.colors.dim(opts.remove ? "not listed:" : "already listed:")} ${person}\n`,
     );
   }
+  reportMove(ctx, movedTo);
   if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
 
 /* ------------------------------------------------------------------- review */
 
-export interface ReviewOptions extends GlobalFlags {
+export interface ReviewOptions extends GlobalFlags, PrWriteOptions {
   approve?: boolean;
   requestChanges?: boolean;
   comment?: boolean;
@@ -162,7 +172,9 @@ export interface ReviewOptions extends GlobalFlags {
 }
 
 export function cmdPrReview(ctx: Ctx, prefix: string, opts: ReviewOptions): void {
-  const entity = findPrToWrite(ctx, prefix);
+  const site = prWriteSite(ctx, prefix, opts);
+  const at = site.ctx;
+  const entity = site.movedTo === null ? findPrToWrite(ctx, prefix) : site.entity;
   const chosen = [opts.approve, opts.requestChanges, opts.comment].filter(Boolean).length;
   if (chosen > 1) {
     fail("choose one of --approve, --request-changes or --comment, not several");
@@ -185,7 +197,7 @@ export function cmdPrReview(ctx: Ctx, prefix: string, opts: ReviewOptions): void
   const isReview = verdict !== undefined || opts.file !== undefined;
 
   const base: NewCommentInput = {
-    author: currentAuthor(ctx),
+    author: currentAuthor(at),
     body: "",
     ...(verdict ? { verdict } : {}),
     ...(isReview ? { revision } : {}),
@@ -202,17 +214,20 @@ export function cmdPrReview(ctx: Ctx, prefix: string, opts: ReviewOptions): void
   });
 
   const { id, path, run } = applyComment(
-    ctx,
+    at,
     entity,
     { content: composed.content, review: isReview },
     { commit: opts.commit },
   );
 
   const label = verdict ? `Reviewed (${verdict})` : "Commented on";
-  ctx.stdout.write(`${label} #${entity.id}  ${ctx.navDir}/${path}  (#${id})\n`);
+  ctx.stdout.write(`${label} #${entity.id}  ${at.navDir}/${path}  (#${id})\n`);
+  reportMove(ctx, site.movedTo);
   if (isReview) ctx.stdout.write(`Bound to revision ${revision.slice(0, 12)}\n`);
   if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
-  warnIfOwnVerdict(ctx, entity, verdict);
+  // The policy that decides whether a verdict counts is the one in the tree
+  // the review was written into.
+  warnIfOwnVerdict(at, entity, verdict);
 }
 
 /**

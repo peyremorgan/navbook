@@ -54,6 +54,7 @@ import { type Column, renderTable } from "../render/table.ts";
 import { parseSortOrder, sortListing } from "../sort.ts";
 import { composeFile } from "./compose.ts";
 import { warnPolicyProblems } from "./policy.ts";
+import { type PrWriteOptions, type PrWriteSite, prWriteSite, reportMove } from "./pr-elsewhere.ts";
 
 export interface GlobalFlags {
   json?: boolean;
@@ -239,23 +240,26 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
 
 /* --------------------------------------------------------------------- edit */
 
-export function cmdEdit(ctx: Ctx, kind: EntityKind, prefix: string, opts: GlobalFlags): void {
-  const entity = writeTarget(ctx, kind, prefix);
-  const path = absPath(ctx, entity.filePath);
-  openInEditor(ctx, path);
+export interface EditOptions extends GlobalFlags, PrWriteOptions {}
+
+export function cmdEdit(ctx: Ctx, kind: EntityKind, prefix: string, opts: EditOptions): void {
+  const { ctx: at, entity, movedTo } = writeTarget(ctx, kind, prefix, opts);
+  const path = absPath(at, entity.filePath);
+  openInEditor(at, path);
 
   for (const problem of revalidateEntityFile(path, kind)) {
     ctx.stderr.write(`${ctx.colors.yellow("warning:")} ${entity.filePath}: ${problem}\n`);
   }
 
-  const result = applyEntityEdit(ctx, entity, { commit: opts.commit });
-  ctx.stdout.write(`Edited #${entity.id}  ${ctx.navDir}/${entity.filePath}\n`);
+  const result = applyEntityEdit(at, entity, { commit: opts.commit });
+  ctx.stdout.write(`Edited #${entity.id}  ${at.navDir}/${entity.filePath}\n`);
+  reportMove(ctx, movedTo);
   if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
 }
 
 /* ------------------------------------------------------------------ comment */
 
-export interface CommentOptions extends GlobalFlags {
+export interface CommentOptions extends GlobalFlags, PrWriteOptions {
   message?: string;
   replyTo?: string;
   /** Review fields, supplied by `nav pr review`. */
@@ -263,13 +267,13 @@ export interface CommentOptions extends GlobalFlags {
 }
 
 export function cmdComment(ctx: Ctx, kind: EntityKind, prefix: string, opts: CommentOptions): void {
-  const entity = writeTarget(ctx, kind, prefix);
+  const { ctx: at, entity, movedTo } = writeTarget(ctx, kind, prefix, opts);
   const replyTo = opts.replyTo ? resolveComment(entity, opts.replyTo) : undefined;
   const isReview = opts.review?.verdict !== undefined;
   const noun = isReview ? "review" : "comment";
 
   const base: NewCommentInput = {
-    author: currentAuthor(ctx),
+    author: currentAuthor(at),
     body: "",
     ...(replyTo ? { replyTo } : {}),
     ...(opts.review ?? {}),
@@ -284,24 +288,38 @@ export function cmdComment(ctx: Ctx, kind: EntityKind, prefix: string, opts: Com
   });
 
   const { id, path, run } = applyComment(
-    ctx,
+    at,
     entity,
     { content: composed.content, review: isReview },
     { commit: opts.commit },
   );
 
   ctx.stdout.write(
-    `${isReview ? "Reviewed" : "Commented on"} #${entity.id}  ${ctx.navDir}/${path}  (#${id})\n`,
+    `${isReview ? "Reviewed" : "Commented on"} #${entity.id}  ${at.navDir}/${path}  (#${id})\n`,
   );
+  reportMove(ctx, movedTo);
   if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
 
 /**
- * The entity a verb writes into. A pull request that only another branch holds
- * is refused with where it lives, rather than reported as not existing.
+ * The entity a verb writes into, and the context to write it in.
+ *
+ * A pull request that only another branch holds cannot be written to from
+ * here. When a clean worktree already has that branch and there is somebody to
+ * ask, the write moves there; otherwise this is core's refusal naming where it
+ * lives, rather than a report that it does not exist.
  */
-function writeTarget(ctx: Ctx, kind: EntityKind, prefix: string): EntityRecord {
-  return kind === "pr" ? findPrToWrite(ctx, prefix) : findEntity(ctx, kind, prefix);
+function writeTarget(
+  ctx: Ctx,
+  kind: EntityKind,
+  prefix: string,
+  opts: PrWriteOptions,
+): PrWriteSite {
+  if (kind !== "pr") return { ctx, entity: findEntity(ctx, kind, prefix), movedTo: null };
+  const site = prWriteSite(ctx, prefix, opts);
+  // Declined, or never offerable: core says where it is and why not here.
+  if (site.movedTo === null) return { ctx, entity: findPrToWrite(ctx, prefix), movedTo: null };
+  return site;
 }
 
 /* ------------------------------------------------------------ close/reopen */

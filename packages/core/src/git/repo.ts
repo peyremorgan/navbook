@@ -231,6 +231,23 @@ export function isTreeClean(cwd: string): boolean {
   return status.code === 0 && status.stdout.trim() === "";
 }
 
+/**
+ * True when the index is empty and no tracked file differs from `HEAD`.
+ *
+ * The looser reading of {@link isTreeClean}, which counts untracked files too.
+ * Both readings are wanted: before moving a ref or starting a server on a
+ * clone, an untracked file is a sign that somebody is working and the strict
+ * reading is right. Before writing a tracker file into a checkout the user is
+ * not standing in, only the index and the tracked tree matter — that write
+ * stages its own paths and nothing else, and a build directory or an installed
+ * `node_modules` sitting untracked beside them says nothing about whether it is
+ * safe. Judging those would disqualify almost every real worktree.
+ */
+export function isTrackedTreeClean(cwd: string): boolean {
+  const status = gitRun(["status", "--porcelain", "--untracked-files=no"], { cwd });
+  return status.code === 0 && status.stdout.trim() === "";
+}
+
 /** True when a merge is currently in progress. */
 export function isMergeInProgress(cwd: string): boolean {
   const gitDir = gitMaybe(["rev-parse", "--git-dir"], { cwd });

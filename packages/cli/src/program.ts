@@ -41,6 +41,7 @@ import {
   cmdPrReview,
   cmdPrUpdate,
 } from "./commands/pr.ts";
+import { IN_WORKTREE_HELP } from "./commands/pr-elsewhere.ts";
 import type { Ctx } from "./context.ts";
 import { DEFAULT_SORT, SORT_ORDERS } from "./sort.ts";
 
@@ -179,6 +180,7 @@ function buildPrCommand(getCtx: () => Ctx): Command {
   pr.command("update")
     .argument("<id>", "ID or unambiguous prefix")
     .description("append a revision pinning the current HEAD")
+    .option("--in-worktree", IN_WORKTREE_HELP)
     .option("--commit", commitHelp("pr"))
     .action((id: string, opts) => cmdPrUpdate(getCtx(), id, opts));
 
@@ -187,6 +189,7 @@ function buildPrCommand(getCtx: () => Ctx): Command {
     .argument("<email...>", "who to ask")
     .description("ask people to review a pull request")
     .option("--remove", "take them off the reviewers instead")
+    .option("--in-worktree", IN_WORKTREE_HELP)
     .option("--commit", commitHelp("pr"))
     .action((id: string, people: string[], opts) => cmdPrRequest(getCtx(), id, people, opts));
 
@@ -200,6 +203,7 @@ function buildPrCommand(getCtx: () => Ctx): Command {
     .option("--revision <sha>", "bind to this revision instead of the latest")
     .option("--file <path>", "anchor the comment to a file")
     .option("--line <n|start-end>", "anchor the comment to a line or range")
+    .option("--in-worktree", IN_WORKTREE_HELP)
     .option("--commit", commitHelp("pr"))
     .action((id: string, opts) => cmdPrReview(getCtx(), id, opts));
 
@@ -412,19 +416,25 @@ export function addSharedVerbs(
   shared.configureShow?.(show);
   show.action((id: string, opts) => cmdShow(getCtx(), kind, id, opts));
 
-  parent
+  // An issue lives on whatever branch you are standing on, so there is never
+  // another worktree to send its write to: the flag is a pull-request notion.
+  const edit = parent
     .command("edit")
     .argument("<id>", "ID or unambiguous prefix")
-    .description(`open the ${noun}'s file in $EDITOR`)
+    .description(`open the ${noun}'s file in $EDITOR`);
+  if (kind === "pr") edit.option("--in-worktree", IN_WORKTREE_HELP);
+  edit
     .option("--commit", commitHelp(kind))
     .action((id: string, opts) => cmdEdit(getCtx(), kind, id, opts));
 
-  parent
+  const comment = parent
     .command("comment")
     .argument("<id>", "ID or unambiguous prefix")
     .description(`add a comment to a ${noun}`)
     .option("-m, --message <text>", "comment text; without it $EDITOR is opened")
-    .option("--reply-to <comment-id>", "comment this one replies to")
+    .option("--reply-to <comment-id>", "comment this one replies to");
+  if (kind === "pr") comment.option("--in-worktree", IN_WORKTREE_HELP);
+  comment
     .option("--commit", commitHelp(kind))
     .action((id: string, opts) => cmdComment(getCtx(), kind, id, opts));
 

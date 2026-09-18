@@ -198,6 +198,21 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   [03 §3.3.1](03-merge-and-branches.md), rather than on the branch under review.
   "No pull request matches" is reserved for an ID that no fetched branch
   carries.
+
+  Those five verbs MAY instead perform the write in that worktree, when one has
+  the branch and its index and tracked files are clean. It is never assumed:
+  either somebody at a terminal was asked and said yes, or `--in-worktree` said
+  so in advance. Untracked files do not make a worktree unclean for this — the
+  write stages its own paths and nothing else, and a build directory sitting
+  beside them says nothing about whether it is safe. A run with nobody to ask
+  and no flag MUST refuse as above, since a command that silently wrote into a
+  checkout the user never named would be a worse outcome than exit 1. The
+  refusal SHOULD say when a worktree was passed over for being unclean, so the
+  absence of the offer is not a silence.
+
+  Nothing about this changes where the files go: the write happens on the
+  source branch either way, and the calling shell's working directory is not
+  its business to change.
 - `nav pr close <id> [--resolution declined]` — record the PR under
   `prs/closed/` on the current branch. A PR's files normally live on its source
   branch, so when the ID is not present in the checked-out tree the directory is

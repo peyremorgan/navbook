@@ -49,6 +49,7 @@ import {
   currentBranch,
   defaultBranch,
   isMergeInProgress,
+  isTrackedTreeClean,
   isTreeClean,
   resolveSha,
   updateBranch,
@@ -972,27 +973,54 @@ export function readPr(ws: WsCtx, ref: string, repo: Repo = loadRepo(ws)): Reada
   return { entity: located.entity, ref: located.sourceRef };
 }
 
+/** Where a pull request lives, when this checkout is not where it lives. */
+export interface PrElsewhere {
+  /** The ref carrying it, in the spelling {@link locatePr} reports. */
+  sourceRef: string;
+  sourceRemote: boolean;
+  /**
+   * The local branch to stand on: {@link sourceRef} without its remote prefix,
+   * since a remote-tracking copy is `<remote>/<branch>` and `git switch
+   * <branch>` makes the local branch that tracks it.
+   */
+  branch: string;
+  /** The worktree that has {@link branch} checked out, or null when none does. */
+  worktree: string | null;
+  /** Whether that worktree's index and tracked files are clean. */
+  worktreeClean: boolean;
+}
+
+export interface PrWriteTarget {
+  entity: EntityRecord;
+  /** Null when this checkout holds the pull request and can be written to. */
+  elsewhere: PrElsewhere | null;
+}
+
 /**
- * Find a pull request to write to, and refuse one this checkout does not hold.
+ * Find a pull request to write to, and say where it is when it is not here.
  *
  * A comment or review is a file in the pull request's directory, so written
  * here it would land beside no `pr.md` — the stranded comment of spec 03
  * §3.3.1 — rather than on the branch under review. The scan can still see
- * where the pull request lives, so the refusal says that, and the worktree to
- * run in when one already has the branch, instead of claiming it does not
- * exist.
+ * where the pull request lives, so this reports that rather than claiming it
+ * does not exist.
+ *
+ * Separated from {@link findPrToWrite} so a front end with somebody at a
+ * terminal can offer to do the write in the worktree that already has the
+ * branch, instead of only printing where that is. Nothing here knows whether
+ * such an offer is possible: it returns the facts and the caller decides.
  */
-export function findPrToWrite(ws: WsCtx, ref: string): EntityRecord {
+export function locatePrToWrite(ws: WsCtx, ref: string): PrWriteTarget {
   const here = prInTree(loadRepo(ws), ref);
-  if (here) return here;
+  if (here) return { entity: here, elsewhere: null };
 
   const { entity, sourceRef, sourceRemote } = locatePr(ws, ref);
-  const why =
-    "a pull request is written on its source branch, beside the files it proposes to merge";
-  // A remote-tracking copy is `<remote>/<branch>`; `git switch <branch>` makes
-  // the local branch that tracks it.
   const branch = sourceRemote ? sourceRef.slice(sourceRef.indexOf("/") + 1) : sourceRef;
-  const tree = sourceRemote ? null : worktreeHolding(ws.repoRoot, branch);
+
+  // Standing on the branch that carries it, with the directory gone from the
+  // tree, is a different fault with a different fix: nowhere else to go, and
+  // nothing to offer. It is an error under every front end, so it is raised
+  // here rather than handed back as a location.
   if (!sourceRemote && branch === currentBranch(ws.repoRoot)) {
     wsFail(
       "precondition",
@@ -1000,11 +1028,46 @@ export function findPrToWrite(ws: WsCtx, ref: string): EntityRecord {
       [`restore it with 'git checkout HEAD -- ${ws.navDir}/${entity.dirPath}'`],
     );
   }
+
+  const worktree = sourceRemote ? null : worktreeHolding(ws.repoRoot, branch);
+  return {
+    entity,
+    elsewhere: {
+      sourceRef,
+      sourceRemote,
+      branch,
+      worktree,
+      worktreeClean: worktree !== null && isTrackedTreeClean(worktree),
+    },
+  };
+}
+
+/**
+ * Find a pull request to write to, and refuse one this checkout does not hold.
+ *
+ * The refusal names the branch, and the worktree to run in when one already
+ * has it. For a front end that can ask a question first, see
+ * {@link locatePrToWrite}.
+ */
+export function findPrToWrite(ws: WsCtx, ref: string): EntityRecord {
+  const { entity, elsewhere } = locatePrToWrite(ws, ref);
+  if (elsewhere === null) return entity;
+
+  const { sourceRef, branch, worktree, worktreeClean } = elsewhere;
+  const why =
+    "a pull request is written on its source branch, beside the files it proposes to merge";
   wsFail(
     "precondition",
     `#${entity.id} is on '${sourceRef}', which is not checked out here`,
-    tree
-      ? [why, `'${branch}' is checked out in ${tree}; run the command there`]
+    worktree
+      ? [
+          why,
+          // Saying it is dirty is what explains the absence of any offer to
+          // write there, for a front end that would otherwise have made one.
+          `'${branch}' is checked out in ${worktree}${
+            worktreeClean ? "" : " (which has uncommitted changes)"
+          }; run the command there`,
+        ]
       : [
           why,
           `check out '${branch}' first: 'git switch ${branch}', or 'git worktree add <dir> ${branch}'`,

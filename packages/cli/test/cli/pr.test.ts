@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
@@ -878,6 +878,11 @@ describe("a pull request that only another branch holds", () => {
       .map((line) => JSON.parse(line));
   }
 
+  /** The fixture's one pull request, as the cross-ref listing reports it. */
+  function id0(repo: TempRepo): string {
+    return (listedAcrossRefs(repo)[0] as { id: string }).id;
+  }
+
   it("shows every pull request the cross-ref listing returns, by any form it prints", () => {
     const { repo } = withOpenPr();
     try {
@@ -1014,6 +1019,114 @@ describe("a pull request that only another branch holds", () => {
       assert.match(reviewed.stdout, /Reviewed \(comment\) #dk3mp2x9/);
     } finally {
       repo.git(["worktree", "remove", "--force", tree]);
+      repo.cleanup();
+    }
+  });
+
+  it("writes in the worktree that has the branch when asked to", () => {
+    const { repo } = withOpenPr();
+    const tree = join(repo.dir, "..", "worktree-in");
+    try {
+      repo.git(["worktree", "add", "--quiet", tree, "feat/auth"]);
+      const { id } = listedAcrossRefs(repo)[0] as { id: string };
+
+      // No terminal here — `--in-worktree` is the answer given in advance, so
+      // the same run that refuses without it succeeds with it.
+      const written = repo.nav(["pr", "comment", id, "--in-worktree", "--commit", "-m", "Read."]);
+      assert.equal(written.code, 0, written.stderr);
+      assert.match(written.stdout, /Commented on #dk3mp2x9/);
+      assert.match(
+        written.stderr,
+        new RegExp(`written in ${tree.replace(/[.*+?^$()|[\]\\]/g, "\\$&")}`),
+      );
+
+      // The comment is on the source branch, and the checkout that asked for it
+      // is exactly as it was: no file, no commit, nothing staged.
+      const onBranch = repo.git(["log", "--oneline", "-1", "feat/auth"]);
+      assert.match(onBranch.stdout, /docs\(pr\): comment on #dk3mp2x9/);
+      assert.equal(repo.git(["status", "--porcelain"]).stdout.trim(), "");
+      assert.match(repo.git(["log", "--oneline", "-1", "main"]).stdout, /feat: initial code/);
+      assert.equal(navIn(tree, repo.home, ["doctor"]).code, 0);
+    } finally {
+      repo.git(["worktree", "remove", "--force", tree]);
+      repo.cleanup();
+    }
+  });
+
+  it("pins the source branch's head when update is written in its worktree", () => {
+    const { repo, head } = withOpenPr();
+    const tree = join(repo.dir, "..", "worktree-update");
+    try {
+      repo.git(["worktree", "add", "--quiet", tree, "feat/auth"]);
+      // A commit the pull request has not recorded yet, made where the branch is.
+      writeFileSync(join(tree, "auth.txt"), "more token handling\n", "utf8");
+      repo.git(["-C", tree, "commit", "--quiet", "-am", "feat: more auth"]);
+      const moved = repo.git(["rev-parse", "feat/auth"]).stdout.trim();
+      assert.notEqual(moved, head);
+
+      const updated = repo.nav(["pr", "update", id0(repo), "--in-worktree", "--commit"]);
+      assert.equal(updated.code, 0, updated.stderr);
+      // The head recorded is the branch's, never this checkout's: pinning
+      // `main` is the reason the verb refuses from here in the first place.
+      assert.match(updated.stdout, new RegExp(`head ${moved.slice(0, 12)}`));
+    } finally {
+      repo.git(["worktree", "remove", "--force", tree]);
+      repo.cleanup();
+    }
+  });
+
+  it("refuses a worktree with uncommitted changes, and says that is why", () => {
+    const { repo } = withOpenPr();
+    const tree = join(repo.dir, "..", "worktree-dirty");
+    try {
+      repo.git(["worktree", "add", "--quiet", tree, "feat/auth"]);
+      writeFileSync(join(tree, "auth.txt"), "half-finished\n", "utf8");
+
+      const refused = repo.nav(["pr", "comment", id0(repo), "--in-worktree", "-m", "Read."]);
+      assert.equal(refused.code, 1);
+      assert.match(refused.stderr, /which has uncommitted changes/);
+      assert.match(refused.stderr, /run the command there/);
+    } finally {
+      repo.git(["worktree", "remove", "--force", tree]);
+      repo.cleanup();
+    }
+  });
+
+  it("does not count untracked files against a worktree", () => {
+    const { repo } = withOpenPr();
+    const tree = join(repo.dir, "..", "worktree-untracked");
+    try {
+      repo.git(["worktree", "add", "--quiet", tree, "feat/auth"]);
+      // What every real worktree has sitting in it, and what the strict
+      // reading of "clean" would disqualify it for.
+      mkdirSync(join(tree, "node_modules"), { recursive: true });
+      writeFileSync(join(tree, "node_modules", "installed.txt"), "junk\n", "utf8");
+
+      const written = repo.nav([
+        "pr",
+        "comment",
+        id0(repo),
+        "--in-worktree",
+        "--commit",
+        "-m",
+        "Read.",
+      ]);
+      assert.equal(written.code, 0, written.stderr);
+    } finally {
+      repo.git(["worktree", "remove", "--force", tree]);
+      repo.cleanup();
+    }
+  });
+
+  it("has nowhere to offer when no worktree holds the branch", () => {
+    const { repo } = withOpenPr();
+    try {
+      // The flag says yes to a question that cannot be asked: `feat/auth` is a
+      // branch nothing has checked out, so the refusal is the ordinary one.
+      const refused = repo.nav(["pr", "comment", id0(repo), "--in-worktree", "-m", "Read."]);
+      assert.equal(refused.code, 1);
+      assert.match(refused.stderr, /git switch feat\/auth/);
+    } finally {
       repo.cleanup();
     }
   });
