@@ -5,6 +5,7 @@ created: 2026-09-18T11:06:51Z
 labels: [enhancement]
 assignee: Claude <noreply@anthropic.com>
 feature: [cli, pull-requests]
+resolution: fixed
 ---
 
 Writing to a pull request whose branch lives in another worktree refuses with exit 1 and tells you to go there yourself. When there is somebody at a terminal and that worktree is clean, `nav` already knows everything it needs to just do it — and should offer to.
