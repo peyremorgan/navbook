@@ -9,6 +9,7 @@
 
 import type {
   CommentRecord,
+  CommitRange,
   CommitSummary,
   Diagnostic,
   EntityRecord,
@@ -16,6 +17,7 @@ import type {
   LinkNode,
   SpecRecord,
 } from "@navbook/core";
+import type { ChangedFileView, ChangesView } from "./changes.ts";
 
 export type IssueParent = EntityRecord;
 
@@ -36,6 +38,9 @@ export type LinkNodeParent = LinkNode;
 export type DiagnosticParent = Diagnostic;
 export type FeatureParent = FeatureRecord;
 export type CommitParent = CommitSummary;
+export type CommitRangeParent = CommitRange;
+export type ChangesParent = ChangesView;
+export type ChangedFileParent = ChangedFileView;
 
 /**
  * A document, and the feature that holds it.

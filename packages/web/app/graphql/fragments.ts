@@ -242,3 +242,24 @@ export const FEATURE_DETAIL = graphql(`
     }
   }
 `);
+
+/**
+ * One file of a pull request's diff.
+ *
+ * `patch` is null when the server withheld it for size, and a file shown that
+ * way is asked for again by path (`PR_FILE_CHANGES_QUERY`); the rest of the
+ * record is what the listing shows meanwhile.
+ */
+export const CHANGED_FILE_FIELDS = graphql(`
+  fragment ChangedFileFields on ChangedFile {
+    path
+    oldPath
+    status
+    additions
+    deletions
+    binary
+    lines
+    patch
+    truncated
+  }
+`);

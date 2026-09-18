@@ -17,6 +17,7 @@ import {
 } from "@navbook/core";
 import { createYoga } from "graphql-yoga";
 import { type Authenticator, makeAuthenticator } from "./auth.ts";
+import { RevisionCache } from "./changes.ts";
 import type { Config } from "./config.ts";
 import { makeGraphQLCtx } from "./context.ts";
 import { AuthorCache } from "./people.ts";
@@ -126,6 +127,8 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
   // One per process, beside the clone it describes: the history it walks is
   // this checkout's, and the committer it leaves out is this clone's own.
   const authors = new AuthorCache({ repoRoot, exclude: identity });
+  // Likewise one per process: a revision's diff is the same for everybody.
+  const revisions = new RevisionCache({ repoRoot, navDir });
 
   const yoga = createYoga({
     schema: makeSchema(),
@@ -135,7 +138,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     // covered, including ones added later.
     context: async ({ request }) => {
       const viewer = await auth.verify(request.headers.get("authorization"));
-      return makeGraphQLCtx({ viewer, config, sync, authors, env, navDir });
+      return makeGraphQLCtx({ viewer, config, sync, authors, revisions, env, navDir });
     },
   });
 

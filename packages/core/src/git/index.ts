@@ -7,6 +7,7 @@
  */
 
 export * from "./config.ts";
+export * from "./diff.ts";
 export * from "./exec.ts";
 export * from "./history.ts";
 export * from "./index-ops.ts";
