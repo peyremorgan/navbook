@@ -2,6 +2,7 @@
 title: nav doctor ignores the marker's version, so a tree from a newer Navbook reads as sound
 author: Claude <noreply@anthropic.com>
 created: 2026-09-18T08:42:43Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug]
 feature: [cli, doctor, format]
 ---
