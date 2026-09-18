@@ -15,11 +15,7 @@ nav: no pull request matches 'zno8oe2q'
 
 The pull request exists. It is open, it is on `feat/sfbidn0t-pr-tabs`, and the same `nav` finds it one command earlier:
 
-```console
-$ nav pr list --all-refs
-ID         STATUS  TARGET  REVIEW    REFS                   TITLE
-#zno8oe2q  open    dev     approved  feat/sfbidn0t-pr-tabs  Conversation, Commits and Changes tabs …
-```
+`nav pr list --all-refs`, run a moment earlier in the same checkout with the same binary, prints it: `#zno8oe2q`, open, target `dev`, found on `feat/sfbidn0t-pr-tabs`.
 
 ## What it actually was
 
@@ -36,15 +32,11 @@ $ npm view @navbook/cli version
 
 So this is issue #t4mwvm2j, fixed by #z3j95v3e and released in v0.3.0 (#nq2m4evc), met again by a CLI that predates the fix. Running the workspace's own 0.3.0 from `dev`, every part of it behaves:
 
-```console
-$ node packages/cli/src/main.ts pr show zno8oe2q
-read from 'feat/sfbidn0t-pr-tabs'; this checkout does not hold #zno8oe2q
-…
-$ node packages/cli/src/main.ts pr review zno8oe2q --approve -m x
-nav: #zno8oe2q is on 'feat/sfbidn0t-pr-tabs', which is not checked out here
-a pull request is written on its source branch, beside the files it proposes to merge
-'feat/sfbidn0t-pr-tabs' is checked out in /home/deck/.cache/navbook-worktrees/sfbidn0t; run the command there
-```
+`pr show` prints the pull request under the line *read from 'feat/sfbidn0t-pr-tabs'; this checkout does not hold `#zno8oe2q`*. `pr review --approve` refuses with
+
+> nav: `#zno8oe2q` is on 'feat/sfbidn0t-pr-tabs', which is not checked out here
+> a pull request is written on its source branch, beside the files it proposes to merge
+> 'feat/sfbidn0t-pr-tabs' is checked out in /home/deck/.cache/navbook-worktrees/sfbidn0t; run the command there
 
 That last line is right down to naming the worktree, which is what #t4mwvm2j asked for. `npm install -g @navbook/cli` is the whole remedy for the report.
 
