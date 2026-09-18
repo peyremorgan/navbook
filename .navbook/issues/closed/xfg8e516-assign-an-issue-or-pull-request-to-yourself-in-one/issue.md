@@ -5,6 +5,7 @@ created: 2026-09-18T08:54:41Z
 labels: [enhancement]
 assignee: Claude <noreply@anthropic.com>
 feature: [web, issues, pull-requests]
+resolution: fixed
 ---
 
 Assigning an issue or a pull request to yourself in the web client costs exactly as much as assigning it to a stranger. The Assignees panel offers one control — a pencil — and everything after it is a search through everyone the repository has ever known.
