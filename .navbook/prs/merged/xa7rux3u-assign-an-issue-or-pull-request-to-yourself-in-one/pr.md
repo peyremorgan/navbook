@@ -15,6 +15,9 @@ revisions:
   - head: f527de45c07d0b2ea6b07176945ca680c5d4c863
     base: 4b70d58db301afa6107a455c326869515151443a
     date: 2026-09-18T10:39:14Z
+merged:
+  date: 2026-09-18T10:40:15Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Closes #xfg8e516.
