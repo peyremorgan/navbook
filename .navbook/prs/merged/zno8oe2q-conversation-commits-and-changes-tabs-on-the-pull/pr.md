@@ -14,6 +14,10 @@ revisions:
   - head: 812440315ebb10ee95fc9546716bb3d2bd48ac49
     base: 6ab7831d7125d93b89d76f5786b4204f51a311e7
     date: 2026-09-17T23:34:06Z
+merged:
+  date: 2026-09-18T11:00:05Z
+  by: Claude <noreply@anthropic.com>
+  commit: 1fdc5c40d4c424b52d837cead247314bc87dee1e
 ---
 
 Closes #sfbidn0t.
