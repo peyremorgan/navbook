@@ -44,15 +44,15 @@ Membership is matched the same way, so the toggle still takes you off a list tha
 
 ## Shape
 
-- `utils/people.ts` gains `findPerson`, `togglePerson` and `viewerField` — pure, and where the tests are.
+- `utils/people.ts` gains `namesPerson`, `togglePerson` and `viewerField` — pure, and where the tests are. `namesPerson` is the primitive: `togglePerson` filters every entry it decides against, so a list carrying both spellings of one address is cleared whole, and the component asks it directly rather than through a finder.
 - `composables/useViewerField.ts` joins the two queries that each hold half the answer. Both are `cache-first` and both are already asked on every page the button appears on, so it costs two cache reads rather than two requests.
 - `LabelEditor` gains an optional `self`. It is deliberately generic rather than assignee-specific: the labels read "Add yourself to assignees" from the field's own title, so `reviewer:` could take the same button later without touching the component. The save goes through the existing emit, so a save in flight, a refusal and a stale edit read identically — no new mutation, no new patch shape, no new refresh.
 - Both detail pages pass it.
 
 ## Verified
 
-- Unit: 366 pass, up from 296.
-- End-to-end: the full suite runs 148, all green. Three are new (`test-e2e/self-assign.spec.ts`) and prove the round trip on the issue page, on the pull request page and across a reload, each as an address held by no fixture and no history — so an assignee bearing it afterwards can only be this button's doing.
+- Unit: 367 pass, up from 296.
+- End-to-end: the full suite runs 145, all green. Two are new (`test-e2e/self-assign.spec.ts`) and prove the round trip on the issue page and on the pull request page, each under a name held by no fixture and no history — so an assignee bearing it afterwards can only be this button's doing. Each half is read back from a reloaded page: the panel overlays a pending edit, so an assertion taken before the reload would pass whether or not anything reached the file.
 - `nuxi typecheck` clean. `biome check` leaves only the three `noVueDuplicateKeys` errors already present on `dev`; this branch adds none.
 
 One trap found while writing those tests, noted in the spec's header: the two pages render the same field differently. The issue page keeps the component's chips, carrying the whole `Name <address>`; the pull request page replaces them with the avatars it already showed, carrying only the name. An assertion on the address passes on one page and fails on the other.
