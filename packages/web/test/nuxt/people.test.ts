@@ -6,7 +6,14 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
-import { displayPerson, personInitials, personLabel } from "../../app/utils/people";
+import {
+  displayPerson,
+  findPerson,
+  personInitials,
+  personLabel,
+  togglePerson,
+  viewerField,
+} from "../../app/utils/people";
 
 describe("displayPerson", () => {
   it("prefers the display name of an RFC 5322 address", () => {
@@ -66,5 +73,89 @@ describe("personInitials", () => {
   it("has nothing to show for nothing", () => {
     assert.equal(personInitials(""), "");
     assert.equal(personInitials("   "), "");
+  });
+});
+
+describe("findPerson", () => {
+  const values = ["A Person <person@example.invalid>", "other@example.invalid"];
+
+  it("finds the entry carrying an address, however it is spelled", () => {
+    // The same assignee written three ways: nav writes `user.name`, the web
+    // client writes the token's claim, and a hand edit may write neither.
+    assert.equal(findPerson(values, "person@example.invalid"), values[0]);
+    assert.equal(findPerson(values, "<person@example.invalid>"), values[0]);
+    assert.equal(findPerson(values, "P. Erson <person@example.invalid>"), values[0]);
+  });
+
+  it("ignores the case of the address, as the server's dedupe does", () => {
+    assert.equal(findPerson(values, "PERSON@Example.Invalid"), values[0]);
+  });
+
+  it("never reads two different addresses as one person", () => {
+    assert.equal(findPerson(values, "A Person <someone.else@example.invalid>"), undefined);
+    assert.equal(findPerson(values, "nobody@example.invalid"), undefined);
+  });
+
+  it("matches a value with no address only against itself", () => {
+    assert.equal(findPerson(["somebody"], "somebody"), "somebody");
+    assert.equal(findPerson(["somebody"], "someone"), undefined);
+  });
+});
+
+describe("togglePerson", () => {
+  const values = ["A Person <person@example.invalid>", "other@example.invalid"];
+
+  it("adds somebody who is not on the list", () => {
+    assert.deepEqual(togglePerson(values, "new@example.invalid"), [
+      ...values,
+      "new@example.invalid",
+    ]);
+  });
+
+  it("removes the entry that names them, not the string passed in", () => {
+    // What comes off the list is what was on it; the two spellings differ.
+    assert.deepEqual(togglePerson(values, "P. Erson <person@example.invalid>"), [
+      "other@example.invalid",
+    ]);
+  });
+
+  it("leaves the original alone", () => {
+    const before = [...values];
+    togglePerson(values, "new@example.invalid");
+    assert.deepEqual(values, before);
+  });
+});
+
+describe("viewerField", () => {
+  const people = ["Morgan PEYRE <morgan@example.invalid>", "other@example.invalid"];
+
+  it("prefers the repository's spelling over the token's claim", () => {
+    assert.equal(
+      viewerField(people, { name: "M. Peyre", email: "morgan@example.invalid" }),
+      "Morgan PEYRE <morgan@example.invalid>",
+    );
+  });
+
+  it("composes from the claim for somebody the answer does not hold", () => {
+    assert.equal(
+      viewerField(people, { name: "New Person", email: "new@example.invalid" }),
+      "New Person <new@example.invalid>",
+    );
+    assert.equal(
+      viewerField(people, { name: null, email: "new@example.invalid" }),
+      "new@example.invalid",
+    );
+    assert.equal(
+      viewerField(people, { name: "  ", email: "  new@example.invalid  " }),
+      "new@example.invalid",
+    );
+  });
+
+  it("has no answer before there is one", () => {
+    // An empty list is the server not having answered rather than a repository
+    // with nobody in it: it always holds at least the viewer.
+    assert.equal(viewerField([], { name: "M", email: "morgan@example.invalid" }), null);
+    assert.equal(viewerField(people, null), null);
+    assert.equal(viewerField(people, { name: "M", email: "  " }), null);
   });
 });

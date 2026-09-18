@@ -3,11 +3,12 @@
  *
  * `author:` is an RFC 5322 address on disk — `Alice <alice@example.com>` or a
  * bare address (spec 02 §2.4) — and a list row wants the short half of that.
- * This splits it for display and nothing else: it does not validate an address,
- * decide whether two of them are the same person, or match one against a
- * filter. Those are format questions, and format questions are the server's
- * (spec 06 §6.3); the filter sends the string the person typed and lets the
- * server answer.
+ * This splits it for display, and picks out of a list of such fields the one
+ * that carries a given address. It does not validate an address, decide that
+ * two different addresses are one person, or match one against a filter. Those
+ * are format questions, and format questions are the server's (spec 06 §6.3);
+ * the filter sends the string the person typed and lets the server answer, and
+ * the one spelling this module ever prefers is a spelling the server sent.
  */
 
 export interface DisplayPerson {
@@ -50,4 +51,67 @@ export function personInitials(field: string): string {
     return `${words[0]?.[0] ?? ""}${words[1]?.[0] ?? ""}`.toUpperCase();
   }
   return (words[0] ?? "").slice(0, 2).toUpperCase();
+}
+
+/** The signed-in person as the server answers them, from the token's claims. */
+export interface Viewer {
+  name: string | null;
+  email: string;
+}
+
+/**
+ * Find, among values that name people, the one that names this person.
+ *
+ * Matched on the address rather than on the whole string, because the same
+ * person is written both ways: `nav` writes whatever `user.name` says, the
+ * web client writes what the token claims, and a file edited by hand may hold
+ * a bare address where history has a named one. All three are the same
+ * assignee, and a caller asking "am I on this list" wants "yes" for any of
+ * them.
+ *
+ * That is not this module deciding who is whom. Two different addresses are
+ * never the same person here, and the key — the address, lowercased — is the
+ * one the server itself dedupes people on (`dedupePeople`, core). A value
+ * carrying no address at all is only ever its own exact self.
+ */
+export function findPerson(values: readonly string[], person: string): string | undefined {
+  const wanted = displayPerson(person);
+  if (wanted.email === null) return values.find((value) => value.trim() === person.trim());
+  const needle = wanted.email.toLowerCase();
+  return values.find((value) => displayPerson(value).email?.toLowerCase() === needle);
+}
+
+/** The list with this person added, or — if they are already on it — removed. */
+export function togglePerson(values: readonly string[], person: string): string[] {
+  const found = findPerson(values, person);
+  return found === undefined ? [...values, person] : values.filter((value) => value !== found);
+}
+
+/**
+ * How this repository spells the viewer, for a field that names a person.
+ *
+ * Composing `Name <address>` from the token is the obvious answer and the
+ * wrong one: if the `name` claim differs from how git history spells the same
+ * address — "M. Peyre" against "Morgan PEYRE" — the file gains a second
+ * spelling of one person, and the panel shows both. So the spelling is taken
+ * from `people`, which is the server's own merge of its history, its tree and
+ * the viewer, already formatted (`packages/server`'s `people` resolver).
+ *
+ * The viewer is always in that answer, so the composed fallback is for the one
+ * case where it cannot be: an address the server has not been asked about yet.
+ * An empty list is that case rather than a repository with nobody in it, which
+ * is why it yields nothing at all — a button written from a guess, offered for
+ * the instant before the real answer lands, is worse than one that appears a
+ * moment late.
+ */
+export function viewerField(people: readonly string[], viewer: Viewer | null): string | null {
+  if (viewer === null || viewer.email.trim() === "") return null;
+  if (people.length === 0) return null;
+  return findPerson(people, viewer.email) ?? formatViewer(viewer);
+}
+
+function formatViewer(viewer: Viewer): string {
+  const name = viewer.name?.trim() ?? "";
+  const email = viewer.email.trim();
+  return name === "" ? email : `${name} <${email}>`;
 }

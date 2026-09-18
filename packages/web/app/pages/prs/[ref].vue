@@ -65,6 +65,7 @@ const reviewPolicy = computed(() => policyResult.value?.reviewPolicy ?? null);
 // which is precisely what offering only the people already asked cannot help
 // with. The repository knows who is around; this asks it.
 const people = usePeople();
+const self = useViewerField();
 
 /*
  * Suggestions for the sidebar's menus, exactly as the issue page gets them.
@@ -444,6 +445,7 @@ const branchHint = computed(() => refusedOn.value);
             title="Assignees"
             icon="i-lucide-user"
             testid="assignees"
+            :self="self"
             :values="shown.assignees"
             :suggestions="people"
             :save="edits.field('assignees')"

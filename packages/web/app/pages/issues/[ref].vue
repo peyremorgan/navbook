@@ -76,6 +76,7 @@ const { result: featureList } = useQuery(FEATURES_QUERY, undefined, {
 // anything to yet — the one you most need to pick — is exactly the one it
 // could never offer. The server reads them from its history and its tree.
 const people = usePeople();
+const self = useViewerField();
 const known = computed(() => {
   const issues = listing.value?.issues ?? [];
   return {
@@ -377,6 +378,7 @@ async function unlink(child: string): Promise<void> {
             title="Assignees"
             icon="i-lucide-user"
             testid="assignees"
+            :self="self"
             :values="shown.assignees"
             :suggestions="people"
             :save="edits.field('assignees')"

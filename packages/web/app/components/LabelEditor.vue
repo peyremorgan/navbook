@@ -14,6 +14,14 @@
   What it shows when it is not being edited can be replaced through the
   `display` slot, for a field whose reading is richer than its list of values.
 
+  `self` is the signed-in person, spelled the way this repository spells them
+  (`useViewerField`). A field given one grows a second button that puts them on
+  the list, or takes them off it again when they are already on it — the whole
+  point being that the commonest value of a field that names a person is the
+  person reading it, and searching a directory of everybody for your own name
+  is a poor way to say "mine". It saves through the same emit as the editor
+  below it, so a save in flight, a refusal and a stale edit read identically.
+
   `disabled` withdraws the offer to edit, for the one case where the server has
   already said it cannot take the write: a pull request whose branch this
   checkout does not hold. Letting somebody type a second thing that will be
@@ -35,6 +43,8 @@ const props = defineProps<{
   /** Route prefix that makes each chip a link, e.g. `/features/`. */
   linkTo?: string;
   testid: string;
+  /** The viewer, spelled as this field spells people; enables the quick toggle. */
+  self?: string | null;
   /** The field's save in flight or refused, shown beneath the values. */
   save?: FieldSave;
   /** Set when this cannot be written at all; the field reads but does not offer. */
@@ -73,6 +83,24 @@ function save(): void {
   emit("save", draft.value);
   editing.value = false;
 }
+
+/** Whether the viewer is already on the list, by address rather than spelling. */
+const mine = computed(
+  () =>
+    props.self !== null &&
+    props.self !== undefined &&
+    findPerson(props.values, props.self) !== undefined,
+);
+
+/*
+ * The toggle saves against `values` rather than against the draft: it is
+ * offered while the editor is closed, so `values` is the whole truth, and the
+ * page overlays what this sends before the server answers.
+ */
+function toggleSelf(): void {
+  if (props.self === null || props.self === undefined) return;
+  emit("save", togglePerson(props.values, props.self));
+}
 </script>
 
 <template>
@@ -81,16 +109,30 @@ function save(): void {
       <h3 class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
         <UIcon :name="props.icon" class="size-3.5" />{{ props.title }}
       </h3>
-      <UButton
-        v-if="!editing && !props.disabled"
-        size="xs"
-        color="neutral"
-        variant="ghost"
-        icon="i-lucide-pencil"
-        :aria-label="`Edit ${props.title.toLowerCase()}`"
-        :data-testid="`edit-${props.testid}`"
-        @click="open"
-      />
+      <div class="flex items-center">
+        <UButton
+          v-if="!editing && !props.disabled && props.self"
+          size="xs"
+          color="neutral"
+          variant="ghost"
+          :icon="mine ? 'i-lucide-user-minus' : 'i-lucide-user-plus'"
+          :aria-label="`${mine ? 'Remove yourself from' : 'Add yourself to'} ${props.title.toLowerCase()}`"
+          :title="`${mine ? 'Remove yourself from' : 'Add yourself to'} ${props.title.toLowerCase()}`"
+          :loading="props.save?.saving"
+          :data-testid="`self-${props.testid}`"
+          @click="toggleSelf"
+        />
+        <UButton
+          v-if="!editing && !props.disabled"
+          size="xs"
+          color="neutral"
+          variant="ghost"
+          icon="i-lucide-pencil"
+          :aria-label="`Edit ${props.title.toLowerCase()}`"
+          :data-testid="`edit-${props.testid}`"
+          @click="open"
+        />
+      </div>
     </div>
 
     <template v-if="editing">
