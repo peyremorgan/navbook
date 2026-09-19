@@ -19,7 +19,7 @@
   page will not do is quietly pick one.
 -->
 <script setup lang="ts">
-import type { SpecDetailFragment } from "~~/src/generated/gql/graphql";
+import type { SpecDetailFragment } from "../../src/generated/gql/graphql";
 
 const props = defineProps<{
   spec: SpecDetailFragment;

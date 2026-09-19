@@ -68,6 +68,11 @@ and running `doctor` all work and none of them loses a feature. `nav` says once
 that the directory belongs to a plugin the marker does not declare, so the
 silence is explained rather than merely quiet.
 
+The same holds in a browser. `@navbook/web` is built from the server's schema
+alone and knows nothing about features: a bundle built without this layer has
+no `/features` route, no Features tab and no feature chips, and every other
+page is exactly what it was.
+
 ## What it adds
 
 | Where | What |
@@ -75,4 +80,16 @@ silence is explained rather than merely quiet.
 | Format | `specs/<slug>/` and the `feature:` key; checks D13 and D14 |
 | CLI | `nav feature {open,list,show,edit}`, `nav feature spec {add,edit,list}`, `--feature` on `issue open` and `pr open`, the `feature:` query term |
 | API | `Feature`, `Spec`, four mutations, and `features` on every entity — merged into the server's schema |
+| Web | a Nuxt layer: the `/features` pages, a Features tab, a feature editor on each entity, a chip in the filter bar, chips on listing rows and a group in the inbox |
 | Commits | the `docs(feature): …` scope |
+
+The web half is compiled into the client rather than loaded by it, so a
+deployment that wants the feature pages builds with this package named:
+
+```sh
+NAVBOOK_PLUGINS="@navbook/plugin-kb" docker compose build
+```
+
+That one value sets both images — the API installs the plugin, the client
+merges the layer — because a client with feature pages the server cannot answer
+is worse than one with neither.

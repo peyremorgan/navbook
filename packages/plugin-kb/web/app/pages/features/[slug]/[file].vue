@@ -7,9 +7,9 @@
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
-import { staleContent } from "~/composables/useFeatureMutations";
-import { FEATURE_QUERY } from "~/graphql/queries";
 import { pageTitle } from "~/utils/title";
+import { staleContent } from "../../../composables/useFeatureMutations";
+import { FEATURE_QUERY } from "../../../graphql/queries";
 
 const route = useRoute();
 const mutations = useFeatureMutations();

@@ -14,7 +14,7 @@
   Tailwind reads the classes it emits out of the source, so a class assembled
   at runtime is one it has never heard of.
 
-  The row is a link, so the feature chips are a sibling of it rather than part
+  The row is a link, so a plugin's badges are a sibling of it rather than part
   of it — a link inside a link is invalid, and browsers disagree about what to
   do with one. Same shape, and same reason, as `IssueRow`.
 
@@ -60,6 +60,7 @@ const STATUS_CLASS = {
 } as const;
 
 const entity = computed(() => props.item.entity);
+const slots = useNavbookSlots();
 
 /** A draft is open and not asking for anything yet, so it is drawn as neither. */
 const draft = computed(
@@ -172,18 +173,14 @@ const described = computed(() => {
       </span>
     </NuxtLink>
 
-    <div v-if="entity.features.length" class="mt-1 flex flex-wrap gap-1 ps-6">
-      <NuxtLink
-        v-for="feature in entity.features"
-        :key="feature"
-        :to="`/features/${feature}`"
-        :data-testid="`inbox-row-feature-${feature}`"
-      >
-        <UBadge color="neutral" variant="subtle" size="sm" class="hover:bg-elevated">
-          <UIcon name="i-lucide-layers" class="me-1 size-3" />{{ feature }}
-        </UBadge>
-      </NuxtLink>
-    </div>
+    <component
+      :is="badge.component"
+      v-for="(badge, index) in slots.rowBadges()"
+      :key="`badge-${index}`"
+      :entity="entity"
+      where="inbox-row"
+      class="ps-6"
+    />
     </div>
   </div>
 </template>

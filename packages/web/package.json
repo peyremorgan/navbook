@@ -9,14 +9,14 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "nuxi dev",
-    "dev:stack": "node script/dev-stack.ts",
+    "dev": "NAVBOOK_WEB_PLUGINS=@navbook/plugin-kb nuxi dev",
+    "dev:stack": "NAVBOOK_WEB_PLUGINS=@navbook/plugin-kb node script/dev-stack.ts",
     "dev:issuer": "node script/dev-issuer.ts",
-    "build": "nuxi generate",
-    "postinstall": "nuxi prepare",
-    "typecheck": "nuxi typecheck && tsc -p tsconfig.tools.json --noEmit",
-    "test": "vitest run",
-    "test:e2e": "playwright test --config test-e2e/playwright.config.ts",
+    "build": "NAVBOOK_WEB_PLUGINS=@navbook/plugin-kb nuxi generate",
+    "postinstall": "NAVBOOK_WEB_PLUGINS=@navbook/plugin-kb nuxi prepare",
+    "typecheck": "NAVBOOK_WEB_PLUGINS=@navbook/plugin-kb nuxi typecheck && tsc -p tsconfig.tools.json --noEmit",
+    "test": "NAVBOOK_WEB_PLUGINS=@navbook/plugin-kb vitest run",
+    "test:e2e": "NAVBOOK_WEB_PLUGINS=@navbook/plugin-kb playwright test --config test-e2e/playwright.config.ts",
     "codegen": "graphql-codegen --config codegen.ts",
     "codegen:check": "graphql-codegen --config codegen.ts && git diff --exit-code -- src/generated"
   },

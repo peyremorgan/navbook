@@ -20,6 +20,13 @@ import {
   queryToFilter,
   toEntityFilter,
 } from "~/utils/filter-params";
+import {
+  buildEntityPatch,
+  describeEntityEdit,
+  type EntityEdit,
+  fieldLabel,
+  PATCH_EXTENSIONS,
+} from "~/utils/patch";
 
 const Stub = defineComponent({ template: "<div />" });
 const ISSUES = { statuses: ["OPEN", "CLOSED"] as const, deadlines: ["OVERDUE", "NONE"] as const };
@@ -166,6 +173,107 @@ describe("a registered filter", () => {
     const filter = queryToFilter({ report: ["failing"] }, ISSUES);
     assert.deepEqual(filter.ext, {});
     assert.equal(filterToQuery(filter).report, undefined);
+  });
+});
+
+describe("a registered entity field", () => {
+  /** An entity as a detail page shows it, with a plugin's field on it. */
+  const entity = (reports: string[]): EntityEdit => ({
+    title: "Sign-in is unreliable",
+    body: "It gives up too early.",
+    labels: [],
+    assignees: [],
+    milestone: null,
+    ext: { reports },
+  });
+
+  const registerReports = (): void => {
+    useNavbookSlots().register({
+      entityFields: [
+        {
+          field: "reports",
+          label: "test reports",
+          read: (ext) => ((ext.probe as { reports?: string[] })?.reports ?? []) as string[],
+        },
+      ],
+    });
+  };
+
+  it("reaches the pure patch builder", () => {
+    registerReports();
+    assert.deepEqual(PATCH_EXTENSIONS, [{ field: "reports", label: "test reports" }]);
+  });
+
+  it("is sent under the name its plugin's schema added to the input", () => {
+    registerReports();
+    const patch = buildEntityPatch(entity([]), { ext: { reports: ["nightly"] } }) as Record<
+      string,
+      unknown
+    >;
+    assert.deepEqual(patch.reports, ["nightly"]);
+  });
+
+  it("is left out when it has not changed, so nothing else is rewritten", () => {
+    registerReports();
+    assert.equal(buildEntityPatch(entity(["nightly"]), { ext: { reports: ["nightly"] } }), null);
+  });
+
+  it("sends an empty list, which is how the mutation spells 'remove it'", () => {
+    registerReports();
+    const patch = buildEntityPatch(entity(["nightly"]), { ext: { reports: [] } }) as Record<
+      string,
+      unknown
+    >;
+    assert.deepEqual(patch.reports, []);
+  });
+
+  it("ignores an ext key nothing registered", () => {
+    // A field no loaded plugin has. Sending it would ask the server to refuse
+    // an input it does not have either.
+    assert.equal(buildEntityPatch(entity([]), { ext: { reports: ["nightly"] } }), null);
+  });
+
+  it("reads back under the name a person would recognise", () => {
+    // This is the alert beside a refused edit, so "ext" would say nothing.
+    registerReports();
+    assert.equal(fieldLabel("reports"), "test reports");
+    assert.deepEqual(describeEntityEdit({ ext: { reports: ["nightly"] } }), [
+      { field: "test reports", value: "nightly" },
+    ]);
+    assert.deepEqual(describeEntityEdit({ ext: { reports: [] } }), [
+      { field: "test reports", value: "none" },
+    ]);
+  });
+
+  it("finds its value on an entity through the reader its layer gave", () => {
+    registerReports();
+    const field = useNavbookSlots().entityFields()[0];
+    assert.deepEqual(field?.read({ probe: { reports: ["nightly"] } }), ["nightly"]);
+    assert.deepEqual(field?.read({}), []);
+  });
+});
+
+describe("registered cache policies", () => {
+  it("merge what every layer asked for into one map each", () => {
+    const slots = useNavbookSlots();
+    slots.register({
+      cache: {
+        typePolicies: { Report: { keyFields: ["id"] } },
+        queryFields: { reports: { keyArgs: [] } },
+      },
+    });
+    slots.register({ cache: { typePolicies: { Build: { keyFields: ["sha"] } } } });
+    assert.deepEqual(slots.typePolicies(), {
+      Report: { keyFields: ["id"] },
+      Build: { keyFields: ["sha"] },
+    });
+    assert.deepEqual(slots.queryFields(), { reports: { keyArgs: [] } });
+  });
+
+  it("are empty with nothing registered, so the host's own map is untouched", () => {
+    const slots = useNavbookSlots();
+    assert.deepEqual(slots.typePolicies(), {});
+    assert.deepEqual(slots.queryFields(), {});
   });
 });
 

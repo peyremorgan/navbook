@@ -8,7 +8,11 @@
  * saves racing over one file, which is a server decision the client only shows.
  */
 
-import { chooseOrCreate, expect, signIn, test } from "./helpers/fixtures.ts";
+import { chooseOrCreate, expect, signIn, test } from "../../web/test-e2e/helpers/fixtures.ts";
+
+/** The rail's count for one entry, which is what clicking it would show. */
+const count = (page: import("@playwright/test").Page, testid: string) =>
+  page.getByTestId(`${testid}-count`);
 
 test("lists the features the repository holds", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/features`);
@@ -144,4 +148,45 @@ test("sets a feature on an issue from its sidebar", async ({ signedIn, stack }) 
   await expect(signedIn.getByTestId("chip-features-billing")).toBeVisible();
   await signedIn.goto(`${stack.appUrl}/features/billing`);
   await expect(signedIn.getByTestId("timeline").getByTestId("issue-row-aaaa0006")).toBeVisible();
+});
+
+/*
+ * The inbox's Feature group — this plugin's, through the `inboxGroups` slot.
+ *
+ * It lives here rather than beside the inbox's own tests because a build
+ * without this layer has no such group, and a host test asserting one would
+ * fail for the right reason in the wrong package.
+ */
+test("narrows to one feature, and offers one nothing carries so it can be dropped", async ({
+  signedIn,
+  stack,
+}) => {
+  await signedIn.goto(`${stack.appUrl}/inbox?feature=authentication`);
+  await expect(signedIn.getByTestId("inbox-row-aaaa0001")).toBeVisible();
+  await expect(signedIn.getByTestId("inbox-row-bbbb0002")).toHaveCount(0);
+  await expect(signedIn.getByTestId("inbox-feature-authentication")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  // A slug the inbox does not hold is still shown, or there would be no
+  // control to take it off with.
+  await signedIn.goto(`${stack.appUrl}/inbox?feature=nothing-carries-this`);
+  await expect(signedIn.getByText("Nothing matches this view")).toBeVisible();
+  await expect(count(signedIn, "inbox-feature-nothing-carries-this")).toHaveText("0");
+  await signedIn.getByTestId("inbox-feature-any").click();
+  await expect(signedIn).not.toHaveURL(/feature=/);
+  await expect(signedIn.getByTestId("inbox-row-aaaa0001")).toBeVisible();
+});
+
+/*
+ * Page titles, for the reason the inbox group is here: these routes exist only
+ * in a bundle built with this layer.
+ */
+test("names a feature, and a document within it", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/features/authentication`);
+  await expect(signedIn).toHaveTitle("Authentication · Navbook");
+
+  await signedIn.goto(`${stack.appUrl}/features/authentication/login-flow.md`);
+  await expect(signedIn).toHaveTitle("Login flow — Authentication · Navbook");
 });

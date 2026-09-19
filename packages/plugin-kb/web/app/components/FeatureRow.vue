@@ -5,7 +5,7 @@
   how much is still open, so the counts are the row: documents, then work.
 -->
 <script setup lang="ts">
-import type { FeatureListItemFragment } from "~~/src/generated/gql/graphql";
+import type { FeatureListItemFragment } from "../../src/generated/gql/graphql";
 
 const props = defineProps<{ feature: FeatureListItemFragment }>();
 

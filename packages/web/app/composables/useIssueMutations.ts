@@ -107,10 +107,17 @@ export function useIssueMutations() {
       labels?: string[];
       assignees?: string[];
       milestone?: string | null;
-      features?: string[];
       rank?: number | null;
       deadline?: string | null;
       parent?: string | null;
+      /**
+       * Fields a plugin layer's form contributed (spec 02 §2.12).
+       *
+       * Its SDL added them to `OpenIssueInput`, and the generated input type
+       * describes the core schema and cannot know about them — so they are
+       * named as an open map here rather than cast at the call site.
+       */
+      [pluginField: string]: unknown;
     }) {
       return reported(async () => {
         const payload = (await open.mutate({ input }))?.data?.openIssue;

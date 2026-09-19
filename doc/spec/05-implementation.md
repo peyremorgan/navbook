@@ -35,7 +35,9 @@ is mature and widely installed.
   codebase keeps them out of the core. It is what proves the plugin surface is
   enough to build with, since it uses every part of it — a directory of its
   own, a frontmatter key, a query term, two checks, a command tree, options on
-  built-in verbs, and GraphQL types merged into the server's schema.
+  built-in verbs, GraphQL types merged into the server's schema, and a Nuxt
+  layer carrying the pages and the slot registrations its half of the browser
+  client needs.
 - **Dependencies:** deliberately minimal. A YAML parser (`yaml`) in the core
   and an argument parser in the CLI; no framework. Every dependency added to
   the core is a liability for the Rust rewrite (behavior to reproduce) and MUST
@@ -67,6 +69,17 @@ is mature and widely installed.
   would mean two class identities for the same error and two parsers on the
   startup path — and declares the plugin API version it was built against, so
   a mismatch is reported rather than discovered as a missing function.
+- **Generated code across the plugin boundary:** each package generates against
+  the schema it is built for, and no generated artefact is shared. The server
+  generates resolver types from its own SDL; `@navbook/web` generates its
+  client from that same SDL and nothing else, so it builds with no plugin
+  installed; a plugin generates its own client from the *composed* SDL, in its
+  own package. The cost is that a fragment cannot cross the boundary — a
+  document registry is per package — so a plugin repeats any selection of the
+  host's that it also needs, and its type check fails if the two drift.
+  `Entity.ext` ([06 §6.3](06-future.md)) is the other side of the same coin:
+  what a plugin needs on a row the *host* selected cannot be a field, because
+  the host's fragment can never name it.
 - **Performance budget:** cold `nav issue list` on a 1 000-issue repo MUST
   complete in under 500 ms on commodity hardware. (Measured floor: ~40 ms
   Node startup + ~110 ms with one heavy import — import cost is the budget's

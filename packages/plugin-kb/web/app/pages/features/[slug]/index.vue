@@ -9,10 +9,10 @@
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
-import { FEATURE_QUERY } from "~/graphql/queries";
 import type { EntityEdit } from "~/utils/patch";
-import { mergeTimeline } from "~/utils/timeline";
 import { pageTitle } from "~/utils/title";
+import { FEATURE_QUERY } from "../../../graphql/queries";
+import { mergeTimeline } from "../../../utils/timeline";
 
 const route = useRoute();
 const toast = useToast();

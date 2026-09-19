@@ -21,6 +21,8 @@
 
 import type { Component } from "vue";
 import { registerFilterParam, resetFilterParams } from "~/utils/filter-params";
+import { type InboxItem, registerInboxGrouping, resetInboxGroupings } from "~/utils/inbox";
+import { registerPatchField, resetPatchFields } from "~/utils/patch";
 
 /** A tab in the header, beside Issues and Pull requests. */
 export interface NavLinkSlot {
@@ -37,15 +39,38 @@ export interface NavLinkSlot {
 /**
  * A panel on an entity's detail page, below the built-in fields.
  *
- * Given the entity and whether a save is in flight; emits `save` with whatever
- * the host should send. Kept to one shape for issues and pull requests,
- * because a plugin that has something to say about one usually has the same
- * thing to say about the other.
+ * Given the entity as the page shows it — pending edits already laid over it —
+ * whether any save is in flight, and the `FieldSave` that covers plugin
+ * fields, so a panel's spinner, refusal and Retry read exactly as a built-in
+ * editor's do. It emits `save` with a `Partial<EntityEdit>`, and a plugin's
+ * values go in `ext` under the field name its SDL added
+ * ({@link EntityFieldSlot}).
+ *
+ * Kept to one shape for issues and pull requests, because a plugin that has
+ * something to say about one usually has the same thing to say about the
+ * other.
  */
 export interface PanelSlot {
   noun: "issue" | "pr";
   component: Component;
   order?: number;
+}
+
+/**
+ * A field this plugin's SDL added to `UpdateIssueInput` / `UpdatePrInput`.
+ *
+ * Registering it is what lets the host build a patch naming it, and what gives
+ * a refused edit a name a person recognises. `read` is how its current value
+ * is found on an entity: `Entity.ext` is keyed by plugin short name, and only
+ * the plugin knows what it put there.
+ */
+export interface EntityFieldSlot {
+  /** The input field, e.g. `features`. */
+  field: string;
+  /** What it is called on the page, for the refused-edit alert. */
+  label: string;
+  /** Its current value, read off `Entity.ext`. */
+  read: (ext: Record<string, unknown>) => string[];
 }
 
 /** A field on the new-issue form, whose value joins the mutation's input. */
@@ -68,29 +93,63 @@ export interface FilterSlot {
   options: () => string[];
 }
 
-/** A badge on a row in a listing, beside the labels. */
+/**
+ * A badge on a row in a listing, beside the labels.
+ *
+ * Given the entity the row drew and `where` — a short name for the listing it
+ * is in, `issue` or `inbox-row` — because the same badge is placed differently
+ * in each and an end-to-end test finds it by a name that says which.
+ */
 export interface RowBadgeSlot {
   component: Component;
   order?: number;
 }
 
-/** A way of grouping the inbox, beside the built-in ones. */
+/**
+ * A way of grouping the inbox, beside the built-in ones.
+ *
+ * `key` is both the field in the selection and the query parameter, so a
+ * grouped inbox is an address somebody can send. `label` heads the group and
+ * names its "Any" entry, and `icon` is a Lucide name as the built-in groups
+ * use.
+ */
 export interface InboxGroupSlot {
   key: string;
   label: string;
+  icon: string;
   /** The values present among these items, in the order to offer them. */
-  values: (items: readonly unknown[]) => string[];
-  matches: (item: unknown, value: string) => boolean;
+  values: (items: readonly InboxItem[]) => string[];
+  matches: (item: InboxItem, value: string) => boolean;
+}
+
+/**
+ * How Apollo should cache the types and root fields this plugin's SDL added.
+ *
+ * The host's cache configuration names the types it knows about, and a type it
+ * cannot key is normalised badly rather than loudly — two reads of one feature
+ * becoming two objects, and a write to one leaving the other showing the old
+ * value. `keyArgs` is the same problem for a root field: without it, a query
+ * for one argument is answered from the cache of another.
+ *
+ * Both maps are passed to Apollo as they are.
+ */
+export interface CacheSlot {
+  /** By type name, e.g. `{ Feature: { keyFields: ["slug"] } }`. */
+  typePolicies?: Record<string, { keyFields: string[] | false }>;
+  /** By root query field, e.g. `{ feature: { keyArgs: ["slug"] } }`. */
+  queryFields?: Record<string, { keyArgs: string[] | false }>;
 }
 
 /** What a layer may register. */
 export interface SlotRegistration {
   navLinks?: NavLinkSlot[];
   panels?: PanelSlot[];
+  entityFields?: EntityFieldSlot[];
   formFields?: FormFieldSlot[];
   filters?: FilterSlot[];
   rowBadges?: RowBadgeSlot[];
   inboxGroups?: InboxGroupSlot[];
+  cache?: CacheSlot;
   /**
    * Apollo cache fields to evict when a listing should be refetched.
    *
@@ -104,20 +163,24 @@ export interface SlotRegistration {
 interface Slots {
   navLinks: NavLinkSlot[];
   panels: PanelSlot[];
+  entityFields: EntityFieldSlot[];
   formFields: FormFieldSlot[];
   filters: FilterSlot[];
   rowBadges: RowBadgeSlot[];
   inboxGroups: InboxGroupSlot[];
+  cache: CacheSlot[];
   listings: string[];
 }
 
 const slots: Slots = {
   navLinks: [],
   panels: [],
+  entityFields: [],
   formFields: [],
   filters: [],
   rowBadges: [],
   inboxGroups: [],
+  cache: [],
   listings: [],
 };
 
@@ -130,17 +193,36 @@ export function useNavbookSlots() {
   return {
     navLinks: () => byOrder(slots.navLinks),
     panels: (noun: "issue" | "pr") => byOrder(slots.panels.filter((slot) => slot.noun === noun)),
+    entityFields: () => [...slots.entityFields],
     formFields: (form: "issue-new") =>
       byOrder(slots.formFields.filter((slot) => slot.form === form)),
     filters: (noun: "issue" | "pr") => slots.filters.filter((slot) => slot.nouns.includes(noun)),
     rowBadges: () => byOrder(slots.rowBadges),
     inboxGroups: () => [...slots.inboxGroups],
+    /** Every registered type policy, merged into one map for Apollo. */
+    typePolicies: () =>
+      Object.assign({}, ...slots.cache.map((entry) => entry.typePolicies ?? {})) as Record<
+        string,
+        { keyFields: string[] | false }
+      >,
+    /** Every registered root-field policy, merged the same way. */
+    queryFields: () =>
+      Object.assign({}, ...slots.cache.map((entry) => entry.queryFields ?? {})) as Record<
+        string,
+        { keyArgs: string[] | false }
+      >,
     listings: () => [...slots.listings],
 
     /** Called by a layer's own Nuxt plugin, before the first render. */
     register(registration: SlotRegistration): void {
       for (const link of registration.navLinks ?? []) slots.navLinks.push(link);
       for (const panel of registration.panels ?? []) slots.panels.push(panel);
+      for (const entityField of registration.entityFields ?? []) {
+        slots.entityFields.push(entityField);
+        // The pure patch builder keeps its own list, so it stays testable
+        // without an app; this is the one place the two are kept in step.
+        registerPatchField(entityField.field, entityField.label);
+      }
       for (const field of registration.formFields ?? []) slots.formFields.push(field);
       for (const filter of registration.filters ?? []) {
         slots.filters.push(filter);
@@ -149,7 +231,11 @@ export function useNavbookSlots() {
         registerFilterParam(filter.param, filter.apiField);
       }
       for (const badge of registration.rowBadges ?? []) slots.rowBadges.push(badge);
-      for (const group of registration.inboxGroups ?? []) slots.inboxGroups.push(group);
+      for (const group of registration.inboxGroups ?? []) {
+        slots.inboxGroups.push(group);
+        registerInboxGrouping(group);
+      }
+      if (registration.cache !== undefined) slots.cache.push(registration.cache);
       for (const listing of registration.listings ?? []) {
         if (!slots.listings.includes(listing)) slots.listings.push(listing);
       }
@@ -160,11 +246,15 @@ export function useNavbookSlots() {
 /** Empty every slot. For tests, which would otherwise leak across cases. */
 export function resetNavbookSlots(): void {
   resetFilterParams();
+  resetInboxGroupings();
+  resetPatchFields();
   slots.navLinks.length = 0;
   slots.panels.length = 0;
+  slots.entityFields.length = 0;
   slots.formFields.length = 0;
   slots.filters.length = 0;
   slots.rowBadges.length = 0;
   slots.inboxGroups.length = 0;
+  slots.cache.length = 0;
   slots.listings.length = 0;
 }

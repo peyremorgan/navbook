@@ -10,8 +10,8 @@
  */
 
 import { useMutation } from "@vue/apollo-composable";
-import { ADD_SPEC, CREATE_FEATURE, UPDATE_FEATURE, UPDATE_SPEC } from "~/graphql/mutations";
 import { describeApiError, staleEdit } from "~/utils/errors";
+import { ADD_SPEC, CREATE_FEATURE, UPDATE_FEATURE, UPDATE_SPEC } from "../graphql/mutations";
 
 /** Codes a page answers itself, so the shared toast stays quiet about them. */
 const ASKED = { handledCodes: ["STALE_CONTENT"] } as const;

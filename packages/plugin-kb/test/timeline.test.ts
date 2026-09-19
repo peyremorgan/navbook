@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { describe, it } from "vitest";
-import { mergeTimeline, type TimelineEvent } from "../../app/utils/timeline";
+import { describe, it } from "node:test";
+import { mergeTimeline, type TimelineEvent } from "../web/app/utils/timeline.ts";
 
 const issue = (id: string, created: string) => ({ id, created });
 const commit = (sha: string, date: string) => ({

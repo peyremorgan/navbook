@@ -26,6 +26,7 @@
     "./core": "./src/core/index.ts",
     "./cli": "./src/cli/index.ts",
     "./server": "./src/server/index.ts",
+    "./web": "./web/nuxt.config.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -43,28 +44,43 @@
         "types": "./dist/server/index.d.ts",
         "default": "./dist/server/index.js"
       },
+      "./web": "./web/nuxt.config.ts",
       "./package.json": "./package.json"
     }
   },
   "files": [
     "dist",
     "doc",
-    "schema.graphql"
+    "schema.graphql",
+    "web"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/**/*.test.ts\"",
     "prepack": "node ../../script/require-pnpm.js && pnpm build",
-    "prepublishOnly": "node ../../script/require-pnpm.js"
+    "prepublishOnly": "node ../../script/require-pnpm.js",
+    "codegen": "graphql-codegen --config codegen.ts",
+    "codegen:check": "graphql-codegen --config codegen.ts && git diff --exit-code -- web/src/generated"
   },
   "peerDependencies": {
-    "@navbook/core": "^0.3.0"
+    "@navbook/core": "^0.3.0",
+    "@apollo/client": "^3.14.1",
+    "@vue/apollo-composable": "^4.2.2",
+    "graphql": "^16.14.2",
+    "vue": "^3.5.40"
   },
   "devDependencies": {
-    "@navbook/core": "workspace:*",
+    "@apollo/client": "^3.14.1",
+    "@graphql-codegen/cli": "^7.3.1",
+    "@graphql-codegen/client-preset": "^6.1.3",
+    "@graphql-typed-document-node/core": "^3.2.0",
     "@navbook/cli": "workspace:*",
-    "@navbook/server": "workspace:*"
+    "@navbook/core": "workspace:*",
+    "@navbook/server": "workspace:*",
+    "@vue/apollo-composable": "^4.2.2",
+    "graphql": "^16.14.2",
+    "vue": "^3.5.40"
   },
   "navbook": {
     "short": "kb",
@@ -294,6 +310,21 @@
     },
     "server": {
       "schema": "schema.graphql"
+    },
+    "web": true
+  },
+  "peerDependenciesMeta": {
+    "@apollo/client": {
+      "optional": true
+    },
+    "@vue/apollo-composable": {
+      "optional": true
+    },
+    "graphql": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
     }
   }
 }

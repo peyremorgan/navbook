@@ -29,7 +29,6 @@
 import { useMutation, useQuery } from "@vue/apollo-composable";
 import { ADD_COMMENT, UPDATE_PR } from "~/graphql/mutations";
 import {
-  FEATURES_QUERY,
   PR_CHANGES_QUERY,
   PR_COMMITS_QUERY,
   PR_QUERY,
@@ -156,8 +155,7 @@ const self = useViewerField();
  *
  * Labels and milestones have no registry to read — the format keeps none — so
  * a listing is fetched purely to have something to offer, and being incomplete
- * costs nothing because every menu takes a value that is not in it. Features
- * are real directories, so their list is the registry itself.
+ * costs nothing because every menu takes a value that is not in it.
  *
  * The listing is the served checkout's, not `allRefs`: this is a menu, and the
  * cheaper answer is the right one for a menu. It is also the same cache entry
@@ -168,15 +166,11 @@ const { result: listing } = useQuery(
   { filter: {}, allRefs: false },
   { fetchPolicy: "cache-first" },
 );
-const { result: featureList } = useQuery(FEATURES_QUERY, undefined, {
-  fetchPolicy: "cache-first",
-});
 const known = computed(() => {
   const prs = listing.value?.prs ?? [];
   return {
     labels: distinctValues(prs, (item) => item.labels),
     milestones: distinctValues(prs, (item) => (item.milestone ? [item.milestone] : [])),
-    features: (featureList.value?.features ?? []).map((feature) => feature.slug),
   };
 });
 
@@ -265,7 +259,12 @@ const current = computed<EntityEdit>(() => ({
   labels: [...(pr.value?.labels ?? [])],
   assignees: [...(pr.value?.assignees ?? [])],
   milestone: pr.value?.milestone ?? null,
-  features: [...(pr.value?.features ?? [])],
+  // Values for the fields plugin layers added, read off `Entity.ext` by the
+  // layer that knows what it put there (spec 06 §6.3). Empty with no plugins
+  // loaded, and then every function over an edit ignores it.
+  ext: Object.fromEntries(
+    slots.entityFields().map((field) => [field.field, field.read(pr.value?.ext ?? {})]),
+  ),
   reviewers: [...(pr.value?.reviewers ?? [])],
 }));
 
@@ -598,17 +597,6 @@ const branchHint = computed(() => refusedOn.value);
             </template>
           </LabelEditor>
           <LabelEditor
-            title="Features"
-            icon="i-lucide-layers"
-            testid="features"
-            link-to="/features/"
-            :values="shown.features"
-            :suggestions="known.features"
-            :save="edits.field('features')"
-            :disabled="branchHint !== null"
-            @save="(features: string[]) => save({ features })"
-          />
-          <LabelEditor
             title="Milestone"
             icon="i-lucide-flag"
             testid="milestone"
@@ -628,6 +616,7 @@ const branchHint = computed(() => refusedOn.value);
             :key="`panel-${index}`"
             :entity="shown"
             :saving="edits.saving.value"
+            :field-save="edits.field('ext')"
             @save="save"
           />
 

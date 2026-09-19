@@ -41,14 +41,6 @@ test("names an issue and a pull request after the thing under it", async ({ sign
   await expect(signedIn).toHaveTitle(/^#bbbb0001 .+ · Navbook$/);
 });
 
-test("names a feature, and a document within it", async ({ signedIn, stack }) => {
-  await signedIn.goto(`${stack.appUrl}/features/authentication`);
-  await expect(signedIn).toHaveTitle("Authentication · Navbook");
-
-  await signedIn.goto(`${stack.appUrl}/features/authentication/login-flow.md`);
-  await expect(signedIn).toHaveTitle("Login flow — Authentication · Navbook");
-});
-
 test("gives two different pages two different titles", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/issues`);
   // Waited for, not merely read: `goto` resolves on load and the app mounts
