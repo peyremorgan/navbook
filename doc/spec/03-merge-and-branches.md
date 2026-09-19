@@ -38,6 +38,11 @@ short-lived branches, not parked inside long-lived feature branches.
   to one of its documents names the document too, since the slug alone would
   not say which file moved: `docs(feature): add auth/login-flow.md`. Such a
   commit carries no trailer — there is no ID for one to name.
+- A change an extension makes ([02 §2.12](02-data-model.md)) uses a scope the
+  extension declares, in the same shape: `docs(<scope>): <action> <subject>`.
+  `feature` is one such scope in the reference implementation
+  ([05 §5.2](05-implementation.md)), which is why it is written out above
+  rather than left to the extension to describe.
 - To view code history without tracker noise:
   `git log -- ':!.navbook'`. CI pipelines that should not run for tracker-only
   commits SHOULD use an equivalent path filter on `.navbook/`.

@@ -45,6 +45,16 @@ the person, committer the machine account. The bot, the Action and the email
 ingester remain reserved, and the design is written once here rather than
 per-gateway because it is the same design each time.
 
+Where such a gateway is long-running — a chat bridge listening to Slack, Matrix
+or Discord is the motivating case — it belongs *inside* that server as a plugin
+service ([05 §5.2](05-implementation.md)) rather than beside it as another
+program. Not for convenience: the server already owns the clone, serialises
+operations against it, and synchronises it with the origin, and a second
+process doing the same thing to the same repository would be racing it. The
+identity model is the one above, unchanged — the chat user is `author:`, the
+machine account is the committer — which is the whole reason this is a gateway
+and not a new kind of client.
+
 ## 6.3 Web client (built)
 
 A browser interface so that filing an issue, commenting and reviewing do not
