@@ -18,8 +18,11 @@ import {
   mergeExtensions,
   NO_EXTENSIONS,
 } from "@navbook/core";
+import { checkComposed, requireText } from "../compose.ts";
 import type { Config } from "../config.ts";
+import { invalidInput, run } from "../errors.ts";
 import type { AuthorCache } from "../people.ts";
+import { commitInfo } from "../resolvers/mutation.ts";
 import type { RepoSync } from "../sync.ts";
 import type { ServerPluginEntry, ServerPluginHost } from "./host.ts";
 import { pluginConfig, pluginSchema, type ServerPlugin } from "./resolve.ts";
@@ -89,6 +92,8 @@ export async function loadServerPlugins(opts: LoadOptions): Promise<LoadedPlugin
       resolvers: (map) => runtime.addResolvers(map),
       service: (service) => runtime.addService(service),
       onMutation: (listener) => runtime.onMutation(listener),
+      entityInput: (bridge) => runtime.addBridge(bridge),
+      api: { run, invalidInput, requireText, checkComposed, commitInfo },
     };
     await serverEntry.activate(host);
     opts.report(`loaded plugin ${plugin.name}@${plugin.version}`);

@@ -158,13 +158,6 @@ export type Status =
   | 'MERGED'
   | 'OPEN';
 
-/**
- * Fields to change on a feature's identity card.
- *
- * An omitted field is left alone; `title` can be replaced but not cleared, and an
- * explicit null clears the summary. Frontmatter keys this schema does not name
- * are always preserved.
- */
 export type UpdateFeatureInput = {
   /**
    * The `baseSha` the editor started from.
@@ -182,7 +175,7 @@ export type UpdateFeatureInput = {
  * Fields to change on an issue.
  *
  * An omitted field is left alone. An explicit null clears the key, as does an
- * empty list for `labels`, `assignees` and `features`; `title` and `body` can be
+ * empty list for `labels` and `assignees`; `title` and `body` can be
  * replaced but not cleared. Frontmatter keys this schema does not name are always
  * preserved.
  */
@@ -191,7 +184,7 @@ export type UpdateIssueInput = {
   /**
    * The `baseSha` the edit was composed against, when it was composed against one.
    *
-   * Optional, unlike `UpdateSpecInput.baseSha`: a listing that toggles a label or
+   * Optional: a listing that toggles a label or
    * a drag that sets a rank has not read the file, and need not. Absent, the
    * patch lands on the file as it is. Present, the patch is refused with
    * `STALE_CONTENT` when a field it names has changed since — and only then, so

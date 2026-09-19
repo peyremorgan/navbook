@@ -9,10 +9,8 @@
 import {
   calendarDateOf,
   findEntity,
-  findFeature,
   formatPerson,
   listEntities,
-  listFeatures,
   listPrsAcrossRefs,
   loadRepo,
   mergePeople,
@@ -42,7 +40,15 @@ function today(ctx: GraphQLCtx): string {
 
 export const Query: QueryResolvers = {
   issues: (_parent, args, ctx) =>
-    run(() => ctx.sync.read(() => listEntities(ctx.ws, "issue", toQuery(args.filter, today(ctx))))),
+    run(() =>
+      ctx.sync.read(() =>
+        listEntities(
+          ctx.ws,
+          "issue",
+          toQuery(args.filter, today(ctx), ctx.plugins.filterTerms(args.filter ?? {})),
+        ),
+      ),
+    ),
 
   issue: (_parent, args, ctx) =>
     run(() => ctx.sync.read(() => findEntity(ctx.ws, "issue", args.ref))),
@@ -56,7 +62,7 @@ export const Query: QueryResolvers = {
         if (args.filter?.deadline?.length) {
           throw invalidInput("'deadline' describes an issue; pull requests have no deadline");
         }
-        const query = toQuery(args.filter, today(ctx));
+        const query = toQuery(args.filter, today(ctx), ctx.plugins.filterTerms(args.filter ?? {}));
         // A pull request's files live on the branch it proposes to merge, so
         // the working tree usually does not hold them (spec 03 §3.5).
         if (args.allRefs) {
@@ -78,10 +84,6 @@ export const Query: QueryResolvers = {
         return { entity, refs: ref === null ? [] : [ref] };
       }),
     ),
-
-  features: (_parent, _args, ctx) => run(() => ctx.sync.read(() => listFeatures(ctx.ws))),
-
-  feature: (_parent, args, ctx) => run(() => ctx.sync.read(() => findFeature(ctx.ws, args.slug))),
 
   doctor: (_parent, _args, ctx) =>
     run(() => ctx.sync.read(() => ({ diagnostics: runDoctor(ctx.ws).diagnostics }))),

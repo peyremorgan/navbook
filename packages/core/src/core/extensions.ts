@@ -16,6 +16,7 @@
  */
 
 import type { ParsedFile, Problem } from "./files.ts";
+import type { PluginManifest } from "./plugins.ts";
 import type { EntityKind, EntityRecord, NavTree, Repo, StructuralProblem } from "./tree.ts";
 import type { Level } from "./validate.ts";
 
@@ -211,6 +212,32 @@ export function mergeExtensions(parts: readonly ExtensionParts[]): CoreExtension
 
   if (conflicts.length > 0) throw new ExtensionConflictError(conflicts);
   return { treeLocations, frontmatterKeys, queryKeys, doctorChecks, commitScopes };
+}
+
+/**
+ * What a plugin's `./core` entry is handed — spec 05 §5.2.
+ *
+ * `core` is the *host's* module object, never one the plugin resolved. That is
+ * the single most important line here: a plugin with its own copy of
+ * `@navbook/core` would make `instanceof WorkspaceError` false across the
+ * boundary, put two YAML parsers on the startup path, and give two
+ * structurally identical `Repo` types different identities. The CLI store
+ * installs with `--omit=peer` so that copy cannot exist; this is how the
+ * plugin gets the real one instead.
+ *
+ * Declared in core rather than in a front end because every front end builds
+ * one, and a plugin typing against it should not have to depend on whichever
+ * of them happens to be loading it.
+ */
+export interface CorePluginHost {
+  /** The running core — the host's copy. */
+  core: typeof import("../index.ts");
+  /** The plugin's own manifest, so it need not read its `package.json`. */
+  manifest: PluginManifest;
+  /** What `navbook.json` declares under this plugin's name (spec 02 §2.12). */
+  settings: Record<string, unknown>;
+  /** Register tree locations, frontmatter keys, query terms and checks. */
+  register(parts: ExtensionParts): void;
 }
 
 /** The definition for a query key, or undefined when no plugin answers it. */

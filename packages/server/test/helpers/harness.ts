@@ -201,3 +201,7 @@ export function ok<T>(response: GraphQLResponse<T>): T {
   }
   return response.data;
 }
+
+// Re-exported so a plugin's suite has one import for the whole harness rather
+// than reaching into this package's test tree by path.
+export { type Fixture, originSubjects } from "./temprepo.ts";

@@ -195,3 +195,23 @@ export function readPluginAt(dir: string): IndexedPlugin | { error: string } {
 export function packageDir(env: NodeJS.ProcessEnv, name: string): string {
   return join(storeDir(env), "node_modules", ...name.split("/"));
 }
+
+/**
+ * The package names the store depends on, as npm recorded them.
+ *
+ * What was *asked* for and what was *installed* are not the same string: a
+ * tarball path, a git URL and a short name all resolve to a package whose real
+ * name is inside it, and looking in `node_modules/<what-was-typed>` finds
+ * nothing. npm writes the real name into the store's own `package.json`, so
+ * reading it back is how an install learns what it actually got.
+ */
+export function storeDependencies(env: NodeJS.ProcessEnv): string[] {
+  try {
+    const pkg = JSON.parse(readFileSync(join(storeDir(env), "package.json"), "utf8")) as {
+      dependencies?: Record<string, string>;
+    };
+    return Object.keys(pkg.dependencies ?? {});
+  } catch {
+    return [];
+  }
+}

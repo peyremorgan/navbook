@@ -66,6 +66,16 @@ export interface PluginService {
   stop(): Promise<void>;
 }
 
+/** How a plugin's own input fields reach the format and the query. */
+export interface EntityInputBridge {
+  /** Frontmatter for a newly composed entity, read off the mutation's input. */
+  openFields?(input: Record<string, unknown>): Record<string, string | readonly string[]>;
+  /** Keys to patch on an existing entity, including nulls that clear one. */
+  patchFields?(input: Record<string, unknown>): Record<string, unknown>;
+  /** Registered query terms a filter asks for, by key. */
+  filterTerms?(filter: Record<string, unknown>): Record<string, string[]>;
+}
+
 export interface ServerPluginHost {
   /** The running core — the server's copy, never one the plugin resolved. */
   core: typeof NavbookCore;
@@ -94,4 +104,52 @@ export interface ServerPluginHost {
   service(service: PluginService): void;
   /** Subscribe to every committed mutation, this plugin's included. */
   onMutation(listener: (event: MutationEvent) => void): void;
+  /**
+   * Bridge the fields a plugin added to an input onto the format.
+   *
+   * A plugin's SDL can add `features` to `OpenIssueInput` and to
+   * `EntityFilter`, but the resolver that composes an issue is the host's and
+   * knows nothing about them. These two hooks are how the values reach the
+   * file and the query: the host calls them where it builds each, so a
+   * plugin's field behaves exactly as a built-in one does rather than needing
+   * its own mutation.
+   */
+  entityInput(bridge: EntityInputBridge): void;
+  /**
+   * The pieces a resolver needs to behave like a built-in one.
+   *
+   * Named rather than left to a plugin to reimplement, because each of them is
+   * a decision this server has already made: how a `WorkspaceError` becomes a
+   * GraphQL error with the right extension code, what an empty required field
+   * is called, and that a composed file is validated before it is written. A
+   * plugin reproducing them would reproduce them slightly differently, and the
+   * difference would show up as one mutation reporting a fault unlike every
+   * other.
+   */
+  api: {
+    /** Run an operation, translating a core failure into a GraphQL error. */
+    run<T>(operation: () => T | Promise<T>): Promise<T>;
+    /** The error a malformed request gets, with its extension code. */
+    invalidInput(message: string): Error;
+    /** Refuse an empty required string, naming the field. */
+    requireText(value: string, field: string): void;
+    /** Validate a composed file before it is written, as the built-ins do. */
+    checkComposed(
+      content: string,
+      validate: (parsed: import("@navbook/core").ParsedFile) => { message: string }[],
+      noun: string,
+    ): void;
+    /** Report a commit to the client, and emit the mutation event. */
+    commitInfo(
+      ctx: GraphQLCtx,
+      result: import("@navbook/core").RunPlanResult,
+      pushed: boolean,
+    ): { committed: boolean; subject: string; pushed: boolean };
+  };
 }
+
+// A plugin's resolvers are handed the server's own context, and its patchers
+// report through the server's own errors. Re-exported here so `./plugin` is
+// the whole surface a plugin types against, rather than one of three imports.
+export type { GraphQLCtx } from "../context.ts";
+export { apiError, invalidInput } from "../errors.ts";

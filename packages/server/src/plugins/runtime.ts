@@ -10,11 +10,12 @@
 
 import type { GraphQLCtx } from "../context.ts";
 import type { PluginResolvers } from "../schema.ts";
-import type { MutationEvent, PluginService } from "./host.ts";
+import type { EntityInputBridge, MutationEvent, PluginService } from "./host.ts";
 
 export class PluginRuntime {
   readonly resolvers: PluginResolvers[] = [];
   readonly services: PluginService[] = [];
+  readonly bridges: EntityInputBridge[] = [];
   #listeners: ((event: MutationEvent) => void)[] = [];
   #report: (line: string) => void;
 
@@ -28,6 +29,25 @@ export class PluginRuntime {
 
   addService(service: PluginService): void {
     this.services.push(service);
+  }
+
+  addBridge(bridge: EntityInputBridge): void {
+    this.bridges.push(bridge);
+  }
+
+  /** Frontmatter every plugin wants on a newly composed entity. */
+  openFields(input: Record<string, unknown>): Record<string, string | readonly string[]> {
+    return Object.assign({}, ...this.bridges.map((b) => b.openFields?.(input) ?? {}));
+  }
+
+  /** Keys every plugin wants patched on an existing entity. */
+  patchFields(input: Record<string, unknown>): Record<string, unknown> {
+    return Object.assign({}, ...this.bridges.map((b) => b.patchFields?.(input) ?? {}));
+  }
+
+  /** Registered query terms every plugin reads out of a filter. */
+  filterTerms(filter: Record<string, unknown>): Record<string, string[]> {
+    return Object.assign({}, ...this.bridges.map((b) => b.filterTerms?.(filter) ?? {}));
   }
 
   onMutation(listener: (event: MutationEvent) => void): void {

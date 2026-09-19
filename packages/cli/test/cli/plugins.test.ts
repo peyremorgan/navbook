@@ -286,13 +286,27 @@ describe("contributions to a built-in verb", () => {
     }
   });
 
-  it("offers the plugin's listing completions", () => {
+  it("offers the plugin's listing term, and its values", () => {
     const repo = probeRepo();
     try {
-      const result = repo.nav(["__complete", "issue", "list"], withProbe(repo));
-      const words = result.stdout.split("\n");
-      // From the manifest, so no plugin is loaded to produce it.
+      repo.nav(["issue", "open", "One", "-m", "b", "--probe-tag", "flaky"], withProbe(repo));
+      const words = repo.nav(["__complete", "issue", "list"], withProbe(repo)).stdout.split("\n");
+      // The term itself is in the manifest; the values are the plugin's, and
+      // it declared `completions` on this verb to be asked for them.
       assert.ok(words.includes("ptag:"));
+      assert.ok(words.includes("ptag:flaky"));
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("costs nothing to list a plugin noun's verbs", () => {
+    // Verb names come from the manifest, so completing `nav probe <TAB>`
+    // imports nothing — the cheap case stays cheap.
+    const repo = probeRepo();
+    try {
+      clearLog(repo);
+      repo.nav(["__complete", "probe"], withProbe(repo));
       assert.deepEqual(repo.log(), []);
     } finally {
       repo.cleanup();

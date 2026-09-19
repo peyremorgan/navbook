@@ -68,6 +68,19 @@ export class PluginRuntime {
     // built and exits, so there is nothing for an extension to be needed by.
     if (argv.some((word) => word === "--help" || word === "-h")) return false;
     const words = argv.filter((word) => !word.startsWith("-"));
+    // `__complete` is a stand-in for whatever is being typed, so the decision
+    // is made about *that*: completing `nav issue list` must load whatever
+    // completing `nav issue list` would.
+    //
+    // With one exception. A plugin noun on its own — `nav probe <TAB>` — is
+    // answered with its verb names, which come from the manifest, so it costs
+    // nothing. Only once a verb is on the line can completion reach an
+    // argument completer or a query term, and only then is the tree needed.
+    const completing = words[0] === "__complete";
+    if (completing) {
+      words.shift();
+      if (words.length <= 1) return false;
+    }
     const [noun, verb] = words;
     if (noun === undefined) return false;
     if (noun === "doctor") return true;

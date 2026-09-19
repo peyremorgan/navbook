@@ -29,8 +29,6 @@ const config: CodegenConfig = {
           Comment: "../mappers.ts#CommentParent",
           LinkNode: "../mappers.ts#LinkNodeParent",
           Diagnostic: "../mappers.ts#DiagnosticParent",
-          Feature: "../mappers.ts#FeatureParent",
-          Spec: "../mappers.ts#SpecParent",
           Commit: "../mappers.ts#CommitParent",
           CommitRange: "../mappers.ts#CommitRangeParent",
           Changes: "../mappers.ts#ChangesParent",

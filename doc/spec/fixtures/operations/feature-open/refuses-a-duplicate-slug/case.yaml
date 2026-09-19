@@ -1,5 +1,6 @@
 spec-version: 1
 description: a slug that already names a feature is refused, and nothing is written
+plugins: ["@navbook/plugin-kb"]
 init: {from: before}
 run:
   command: [feature, open, "Another", --slug, auth, -m, "x"]

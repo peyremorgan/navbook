@@ -147,27 +147,6 @@ describe("matchesQuery", () => {
     assert.deepEqual(matching(entities, "milestone:v1"), []);
   });
 
-  it("matches every named feature, so two terms narrow", () => {
-    const entities = build([
-      { id: "aaaaaaa1", features: ["auth", "mobile"] },
-      { id: "bbbbbbb2", features: ["auth"] },
-      { id: "ccccccc3" },
-    ]);
-    assert.deepEqual(matching(entities, "feature:auth"), ["aaaaaaa1", "bbbbbbb2"]);
-    assert.deepEqual(matching(entities, "feature:auth", "feature:mobile"), ["aaaaaaa1"]);
-    assert.deepEqual(matching(entities, "feature:billing"), []);
-    // A query typed with a capital still finds the lowercase slug it means.
-    assert.deepEqual(matching(entities, "feature:AUTH"), ["aaaaaaa1", "bbbbbbb2"]);
-  });
-
-  it("reads a feature term as a term, not as free text", () => {
-    const entities = build([{ id: "aaaaaaa1", body: "feature:auth appears in the body" }]);
-    assert.deepEqual(matching(entities, "feature:auth"), []);
-    assert.deepEqual(query("feature:auth").features, ["auth"]);
-    assert.deepEqual(query("feature:auth").text, []);
-    assert.equal(isQueryError(parseQuery(["feature:"], "issue")), true);
-  });
-
   it("searches title, description and comment bodies for free text", () => {
     const entities = build([
       { id: "aaaaaaa1", title: "Timeout on login" },

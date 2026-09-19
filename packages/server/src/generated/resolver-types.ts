@@ -1,5 +1,5 @@
 import type { GraphQLResolveInfo } from 'graphql';
-import type { IssueParent, PrParent, EntityParent, CommentParent, LinkNodeParent, DiagnosticParent, FeatureParent, SpecParent, CommitParent, CommitRangeParent, ChangesParent, ChangedFileParent } from '../mappers.ts';
+import type { IssueParent, PrParent, EntityParent, CommentParent, LinkNodeParent, DiagnosticParent, CommitParent, CommitRangeParent, ChangesParent, ChangedFileParent } from '../mappers.ts';
 import type { GraphQLCtx } from '../context.ts';
 export type Maybe<T> = T | null;
 export type InputMaybe<T> = Maybe<T>;
@@ -43,22 +43,6 @@ export type AddCommentPayload = {
   comment: Comment;
   commit: CommitInfo;
   entity: Entity;
-};
-
-export type AddSpecInput = {
-  body: Scalars['String']['input'];
-  /** Slug of the feature to add it to. */
-  feature: Scalars['String']['input'];
-  /** File to write it to; derived from the title when absent. */
-  fileName?: InputMaybe<Scalars['String']['input']>;
-  title: Scalars['String']['input'];
-};
-
-export type AddSpecPayload = {
-  __typename?: 'AddSpecPayload';
-  commit: CommitInfo;
-  feature: Feature;
-  spec: Spec;
 };
 
 /** Approvals counted against the number the review policy asks for. */
@@ -142,7 +126,7 @@ export type Comment = {
   verdict?: Maybe<Verdict>;
 };
 
-/** A commit, as a feature's history reports it. */
+/** A commit, as a history walk reports it. */
 export type Commit = {
   __typename?: 'Commit';
   /** RFC 5322 address of the commit's author: `Name <email>`. */
@@ -169,20 +153,6 @@ export type CommitRange = {
   commits: Array<Commit>;
   /** How many the range holds, whatever the limit kept. */
   total: Scalars['Int']['output'];
-};
-
-export type CreateFeatureInput = {
-  /** Directory to file it under; derived from the title when absent. */
-  slug?: InputMaybe<Scalars['String']['input']>;
-  /** Markdown summary; a feature may have none. */
-  summary?: InputMaybe<Scalars['String']['input']>;
-  title: Scalars['String']['input'];
-};
-
-export type CreateFeaturePayload = {
-  __typename?: 'CreateFeaturePayload';
-  commit: CommitInfo;
-  feature: Feature;
 };
 
 /** Where an issue stands against its deadline (spec 02 §2.5). */
@@ -226,8 +196,6 @@ export type Entity = {
   body: Scalars['String']['output'];
   comments: Array<Comment>;
   created: Scalars['String']['output'];
-  /** Slugs of the features this entity belongs to (spec 02 §2.11). */
-  features: Array<Scalars['String']['output']>;
   id: Scalars['ID']['output'];
   kind: Kind;
   labels: Array<Scalars['String']['output']>;
@@ -263,8 +231,6 @@ export type EntityFilter = {
    * of what `issues` does with the three above.
    */
   deadline?: InputMaybe<Array<DeadlineState>>;
-  /** Feature slugs; an entity must name every one of them. */
-  features?: InputMaybe<Array<Scalars['String']['input']>>;
   labels?: InputMaybe<Array<Scalars['String']['input']>>;
   milestones?: InputMaybe<Array<Scalars['String']['input']>>;
   /**
@@ -280,58 +246,6 @@ export type EntityFilter = {
   status?: InputMaybe<Array<Status>>;
   /** Free text, matched against title, body and comments. */
   text?: InputMaybe<Array<Scalars['String']['input']>>;
-};
-
-/**
- * A feature: a standing concept work attaches to (spec 02 §2.11).
- *
- * It has no ID and no status. Its `slug` is the directory that holds it and is
- * what an entity's `feature` key names; the work attached to it has the status.
- */
-export type Feature = {
-  __typename?: 'Feature';
-  /** RFC 5322 address as stored in frontmatter: `Name <email>`. */
-  author: Scalars['String']['output'];
-  /**
-   * The blob hash of `feature.md` as it now stands.
-   *
-   * Hand it back as `baseSha` when editing, and an edit made against an older
-   * version is refused rather than landed on top of somebody else's.
-   */
-  baseSha: Scalars['String']['output'];
-  /**
-   * Commits that touched this feature, newest first.
-   *
-   * A commit counts when it changed the feature's documents, when it changed the
-   * directory of an issue or pull request naming the feature, or when its message
-   * references one of those by ID — which is how a commit that only touches code
-   * joins the story (spec 04 §4.3). Read from the served checkout's history.
-   */
-  commits: Array<Commit>;
-  created: Scalars['String']['output'];
-  /** Issues naming this feature, newest first, whatever their status. */
-  issues: Array<Issue>;
-  /** Path from the repository root, e.g. `.navbook/specs/auth`. */
-  path: Scalars['String']['output'];
-  /** Pull requests naming this feature, newest first. */
-  prs: Array<Pr>;
-  slug: Scalars['String']['output'];
-  /** Specification documents, in file-name order. */
-  specs: Array<Spec>;
-  /** Markdown summary, trimmed. A feature may have none. */
-  summary: Scalars['String']['output'];
-  title: Scalars['String']['output'];
-};
-
-
-/**
- * A feature: a standing concept work attaches to (spec 02 §2.11).
- *
- * It has no ID and no status. Its `slug` is the directory that holds it and is
- * what an entity's `feature` key names; the work attached to it has the status.
- */
-export type FeatureCommitsArgs = {
-  limit?: Scalars['Int']['input'];
 };
 
 export type Issue = Entity & {
@@ -355,7 +269,6 @@ export type Issue = Entity & {
   deadline?: Maybe<Scalars['String']['output']>;
   /** The issue this one duplicates. */
   duplicateOf?: Maybe<Scalars['ID']['output']>;
-  features: Array<Scalars['String']['output']>;
   id: Scalars['ID']['output'];
   kind: Kind;
   labels: Array<Scalars['String']['output']>;
@@ -443,14 +356,11 @@ export type MergedInfo = {
 export type Mutation = {
   __typename?: 'Mutation';
   addComment: AddCommentPayload;
-  addSpec: AddSpecPayload;
   closeIssue: CloseIssuePayload;
-  createFeature: CreateFeaturePayload;
   linkIssue: LinkIssuePayload;
   openIssue: OpenIssuePayload;
   reopenIssue: ReopenIssuePayload;
   unlinkIssue: UnlinkIssuePayload;
-  updateFeature: UpdateFeaturePayload;
   updateIssue: UpdateIssuePayload;
   /**
    * Patch a pull request's metadata, `reviewers` included.
@@ -460,7 +370,6 @@ export type Mutation = {
    * here to patch, and the answer is to serve that branch.
    */
   updatePr: UpdatePrPayload;
-  updateSpec: UpdateSpecPayload;
 };
 
 
@@ -469,18 +378,8 @@ export type MutationAddCommentArgs = {
 };
 
 
-export type MutationAddSpecArgs = {
-  input: AddSpecInput;
-};
-
-
 export type MutationCloseIssueArgs = {
   input: CloseIssueInput;
-};
-
-
-export type MutationCreateFeatureArgs = {
-  input: CreateFeatureInput;
 };
 
 
@@ -504,11 +403,6 @@ export type MutationUnlinkIssueArgs = {
 };
 
 
-export type MutationUpdateFeatureArgs = {
-  input: UpdateFeatureInput;
-};
-
-
 export type MutationUpdateIssueArgs = {
   input: UpdateIssueInput;
 };
@@ -518,18 +412,11 @@ export type MutationUpdatePrArgs = {
   input: UpdatePrInput;
 };
 
-
-export type MutationUpdateSpecArgs = {
-  input: UpdateSpecInput;
-};
-
 export type OpenIssueInput = {
   assignees?: InputMaybe<Array<Scalars['String']['input']>>;
   body: Scalars['String']['input'];
   /** When the work is wanted, `YYYY-MM-DD`. */
   deadline?: InputMaybe<Scalars['String']['input']>;
-  /** Slugs of features to attach it to (spec 02 §2.11). */
-  features?: InputMaybe<Array<Scalars['String']['input']>>;
   labels?: InputMaybe<Array<Scalars['String']['input']>>;
   milestone?: InputMaybe<Scalars['String']['input']>;
   /** ID or prefix of the issue to file this one under. */
@@ -580,7 +467,6 @@ export type Pr = Entity & {
   commits: CommitRange;
   created: Scalars['String']['output'];
   draft: Scalars['Boolean']['output'];
-  features: Array<Scalars['String']['output']>;
   id: Scalars['ID']['output'];
   kind: Kind;
   labels: Array<Scalars['String']['output']>;
@@ -624,10 +510,6 @@ export type PrCommitsArgs = {
 export type Query = {
   __typename?: 'Query';
   doctor: DoctorReport;
-  /** `slug` is exact: a feature is named by a word somebody chose, not a prefix. */
-  feature: Feature;
-  /** Every feature in the working tree, in slug order (spec 02 §2.11). */
-  features: Array<Feature>;
   /** `ref` is a full ID or an unambiguous prefix of at least four characters. */
   issue: Issue;
   issues: Array<Issue>;
@@ -668,11 +550,6 @@ export type Query = {
   /** How this repository counts reviews (spec 02 §2.10). */
   reviewPolicy: ReviewPolicy;
   viewer: Viewer;
-};
-
-
-export type QueryFeatureArgs = {
-  slug: Scalars['String']['input'];
 };
 
 
@@ -757,20 +634,6 @@ export type Revision = {
   head: Scalars['String']['output'];
 };
 
-/** One of a feature's specification documents (spec 02 §2.11). */
-export type Spec = {
-  __typename?: 'Spec';
-  /** The blob hash of this file as it now stands; see `Feature.baseSha`. */
-  baseSha: Scalars['String']['output'];
-  /** Markdown body, trimmed. */
-  body: Scalars['String']['output'];
-  /** File name inside the feature's directory, e.g. `login-flow.md`. */
-  fileName: Scalars['String']['output'];
-  /** Path from the repository root. */
-  path: Scalars['String']['output'];
-  title: Scalars['String']['output'];
-};
-
 /** Issues are open or closed; pull requests may also be merged (spec 02 §2.1). */
 export type Status =
   | 'CLOSED'
@@ -785,36 +648,10 @@ export type UnlinkIssuePayload = {
 };
 
 /**
- * Fields to change on a feature's identity card.
- *
- * An omitted field is left alone; `title` can be replaced but not cleared, and an
- * explicit null clears the summary. Frontmatter keys this schema does not name
- * are always preserved.
- */
-export type UpdateFeatureInput = {
-  /**
-   * The `baseSha` the editor started from.
-   *
-   * A save whose file has moved on since is refused with `STALE_CONTENT` rather
-   * than landed on top of the change that moved it (spec 06 §6.3).
-   */
-  baseSha: Scalars['String']['input'];
-  slug: Scalars['String']['input'];
-  summary?: InputMaybe<Scalars['String']['input']>;
-  title?: InputMaybe<Scalars['String']['input']>;
-};
-
-export type UpdateFeaturePayload = {
-  __typename?: 'UpdateFeaturePayload';
-  commit: CommitInfo;
-  feature: Feature;
-};
-
-/**
  * Fields to change on an issue.
  *
  * An omitted field is left alone. An explicit null clears the key, as does an
- * empty list for `labels`, `assignees` and `features`; `title` and `body` can be
+ * empty list for `labels` and `assignees`; `title` and `body` can be
  * replaced but not cleared. Frontmatter keys this schema does not name are always
  * preserved.
  */
@@ -823,7 +660,7 @@ export type UpdateIssueInput = {
   /**
    * The `baseSha` the edit was composed against, when it was composed against one.
    *
-   * Optional, unlike `UpdateSpecInput.baseSha`: a listing that toggles a label or
+   * Optional: a listing that toggles a label or
    * a drag that sets a rank has not read the file, and need not. Absent, the
    * patch lands on the file as it is. Present, the patch is refused with
    * `STALE_CONTENT` when a field it names has changed since — and only then, so
@@ -835,7 +672,6 @@ export type UpdateIssueInput = {
   body?: InputMaybe<Scalars['String']['input']>;
   /** When the work is wanted, `YYYY-MM-DD`; an explicit null undates it. */
   deadline?: InputMaybe<Scalars['String']['input']>;
-  features?: InputMaybe<Array<Scalars['String']['input']>>;
   labels?: InputMaybe<Array<Scalars['String']['input']>>;
   milestone?: InputMaybe<Scalars['String']['input']>;
   /** Where it sits in the queue; an explicit null unplaces it (spec 02 §2.5). */
@@ -863,7 +699,6 @@ export type UpdatePrInput = {
   /** See `UpdateIssueInput.baseSha`. */
   baseSha?: InputMaybe<Scalars['String']['input']>;
   body?: InputMaybe<Scalars['String']['input']>;
-  features?: InputMaybe<Array<Scalars['String']['input']>>;
   labels?: InputMaybe<Array<Scalars['String']['input']>>;
   milestone?: InputMaybe<Scalars['String']['input']>;
   ref: Scalars['ID']['input'];
@@ -875,23 +710,6 @@ export type UpdatePrPayload = {
   __typename?: 'UpdatePrPayload';
   commit: CommitInfo;
   pr: Pr;
-};
-
-/** Fields to change on a document; `title` and `body` are replaced, never cleared. */
-export type UpdateSpecInput = {
-  /** See `UpdateFeatureInput.baseSha`. */
-  baseSha: Scalars['String']['input'];
-  body?: InputMaybe<Scalars['String']['input']>;
-  feature: Scalars['String']['input'];
-  fileName: Scalars['String']['input'];
-  title?: InputMaybe<Scalars['String']['input']>;
-};
-
-export type UpdateSpecPayload = {
-  __typename?: 'UpdateSpecPayload';
-  commit: CommitInfo;
-  feature: Feature;
-  spec: Spec;
 };
 
 /**
@@ -988,8 +806,6 @@ export type DirectiveResolverFn<TResult = Record<PropertyKey, never>, TParent = 
 export type ResolversTypes = {
   AddCommentInput: AddCommentInput;
   AddCommentPayload: ResolverTypeWrapper<Omit<AddCommentPayload, 'comment' | 'entity'> & { comment: ResolversTypes['Comment'], entity: ResolversTypes['Entity'] }>;
-  AddSpecInput: AddSpecInput;
-  AddSpecPayload: ResolverTypeWrapper<Omit<AddSpecPayload, 'feature' | 'spec'> & { feature: ResolversTypes['Feature'], spec: ResolversTypes['Spec'] }>;
   Approvals: ResolverTypeWrapper<Approvals>;
   Boolean: ResolverTypeWrapper<Scalars['Boolean']['output']>;
   ChangeStatus: ChangeStatus;
@@ -1001,15 +817,12 @@ export type ResolversTypes = {
   Commit: ResolverTypeWrapper<CommitParent>;
   CommitInfo: ResolverTypeWrapper<CommitInfo>;
   CommitRange: ResolverTypeWrapper<CommitRangeParent>;
-  CreateFeatureInput: CreateFeatureInput;
-  CreateFeaturePayload: ResolverTypeWrapper<Omit<CreateFeaturePayload, 'feature'> & { feature: ResolversTypes['Feature'] }>;
   DeadlineState: DeadlineState;
   Diagnostic: ResolverTypeWrapper<DiagnosticParent>;
   DiagnosticLevel: DiagnosticLevel;
   DoctorReport: ResolverTypeWrapper<Omit<DoctorReport, 'diagnostics'> & { diagnostics: Array<ResolversTypes['Diagnostic']> }>;
   Entity: ResolverTypeWrapper<EntityParent>;
   EntityFilter: EntityFilter;
-  Feature: ResolverTypeWrapper<FeatureParent>;
   Float: ResolverTypeWrapper<Scalars['Float']['output']>;
   ID: ResolverTypeWrapper<Scalars['ID']['output']>;
   Int: ResolverTypeWrapper<Scalars['Int']['output']>;
@@ -1030,18 +843,13 @@ export type ResolversTypes = {
   ReviewState: ReviewState;
   ReviewerState: ResolverTypeWrapper<ReviewerState>;
   Revision: ResolverTypeWrapper<Revision>;
-  Spec: ResolverTypeWrapper<SpecParent>;
   Status: Status;
   String: ResolverTypeWrapper<Scalars['String']['output']>;
   UnlinkIssuePayload: ResolverTypeWrapper<Omit<UnlinkIssuePayload, 'child'> & { child: ResolversTypes['Issue'] }>;
-  UpdateFeatureInput: UpdateFeatureInput;
-  UpdateFeaturePayload: ResolverTypeWrapper<Omit<UpdateFeaturePayload, 'feature'> & { feature: ResolversTypes['Feature'] }>;
   UpdateIssueInput: UpdateIssueInput;
   UpdateIssuePayload: ResolverTypeWrapper<Omit<UpdateIssuePayload, 'issue'> & { issue: ResolversTypes['Issue'] }>;
   UpdatePrInput: UpdatePrInput;
   UpdatePrPayload: ResolverTypeWrapper<Omit<UpdatePrPayload, 'pr'> & { pr: ResolversTypes['Pr'] }>;
-  UpdateSpecInput: UpdateSpecInput;
-  UpdateSpecPayload: ResolverTypeWrapper<Omit<UpdateSpecPayload, 'feature' | 'spec'> & { feature: ResolversTypes['Feature'], spec: ResolversTypes['Spec'] }>;
   Verdict: Verdict;
   Viewer: ResolverTypeWrapper<Viewer>;
 };
@@ -1050,8 +858,6 @@ export type ResolversTypes = {
 export type ResolversParentTypes = {
   AddCommentInput: AddCommentInput;
   AddCommentPayload: Omit<AddCommentPayload, 'comment' | 'entity'> & { comment: ResolversParentTypes['Comment'], entity: ResolversParentTypes['Entity'] };
-  AddSpecInput: AddSpecInput;
-  AddSpecPayload: Omit<AddSpecPayload, 'feature' | 'spec'> & { feature: ResolversParentTypes['Feature'], spec: ResolversParentTypes['Spec'] };
   Approvals: Approvals;
   Boolean: Scalars['Boolean']['output'];
   ChangedFile: ChangedFileParent;
@@ -1062,13 +868,10 @@ export type ResolversParentTypes = {
   Commit: CommitParent;
   CommitInfo: CommitInfo;
   CommitRange: CommitRangeParent;
-  CreateFeatureInput: CreateFeatureInput;
-  CreateFeaturePayload: Omit<CreateFeaturePayload, 'feature'> & { feature: ResolversParentTypes['Feature'] };
   Diagnostic: DiagnosticParent;
   DoctorReport: Omit<DoctorReport, 'diagnostics'> & { diagnostics: Array<ResolversParentTypes['Diagnostic']> };
   Entity: EntityParent;
   EntityFilter: EntityFilter;
-  Feature: FeatureParent;
   Float: Scalars['Float']['output'];
   ID: Scalars['ID']['output'];
   Int: Scalars['Int']['output'];
@@ -1086,17 +889,12 @@ export type ResolversParentTypes = {
   ReviewPolicy: ReviewPolicy;
   ReviewerState: ReviewerState;
   Revision: Revision;
-  Spec: SpecParent;
   String: Scalars['String']['output'];
   UnlinkIssuePayload: Omit<UnlinkIssuePayload, 'child'> & { child: ResolversParentTypes['Issue'] };
-  UpdateFeatureInput: UpdateFeatureInput;
-  UpdateFeaturePayload: Omit<UpdateFeaturePayload, 'feature'> & { feature: ResolversParentTypes['Feature'] };
   UpdateIssueInput: UpdateIssueInput;
   UpdateIssuePayload: Omit<UpdateIssuePayload, 'issue'> & { issue: ResolversParentTypes['Issue'] };
   UpdatePrInput: UpdatePrInput;
   UpdatePrPayload: Omit<UpdatePrPayload, 'pr'> & { pr: ResolversParentTypes['Pr'] };
-  UpdateSpecInput: UpdateSpecInput;
-  UpdateSpecPayload: Omit<UpdateSpecPayload, 'feature' | 'spec'> & { feature: ResolversParentTypes['Feature'], spec: ResolversParentTypes['Spec'] };
   Viewer: Viewer;
 };
 
@@ -1104,12 +902,6 @@ export type AddCommentPayloadResolvers<ContextType = GraphQLCtx, ParentType exte
   comment?: Resolver<ResolversTypes['Comment'], ParentType, ContextType>;
   commit?: Resolver<ResolversTypes['CommitInfo'], ParentType, ContextType>;
   entity?: Resolver<ResolversTypes['Entity'], ParentType, ContextType>;
-};
-
-export type AddSpecPayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['AddSpecPayload'] = ResolversParentTypes['AddSpecPayload']> = {
-  commit?: Resolver<ResolversTypes['CommitInfo'], ParentType, ContextType>;
-  feature?: Resolver<ResolversTypes['Feature'], ParentType, ContextType>;
-  spec?: Resolver<ResolversTypes['Spec'], ParentType, ContextType>;
 };
 
 export type ApprovalsResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['Approvals'] = ResolversParentTypes['Approvals']> = {
@@ -1174,11 +966,6 @@ export type CommitRangeResolvers<ContextType = GraphQLCtx, ParentType extends Re
   total?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
 };
 
-export type CreateFeaturePayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['CreateFeaturePayload'] = ResolversParentTypes['CreateFeaturePayload']> = {
-  commit?: Resolver<ResolversTypes['CommitInfo'], ParentType, ContextType>;
-  feature?: Resolver<ResolversTypes['Feature'], ParentType, ContextType>;
-};
-
 export type DiagnosticResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['Diagnostic'] = ResolversParentTypes['Diagnostic']> = {
   check?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   fixable?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
@@ -1195,20 +982,6 @@ export type EntityResolvers<ContextType = GraphQLCtx, ParentType extends Resolve
   __resolveType: TypeResolveFn<'Issue' | 'Pr', ParentType, ContextType>;
 };
 
-export type FeatureResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['Feature'] = ResolversParentTypes['Feature']> = {
-  author?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
-  baseSha?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
-  commits?: Resolver<Array<ResolversTypes['Commit']>, ParentType, ContextType, RequireFields<FeatureCommitsArgs, 'limit'>>;
-  created?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
-  issues?: Resolver<Array<ResolversTypes['Issue']>, ParentType, ContextType>;
-  path?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
-  prs?: Resolver<Array<ResolversTypes['Pr']>, ParentType, ContextType>;
-  slug?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
-  specs?: Resolver<Array<ResolversTypes['Spec']>, ParentType, ContextType>;
-  summary?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
-  title?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
-};
-
 export type IssueResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['Issue'] = ResolversParentTypes['Issue']> = {
   archived?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   assignees?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
@@ -1219,7 +992,6 @@ export type IssueResolvers<ContextType = GraphQLCtx, ParentType extends Resolver
   created?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   deadline?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   duplicateOf?: Resolver<Maybe<ResolversTypes['ID']>, ParentType, ContextType>;
-  features?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
   id?: Resolver<ResolversTypes['ID'], ParentType, ContextType>;
   kind?: Resolver<ResolversTypes['Kind'], ParentType, ContextType>;
   labels?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
@@ -1259,17 +1031,13 @@ export type MergedInfoResolvers<ContextType = GraphQLCtx, ParentType extends Res
 
 export type MutationResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['Mutation'] = ResolversParentTypes['Mutation']> = {
   addComment?: Resolver<ResolversTypes['AddCommentPayload'], ParentType, ContextType, RequireFields<MutationAddCommentArgs, 'input'>>;
-  addSpec?: Resolver<ResolversTypes['AddSpecPayload'], ParentType, ContextType, RequireFields<MutationAddSpecArgs, 'input'>>;
   closeIssue?: Resolver<ResolversTypes['CloseIssuePayload'], ParentType, ContextType, RequireFields<MutationCloseIssueArgs, 'input'>>;
-  createFeature?: Resolver<ResolversTypes['CreateFeaturePayload'], ParentType, ContextType, RequireFields<MutationCreateFeatureArgs, 'input'>>;
   linkIssue?: Resolver<ResolversTypes['LinkIssuePayload'], ParentType, ContextType, RequireFields<MutationLinkIssueArgs, 'input'>>;
   openIssue?: Resolver<ResolversTypes['OpenIssuePayload'], ParentType, ContextType, RequireFields<MutationOpenIssueArgs, 'input'>>;
   reopenIssue?: Resolver<ResolversTypes['ReopenIssuePayload'], ParentType, ContextType, RequireFields<MutationReopenIssueArgs, 'ref'>>;
   unlinkIssue?: Resolver<ResolversTypes['UnlinkIssuePayload'], ParentType, ContextType, RequireFields<MutationUnlinkIssueArgs, 'ref'>>;
-  updateFeature?: Resolver<ResolversTypes['UpdateFeaturePayload'], ParentType, ContextType, RequireFields<MutationUpdateFeatureArgs, 'input'>>;
   updateIssue?: Resolver<ResolversTypes['UpdateIssuePayload'], ParentType, ContextType, RequireFields<MutationUpdateIssueArgs, 'input'>>;
   updatePr?: Resolver<ResolversTypes['UpdatePrPayload'], ParentType, ContextType, RequireFields<MutationUpdatePrArgs, 'input'>>;
-  updateSpec?: Resolver<ResolversTypes['UpdateSpecPayload'], ParentType, ContextType, RequireFields<MutationUpdateSpecArgs, 'input'>>;
 };
 
 export type OpenIssuePayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['OpenIssuePayload'] = ResolversParentTypes['OpenIssuePayload']> = {
@@ -1290,7 +1058,6 @@ export type PrResolvers<ContextType = GraphQLCtx, ParentType extends ResolversPa
   commits?: Resolver<ResolversTypes['CommitRange'], ParentType, ContextType, RequireFields<PrCommitsArgs, 'limit'>>;
   created?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   draft?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
-  features?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
   id?: Resolver<ResolversTypes['ID'], ParentType, ContextType>;
   kind?: Resolver<ResolversTypes['Kind'], ParentType, ContextType>;
   labels?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
@@ -1312,8 +1079,6 @@ export type PrResolvers<ContextType = GraphQLCtx, ParentType extends ResolversPa
 
 export type QueryResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['Query'] = ResolversParentTypes['Query']> = {
   doctor?: Resolver<ResolversTypes['DoctorReport'], ParentType, ContextType>;
-  feature?: Resolver<ResolversTypes['Feature'], ParentType, ContextType, RequireFields<QueryFeatureArgs, 'slug'>>;
-  features?: Resolver<Array<ResolversTypes['Feature']>, ParentType, ContextType>;
   issue?: Resolver<ResolversTypes['Issue'], ParentType, ContextType, RequireFields<QueryIssueArgs, 'ref'>>;
   issues?: Resolver<Array<ResolversTypes['Issue']>, ParentType, ContextType, Partial<QueryIssuesArgs>>;
   people?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
@@ -1349,23 +1114,10 @@ export type RevisionResolvers<ContextType = GraphQLCtx, ParentType extends Resol
   head?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
 };
 
-export type SpecResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['Spec'] = ResolversParentTypes['Spec']> = {
-  baseSha?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
-  body?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
-  fileName?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
-  path?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
-  title?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
-};
-
 export type UnlinkIssuePayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['UnlinkIssuePayload'] = ResolversParentTypes['UnlinkIssuePayload']> = {
   child?: Resolver<ResolversTypes['Issue'], ParentType, ContextType>;
   commit?: Resolver<ResolversTypes['CommitInfo'], ParentType, ContextType>;
   previousParentId?: Resolver<Maybe<ResolversTypes['ID']>, ParentType, ContextType>;
-};
-
-export type UpdateFeaturePayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['UpdateFeaturePayload'] = ResolversParentTypes['UpdateFeaturePayload']> = {
-  commit?: Resolver<ResolversTypes['CommitInfo'], ParentType, ContextType>;
-  feature?: Resolver<ResolversTypes['Feature'], ParentType, ContextType>;
 };
 
 export type UpdateIssuePayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['UpdateIssuePayload'] = ResolversParentTypes['UpdateIssuePayload']> = {
@@ -1378,12 +1130,6 @@ export type UpdatePrPayloadResolvers<ContextType = GraphQLCtx, ParentType extend
   pr?: Resolver<ResolversTypes['Pr'], ParentType, ContextType>;
 };
 
-export type UpdateSpecPayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['UpdateSpecPayload'] = ResolversParentTypes['UpdateSpecPayload']> = {
-  commit?: Resolver<ResolversTypes['CommitInfo'], ParentType, ContextType>;
-  feature?: Resolver<ResolversTypes['Feature'], ParentType, ContextType>;
-  spec?: Resolver<ResolversTypes['Spec'], ParentType, ContextType>;
-};
-
 export type ViewerResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['Viewer'] = ResolversParentTypes['Viewer']> = {
   email?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   name?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
@@ -1391,7 +1137,6 @@ export type ViewerResolvers<ContextType = GraphQLCtx, ParentType extends Resolve
 
 export type Resolvers<ContextType = GraphQLCtx> = {
   AddCommentPayload?: AddCommentPayloadResolvers<ContextType>;
-  AddSpecPayload?: AddSpecPayloadResolvers<ContextType>;
   Approvals?: ApprovalsResolvers<ContextType>;
   ChangedFile?: ChangedFileResolvers<ContextType>;
   Changes?: ChangesResolvers<ContextType>;
@@ -1400,11 +1145,9 @@ export type Resolvers<ContextType = GraphQLCtx> = {
   Commit?: CommitResolvers<ContextType>;
   CommitInfo?: CommitInfoResolvers<ContextType>;
   CommitRange?: CommitRangeResolvers<ContextType>;
-  CreateFeaturePayload?: CreateFeaturePayloadResolvers<ContextType>;
   Diagnostic?: DiagnosticResolvers<ContextType>;
   DoctorReport?: DoctorReportResolvers<ContextType>;
   Entity?: EntityResolvers<ContextType>;
-  Feature?: FeatureResolvers<ContextType>;
   Issue?: IssueResolvers<ContextType>;
   LinkIssuePayload?: LinkIssuePayloadResolvers<ContextType>;
   LinkNode?: LinkNodeResolvers<ContextType>;
@@ -1417,12 +1160,9 @@ export type Resolvers<ContextType = GraphQLCtx> = {
   ReviewPolicy?: ReviewPolicyResolvers<ContextType>;
   ReviewerState?: ReviewerStateResolvers<ContextType>;
   Revision?: RevisionResolvers<ContextType>;
-  Spec?: SpecResolvers<ContextType>;
   UnlinkIssuePayload?: UnlinkIssuePayloadResolvers<ContextType>;
-  UpdateFeaturePayload?: UpdateFeaturePayloadResolvers<ContextType>;
   UpdateIssuePayload?: UpdateIssuePayloadResolvers<ContextType>;
   UpdatePrPayload?: UpdatePrPayloadResolvers<ContextType>;
-  UpdateSpecPayload?: UpdateSpecPayloadResolvers<ContextType>;
   Viewer?: ViewerResolvers<ContextType>;
 };
 

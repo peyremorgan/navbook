@@ -76,10 +76,11 @@ complete Navbook clients for reading.
 
 `specs/` holds **features** — the standing concepts work attaches to. A feature
 is a directory named after itself, holding a `feature.md` and however many
-specification documents describe it. Features come from
-[`@navbook/plugin-kb`](doc/plugins.md), a plugin, because not every project
-wants them; the format defines them all the same, so a tree using them is
-readable by any Navbook. An issue joins one by naming it:
+specification documents describe it. They come from
+[`@navbook/plugin-kb`](packages/plugin-kb/README.md), a plugin, because not
+every project wants them; the format defines them all the same, so a tree using
+them is readable by any Navbook and a `nav` without the plugin preserves them
+untouched. An issue joins one by naming it:
 
 ```console
 $ nav feature open "Authentication" --slug auth -m "Signing in, sessions, tokens."
@@ -331,8 +332,9 @@ files, so nothing about the format ships to a browser
 ([spec 05 §5.2](doc/spec/05-implementation.md), [06 §6.3](doc/spec/06-future.md)).
 `packages/plugin-kb`
 ([`@navbook/plugin-kb`](packages/plugin-kb/README.md)) is the knowledge base,
-and the first plugin: it is where features and `specs/` are implemented, and
-what proves the plugin surface is enough to build on.
+and the first plugin: features, `specs/` and the `feature:` key are implemented
+there rather than in the core, and it is what proves the plugin surface is
+enough to build on — it uses every part of it.
 Development needs no build step outside the web client: a library's entry point
 is its TypeScript source, and Node runs it directly.
 

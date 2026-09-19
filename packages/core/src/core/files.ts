@@ -35,7 +35,6 @@ import type { EntityKind } from "./tree.ts";
 
 export const SHA_PATTERN = /^[0-9a-f]{40}$/;
 /** The identity card at the top of a feature directory (spec 02 §2.11). */
-export const FEATURE_FILE = "feature.md";
 export const VERDICTS = ["approve", "request-changes", "comment"] as const;
 export type Verdict = (typeof VERDICTS)[number];
 
@@ -135,7 +134,7 @@ function normalizeKey(nav: NavDoc, key: string, rawValue: unknown, ext?: CoreExt
   }
   if (key === "rank") return normalizeRank(rawValue);
   if (key === "labels" || key === "subtasks") return normalizeStringList(nav, key, rawValue);
-  if (key === "assignee" || key === "feature" || key === "reviewer") {
+  if (key === "assignee" || key === "reviewer") {
     return Array.isArray(rawValue)
       ? normalizeStringList(nav, key, rawValue)
       : (stringAt(nav, [key]) ?? rawValue);
@@ -455,12 +454,6 @@ export function readReviewers(fm: Record<string, unknown>): string[] {
 }
 
 /** Read `feature` (scalar or list) defensively, keeping only slugs. */
-export function readFeatures(fm: Record<string, unknown>): string[] {
-  const value = fm.feature;
-  if (value === undefined || value === null) return [];
-  const entries = Array.isArray(value) ? value : [value];
-  return entries.filter((v): v is string => typeof v === "string" && SLUG_PATTERN.test(v));
-}
 
 /**
  * Read a key that may be written as one string or a list of them.
@@ -534,7 +527,6 @@ export function validateIssue(parsed: ParsedFile, ext?: CoreExtensions): Problem
   checkLabels(parsed, problems);
   checkPersonList(parsed, "assignee", problems);
   checkOptionalString(parsed, "milestone", problems);
-  checkFeature(parsed, problems);
   checkRank(parsed, problems);
   checkDeadline(parsed, problems);
   checkOptionalString(parsed, "resolution", problems);
@@ -561,7 +553,6 @@ export function validatePr(parsed: ParsedFile, ext?: CoreExtensions): Problem[] 
   checkPersonList(parsed, "assignee", problems);
   checkPersonList(parsed, "reviewer", problems);
   checkOptionalString(parsed, "milestone", problems);
-  checkFeature(parsed, problems);
   checkOptionalString(parsed, "resolution", problems);
   checkIdReference(parsed, "superseded-by", problems);
   checkNoIssueOnlyKeys(parsed, problems);
@@ -686,8 +677,6 @@ export interface NewEntityInput {
   labels?: string[];
   assignee?: string[];
   milestone?: string;
-  /** Feature slugs this entity belongs to (§2.11). */
-  features?: string[];
   /**
    * Values for frontmatter keys a plugin owns (§2.12).
    *
@@ -758,9 +747,6 @@ function applyOptionalMeta(nav: NavDoc, input: NewEntityInput): void {
   if (input.labels?.length) setFlowList(nav, "labels", input.labels);
   writeScalarOrList(nav, "assignee", input.assignee);
   if (input.milestone) patchDoc(nav, { milestone: input.milestone });
-  // Singular on disk and scalar-or-list like `assignee` (§2.11): one feature is
-  // written as a scalar, which is what nearly every entity carries.
-  writeScalarOrList(nav, "feature", input.features);
   for (const [key, value] of Object.entries(input.ext ?? {})) {
     if (typeof value === "string") patchDoc(nav, { [key]: value });
     else writeScalarOrList(nav, key, value);
@@ -789,104 +775,6 @@ export function writeScalarOrList(nav: NavDoc, key: string, values?: readonly st
  * the sense this document defines, and reimplementing them would be a second
  * opinion about a format that has one.
  */
-
-/**
- * Validate a `feature.md` (§2.11).
- *
- * The body is the feature's summary and may be empty: a title and an author is
- * enough to name a concept, and the specification documents beside it are where
- * the substance belongs.
- */
-export function validateFeature(parsed: ParsedFile): Problem[] {
-  const problems = [...parsed.problems];
-  requireString(parsed, "title", problems);
-  checkPerson(parsed, "author", problems);
-  checkTimestamp(parsed, "created", problems);
-  checkNoStatusKey(parsed, problems);
-  return problems;
-}
-
-/**
- * Validate a specification document (§2.11).
- *
- * Only `title` is required. A spec is a living document rather than a record of
- * something that happened, so who wrote it and when are git's answer to give.
- */
-export function validateSpec(parsed: ParsedFile): Problem[] {
-  const problems = [...parsed.problems];
-  requireString(parsed, "title", problems);
-  if (parsed.fm.author !== undefined && parsed.fm.author !== null) {
-    checkPerson(parsed, "author", problems);
-  }
-  if (parsed.fm.created !== undefined && parsed.fm.created !== null) {
-    checkTimestamp(parsed, "created", problems);
-  }
-  checkNoStatusKey(parsed, problems);
-  return problems;
-}
-
-export interface NewFeatureInput {
-  title: string;
-  author: string;
-  created: string;
-  /** The summary; a feature may have none. */
-  body?: string;
-}
-
-/** Render a new `feature.md`. */
-export function newFeatureFile(input: NewFeatureInput): string {
-  const nav = emptyDoc();
-  patchDoc(nav, { title: input.title, author: input.author, created: input.created });
-  const summary = normalizeBody(input.body ?? "");
-  // A feature with no summary ends at its closing delimiter. The blank line a
-  // body is separated by is part of having one.
-  nav.body = summary === "" ? "" : `\n${summary}`;
-  return serializeDoc(nav);
-}
-
-export interface NewSpecInput {
-  title: string;
-  body: string;
-  author?: string;
-  created?: string;
-}
-
-/** Render a new specification document. */
-export function newSpecFile(input: NewSpecInput): string {
-  const nav = emptyDoc();
-  patchDoc(nav, { title: input.title });
-  if (input.author) patchDoc(nav, { author: input.author });
-  if (input.created) patchDoc(nav, { created: input.created });
-  nav.body = `\n${normalizeBody(input.body)}`;
-  return serializeDoc(nav);
-}
-
-/**
- * The grammar a spec document's name must follow to be *created* by a tool.
- *
- * Reading is deliberately more generous — the tree model takes any `*.md` —
- * because a hand-written `Login Flow.md` is legal and must keep working. What a
- * tool mints for somebody else to live with is held to the slug grammar, and
- * `feature.md` is excluded because that name already means something else.
- */
-export const SPEC_FILE_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*\.md$/;
-
-/** True when a tool may create a spec document under this name. */
-export function isSpecFileName(name: string): boolean {
-  return name !== FEATURE_FILE && SPEC_FILE_PATTERN.test(name);
-}
-
-/**
- * Derive a spec document's file name from its title.
- *
- * A title that slugs to `feature` would collide with the identity card, so it
- * gains a suffix rather than being refused: the author named a document, and
- * which file holds it is the tool's business.
- */
-export function specFileName(title: string): string {
-  const slug = slugify(title);
-  return slug === "feature" ? "feature-spec.md" : `${slug}.md`;
-}
 
 export interface NewCommentInput {
   author: string;

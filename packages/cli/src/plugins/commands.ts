@@ -138,13 +138,7 @@ function argumentOf(spec: ArgumentSpec): [string, string] {
   return [name, spec.description ?? ""];
 }
 
-/**
- * Apply one declared option, refusing a short flag.
- *
- * Short flags are a scarce shared namespace — `-m`, `-y`, `-n` already mean
- * things across the whole CLI — and a plugin taking one would be discovered by
- * whoever installed two plugins rather than by whoever wrote the second.
- */
+/** Apply one declared option to a command. */
 export function applyOption(command: Command, spec: OptionSpec): void {
   const option = new Option(spec.flags, spec.description);
   if (spec.repeatable === true) {
@@ -162,12 +156,37 @@ export function applyOption(command: Command, spec: OptionSpec): void {
   command.addOption(option);
 }
 
-/** True when a declared option would collide with one the command already has. */
-export function optionCollision(command: Command, spec: OptionSpec): string | null {
+/**
+ * Why a declared option cannot be applied, or null when it can.
+ *
+ * Two different rules, because two different namespaces are at stake.
+ *
+ * On a plugin's **own** command the plugin owns every flag, so a short one is
+ * its business: `nav feature open -m "…"` reads exactly as `nav issue open -m
+ * "…"` does, and denying it would make a plugin's commands feel like
+ * second-class ones for no gain.
+ *
+ * On a **contribution** to a built-in verb the namespace is shared, and short
+ * flags are the scarce part of it — `-m`, `-y`, `-n` already mean things
+ * across the whole CLI. A plugin taking one there would be discovered by
+ * whoever installed two plugins rather than by whoever wrote the second, so
+ * they are refused outright rather than raced for.
+ *
+ * A long flag that is already taken is refused either way, and checked before
+ * Commander sees it: `.option()` throws on a duplicate, which would take the
+ * whole CLI down over one plugin's manifest.
+ */
+export function optionCollision(
+  command: Command,
+  spec: OptionSpec,
+  where: "own" | "contribution" = "contribution",
+): string | null {
   const flags = spec.flags.split(/[ ,|]+/).filter((part) => part.startsWith("-"));
-  const short = flags.find((flag) => /^-[^-]/.test(flag));
-  if (short !== undefined) {
-    return `'${short}' is a short flag, which a plugin may not take`;
+  if (where === "contribution") {
+    const short = flags.find((flag) => /^-[^-]/.test(flag));
+    if (short !== undefined) {
+      return `'${short}' is a short flag, which a plugin may not add to a built-in verb`;
+    }
   }
   for (const flag of flags) {
     if (command.options.some((existing) => existing.long === flag || existing.short === flag)) {

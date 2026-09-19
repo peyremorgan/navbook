@@ -30,10 +30,12 @@ is mature and widely installed.
   is not published: it is a static bundle to be served, not a dependency to be
   installed, and it is the one package here that needs a build step. A fifth,
   `@navbook/plugin-kb`, is the first plugin ([04 §4.3](04-cli.md)) and holds
-  the implementation of features and specifications ([02 §2.11](02-data-model.md)):
-  the format keeps their definition, this codebase keeps them out of the core.
-  It is what proves the plugin surface is enough to build with, since it uses
-  every part of it.
+  the *implementation* of features and specifications
+  ([02 §2.11](02-data-model.md)): the format keeps their definition, this
+  codebase keeps them out of the core. It is what proves the plugin surface is
+  enough to build with, since it uses every part of it — a directory of its
+  own, a frontmatter key, a query term, two checks, a command tree, options on
+  built-in verbs, and GraphQL types merged into the server's schema.
 - **Dependencies:** deliberately minimal. A YAML parser (`yaml`) in the core
   and an argument parser in the CLI; no framework. Every dependency added to
   the core is a liability for the Rust rewrite (behavior to reproduce) and MUST

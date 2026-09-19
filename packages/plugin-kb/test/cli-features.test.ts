@@ -5,9 +5,28 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { makeNavRepo, type TempRepo } from "../helpers/temprepo.ts";
+import { fileURLToPath } from "node:url";
+import { makeNavRepo, type TempRepo } from "@navbook/cli/test-helpers";
+
+/** This package, as `NAVBOOK_PLUGIN_PATH` names it. */
+const KB = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * A repository with the knowledge base installed and declared.
+ *
+ * The plugin path is folded into `nav` itself rather than passed at each of
+ * forty call sites: every command in this suite needs it, and a case that
+ * forgot it would fail with "unknown command" rather than with whatever it was
+ * actually testing.
+ */
+function makeKbRepo(): TempRepo {
+  const repo = makeNavRepo();
+  const plain = repo.nav.bind(repo);
+  repo.nav = (args, env, input) => plain(args, { NAVBOOK_PLUGIN_PATH: KB, ...env }, input);
+  return repo;
+}
 
 const read = (repo: TempRepo, path: string): string =>
   readFileSync(join(repo.dir, ...path.split("/")), "utf8");
@@ -23,7 +42,7 @@ const editorReplacing = (repo: TempRepo, name: string, text: string): string =>
 describe("nav feature open", () => {
   let repo: TempRepo;
   before(() => {
-    repo = makeNavRepo();
+    repo = makeKbRepo();
   });
   after(() => repo.cleanup());
 
@@ -85,7 +104,7 @@ describe("nav feature open", () => {
 describe("nav feature spec", () => {
   let repo: TempRepo;
   before(() => {
-    repo = makeNavRepo();
+    repo = makeKbRepo();
     repo.nav([
       "feature",
       "open",
@@ -215,7 +234,7 @@ describe("nav feature spec", () => {
 describe("attaching work to a feature", () => {
   let repo: TempRepo;
   before(() => {
-    repo = makeNavRepo();
+    repo = makeKbRepo();
     repo.nav([
       "feature",
       "open",
@@ -304,7 +323,7 @@ describe("attaching work to a feature", () => {
 describe("nav feature list and show", () => {
   let repo: TempRepo;
   before(() => {
-    repo = makeNavRepo();
+    repo = makeKbRepo();
     repo.nav([
       "feature",
       "open",
@@ -365,7 +384,7 @@ describe("nav feature list and show", () => {
   });
 
   it("says so when there is nothing to list", () => {
-    const empty = makeNavRepo();
+    const empty = makeKbRepo();
     try {
       assert.match(empty.nav(["feature", "list"]).stdout, /No features yet/);
       assert.equal(empty.nav(["feature", "list", "--json"]).stdout, "");
@@ -389,7 +408,7 @@ describe("nav feature list and show", () => {
 describe("completion", () => {
   let repo: TempRepo;
   before(() => {
-    repo = makeNavRepo();
+    repo = makeKbRepo();
     repo.nav(["feature", "open", "Authentication", "--slug", "auth", "-m", "x", "--commit"]);
     repo.nav(["feature", "spec", "add", "auth", "Login flow", "-m", "x", "--commit"]);
     repo.nav(["issue", "open", "Add TOTP", "--feature", "auth", "-m", "Body.", "--commit"]);
@@ -425,5 +444,47 @@ describe("completion", () => {
     const offered = lines("issue", "list");
     assert.ok(offered.includes("feature:"));
     assert.ok(offered.includes("feature:auth"));
+  });
+});
+
+describe("the help this plugin's commands print", () => {
+  let repo: TempRepo;
+  before(() => {
+    repo = makeKbRepo();
+  });
+  after(() => repo.cleanup());
+
+  /**
+   * Built from the manifest, so this is also the assertion that a plugin's
+   * commands are indistinguishable from built-in ones at the help screen —
+   * same usage line, same option list, same exit code.
+   */
+  it("answers for the noun, the group and a leaf", () => {
+    for (const [path, usage] of [
+      [["feature"], /^Usage: nav feature \[options\] \[command\]/m],
+      [["feature", "spec"], /^Usage: nav feature spec \[options\] \[command\]/m],
+      [["feature", "spec", "add"], /^Usage: nav feature spec add \[options\] <slug> <title>/m],
+    ] as [string[], RegExp][]) {
+      const result = repo.nav([...path, "--help"]);
+      assert.equal(result.code, 0, `${path.join(" ")}: ${result.stderr}`);
+      assert.match(result.stdout, usage);
+    }
+  });
+
+  it("drops the implicit help verb, as every built-in noun does", () => {
+    // `nav feature help open` and `nav feature open --help` would be two
+    // spellings of one thing; only the flag stays.
+    for (const path of [
+      ["feature", "help"],
+      ["feature", "spec", "help"],
+    ]) {
+      const result = repo.nav(path);
+      assert.notEqual(result.code, 0, path.join(" "));
+      assert.match(result.stderr, /unknown command/);
+    }
+  });
+
+  it("lists the noun in the root help", () => {
+    assert.match(repo.nav(["--help"]).stdout, /feature\s+work with features/);
   });
 });

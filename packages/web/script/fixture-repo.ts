@@ -24,26 +24,33 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+// The seeded tree has features in it, which are `@navbook/plugin-kb`'s
+// (spec 02 §2.12). The fixture uses the plugin's own operations for the same
+// reason it uses core's: composing the files by hand here would be a second
+// implementation of the format.
+import * as core from "@navbook/core";
 import {
-  addSpec,
   applyComment,
   closeEntity,
-  createFeature,
   currentAuthor,
   findEntity,
   makeWsCtx,
   newCommentFile,
-  newFeatureFile,
   newIssueFile,
   newPrFile,
-  newSpecFile,
   openIssue,
   openPr,
   parseFile,
   preparePrOpen,
   readRevisions,
-  specFileName,
 } from "@navbook/core";
+import {
+  addSpec as addSpecOp,
+  createFeature as createFeatureOp,
+  newFeatureFile,
+  newSpecFile,
+  specFileName,
+} from "@navbook/plugin-kb/core";
 
 /** Fixed so a screenshot, a diff and an assertion all say the same thing. */
 export const FIXTURE_DATE = "2026-08-01T10:00:00Z";
@@ -290,7 +297,8 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     input: { title: string; summary?: string },
   ): void => {
     const context = ws(date, []);
-    createFeature(
+    createFeatureOp(
+      core,
       context,
       {
         content: newFeatureFile({
@@ -308,7 +316,8 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
 
   const spec = (date: string, slug: string, input: { title: string; body: string }): void => {
     const context = ws(date, []);
-    addSpec(
+    addSpecOp(
+      core,
       context,
       slug,
       {

@@ -1,5 +1,6 @@
 spec-version: 1
 description: the slug is derived from the title, and a feature may carry no summary at all
+plugins: ["@navbook/plugin-kb"]
 init: {from: before}
 run:
   command: [feature, open, "Billing & Invoices", -m, "", --commit]

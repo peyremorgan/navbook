@@ -8,7 +8,7 @@
  */
 
 import { type CoreExtensions, NO_EXTENSIONS } from "./extensions.ts";
-import { readAssignees, readDeadline, readFeatures, readLabels, readReviewers } from "./files.ts";
+import { readAssignees, readDeadline, readLabels, readReviewers } from "./files.ts";
 import { personMatches } from "./person.ts";
 import { DEFAULT_REVIEW_POLICY, type ReviewPolicy } from "./policy.ts";
 import { isAwaiting, REVIEW_DECISIONS, type ReviewDecision, reviewSummary } from "./review.ts";
@@ -20,7 +20,6 @@ export interface Query {
   assignees: string[];
   authors: string[];
   milestones: string[];
-  features: string[];
   /** `reviewer:` — who the pull request asks for a review (spec 02 §2.7). */
   reviewers: string[];
   /** `review:` — the decision the reviews add up to. */
@@ -51,7 +50,7 @@ export interface QueryError {
 }
 
 const KEYED_TERM =
-  /^(status|label|assignee|author|milestone|feature|reviewer|review|awaiting|deadline):(.*)$/;
+  /^(status|label|assignee|author|milestone|reviewer|review|awaiting|deadline):(.*)$/;
 
 /** Terms that describe something only a pull request has (spec 04 §4.3). */
 const PR_ONLY_TERMS = ["reviewer", "review", "awaiting"] as const;
@@ -66,7 +65,6 @@ export function emptyQuery(): Query {
     assignees: [],
     authors: [],
     milestones: [],
-    features: [],
     reviewers: [],
     reviews: [],
     awaiting: [],
@@ -140,9 +138,6 @@ export function parseQuery(
         break;
       case "author":
         query.authors.push(value);
-        break;
-      case "feature":
-        query.features.push(value);
         break;
       case "reviewer":
         query.reviewers.push(value);
@@ -266,10 +261,6 @@ export function matchesQuery(
 
   // Slugs are lowercase by grammar, so folding case here only forgives a query
   // typed with a capital; it can never widen what a well-formed tree matches.
-  const features = readFeatures(entity.fm).map((f) => f.toLowerCase());
-  for (const wanted of query.features) {
-    if (!features.includes(wanted.toLowerCase())) return false;
-  }
 
   if (query.deadline.length > 0 && !matchesDeadline(query, entity)) return false;
 

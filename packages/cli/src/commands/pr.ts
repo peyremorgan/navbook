@@ -70,7 +70,6 @@ export interface PrOpenOptions extends GlobalFlags {
   assignee?: string[];
   reviewer?: string[];
   milestone?: string;
-  feature?: string[];
   /**
    * Frontmatter a plugin contributed, from an option it declared (§2.12).
    *
@@ -101,7 +100,6 @@ export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
         labels: opts.label,
         assignee: opts.assignee,
         milestone: opts.milestone,
-        features: opts.feature,
         ...(opts.ext ? { ext: opts.ext } : {}),
       }),
     validate: validatePr,

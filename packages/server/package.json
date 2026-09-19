@@ -20,7 +20,8 @@
   "bugs": "https://github.com/peyremorgan/navbook/issues",
   "type": "module",
   "exports": {
-    "./plugin": "./src/plugins/host.ts"
+    "./plugin": "./src/plugins/host.ts",
+    "./test-helpers": "./test/helpers/harness.ts"
   },
   "publishConfig": {
     "access": "public",

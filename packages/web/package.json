@@ -43,6 +43,7 @@
     "jose": "^6.2.10",
     "jsdom": "^30.0.1",
     "vitest": "^4.1.11",
-    "vue-tsc": "^3.3.11"
+    "vue-tsc": "^3.3.11",
+    "@navbook/plugin-kb": "workspace:*"
   }
 }

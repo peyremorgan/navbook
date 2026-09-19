@@ -29,6 +29,7 @@ import {
   packageDir,
   readIndex,
   readPluginAt,
+  storeDependencies,
   storeDir,
   writeIndex,
 } from "../plugins/store.ts";
@@ -59,7 +60,7 @@ export function cmdPluginInstall(ctx: Ctx, names: string[], opts: PluginInstallO
     return;
   }
 
-  const installed = confirmAndPerform(ctx, {
+  const agreed = confirmAndPerform(ctx, {
     title: "nav plugin install will:",
     actions: [
       {
@@ -72,12 +73,22 @@ export function cmdPluginInstall(ctx: Ctx, names: string[], opts: PluginInstallO
     ],
     assumeYes: opts.yes,
   });
-  if (!installed) return;
+  if (!agreed) return;
 
   const index = readIndex(ctx.env) ?? { version: 1 as const, plugins: {} };
+  // What npm actually installed, by its real name. `wanted` may hold tarball
+  // paths and short names, and neither is a name `node_modules` is keyed by;
+  // the store's own manifest is where npm wrote what each one resolved to.
+  const resolved = new Set([
+    ...wanted.filter((spec) => !looksLocal(spec)),
+    // Only the ones this install added: the store's manifest lists everything
+    // it has, and reporting a plugin installed months ago as installed now
+    // would be a lie in the output of a command that installed something else.
+    ...storeDependencies(ctx.env).filter((name) => index.plugins[name] === undefined),
+  ]);
   const kept: string[] = [];
   const rejected: string[] = [];
-  for (const name of wanted) {
+  for (const name of resolved) {
     const problem = record(ctx, index, name);
     if (problem === null) kept.push(name);
     else {

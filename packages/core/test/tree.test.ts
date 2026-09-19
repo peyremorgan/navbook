@@ -322,16 +322,6 @@ describe("treePeople", () => {
     );
   });
 
-  it("names a feature's author", () => {
-    assert.deepEqual(
-      people({
-        "specs/auth/feature.md":
-          "---\ntitle: Auth\nauthor: Fay <fay@example.com>\ncreated: 2026-08-01T09:00:00Z\n---\n\nBody.\n",
-      }),
-      ["Fay <fay@example.com>"],
-    );
-  });
-
   it("skips what is not a person, rather than reporting it", () => {
     assert.deepEqual(
       people({

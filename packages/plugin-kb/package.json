@@ -1,0 +1,299 @@
+{
+  "name": "@navbook/plugin-kb",
+  "version": "0.3.0",
+  "description": "The Navbook knowledge base: features under specs/, the documents that describe them, and the feature: key that attaches work to one",
+  "keywords": [
+    "navbook-plugin",
+    "issues",
+    "tracker",
+    "git",
+    "specifications"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peyremorgan/navbook.git",
+    "directory": "packages/plugin-kb"
+  },
+  "homepage": "https://github.com/peyremorgan/navbook#readme",
+  "bugs": "https://github.com/peyremorgan/navbook/issues",
+  "type": "module",
+  "engines": {
+    "node": ">=24",
+    "navbook": "^1.0.0"
+  },
+  "exports": {
+    "./core": "./src/core/index.ts",
+    "./cli": "./src/cli/index.ts",
+    "./server": "./src/server/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      "./core": {
+        "types": "./dist/core/index.d.ts",
+        "default": "./dist/core/index.js"
+      },
+      "./cli": {
+        "types": "./dist/cli/index.d.ts",
+        "default": "./dist/cli/index.js"
+      },
+      "./server": {
+        "types": "./dist/server/index.d.ts",
+        "default": "./dist/server/index.js"
+      },
+      "./package.json": "./package.json"
+    }
+  },
+  "files": [
+    "dist",
+    "doc",
+    "schema.graphql"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "prepack": "node ../../script/require-pnpm.js && pnpm build",
+    "prepublishOnly": "node ../../script/require-pnpm.js"
+  },
+  "peerDependencies": {
+    "@navbook/core": "^0.3.0"
+  },
+  "devDependencies": {
+    "@navbook/core": "workspace:*",
+    "@navbook/cli": "workspace:*",
+    "@navbook/server": "workspace:*"
+  },
+  "navbook": {
+    "short": "kb",
+    "spec": "doc/spec.md",
+    "format": {
+      "root": [
+        "specs"
+      ],
+      "frontmatterKeys": [
+        "feature"
+      ],
+      "grandfathered": true
+    },
+    "core": {
+      "queryKeys": [
+        {
+          "key": "feature",
+          "kinds": [
+            "issue",
+            "pr"
+          ],
+          "help": "feature:SLUG                 SLUG is among the entity's features (repeatable, ANDs)"
+        }
+      ],
+      "doctorChecks": [
+        {
+          "id": "D13",
+          "level": "error",
+          "description": "the layout and schema of specs/"
+        },
+        {
+          "id": "D14",
+          "level": "warning",
+          "description": "an entity's feature names a slug no specs/ directory holds"
+        }
+      ],
+      "commitScopes": [
+        "feature"
+      ]
+    },
+    "cli": {
+      "commands": [
+        {
+          "name": "feature",
+          "description": "work with features",
+          "commands": [
+            {
+              "name": "open",
+              "description": "create a feature",
+              "arguments": [
+                {
+                  "name": "title",
+                  "description": "one-line name for the feature"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-m, --message <text>",
+                  "description": "summary text; without it $EDITOR is opened"
+                },
+                {
+                  "flags": "--slug <slug>",
+                  "description": "directory name to file it under; derived from the title otherwise"
+                },
+                {
+                  "flags": "--commit",
+                  "description": "wrap the change in a 'docs(feature):' commit"
+                }
+              ]
+            },
+            {
+              "name": "list",
+              "description": "list features, with how much work is attached to each",
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "one JSON object per feature, newline-delimited"
+                }
+              ]
+            },
+            {
+              "name": "show",
+              "description": "render a feature, its documents, and what has touched it",
+              "arguments": [
+                {
+                  "name": "slug",
+                  "description": "the feature's directory name",
+                  "complete": "slug"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "emit a single JSON object naming its issues and pull requests"
+                },
+                {
+                  "flags": "--commits <n>",
+                  "description": "recent commits to list (default 10)",
+                  "parse": "number"
+                }
+              ]
+            },
+            {
+              "name": "edit",
+              "description": "open the feature's feature.md in $EDITOR",
+              "arguments": [
+                {
+                  "name": "slug",
+                  "description": "the feature's directory name",
+                  "complete": "slug"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--commit",
+                  "description": "wrap the change in a 'docs(feature):' commit"
+                }
+              ]
+            },
+            {
+              "name": "spec",
+              "description": "work with a feature's specification documents",
+              "commands": [
+                {
+                  "name": "add",
+                  "description": "add a specification document to a feature",
+                  "arguments": [
+                    {
+                      "name": "slug",
+                      "description": "the feature's directory name",
+                      "complete": "slug"
+                    },
+                    {
+                      "name": "title",
+                      "description": "one-line name for the document"
+                    }
+                  ],
+                  "options": [
+                    {
+                      "flags": "-m, --message <text>",
+                      "description": "document text; without it $EDITOR is opened"
+                    },
+                    {
+                      "flags": "--file <name>",
+                      "description": "file to write it to; derived from the title otherwise"
+                    },
+                    {
+                      "flags": "--commit",
+                      "description": "wrap the change in a 'docs(feature):' commit"
+                    }
+                  ]
+                },
+                {
+                  "name": "edit",
+                  "description": "open a specification document in $EDITOR",
+                  "arguments": [
+                    {
+                      "name": "slug",
+                      "description": "the feature's directory name",
+                      "complete": "slug"
+                    },
+                    {
+                      "name": "file",
+                      "description": "the document's file name",
+                      "complete": "spec-file"
+                    }
+                  ],
+                  "options": [
+                    {
+                      "flags": "--commit",
+                      "description": "wrap the change in a 'docs(feature):' commit"
+                    }
+                  ]
+                },
+                {
+                  "name": "list",
+                  "description": "list a feature's specification documents",
+                  "arguments": [
+                    {
+                      "name": "slug",
+                      "description": "the feature's directory name",
+                      "complete": "slug"
+                    }
+                  ],
+                  "options": [
+                    {
+                      "flags": "--json",
+                      "description": "one JSON object per document, newline-delimited"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "contributions": [
+        {
+          "on": "issue open",
+          "options": [
+            {
+              "flags": "--feature <slug>",
+              "description": "attach it to a feature (repeatable)",
+              "repeatable": true
+            }
+          ]
+        },
+        {
+          "on": "pr open",
+          "options": [
+            {
+              "flags": "--feature <slug>",
+              "description": "attach it to a feature (repeatable)",
+              "repeatable": true
+            }
+          ]
+        },
+        {
+          "on": "issue list",
+          "completions": true
+        },
+        {
+          "on": "pr list",
+          "completions": true
+        }
+      ]
+    },
+    "server": {
+      "schema": "schema.graphql"
+    }
+  }
+}

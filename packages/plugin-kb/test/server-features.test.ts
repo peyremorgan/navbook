@@ -10,10 +10,21 @@
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { errorCode, type Harness, ok, startHarness } from "../helpers/harness.ts";
-import { originSubjects } from "../helpers/temprepo.ts";
+import { fileURLToPath } from "node:url";
+import {
+  errorCode,
+  type Harness,
+  ok,
+  originSubjects,
+  startHarness,
+} from "@navbook/server/test-helpers";
+
+/** This package, as `NAVBOOK_PLUGIN_PATH` names it. */
+const ENV = {
+  NAVBOOK_PLUGIN_PATH: join(dirname(fileURLToPath(import.meta.url)), ".."),
+};
 
 const FEATURE_FIELDS = `slug title author created summary path baseSha
   specs { fileName title path body baseSha }`;
@@ -80,7 +91,7 @@ describe("features", () => {
     ok<Payload>(await h.gql(FEATURE, { slug })).feature;
 
   before(async () => {
-    h = await startHarness();
+    h = await startHarness({ env: ENV });
   });
   after(async () => {
     await h.stop();
@@ -502,6 +513,7 @@ describe("a document a tool would not have created", () => {
 
   before(async () => {
     h = await startHarness({
+      env: ENV,
       // Written from the clone that stands in for somebody at a terminal, which
       // is how a document with a name like this comes to exist at all.
       prepare: (fixture) => {

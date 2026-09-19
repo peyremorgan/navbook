@@ -60,7 +60,14 @@ credential reads it from the environment.
 
 | Plugin | What it adds |
 |---|---|
-| [`@navbook/plugin-kb`](../packages/plugin-kb/README.md) | The knowledge base: features under `specs/`, the documents describing them, and the `feature:` key that attaches work to one |
+| [`@navbook/plugin-kb`](../packages/plugin-kb/README.md) | The knowledge base: features under `specs/`, the documents that describe them, and the `feature:` key that attaches work to one |
+
+`@navbook/plugin-kb` is also the worked example. It uses every seam a plugin
+has — a directory of its own, a frontmatter key, a query term, doctor checks, a
+command tree, options on built-in verbs, GraphQL types and resolvers — and its
+own suite is the same set of questions the built-in feature suite used to ask.
+Reading it beside this document is the fastest way to see what a plugin looks
+like when it is finished.
 
 To have one listed here, open a pull request adding a row. There is no registry
 to submit to and nothing to approve: the list is what somebody thought worth

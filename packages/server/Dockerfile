@@ -28,6 +28,7 @@ COPY packages/cli/package.json packages/cli/
 COPY packages/web/package.json packages/web/
 COPY packages/core/package.json packages/core/
 COPY packages/server/package.json packages/server/
+COPY packages/plugin-kb/package.json packages/plugin-kb/
 
 # The root project is not scenery: `typescript` is a devDependency of the
 # workspace rather than of either package, and `prepack` runs `tsc`.
@@ -36,12 +37,19 @@ RUN pnpm install --frozen-lockfile --filter navbook-workspace --filter "@navbook
 COPY script script
 COPY packages/core packages/core
 COPY packages/server packages/server
+COPY packages/plugin-kb packages/plugin-kb
 
 # `pack` runs each package's `prepack`, which builds `dist/` and refuses to run
 # under npm — the check that keeps the exports rewrite honest.
+# A workspace plugin is packed like the other two, so the image installs the
+# tarball `pnpm publish` would upload rather than a private arrangement that
+# only holds inside this repository. It is always packed and only installed
+# when `NAVBOOK_PLUGINS` names it: packing costs a second, and a conditional
+# COPY is not a thing a Dockerfile has.
 RUN mkdir -p /out \
  && pnpm --filter @navbook/core pack --pack-destination /out \
- && pnpm --filter @navbook/server pack --pack-destination /out
+ && pnpm --filter @navbook/server pack --pack-destination /out \
+ && pnpm --filter @navbook/plugin-kb pack --pack-destination /out
 
 
 FROM node:24-alpine
@@ -71,10 +79,19 @@ ARG NAVBOOK_PLUGINS=""
 # to exist on a registry. Plugins join the same install, so a plugin's
 # `@navbook/core` peer is satisfied by that same tarball rather than by a
 # second copy fetched from the registry — the one thing that must not happen.
-COPY --from=build /out/navbook-core-*.tgz /out/navbook-server-*.tgz ./
+COPY --from=build /out/*.tgz ./
+# `NAVBOOK_PLUGINS` names packages; a workspace one resolves to the tarball
+# beside it and anything else to the registry, which is why the two are
+# installed together rather than in two steps.
 RUN npm init -y > /dev/null \
+ && for name in $NAVBOOK_PLUGINS; do \
+      case "$name" in \
+        @navbook/plugin-*) set -- "$@" "./navbook-plugin-${name#@navbook/plugin-}-"*.tgz ;; \
+        *) set -- "$@" "$name" ;; \
+      esac; \
+    done \
  && npm install --omit=dev --ignore-scripts \
-      ./navbook-core-*.tgz ./navbook-server-*.tgz $NAVBOOK_PLUGINS \
+      ./navbook-core-*.tgz ./navbook-server-*.tgz "$@" \
  && rm -f ./*.tgz \
  && npm cache clean --force
 

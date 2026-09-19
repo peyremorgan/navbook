@@ -15,8 +15,7 @@
  * real one instead.
  */
 
-import type * as NavbookCore from "@navbook/core";
-import type { EntityRecord, ExtensionParts, PluginManifest, Repo } from "@navbook/core";
+import type { CorePluginHost, EntityRecord, Repo } from "@navbook/core";
 import type { Composed, ComposeOptions } from "../commands/compose.ts";
 import type { ExtraColumn } from "../commands/entity.ts";
 import type { Ctx } from "../context.ts";
@@ -26,17 +25,9 @@ export interface PluginEntry<H> {
   activate(host: H): void | Promise<void>;
 }
 
-/** What the `./core` entry is given: the format layer, with no front end. */
-export interface CorePluginHost {
-  /** The running core — the host's copy, never one the plugin resolved. */
-  core: typeof NavbookCore;
-  /** The plugin's own manifest, so it need not read its `package.json`. */
-  manifest: PluginManifest;
-  /** What `navbook.json` declares under this plugin's name (spec 02 §2.12). */
-  settings: Record<string, unknown>;
-  /** Register tree locations, frontmatter keys, query terms and checks. */
-  register(parts: ExtensionParts): void;
-}
+// `CorePluginHost` is core's own: every front end builds one, and a plugin
+// typing against it should not depend on whichever is loading it.
+export type { CorePluginHost };
 
 /**
  * What a plugin adds to a command that already exists.

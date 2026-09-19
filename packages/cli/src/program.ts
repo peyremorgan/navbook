@@ -20,15 +20,6 @@ import {
   cmdShow,
   type ExtraColumn,
 } from "./commands/entity.ts";
-import {
-  cmdFeatureEdit,
-  cmdFeatureList,
-  cmdFeatureOpen,
-  cmdFeatureShow,
-  cmdSpecAdd,
-  cmdSpecEdit,
-  cmdSpecList,
-} from "./commands/feature.ts";
 import { cmdId, cmdInit } from "./commands/init.ts";
 import { cmdInstall, cmdUninstall } from "./commands/install.ts";
 import { cmdIssueLink, cmdIssueOpen, cmdIssueUnlink } from "./commands/issue.ts";
@@ -78,23 +69,23 @@ const QUERY_HELP = `Query terms AND together. Terms:
   assignee:EMAIL              assignee address, or a fragment of its domain
   author:EMAIL                author address, same matching
   milestone:M                 exact milestone
-  feature:SLUG                SLUG is among the entity's features (repeatable, ANDs)
   reviewer:EMAIL              asked to review it; PRs only, same matching
   review:DECISION             pending, approved or changes-requested; PRs only
   awaiting:EMAIL              asked to review it and has not yet; PRs only
   WORD or "some phrase"       case-insensitive substring of the title,
                               description, or any comment body
 Same-key terms OR for single-valued fields (status, author, milestone, review)
-and AND for multi-valued ones (label, assignee, feature, reviewer, awaiting).
+and AND for multi-valued ones (label, assignee, reviewer, awaiting).
 The default query is status:open.`;
 
 /**
  * Help for `--commit`, naming the subject the verb commits under (spec 03 §3.2).
  *
- * The argument is the commit's scope rather than an entity kind: `feature` is
- * one of the scopes and is deliberately not one of the kinds.
+ * The argument is the commit's scope rather than an entity kind: a plugin
+ * declares scopes of its own (spec 03 §3.2), and those are deliberately not
+ * kinds.
  */
-function commitHelp(scope?: EntityKind | "feature"): string {
+function commitHelp(scope?: EntityKind | string): string {
   return `wrap the change in a 'docs${scope ? `(${scope})` : ""}:' commit`;
 }
 
@@ -121,7 +112,6 @@ function withoutHelpVerb(command: Command): Command {
 export const BUILTIN_NOUNS = [
   "issue",
   "pr",
-  "feature",
   "plugin",
   "init",
   "id",
@@ -183,12 +173,11 @@ export function buildProgram(getCtx: () => Ctx, plugins?: PluginRuntime): Comman
     .command("__complete", { hidden: true })
     .description("internal: print completion candidates for the words typed so far")
     .argument("[words...]")
-    .action((words: string[]) => cmdComplete(getCtx(), words, plugins));
+    .action(async (words: string[]) => cmdComplete(getCtx(), words, plugins));
 
   program.addCommand(buildPluginCommand(getCtx));
   program.addCommand(buildIssueCommand(getCtx, plugins));
   program.addCommand(buildPrCommand(getCtx, plugins));
-  program.addCommand(buildFeatureCommand(getCtx));
 
   // Built from manifests alone: no plugin code is imported here, which is what
   // lets `nav --help` cost the same with plugins installed as without
@@ -250,7 +239,6 @@ function buildPrCommand(getCtx: () => Ctx, plugins?: PluginRuntime): Command {
     .option("--assignee <email>", "assign to a person (repeatable)", collect, [])
     .option("--reviewer <email>", "ask a person to review it (repeatable)", collect, [])
     .option("--milestone <name>", "milestone")
-    .option("--feature <slug>", "attach it to a feature (repeatable)", collect, [])
     .option("--commit", commitHelp("pr"))
     .action(async (opts) =>
       cmdPrOpen(getCtx(), { ...opts, ext: await openFields(getCtx(), plugins, "pr open", opts) }),
@@ -310,86 +298,6 @@ function buildPrCommand(getCtx: () => Ctx, plugins?: PluginRuntime): Command {
   return pr;
 }
 
-/**
- * `nav feature` — spec 04 §4.3.
- *
- * None of the shared verbs appear here. A feature does not open and close, and
- * it is not discussed: the discussion belongs to the issues attached to it. So
- * the family is small on purpose, and `spec` groups what acts on the documents
- * rather than on the feature itself.
- */
-function buildFeatureCommand(getCtx: () => Ctx): Command {
-  const feature = withoutHelpVerb(new Command("feature")).description("work with features");
-
-  feature
-    .command("open")
-    .argument("<title>", "one-line name for the feature")
-    .description("create a feature")
-    .option("-m, --message <text>", "summary text; without it $EDITOR is opened")
-    .option("--slug <slug>", "directory name to file it under; derived from the title otherwise")
-    .option("--commit", commitHelp("feature"))
-    .action((title: string, opts) => cmdFeatureOpen(getCtx(), title, opts));
-
-  feature
-    .command("list")
-    .description("list features, with how much work is attached to each")
-    .option("--json", "one JSON object per feature, newline-delimited")
-    .action((opts) => cmdFeatureList(getCtx(), opts));
-
-  feature
-    .command("show")
-    .argument("<slug>", "the feature's directory name")
-    .description("render a feature, its documents, and what has touched it")
-    .option("--json", "emit a single JSON object naming its issues and pull requests")
-    .option("--commits <n>", "recent commits to list (default 10)", (value) =>
-      value.trim() === "" ? Number.NaN : Number(value),
-    )
-    .action((slug: string, opts) => cmdFeatureShow(getCtx(), slug, opts));
-
-  feature
-    .command("edit")
-    .argument("<slug>", "the feature's directory name")
-    .description("open the feature's feature.md in $EDITOR")
-    .option("--commit", commitHelp("feature"))
-    .action((slug: string, opts) => cmdFeatureEdit(getCtx(), slug, opts));
-
-  feature.addCommand(buildSpecCommand(getCtx));
-  return feature;
-}
-
-function buildSpecCommand(getCtx: () => Ctx): Command {
-  const spec = withoutHelpVerb(new Command("spec")).description(
-    "work with a feature's specification documents",
-  );
-
-  spec
-    .command("add")
-    .argument("<slug>", "the feature's directory name")
-    .argument("<title>", "one-line name for the document")
-    .description("add a specification document to a feature")
-    .option("-m, --message <text>", "document text; without it $EDITOR is opened")
-    .option("--file <name>", "file to write it to; derived from the title otherwise")
-    .option("--commit", commitHelp("feature"))
-    .action((slug: string, title: string, opts) => cmdSpecAdd(getCtx(), slug, title, opts));
-
-  spec
-    .command("edit")
-    .argument("<slug>", "the feature's directory name")
-    .argument("<file>", "the document's file name")
-    .description("open a specification document in $EDITOR")
-    .option("--commit", commitHelp("feature"))
-    .action((slug: string, file: string, opts) => cmdSpecEdit(getCtx(), slug, file, opts));
-
-  spec
-    .command("list")
-    .argument("<slug>", "the feature's directory name")
-    .description("list a feature's specification documents")
-    .option("--json", "one JSON object per document, newline-delimited")
-    .action((slug: string, opts) => cmdSpecList(getCtx(), slug, opts));
-
-  return spec;
-}
-
 function buildIssueCommand(getCtx: () => Ctx, plugins?: PluginRuntime): Command {
   const issue = withoutHelpVerb(new Command("issue")).description("work with issues");
 
@@ -401,7 +309,6 @@ function buildIssueCommand(getCtx: () => Ctx, plugins?: PluginRuntime): Command 
     .option("--label <label>", "add a label (repeatable)", collect, [])
     .option("--assignee <email>", "assign to a person (repeatable)", collect, [])
     .option("--milestone <name>", "milestone")
-    .option("--feature <slug>", "attach it to a feature (repeatable)", collect, [])
     // Number rather than parseInt, and blank rather than 0, for the reason
     // `--depth` does it: a value the command must refuse has to reach it
     // intact rather than arrive silently rounded or defaulted.
