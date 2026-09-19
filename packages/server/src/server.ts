@@ -21,6 +21,8 @@ import { RevisionCache } from "./changes.ts";
 import type { Config } from "./config.ts";
 import { makeGraphQLCtx } from "./context.ts";
 import { AuthorCache } from "./people.ts";
+import { type LoadedPlugins, loadServerPlugins } from "./plugins/load.ts";
+import { resolveServerPlugins } from "./plugins/resolve.ts";
 import { isOpen } from "./policy.ts";
 import { makeSchema } from "./schema.ts";
 import { RepoSync } from "./sync.ts";
@@ -130,17 +132,49 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
   // Likewise one per process: a revision's diff is the same for everybody.
   const revisions = new RevisionCache({ repoRoot, navDir });
 
+  // Plugins before the schema, because the schema is partly theirs. A fault in
+  // any of this is a StartupError, reported by `main` and fatal: see
+  // `plugins/resolve.ts` for why a server refuses where the CLI carries on.
+  let loaded: LoadedPlugins;
+  try {
+    loaded = await loadServerPlugins({
+      plugins: resolveServerPlugins(makeWsCtx({ cwd: config.repoPath, env }), env),
+      config,
+      env,
+      sync,
+      authors,
+      report,
+    });
+  } catch (error) {
+    throw new StartupError(error instanceof Error ? error.message : String(error));
+  }
+
   const yoga = createYoga({
-    schema: makeSchema(),
+    schema: makeSchema({ typeDefs: loaded.typeDefs, resolvers: loaded.runtime.resolvers }),
     graphiql: config.graphiql,
     // Authentication runs here rather than in a resolver, so an unusable token
     // is refused before any operation is planned — and so every field is
     // covered, including ones added later.
     context: async ({ request }) => {
       const viewer = await auth.verify(request.headers.get("authorization"));
-      return makeGraphQLCtx({ viewer, config, sync, authors, revisions, env, navDir });
+      return makeGraphQLCtx({
+        viewer,
+        config,
+        sync,
+        authors,
+        revisions,
+        env,
+        navDir,
+        ext: loaded.ext,
+        plugins: loaded.runtime,
+      });
     },
   });
+
+  // Services start before the port opens: a bridge that has not connected is
+  // not ready to be told about a mutation, and one that cannot start is a
+  // deployment fault rather than something to discover later (spec 06 §6.2).
+  await loaded.runtime.start();
 
   const server = createServer(yoga);
   await new Promise<void>((resolve) => server.listen(config.port, resolve));
@@ -157,6 +191,10 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
       // send anything again.
       server.closeIdleConnections();
       await closed;
+      // Services stop before the clone settles: one of them may still be
+      // holding a socket that would deliver a message nothing is left to
+      // handle.
+      await loaded.runtime.stop();
       // Never cut an operation in half: a mutation between its commit and its
       // push is the one moment the clone's state depends on finishing.
       await sync.drain();

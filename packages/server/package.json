@@ -19,8 +19,17 @@
   "homepage": "https://github.com/peyremorgan/navbook#readme",
   "bugs": "https://github.com/peyremorgan/navbook/issues",
   "type": "module",
+  "exports": {
+    "./plugin": "./src/plugins/host.ts"
+  },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "exports": {
+      "./plugin": {
+        "types": "./dist/plugins/host.d.ts",
+        "default": "./dist/plugins/host.js"
+      }
+    }
   },
   "bin": {
     "nav-server": "dist/main.js"

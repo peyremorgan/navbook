@@ -42,6 +42,7 @@ import {
   newFeatureFile,
   newIssueFile,
   newSpecFile,
+  nowIso,
   openIssue,
   planIssueLink,
   prepareOpen,
@@ -88,8 +89,25 @@ import { toCoreKind, toCoreVerdict } from "./map.ts";
 /** Mutations always commit: a change nobody committed is not a change made. */
 const COMMIT = { commit: true } as const;
 
-/** What the client is told about the commit and the push behind it. */
-function commitInfo(result: RunPlanResult, pushed: boolean): CommitInfo {
+/**
+ * What the client is told about the commit and the push behind it — and, in
+ * the same breath, what the plugins are told.
+ *
+ * Every mutation ends here, which is why the event is emitted here: one place
+ * to keep correct, and a mutation added later gets it without anybody
+ * remembering to. It runs after the write transaction has released, so a
+ * listener sees a settled tree and cannot deadlock reading it, and after the
+ * push has been attempted, so `pushed` is the truth rather than a hope.
+ */
+function commitInfo(ctx: GraphQLCtx, result: RunPlanResult, pushed: boolean): CommitInfo {
+  ctx.plugins.emit({
+    subject: result.subject,
+    message: result.message,
+    committed: result.committed,
+    pushed,
+    viewer: ctx.viewer,
+    at: nowIso(ctx.ws),
+  });
   return { committed: result.committed, subject: result.subject, pushed };
 }
 
@@ -172,21 +190,24 @@ export const Mutation: MutationResolvers = {
       return {
         issue: result.issue,
         parent: result.parent,
-        commit: commitInfo(result.run, pushed),
+        commit: commitInfo(ctx, result.run, pushed),
       };
     }),
 
   updateIssue: (_parent, { input }, ctx) =>
     run(async () => {
       const { result, pushed } = await patchEntity(ctx, "issue", input);
-      return { issue: result.entity, commit: commitInfo(result.run, pushed) };
+      return { issue: result.entity, commit: commitInfo(ctx, result.run, pushed) };
     }),
 
   updatePr: (_parent, { input }, ctx) =>
     run(async () => {
       const { result, pushed } = await patchEntity(ctx, "pr", input);
       // A working-tree read, so it was found on no ref in particular.
-      return { pr: { entity: result.entity, refs: [] }, commit: commitInfo(result.run, pushed) };
+      return {
+        pr: { entity: result.entity, refs: [] },
+        commit: commitInfo(ctx, result.run, pushed),
+      };
     }),
 
   closeIssue: (_parent, { input }, ctx) =>
@@ -215,7 +236,7 @@ export const Mutation: MutationResolvers = {
       return {
         issue: result.issue,
         destination: result.destination,
-        commit: commitInfo(result.run, pushed),
+        commit: commitInfo(ctx, result.run, pushed),
       };
     }),
 
@@ -236,7 +257,7 @@ export const Mutation: MutationResolvers = {
       return {
         issue: result.issue,
         destination: result.destination,
-        commit: commitInfo(result.run, pushed),
+        commit: commitInfo(ctx, result.run, pushed),
       };
     }),
 
@@ -286,7 +307,7 @@ export const Mutation: MutationResolvers = {
         comment: result.comment,
         entity:
           result.entity.kind === "issue" ? result.entity : { entity: result.entity, refs: [] },
-        commit: commitInfo(result.run, pushed),
+        commit: commitInfo(ctx, result.run, pushed),
       };
     }),
 
@@ -327,7 +348,7 @@ export const Mutation: MutationResolvers = {
         child: result.child,
         parent: result.parent,
         previousParentId: result.previousParentId,
-        commit: commitInfo(result.run, pushed),
+        commit: commitInfo(ctx, result.run, pushed),
       };
     }),
 
@@ -348,7 +369,7 @@ export const Mutation: MutationResolvers = {
       return {
         child: result.child,
         previousParentId: result.previousParentId,
-        commit: commitInfo(result.run, pushed),
+        commit: commitInfo(ctx, result.run, pushed),
       };
     }),
 
@@ -383,7 +404,7 @@ export const Mutation: MutationResolvers = {
         (opened) => opened.run.committed,
       );
 
-      return { feature: result.feature, commit: commitInfo(result.run, pushed) };
+      return { feature: result.feature, commit: commitInfo(ctx, result.run, pushed) };
     }),
 
   updateFeature: (_parent, { input }, ctx) =>
@@ -415,7 +436,7 @@ export const Mutation: MutationResolvers = {
         (edited) => edited.run.committed,
       );
 
-      return { feature: result.feature, commit: commitInfo(result.run, pushed) };
+      return { feature: result.feature, commit: commitInfo(ctx, result.run, pushed) };
     }),
 
   addSpec: (_parent, { input }, ctx) =>
@@ -442,7 +463,7 @@ export const Mutation: MutationResolvers = {
       return {
         feature: result.feature,
         spec: result.spec,
-        commit: commitInfo(result.run, pushed),
+        commit: commitInfo(ctx, result.run, pushed),
       };
     }),
 
@@ -470,7 +491,7 @@ export const Mutation: MutationResolvers = {
       return {
         feature: result.feature,
         spec: result.spec,
-        commit: commitInfo(result.run, pushed),
+        commit: commitInfo(ctx, result.run, pushed),
       };
     }),
 };

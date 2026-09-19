@@ -1,0 +1,218 @@
+/**
+ * A plugin reaching the API — spec 06 §6.2, §6.3.
+ *
+ * Three things only the server offers: a schema it can extend, a service that
+ * outlives the request that started it, and the event every mutation emits.
+ * And one refusal the CLI does not make — a declared plugin that is not
+ * installed stops the server, because its users are people with browsers who
+ * would otherwise see an absence with nothing to explain it.
+ */
+
+import assert from "node:assert/strict";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
+import { startHarness } from "../helpers/harness.ts";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const PROBE = join(HERE, "..", "fixtures", "plugin-probe");
+
+/** A log the probe appends to, so a service's lifecycle can be observed. */
+function logFile(name: string): { path: string; lines(): string[]; clear(): void } {
+  const path = join(process.env.TMPDIR ?? "/tmp", `navbook-srvprobe-${name}-${process.pid}.log`);
+  rmSync(path, { force: true });
+  return {
+    path,
+    lines: () => (existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean) : []),
+    clear: () => rmSync(path, { force: true }),
+  };
+}
+
+/** The environment that puts the probe on the path and configures it. */
+function probeEnv(log: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    NAVBOOK_PLUGIN_PATH: PROBE,
+    SRVPROBE_LOG: log,
+    NAV_SERVER_SRVPROBE_TOKEN: "s3cret",
+    ...extra,
+  };
+}
+
+describe("a plugin's schema", () => {
+  it("is merged into the one the server serves", async () => {
+    const log = logFile("schema");
+    const harness = await startHarness({
+      env: probeEnv(log.path, { NAV_SERVER_SRVPROBE_NOTE: "hello" }),
+    });
+    try {
+      const result = await harness.gql<{ srvprobe: { note: string | null } }>(
+        "{ srvprobe { note } }",
+      );
+      assert.deepEqual(result.errors, [], JSON.stringify(result.errors));
+      assert.equal(result.data?.srvprobe.note, "hello");
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("leaves the built-in schema answering exactly as before", async () => {
+    const log = logFile("builtin");
+    const harness = await startHarness({ env: probeEnv(log.path) });
+    try {
+      const result = await harness.gql<{ viewer: { email: string } }>("{ viewer { email } }");
+      assert.deepEqual(result.errors, [], JSON.stringify(result.errors));
+      assert.ok(result.data?.viewer.email);
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("resolves through the same context the built-in resolvers use", async () => {
+    const log = logFile("context");
+    const harness = await startHarness({ env: probeEnv(log.path) });
+    try {
+      await harness.gql(
+        `mutation { openIssue(input: { title: "Tagged", body: "Body." }) { issue { id } } }`,
+      );
+      // The plugin's own frontmatter key, read out of the tree the API wrote.
+      const result = await harness.gql<{ srvprobe: { tags: string[] } }>("{ srvprobe { tags } }");
+      assert.deepEqual(result.errors, [], JSON.stringify(result.errors));
+      assert.deepEqual(result.data?.srvprobe.tags, []);
+    } finally {
+      await harness.stop();
+    }
+  });
+});
+
+describe("a plugin's service", () => {
+  it("starts before the port opens and stops on shutdown", async () => {
+    const log = logFile("service");
+    const harness = await startHarness({ env: probeEnv(log.path) });
+    // Started before anything could be served: the log already says so.
+    assert.ok(log.lines().includes("service:start"), log.lines().join(", "));
+    assert.equal(log.lines().includes("service:stop"), false);
+    await harness.stop();
+    assert.ok(log.lines().includes("service:stop"), log.lines().join(", "));
+  });
+
+  it("is given the configuration its manifest declared", async () => {
+    const log = logFile("config");
+    const harness = await startHarness({ env: probeEnv(log.path) });
+    try {
+      assert.ok(log.lines().some((line) => line === "activate token=s3cret"));
+    } finally {
+      await harness.stop();
+    }
+  });
+});
+
+describe("the mutation event", () => {
+  it("names every committed mutation, with who made it", async () => {
+    const log = logFile("events");
+    const harness = await startHarness({ env: probeEnv(log.path) });
+    try {
+      await harness.gql(
+        `mutation { openIssue(input: { title: "One", body: "Body." }) { issue { id } } }`,
+      );
+      const events = log.lines().filter((line) => line.startsWith("mutation "));
+      assert.equal(events.length, 1, log.lines().join("\n"));
+      assert.match(events[0] as string, /docs\(issue\): open #\w{8}/);
+      // The person, not the machine account — the gateway rule of §6.2.
+      assert.match(events[0] as string, /by=\S+@\S+/);
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("is emitted once per mutation, and readable back through the schema", async () => {
+    const log = logFile("seen");
+    const harness = await startHarness({ env: probeEnv(log.path) });
+    try {
+      const opened = await harness.gql<{ openIssue: { issue: { id: string } } }>(
+        `mutation { openIssue(input: { title: "One", body: "Body." }) { issue { id } } }`,
+      );
+      const id = opened.data?.openIssue.issue.id;
+      assert.ok(id);
+      await harness.gql(
+        `mutation Close($ref: ID!) { closeIssue(input: { ref: $ref }) { issue { id } } }`,
+        { ref: id },
+      );
+      const result = await harness.gql<{ srvprobe: { seen: string[] } }>("{ srvprobe { seen } }");
+      const seen = result.data?.srvprobe.seen ?? [];
+      assert.equal(seen.length, 2, seen.join(", "));
+      assert.match(seen[0] as string, /open/);
+      assert.match(seen[1] as string, /close/);
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("says nothing about a read", async () => {
+    const log = logFile("reads");
+    const harness = await startHarness({ env: probeEnv(log.path) });
+    try {
+      await harness.gql("{ issues { id } }");
+      assert.deepEqual(
+        log.lines().filter((line) => line.startsWith("mutation ")),
+        [],
+      );
+    } finally {
+      await harness.stop();
+    }
+  });
+});
+
+describe("what the server refuses to start without", () => {
+  it("stops when the clone declares a plugin it does not have", async () => {
+    // The refusal the CLI does not make. A person at a terminal can read one
+    // line and carry on; a browser user would see an absence and no reason.
+    await assert.rejects(
+      () =>
+        startHarness({
+          prepare: (fixture) => {
+            // Written on the clone the server will serve, and committed: the
+            // server refuses a dirty tree, so an uncommitted marker would be
+            // refused for the wrong reason.
+            fixture.server.write(
+              ".navbook/navbook.json",
+              `${JSON.stringify({ version: 1, plugins: { "@navbook/plugin-absent": {} } }, null, 2)}\n`,
+            );
+            fixture.server.commitAll("declare a plugin nobody installed");
+          },
+        }),
+      (error: Error) => {
+        assert.match(error.message, /@navbook\/plugin-absent/);
+        assert.match(error.message, /not installed beside nav-server/);
+        return true;
+      },
+    );
+  });
+
+  it("stops when a plugin's required configuration is absent", async () => {
+    const log = logFile("noconfig");
+    await assert.rejects(
+      () =>
+        startHarness({
+          env: { NAVBOOK_PLUGIN_PATH: PROBE, SRVPROBE_LOG: log.path },
+        }),
+      (error: Error) => {
+        assert.match(error.message, /NAV_SERVER_SRVPROBE_TOKEN/);
+        return true;
+      },
+    );
+  });
+
+  it("starts with an optional key left unset", async () => {
+    const log = logFile("optional");
+    const harness = await startHarness({ env: probeEnv(log.path) });
+    try {
+      const result = await harness.gql<{ srvprobe: { note: string | null } }>(
+        "{ srvprobe { note } }",
+      );
+      assert.equal(result.data?.srvprobe.note, null);
+    } finally {
+      await harness.stop();
+    }
+  });
+});

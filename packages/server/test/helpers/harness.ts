@@ -56,6 +56,8 @@ export interface HarnessOptions extends FixtureOptions {
   prepare?: (fixture: Fixture) => void;
   /** Serve the GraphiQL explorer, as a default deployment does. */
   graphiql?: boolean;
+  /** Extra environment for the server process, e.g. `NAVBOOK_PLUGIN_PATH`. */
+  env?: NodeJS.ProcessEnv;
   /** An authorization policy, as its flags would be given; none admits everyone. */
   policy?: {
     requireClaims?: string[];
@@ -97,7 +99,7 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<Harness> 
       ]),
       ...(opts.policy?.requireEmailVerified ? ["--require-email-verified"] : []),
     ],
-    { env: fixture.env, stdio: ["ignore", "pipe", "pipe"] },
+    { env: { ...fixture.env, ...opts.env }, stdio: ["ignore", "pipe", "pipe"] },
   );
 
   const exited = new Promise<number | null>((resolve) =>
