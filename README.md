@@ -254,6 +254,14 @@ to exist first:
   reach the remote as; the person a commit is *for* comes from their own token
   and is recorded as `author:`.
 
+Plugins are the one exception to "edit `.env` and restart". A plugin's server
+half is installed beside `nav-server` and its web half is compiled into the
+bundle, so `NAVBOOK_PLUGINS` is a *build* argument: change it and run
+`docker compose build`. The repository still decides which of them it uses, in
+its own `navbook.json`, and the API refuses to start if it declares one the
+image does not carry — so a mismatch is found at deploy time rather than as a
+quiet absence in somebody's browser.
+
 The API container makes its own clone on the first start and keeps it in a
 volume. That volume is not a database — it can be deleted, and the next start
 fetches the repository again. Changing any value in `.env` is an edit and a

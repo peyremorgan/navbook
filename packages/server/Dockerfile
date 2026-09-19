@@ -56,12 +56,25 @@ ENV GIT_TERMINAL_PROMPT=0 \
 
 WORKDIR /app
 
+# The plugins this image carries, as `.env` names them (spec 02 §2.12).
+#
+# A build argument rather than an environment variable, because a plugin is
+# part of the image the way the Navbook version is: the server resolves them
+# from beside itself, so they have to be installed here, not chosen at boot.
+# The clone's `navbook.json` still decides which of them a repository *uses* —
+# and the server refuses to start if it declares one this image lacks, which is
+# how a mismatch between the two is found at deploy time rather than later.
+ARG NAVBOOK_PLUGINS=""
+
 # Both tarballs in one install: npm satisfies the server's `@navbook/core`
 # dependency from the core tarball beside it, so the version it names never has
-# to exist on a registry.
+# to exist on a registry. Plugins join the same install, so a plugin's
+# `@navbook/core` peer is satisfied by that same tarball rather than by a
+# second copy fetched from the registry — the one thing that must not happen.
 COPY --from=build /out/navbook-core-*.tgz /out/navbook-server-*.tgz ./
 RUN npm init -y > /dev/null \
- && npm install --omit=dev ./navbook-core-*.tgz ./navbook-server-*.tgz \
+ && npm install --omit=dev --ignore-scripts \
+      ./navbook-core-*.tgz ./navbook-server-*.tgz $NAVBOOK_PLUGINS \
  && rm -f ./*.tgz \
  && npm cache clean --force
 

@@ -19,6 +19,12 @@ services:
     build:
       context: .
       dockerfile: packages/server/Dockerfile
+      # The one build-time value here. Everything else in this file is read
+      # when a container starts, so changing it is an edit and a restart; a
+      # plugin is installed into the image, so changing this is an edit and a
+      # `docker compose build`. See `.env.example`.
+      args:
+        NAVBOOK_PLUGINS: ${NAVBOOK_PLUGINS:-}
     image: navbook-server:${NAVBOOK_IMAGE_TAG:-local}
     restart: unless-stopped
     volumes:
@@ -61,6 +67,11 @@ services:
     build:
       context: .
       dockerfile: packages/web/Dockerfile
+      # The same list, under the name the web build reads. A plugin's web part
+      # is a Nuxt layer compiled into the bundle, so it is a build argument for
+      # the same reason the API's is.
+      args:
+        NAVBOOK_WEB_PLUGINS: ${NAVBOOK_PLUGINS:-}
     image: navbook-web:${NAVBOOK_IMAGE_TAG:-local}
     restart: unless-stopped
     environment:
