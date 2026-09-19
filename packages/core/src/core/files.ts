@@ -221,7 +221,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 /* ------------------------------------------------------------------ helpers */
 
-function requireString(parsed: ParsedFile, key: string, problems: Problem[]): string | null {
+export function requireString(parsed: ParsedFile, key: string, problems: Problem[]): string | null {
   const value = parsed.fm[key];
   if (value === undefined || value === null) {
     if (hasKey(parsed.nav, key)) {
@@ -238,7 +238,7 @@ function requireString(parsed: ParsedFile, key: string, problems: Problem[]): st
   return value;
 }
 
-function checkOptionalString(parsed: ParsedFile, key: string, problems: Problem[]): void {
+export function checkOptionalString(parsed: ParsedFile, key: string, problems: Problem[]): void {
   const value = parsed.fm[key];
   if (value === undefined || value === null) return;
   if (typeof value !== "string" || value.trim() === "") {
@@ -246,7 +246,7 @@ function checkOptionalString(parsed: ParsedFile, key: string, problems: Problem[
   }
 }
 
-function checkPerson(parsed: ParsedFile, key: string, problems: Problem[]): void {
+export function checkPerson(parsed: ParsedFile, key: string, problems: Problem[]): void {
   const value = requireString(parsed, key, problems);
   if (value === null) return;
   if (!parsePerson(value)) {
@@ -257,7 +257,7 @@ function checkPerson(parsed: ParsedFile, key: string, problems: Problem[]): void
   }
 }
 
-function checkTimestamp(parsed: ParsedFile, key: string, problems: Problem[]): void {
+export function checkTimestamp(parsed: ParsedFile, key: string, problems: Problem[]): void {
   const value = requireString(parsed, key, problems);
   if (value === null) return;
   if (!parseIso(value)) {
@@ -281,7 +281,7 @@ function checkLabels(parsed: ParsedFile, problems: Problem[]): void {
  * `reviewer` (§2.7), which take the same shape for the same reason: one name
  * is the overwhelmingly common case and reads better as a scalar.
  */
-function checkPersonList(parsed: ParsedFile, key: string, problems: Problem[]): void {
+export function checkPersonList(parsed: ParsedFile, key: string, problems: Problem[]): void {
   const value = parsed.fm[key];
   if (value === undefined || value === null) return;
   const complain = (): void => {
@@ -368,7 +368,7 @@ function checkIdList(parsed: ParsedFile, key: string, problems: Problem[]): void
   }
 }
 
-function checkNoStatusKey(parsed: ParsedFile, problems: Problem[]): void {
+export function checkNoStatusKey(parsed: ParsedFile, problems: Problem[]): void {
   if (hasKey(parsed.nav, "status")) {
     problems.push({
       key: "status",
@@ -781,6 +781,14 @@ export function writeScalarOrList(nav: NavDoc, key: string, values?: readonly st
   else if (values.length === 1) patchDoc(nav, { [key]: values[0] });
   else setFlowList(nav, key, [...values]);
 }
+
+/*
+ * The six checks above are exported because they are the format's generic
+ * frontmatter rules rather than any one file type's: a plugin validating a
+ * file it owns needs `title` required and `author` to be a person in exactly
+ * the sense this document defines, and reimplementing them would be a second
+ * opinion about a format that has one.
+ */
 
 /**
  * Validate a `feature.md` (§2.11).
