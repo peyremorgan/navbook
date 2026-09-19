@@ -20,6 +20,7 @@ import {
 import { dirname, join, posix, relative, sep } from "node:path";
 import { parseCommentFileName } from "../core/comments.ts";
 import type { FileOp } from "../core/ops.ts";
+import { type PluginDeclarationReading, parsePluginDeclaration } from "../core/plugins.ts";
 import { parseReviewPolicy, type ReviewPolicyReading } from "../core/policy.ts";
 import { needsComments, type Query } from "../core/query.ts";
 import { parseDirName } from "../core/slug.ts";
@@ -92,7 +93,10 @@ function wanted(rel: string, comments: CommentScope): boolean {
 export function loadRepo(ws: WsCtx, opts: ReadTreeOptions = {}): Repo {
   requireNavbook(ws);
   const comments = opts.comments ?? "all";
-  return parseTree(readNavTree(ws.navRoot, { comments }), { commentsLoaded: comments });
+  return parseTree(readNavTree(ws.navRoot, { comments }), {
+    commentsLoaded: comments,
+    ext: ws.ext,
+  });
 }
 
 /**
@@ -105,7 +109,7 @@ export function loadRepo(ws: WsCtx, opts: ReadTreeOptions = {}): Repo {
  */
 export function loadRepoForQuery(ws: WsCtx, query: Query, kind: EntityKind): Repo {
   if (kind === "pr") return loadRepo(ws, { comments: "prs" });
-  return loadRepo(ws, { comments: needsComments(query) ? "all" : "none" });
+  return loadRepo(ws, { comments: needsComments(query, ws.ext) ? "all" : "none" });
 }
 
 /**
@@ -129,12 +133,31 @@ export function loadRepoForQuery(ws: WsCtx, query: Query, kind: EntityKind): Rep
  * quietly counting by the defaults.
  */
 export function readReviewPolicy(ws: WsCtx): ReviewPolicyReading {
+  return parseReviewPolicy(readMarker(ws));
+}
+
+/**
+ * Read the plugin declaration the marker carries (spec 02 §2.12).
+ *
+ * The counterpart of {@link readReviewPolicy}, for the caller that needs to
+ * know which plugins a tree was written by *before* it has a tree — which is
+ * every front end at startup, since what it reads here decides what parses the
+ * tree afterwards. An unreadable marker declares nothing, for the reason given
+ * above: agreeing with what `parseTree` will conclude matters more than
+ * reporting it twice.
+ */
+export function readPluginDeclaration(ws: WsCtx): PluginDeclarationReading {
+  return parsePluginDeclaration(readMarker(ws));
+}
+
+/** The marker's text, or undefined when there is none to read. */
+function readMarker(ws: WsCtx): string | undefined {
   const path = join(ws.navRoot, NAV_MARKER);
-  if (!existsSync(path)) return parseReviewPolicy(undefined);
+  if (!existsSync(path)) return undefined;
   try {
-    return parseReviewPolicy(readFileSync(path, "utf8"));
+    return readFileSync(path, "utf8");
   } catch {
-    return parseReviewPolicy(undefined);
+    return undefined;
   }
 }
 

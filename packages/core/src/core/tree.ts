@@ -7,9 +7,11 @@
  */
 
 import { parseCommentFileName } from "./comments.ts";
+import { type CoreExtensions, NO_EXTENSIONS } from "./extensions.ts";
 import { FEATURE_FILE, type ParsedFile, parseFile, readMerged, readPersonList } from "./files.ts";
 import { blobSha } from "./hash.ts";
 import { dedupePeople, type Person, parsePerson } from "./person.ts";
+import { type PluginDeclarationReading, parsePluginDeclaration } from "./plugins.ts";
 import { parseReviewPolicy, type ReviewPolicyReading } from "./policy.ts";
 import { parseDirName, SLUG_PATTERN } from "./slug.ts";
 
@@ -158,6 +160,17 @@ export interface Repo {
   reserved: string[];
   /** The review policy the marker declares, and what was wrong with it (§2.10). */
   reviewPolicy: ReviewPolicyReading;
+  /** The plugins the marker declares, and what was wrong with it (§2.12). */
+  plugins: PluginDeclarationReading;
+  /**
+   * What each registered tree location built, by its directory name (§2.12).
+   *
+   * Opaque here: core routes the paths and holds the result, and only the
+   * plugin that registered the location knows what is in it.
+   */
+  ext: Map<string, unknown>;
+  /** Layout faults each location reported, by directory name; the plugin reports them. */
+  extProblems: Map<string, StructuralProblem[]>;
 }
 
 interface FeatureDraft {
@@ -181,15 +194,26 @@ interface EntityDraft {
 }
 
 /** Build a {@link Repo} from a flat path→content map. */
-export function parseTree(files: NavTree, opts: { commentsLoaded?: CommentScope } = {}): Repo {
+export function parseTree(
+  files: NavTree,
+  opts: { commentsLoaded?: CommentScope; ext?: CoreExtensions } = {},
+): Repo {
+  const extensions = opts.ext ?? NO_EXTENSIONS;
   const problems: StructuralProblem[] = [];
   const featureProblems: StructuralProblem[] = [];
   const reserved: string[] = [];
   const drafts = new Map<string, EntityDraft>();
   const featureDrafts = new Map<string, FeatureDraft>();
+  // One bucket per registered location, made up front so a location that
+  // matches nothing still builds — an empty `specs/` is a real state, and a
+  // plugin that never heard about it could not report the difference between
+  // no features and no directory.
+  const extPaths = new Map<string, string[]>(
+    extensions.treeLocations.map((location) => [location.dir, []]),
+  );
 
   for (const path of [...files.keys()].sort()) {
-    classify(path, drafts, featureDrafts, problems, featureProblems, reserved);
+    classify(path, drafts, featureDrafts, problems, featureProblems, reserved, extPaths);
   }
 
   const issues: EntityRecord[] = [];
@@ -198,7 +222,7 @@ export function parseTree(files: NavTree, opts: { commentsLoaded?: CommentScope 
 
   const orphans: OrphanDirectory[] = [];
   for (const draft of [...drafts.values()].sort((a, b) => (a.dirPath < b.dirPath ? -1 : 1))) {
-    const record = materialize(draft, files, problems, orphans);
+    const record = materialize(draft, files, problems, orphans, extensions);
     if (!record) continue;
     (record.kind === "issue" ? issues : prs).push(record);
     if (!byId.has(record.id)) byId.set(record.id, record);
@@ -213,6 +237,16 @@ export function parseTree(files: NavTree, opts: { commentsLoaded?: CommentScope 
     featureBySlug.set(record.slug, record);
   }
 
+  const ext = new Map<string, unknown>();
+  const extProblems = new Map<string, StructuralProblem[]>();
+  for (const location of extensions.treeLocations) {
+    const paths = extPaths.get(location.dir) ?? [];
+    const built = location.build(files, paths);
+    ext.set(location.dir, built.model);
+    if (built.problems.length > 0) extProblems.set(location.dir, built.problems);
+  }
+
+  const markerText = files.get(NAV_MARKER);
   return {
     issues,
     prs,
@@ -224,7 +258,10 @@ export function parseTree(files: NavTree, opts: { commentsLoaded?: CommentScope 
     orphans,
     commentsLoaded: opts.commentsLoaded ?? "all",
     reserved,
-    reviewPolicy: parseReviewPolicy(files.get(NAV_MARKER)),
+    reviewPolicy: parseReviewPolicy(markerText),
+    plugins: parsePluginDeclaration(markerText),
+    ext,
+    extProblems,
   };
 }
 
@@ -235,6 +272,7 @@ function classify(
   problems: StructuralProblem[],
   featureProblems: StructuralProblem[],
   reserved: string[],
+  extPaths: Map<string, string[]>,
 ): void {
   const segments = path.split("/");
   const base = segments[segments.length - 1] as string;
@@ -262,6 +300,15 @@ function classify(
     return;
   }
   if (root !== ENTITY_DIR.issue && root !== ENTITY_DIR.pr) {
+    // A directory a plugin registered is that plugin's to read (§2.12). Not
+    // when archived, for the reason `specs/` is not: an archived copy of an
+    // extension's directory is not a shape anything defines, so it stays
+    // reserved rather than being read as live data under another name.
+    const bucket = !archived && rest.length > 1 ? extPaths.get(root) : undefined;
+    if (bucket !== undefined) {
+      bucket.push(path);
+      return;
+    }
     // Reserved and unknown names are tolerated and preserved untouched (§2.10).
     // The marker is not among them: it is read for its review policy, and
     // listing it as uninterpreted would say the opposite of what happens.
@@ -432,14 +479,21 @@ function materializeFeature(
   };
 }
 
-/** Parse a file, recording a structural problem when it cannot be read at all. */
+/**
+ * Parse a file, recording a structural problem when it cannot be read at all.
+ *
+ * `ext` is passed for an entity file and withheld everywhere else, because a
+ * registered key names the kind it belongs to and both kinds are entities: a
+ * comment and a `feature.md` have no kind for one to name.
+ */
 function parseOrReport(
   files: NavTree,
   path: string,
   problems: StructuralProblem[],
+  ext?: CoreExtensions,
 ): ParsedFile | null {
   try {
-    return parseFile(files.get(path) ?? "");
+    return parseFile(files.get(path) ?? "", ext);
   } catch (error) {
     problems.push({ path, message: error instanceof Error ? error.message : String(error) });
     return null;
@@ -451,6 +505,7 @@ function materialize(
   files: NavTree,
   problems: StructuralProblem[],
   orphans: OrphanDirectory[],
+  ext: CoreExtensions,
 ): EntityRecord | null {
   const parsedName = parseDirName(draft.dirName);
   if (!parsedName) return null;
@@ -473,7 +528,7 @@ function materialize(
     return null;
   }
 
-  const parsed = parseOrReport(files, draft.entityFile, problems);
+  const parsed = parseOrReport(files, draft.entityFile, problems, ext);
   if (!parsed) return null;
 
   const comments: CommentRecord[] = [];

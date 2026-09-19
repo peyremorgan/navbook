@@ -12,6 +12,7 @@
  */
 
 import { webcrypto } from "node:crypto";
+import { type CoreExtensions, NO_EXTENSIONS } from "../core/extensions.ts";
 import { mintId as coreMintId, isId, type RandomBytes } from "../core/id.ts";
 import { toIsoSeconds } from "../core/time.ts";
 import {
@@ -42,6 +43,15 @@ export interface WsCtx {
   mintId(taken?: ReadonlySet<string>): string;
   /** Who is acting: git's configured user, unless one was supplied. */
   identity(): Identity;
+  /**
+   * What the loaded plugins registered (spec 02 §2.12).
+   *
+   * Here rather than passed to each operation because it is per-invocation
+   * exactly as the repository root and the clock are: one front end resolves
+   * the plugins once, and everything below reads what it decided. Empty for
+   * every caller that loads none, which is the whole of `core`'s own suite.
+   */
+  ext: CoreExtensions;
 }
 
 export interface MakeWsCtxOptions {
@@ -68,6 +78,8 @@ export interface MakeWsCtxOptions {
    * records the person rather than the machine account (spec 06 §6.2).
    */
   identity?: Identity;
+  /** What the loaded plugins registered; none, for a caller that loads none. */
+  ext?: CoreExtensions;
 }
 
 const defaultRandomBytes: RandomBytes = (n) => webcrypto.getRandomValues(new Uint8Array(n));
@@ -115,6 +127,7 @@ export function makeWsCtx(opts: MakeWsCtxOptions = {}): WsCtx {
     navRoot: paths.navRoot,
     hasNavbook: paths.hasNavbook,
     now: () => (fixedNow ? new Date(fixedNow) : new Date()),
+    ext: opts.ext ?? NO_EXTENSIONS,
     mintId(taken?: ReadonlySet<string>) {
       if (scriptedIds) {
         const next = scriptedIds[idCursor++];

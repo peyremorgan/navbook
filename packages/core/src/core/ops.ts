@@ -99,7 +99,24 @@ export function docsSubject(kind: EntityKind, action: string, id: string): strin
  * `git log --grep='docs(feature)'` finds every feature change there is.
  */
 export function docsFeatureSubject(action: string, slug: string, file?: string): string {
-  return `docs(feature): ${action} ${slug}${file === undefined ? "" : `/${file}`}`;
+  return docsScopedSubject("feature", action, slug, file);
+}
+
+/**
+ * Commit subject for a change under a scope a plugin declares (spec 03 §3.2).
+ *
+ * The shape above, generalised: everything that made `docs(feature):` the
+ * right spelling for a feature makes `docs(<scope>):` the right spelling for
+ * anything else a plugin keeps in the tree, and a plugin reimplementing it
+ * would be a second opinion about a format this document already fixes.
+ */
+export function docsScopedSubject(
+  scope: string,
+  action: string,
+  subject: string,
+  file?: string,
+): string {
+  return `docs(${scope}): ${action} ${subject}${file === undefined ? "" : `/${file}`}`;
 }
 
 /* --------------------------------------------------------------------- init */

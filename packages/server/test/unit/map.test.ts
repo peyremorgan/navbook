@@ -94,6 +94,9 @@ describe("toQuery", () => {
         deadline: ["overdue", "none"],
         today: TODAY,
         text: ["crash"],
+        // No plugin terms: the API's filter is the schema's fields, and a
+        // plugin adds its own rather than smuggling one through these.
+        ext: {},
       },
     );
   });

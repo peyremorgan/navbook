@@ -11,6 +11,7 @@
  * number — still round-trips as the forty characters the author typed.
  */
 
+import type { CoreExtensions, FrontmatterKeyDef } from "./extensions.ts";
 import {
   emptyDoc,
   hasKey,
@@ -28,6 +29,9 @@ import { isId } from "./id.ts";
 import { formatPerson, parsePerson } from "./person.ts";
 import { SLUG_PATTERN, slugify } from "./slug.ts";
 import { isCalendarDate, parseIso } from "./time.ts";
+// Type-only, and therefore erased: `tree.ts` imports this module at runtime,
+// and a value import back would be a cycle.
+import type { EntityKind } from "./tree.ts";
 
 export const SHA_PATTERN = /^[0-9a-f]{40}$/;
 /** The identity card at the top of a feature directory (spec 02 §2.11). */
@@ -92,32 +96,40 @@ const STRING_KEYS = [
   "signature",
 ] as const;
 
-/** Parse any Navbook file; frontmatter faults surface as problems, not throws. */
-export function parseFile(text: string): ParsedFile {
+/**
+ * Parse any Navbook file; frontmatter faults surface as problems, not throws.
+ *
+ * `ext` is the registered frontmatter keys (§2.12), and is optional because
+ * most callers read one built-in key out of one file and could not be affected
+ * by it. It matters where an entity *record* is built, since that `fm` is what
+ * a plugin's query matching and validation read.
+ */
+export function parseFile(text: string, ext?: CoreExtensions): ParsedFile {
   const nav = parseDoc(text);
   const problems: Problem[] = nav.errors.map((message) => ({
     message: `invalid YAML: ${message}`,
   }));
   // One conversion out of the YAML document, shared by both views of it.
   const raw = toPlain(nav);
-  return { nav, fm: normalizeFrontmatter(nav, raw), raw, body: nav.body, problems };
+  return { nav, fm: normalizeFrontmatter(nav, raw, ext), raw, body: nav.body, problems };
 }
 
 /** Coerce spec-typed frontmatter keys; leave unknown keys exactly as parsed. */
 export function normalizeFrontmatter(
   nav: NavDoc,
   parsed?: Record<string, unknown>,
+  ext?: CoreExtensions,
 ): Record<string, unknown> {
   const raw = parsed ?? toPlain(nav);
   const out: Record<string, unknown> = {};
   for (const key of keysInOrder(nav)) {
     if (key === "") continue;
-    out[key] = normalizeKey(nav, key, raw[key]);
+    out[key] = normalizeKey(nav, key, raw[key], ext);
   }
   return out;
 }
 
-function normalizeKey(nav: NavDoc, key: string, rawValue: unknown): unknown {
+function normalizeKey(nav: NavDoc, key: string, rawValue: unknown, ext?: CoreExtensions): unknown {
   if ((STRING_KEYS as readonly string[]).includes(key)) {
     return stringAt(nav, [key]) ?? rawValue;
   }
@@ -130,7 +142,33 @@ function normalizeKey(nav: NavDoc, key: string, rawValue: unknown): unknown {
   }
   if (key === "revisions") return normalizeRevisions(nav, rawValue);
   if (key === "merged") return normalizeMerged(nav, rawValue);
+  // A key a plugin owns is coerced to the shape it declared, for the reason
+  // the built-in keys above are: YAML will happily make `2.0` a number and
+  // `no` a boolean, and a plugin comparing it to a string would find neither.
+  const def = ext?.frontmatterKeys.find((candidate) => candidate.key === key);
+  if (def !== undefined) return normalizeDeclared(nav, key, rawValue, def.shape);
   return rawValue;
+}
+
+/** Coerce one plugin-owned key to its declared shape. */
+function normalizeDeclared(
+  nav: NavDoc,
+  key: string,
+  rawValue: unknown,
+  shape: FrontmatterKeyDef["shape"],
+): unknown {
+  switch (shape) {
+    case "string":
+      return stringAt(nav, [key]) ?? rawValue;
+    case "string-list":
+      return normalizeStringList(nav, key, rawValue);
+    case "string-or-list":
+      return Array.isArray(rawValue)
+        ? normalizeStringList(nav, key, rawValue)
+        : (stringAt(nav, [key]) ?? rawValue);
+    default:
+      return rawValue;
+  }
 }
 
 /**
@@ -424,6 +462,44 @@ export function readFeatures(fm: Record<string, unknown>): string[] {
   return entries.filter((v): v is string => typeof v === "string" && SLUG_PATTERN.test(v));
 }
 
+/**
+ * Read a key that may be written as one string or a list of them.
+ *
+ * The shape `assignee`, `reviewer` and `feature` take (§2.5), offered to
+ * plugins so a key declared `string-or-list` need not each reimplement the
+ * "one SHOULD be written as a scalar" rule. Non-strings are dropped rather
+ * than coerced: what to do about them is `validate`'s business, and a reader
+ * that invented a value would hide the fault from it.
+ */
+export function readStringOrList(fm: Record<string, unknown>, key: string): string[] {
+  const value = fm[key];
+  if (value === undefined || value === null) return [];
+  const entries = Array.isArray(value) ? value : [value];
+  return entries.filter((entry): entry is string => typeof entry === "string");
+}
+
+/**
+ * Run the validators plugins declared for this entity kind.
+ *
+ * Only for keys that are present: a plugin's key is optional by construction,
+ * since a tree written before the plugin existed has none, and a required one
+ * would make installing a plugin retroactively invalidate the repository.
+ */
+function checkDeclaredKeys(
+  parsed: ParsedFile,
+  kind: EntityKind,
+  ext: CoreExtensions | undefined,
+  problems: Problem[],
+): void {
+  if (ext === undefined) return;
+  for (const def of ext.frontmatterKeys) {
+    if (!def.kinds.includes(kind) || def.validate === undefined) continue;
+    const value = parsed.fm[def.key];
+    if (value === undefined) continue;
+    problems.push(...def.validate(value, parsed));
+  }
+}
+
 /** Read `revisions` defensively, keeping only well-formed entries. */
 export function readRevisions(fm: Record<string, unknown>): Revision[] {
   const value = fm.revisions;
@@ -450,7 +526,7 @@ export function readMerged(fm: Record<string, unknown>): Record<string, unknown>
 /* --------------------------------------------------------------- validation */
 
 /** Validate an `issue.md` (§2.5). */
-export function validateIssue(parsed: ParsedFile): Problem[] {
+export function validateIssue(parsed: ParsedFile, ext?: CoreExtensions): Problem[] {
   const problems = [...parsed.problems];
   requireString(parsed, "title", problems);
   checkPerson(parsed, "author", problems);
@@ -469,11 +545,12 @@ export function validateIssue(parsed: ParsedFile): Problem[] {
   if (parsed.body.trim() === "") {
     problems.push({ message: "issue description must not be empty (§2.5)" });
   }
+  checkDeclaredKeys(parsed, "issue", ext, problems);
   return problems;
 }
 
 /** Validate a `pr.md` (§2.7). */
-export function validatePr(parsed: ParsedFile): Problem[] {
+export function validatePr(parsed: ParsedFile, ext?: CoreExtensions): Problem[] {
   const problems = [...parsed.problems];
   requireString(parsed, "title", problems);
   checkPerson(parsed, "author", problems);
@@ -494,6 +571,7 @@ export function validatePr(parsed: ParsedFile): Problem[] {
   }
   validateRevisions(parsed, problems);
   validateMergedBlock(parsed, problems);
+  checkDeclaredKeys(parsed, "pr", ext, problems);
   return problems;
 }
 
@@ -610,6 +688,15 @@ export interface NewEntityInput {
   milestone?: string;
   /** Feature slugs this entity belongs to (§2.11). */
   features?: string[];
+  /**
+   * Values for frontmatter keys a plugin owns (§2.12).
+   *
+   * Written after the keys this format defines, so a file composed with a
+   * plugin installed differs from one composed without it only by the keys
+   * the plugin added — and an entity opened before the plugin existed keeps
+   * the frontmatter order it had.
+   */
+  ext?: Record<string, string | readonly string[]>;
 }
 
 export interface NewIssueInput extends NewEntityInput {
@@ -674,6 +761,10 @@ function applyOptionalMeta(nav: NavDoc, input: NewEntityInput): void {
   // Singular on disk and scalar-or-list like `assignee` (§2.11): one feature is
   // written as a scalar, which is what nearly every entity carries.
   writeScalarOrList(nav, "feature", input.features);
+  for (const [key, value] of Object.entries(input.ext ?? {})) {
+    if (typeof value === "string") patchDoc(nav, { [key]: value });
+    else writeScalarOrList(nav, key, value);
+  }
 }
 
 /**
