@@ -17,10 +17,13 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { makeNavRepo, type TempRepo } from "../helpers/temprepo.ts";
+import { makeNavRepo, PACKAGE_ROOT, type TempRepo } from "../helpers/temprepo.ts";
 
 const ISSUE_COUNT = 1000;
 export const BUDGET_MS = 500;
+
+/** A plugin to have installed while measuring what an unused one costs. */
+const PROBE_PLUGIN = join(PACKAGE_ROOT, "test", "fixtures", "plugin-probe");
 /** Where the test actually fails, leaving room for a busy shared runner. */
 const HARD_LIMIT_MS = BUDGET_MS * 4;
 /** True when measuring compiled JavaScript rather than the TypeScript sources. */
@@ -107,6 +110,31 @@ describe(`nav issue list on ${ISSUE_COUNT} issues`, { timeout: 300_000 }, () => 
       assert.ok(
         searched.ms < HARD_LIMIT_MS * 2,
         `full-text list took ${searched.ms.toFixed(0)} ms`,
+      );
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("costs the same with a plugin installed that this listing does not use", () => {
+    // What spec 04 §4.3's loading rule is for. A plugin that contributes
+    // nothing to `pr list` must not be on its path at all, so an installed
+    // plugin is free until something asks for it.
+    const repo = makeNavRepo();
+    try {
+      seedIssues(repo, 200);
+      repo.commitAll("chore: seed");
+      const withoutPlugin = timed(() => repo.nav(["pr", "list"]));
+      const withPlugin = timed(() =>
+        repo.nav(["pr", "list"], { NAVBOOK_PLUGIN_PATH: PROBE_PLUGIN }),
+      );
+      console.log(
+        `  pr list ${withoutPlugin.ms.toFixed(0)} ms vs ${withPlugin.ms.toFixed(0)} ms with a plugin installed`,
+      );
+      // Resolution reads one small file; loading would cost an import.
+      assert.ok(
+        withPlugin.ms < withoutPlugin.ms + 60,
+        `an unused plugin cost ${(withPlugin.ms - withoutPlugin.ms).toFixed(0)} ms`,
       );
     } finally {
       repo.cleanup();

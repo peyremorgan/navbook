@@ -35,7 +35,7 @@ import {
 import type { Ctx } from "../context.ts";
 import { openInEditor } from "../editor.ts";
 import { fail } from "../errors.ts";
-import { type Column, renderTable } from "../render/table.ts";
+import { type Column, renderTable, terminalWidth } from "../render/table.ts";
 import { composeFile } from "./compose.ts";
 import type { GlobalFlags } from "./entity.ts";
 
@@ -112,7 +112,7 @@ export function cmdFeatureList(ctx: Ctx, opts: GlobalFlags): void {
     String(entities.filter((entity) => entity.status !== "open").length),
   ]);
   ctx.stdout.write(
-    `${renderTable(columns, cells, { colors: ctx.colors, width: terminalWidth(ctx) })}\n`,
+    `${renderTable(columns, cells, { colors: ctx.colors, width: terminalWidth(ctx.stdout) })}\n`,
   );
 }
 
@@ -244,7 +244,7 @@ export function cmdSpecList(ctx: Ctx, slug: string, opts: GlobalFlags): void {
   const columns: Column[] = [{ header: "file" }, { header: "title", flexible: true, minWidth: 20 }];
   const rows = feature.specs.map((spec) => [spec.fileName, spec.title]);
   ctx.stdout.write(
-    `${renderTable(columns, rows, { colors: ctx.colors, width: terminalWidth(ctx) })}\n`,
+    `${renderTable(columns, rows, { colors: ctx.colors, width: terminalWidth(ctx.stdout) })}\n`,
   );
 }
 
@@ -271,11 +271,6 @@ function editInPlace(
   const run = applyFeatureEdit(ctx, target, { commit: opts.commit });
   ctx.stdout.write(`Edited ${ctx.navDir}/${target.filePath}\n`);
   if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
-}
-
-function terminalWidth(ctx: Ctx): number | undefined {
-  const columns = ctx.stdout.columns;
-  return typeof columns === "number" && columns > 0 ? columns : undefined;
 }
 
 /**

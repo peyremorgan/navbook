@@ -180,6 +180,7 @@ usually enough. A full directory name works too.
 | `nav issue open <title> --feature <slug>` | File it against a feature. Repeatable; `nav issue list feature:auth` finds them again. |
 | `nav issue open <title> --rank 20 --deadline 2026-10-01` | Say where it sits in the queue and when it is wanted. `nav issue list --sort priority` reads them back; the web client reorders by dragging. |
 | `nav doctor [--fix]` | Check the tree against the specification. |
+| `nav plugin install` | Install the plugins this repository declares and this machine lacks. `nav plugin list/update/remove` manage them. |
 
 `--commit` on any mutating command wraps the change in a well-formed
 Conventional Commits `docs` commit (`docs(issue): close #bqlybac0`,

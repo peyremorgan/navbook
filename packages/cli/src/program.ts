@@ -5,7 +5,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { EntityKind } from "@navbook/core";
+import type { EntityKind, EntityRecord } from "@navbook/core";
 import { Command, Option } from "commander";
 import { cmdComplete } from "./commands/complete.ts";
 import { cmdDoctor } from "./commands/doctor.ts";
@@ -33,6 +33,12 @@ import { cmdId, cmdInit } from "./commands/init.ts";
 import { cmdInstall, cmdUninstall } from "./commands/install.ts";
 import { cmdIssueLink, cmdIssueOpen, cmdIssueUnlink } from "./commands/issue.ts";
 import {
+  cmdPluginInstall,
+  cmdPluginList,
+  cmdPluginRemove,
+  cmdPluginUpdate,
+} from "./commands/plugin.ts";
+import {
   cmdPrClose,
   cmdPrList,
   cmdPrMerge,
@@ -42,6 +48,13 @@ import {
   cmdPrUpdate,
 } from "./commands/pr.ts";
 import type { Ctx } from "./context.ts";
+import {
+  applyOption,
+  buildPluginCommand as buildDeclaredCommand,
+  optionCollision,
+} from "./plugins/commands.ts";
+import type { VerbHandlers } from "./plugins/host.ts";
+import type { PluginRuntime } from "./plugins/runtime.ts";
 import { DEFAULT_SORT, SORT_ORDERS } from "./sort.ts";
 
 /**
@@ -98,7 +111,26 @@ function withoutHelpVerb(command: Command): Command {
   return command.helpCommand(false);
 }
 
-export function buildProgram(getCtx: () => Ctx): Command {
+/**
+ * The nouns and utilities this CLI defines, which a plugin may not take.
+ *
+ * Kept as data because two things read it: the collision check that refuses a
+ * plugin claiming one of these (spec 04 §4.3), and completion, which offers
+ * them alongside whatever plugins added.
+ */
+export const BUILTIN_NOUNS = [
+  "issue",
+  "pr",
+  "feature",
+  "plugin",
+  "init",
+  "id",
+  "doctor",
+  "install",
+  "uninstall",
+] as const;
+
+export function buildProgram(getCtx: () => Ctx, plugins?: PluginRuntime): Command {
   const program = withoutHelpVerb(new Command());
   program
     .name("nav")
@@ -151,15 +183,61 @@ export function buildProgram(getCtx: () => Ctx): Command {
     .command("__complete", { hidden: true })
     .description("internal: print completion candidates for the words typed so far")
     .argument("[words...]")
-    .action((words: string[]) => cmdComplete(getCtx(), words));
+    .action((words: string[]) => cmdComplete(getCtx(), words, plugins));
 
-  program.addCommand(buildIssueCommand(getCtx));
-  program.addCommand(buildPrCommand(getCtx));
+  program.addCommand(buildPluginCommand(getCtx));
+  program.addCommand(buildIssueCommand(getCtx, plugins));
+  program.addCommand(buildPrCommand(getCtx, plugins));
   program.addCommand(buildFeatureCommand(getCtx));
+
+  // Built from manifests alone: no plugin code is imported here, which is what
+  // lets `nav --help` cost the same with plugins installed as without
+  // (spec 04 §4.3).
+  for (const [, { plugin, spec }] of plugins?.commands.nouns ?? []) {
+    program.addCommand(
+      buildDeclaredCommand(plugin, spec, getCtx, (target, path, args, opts) =>
+        (plugins as PluginRuntime).run(getCtx(), target, path, args, opts),
+      ),
+    );
+  }
   return program;
 }
 
-function buildPrCommand(getCtx: () => Ctx): Command {
+/** `nav plugin` — the store verbs of spec 04 §4.3. */
+function buildPluginCommand(getCtx: () => Ctx): Command {
+  const plugin = withoutHelpVerb(new Command("plugin")).description("install and manage plugins");
+
+  plugin
+    .command("install")
+    .argument("[name...]", "packages to install; the repository's declaration otherwise")
+    .description("install plugins into the per-user store")
+    .option("-y, --yes", "do not ask for confirmation")
+    .action((names: string[], opts) => cmdPluginInstall(getCtx(), names, opts));
+
+  plugin
+    .command("remove")
+    .argument("<name...>", "packages to remove")
+    .description("remove plugins from the store")
+    .option("-y, --yes", "do not ask for confirmation")
+    .action((names: string[], opts) => cmdPluginRemove(getCtx(), names, opts));
+
+  plugin
+    .command("update")
+    .argument("[name...]", "packages to update; all of them otherwise")
+    .description("update installed plugins")
+    .option("-y, --yes", "do not ask for confirmation")
+    .action((names: string[], opts) => cmdPluginUpdate(getCtx(), names, opts));
+
+  plugin
+    .command("list")
+    .description("what is installed, and whether this repository declares it")
+    .option("--json", "one JSON object per plugin, newline-delimited")
+    .action((opts) => cmdPluginList(getCtx(), opts));
+
+  return plugin;
+}
+
+function buildPrCommand(getCtx: () => Ctx, plugins?: PluginRuntime): Command {
   const pr = withoutHelpVerb(new Command("pr")).description("work with pull requests");
 
   pr.command("open")
@@ -174,7 +252,9 @@ function buildPrCommand(getCtx: () => Ctx): Command {
     .option("--milestone <name>", "milestone")
     .option("--feature <slug>", "attach it to a feature (repeatable)", collect, [])
     .option("--commit", commitHelp("pr"))
-    .action((opts) => cmdPrOpen(getCtx(), opts));
+    .action(async (opts) =>
+      cmdPrOpen(getCtx(), { ...opts, ext: await openFields(getCtx(), plugins, "pr open", opts) }),
+    );
 
   pr.command("update")
     .argument("<id>", "ID or unambiguous prefix")
@@ -215,7 +295,9 @@ function buildPrCommand(getCtx: () => Ctx): Command {
       cmdPrMerge(getCtx(), id, { ...opts, noFf: opts.ff === false }),
     );
 
+  applyContributedOptions(pr, "pr", plugins, getCtx);
   addSharedVerbs(pr, "pr", getCtx, {
+    ...(plugins ? { plugins, verbPrefix: "pr" } : {}),
     // No extra columns here: `cmdPrList` owns the PR listing's columns, because
     // it appends a `refs` one when scanning across branches.
     extraColumns: [],
@@ -308,7 +390,7 @@ function buildSpecCommand(getCtx: () => Ctx): Command {
   return spec;
 }
 
-function buildIssueCommand(getCtx: () => Ctx): Command {
+function buildIssueCommand(getCtx: () => Ctx, plugins?: PluginRuntime): Command {
   const issue = withoutHelpVerb(new Command("issue")).description("work with issues");
 
   issue
@@ -329,7 +411,12 @@ function buildIssueCommand(getCtx: () => Ctx): Command {
     .option("--deadline <date>", "when the work is wanted, YYYY-MM-DD")
     .option("--parent <id>", "file it as a subtask of an existing issue")
     .option("--commit", commitHelp("issue"))
-    .action((title, opts) => cmdIssueOpen(getCtx(), title, opts));
+    .action(async (title, opts) =>
+      cmdIssueOpen(getCtx(), title, {
+        ...opts,
+        ext: await openFields(getCtx(), plugins, "issue open", opts),
+      }),
+    );
 
   issue
     .command("link")
@@ -347,7 +434,9 @@ function buildIssueCommand(getCtx: () => Ctx): Command {
     .option("--commit", commitHelp("issue"))
     .action((id: string, opts) => cmdIssueUnlink(getCtx(), id, opts));
 
+  applyContributedOptions(issue, "issue", plugins, getCtx);
   addSharedVerbs(issue, "issue", getCtx, {
+    ...(plugins ? { plugins, verbPrefix: "issue" } : {}),
     extraColumns: [],
     configureList: (command) =>
       command.option(
@@ -369,6 +458,10 @@ function buildIssueCommand(getCtx: () => Ctx): Command {
 
 export interface SharedVerbOptions {
   extraColumns: ExtraColumn[];
+  /** The plugin runtime, when this invocation has one. */
+  plugins?: PluginRuntime;
+  /** The noun these verbs hang off, for looking a contribution up by name. */
+  verbPrefix?: string;
   /** Extra options the noun's `list` accepts, e.g. `--all-refs` for PRs. */
   configureList?: (command: Command) => void;
   /** Extra options the noun's `show` accepts, e.g. `--depth` for issues. */
@@ -379,6 +472,26 @@ export interface SharedVerbOptions {
   runList?: (ctx: Ctx, terms: string[], options: Record<string, unknown>) => void;
   /** Close implementation, when the noun needs more than the shared one. */
   runClose?: (ctx: Ctx, id: string, options: CloseOptions) => void;
+}
+
+/** What plugins contributed to one of this noun's verbs, loading them if any. */
+async function verbHandlers(
+  ctx: Ctx,
+  shared: SharedVerbOptions,
+  verb: string,
+): Promise<VerbHandlers[]> {
+  if (shared.plugins === undefined || shared.verbPrefix === undefined) return [];
+  return shared.plugins.handlersFor(ctx, `${shared.verbPrefix} ${verb}`);
+}
+
+/** One `jsonExtra` from several, or undefined when no plugin contributed one. */
+function mergedJsonExtra(
+  handlers: readonly VerbHandlers[],
+): ((entity: EntityRecord) => Record<string, unknown>) | undefined {
+  const contributors = handlers.filter((handler) => handler.jsonExtra !== undefined);
+  if (contributors.length === 0) return undefined;
+  return (entity) =>
+    Object.assign({}, ...contributors.map((handler) => handler.jsonExtra?.(entity) ?? {}));
 }
 
 /** Register the verbs both nouns share, so their behavior can never drift. */
@@ -398,11 +511,14 @@ export function addSharedVerbs(
     .addHelpText("after", `\n${QUERY_HELP}`)
     .option("--json", "one JSON object per entity, newline-delimited");
   shared.configureList?.(list);
-  list.action((terms: string[], opts) =>
-    shared.runList
-      ? shared.runList(getCtx(), terms, { ...opts, extraColumns })
-      : cmdList(getCtx(), kind, terms, { ...opts, extraColumns }),
-  );
+  list.action(async (terms: string[], opts) => {
+    const contributed = await verbHandlers(getCtx(), shared, "list");
+    const columns = [...extraColumns, ...contributed.flatMap((h) => h.columns ?? [])];
+    const jsonExtra = mergedJsonExtra(contributed);
+    const options = { ...opts, extraColumns: columns, ...(jsonExtra ? { jsonExtra } : {}) };
+    if (shared.runList) shared.runList(getCtx(), terms, options);
+    else cmdList(getCtx(), kind, terms, options);
+  });
 
   const show = parent
     .command("show")
@@ -410,7 +526,18 @@ export function addSharedVerbs(
     .description(`render one ${noun} and its comments`)
     .option("--json", "emit a single JSON object including comments");
   shared.configureShow?.(show);
-  show.action((id: string, opts) => cmdShow(getCtx(), kind, id, opts));
+  show.action(async (id: string, opts) => {
+    const contributed = await verbHandlers(getCtx(), shared, "show");
+    const jsonExtra = mergedJsonExtra(contributed);
+    const sections = contributed.flatMap((handlers) =>
+      handlers.showSection ? [handlers.showSection] : [],
+    );
+    cmdShow(getCtx(), kind, id, {
+      ...opts,
+      ...(jsonExtra ? { jsonExtra } : {}),
+      ...(sections.length > 0 ? { sections } : {}),
+    });
+  });
 
   parent
     .command("edit")
@@ -460,6 +587,63 @@ export function addSharedVerbs(
 
 export function collect(value: string, previous: string[]): string[] {
   return [...previous, value];
+}
+
+/**
+ * Add the options plugins declared for one verb, refusing a collision.
+ *
+ * From the manifest, so no plugin code runs: a `--feature` on `issue open`
+ * exists in `--help` and in completion whether or not anybody has run the
+ * command that would load the plugin implementing it.
+ */
+function applyContributedOptions(
+  noun: Command,
+  kind: EntityKind,
+  plugins: PluginRuntime | undefined,
+  getCtx: () => Ctx,
+): void {
+  if (plugins === undefined) return;
+  for (const [on, entries] of plugins.commands.contributions) {
+    const [target, verb] = on.split(" ");
+    if (target !== kind || verb === undefined) continue;
+    const command = noun.commands.find((candidate) => candidate.name() === verb);
+    if (command === undefined) continue;
+    for (const { plugin, spec } of entries) {
+      for (const option of spec.options ?? []) {
+        const problem = optionCollision(command, option);
+        if (problem !== null) {
+          // Before `.option()`, which throws on a duplicate flag: the plugin
+          // loses its option and says so, rather than taking the CLI down.
+          getCtx().stderr.write(
+            `nav: plugin ${plugin.name} option skipped on '${on}': ${problem}\n`,
+          );
+          continue;
+        }
+        applyOption(command, option);
+      }
+    }
+  }
+}
+
+/**
+ * Frontmatter a plugin wants on a newly opened entity, read off its options.
+ *
+ * This is the one contribution that loads plugin code on a built-in verb, and
+ * only when a plugin declared a contribution to *this* verb — so `nav issue
+ * open` with no such plugin imports nothing.
+ */
+async function openFields(
+  ctx: Ctx,
+  plugins: PluginRuntime | undefined,
+  verb: string,
+  opts: Record<string, unknown>,
+): Promise<Record<string, string | readonly string[]> | undefined> {
+  if (plugins === undefined || !plugins.commands.contributions.has(verb)) return undefined;
+  const fields: Record<string, string | readonly string[]> = {};
+  for (const handlers of await plugins.handlersFor(ctx, verb)) {
+    Object.assign(fields, handlers.openFields?.(opts) ?? {});
+  }
+  return Object.keys(fields).length > 0 ? fields : undefined;
 }
 
 export { Option };

@@ -10,6 +10,7 @@
 import { type Diagnostic, hasErrors, runDoctor } from "@navbook/core";
 import type { Ctx } from "../context.ts";
 import { failFormat } from "../errors.ts";
+import { hintUndeclared } from "../plugins/hint.ts";
 
 export interface DoctorOptions {
   staged?: boolean;

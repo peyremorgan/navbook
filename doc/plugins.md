@@ -196,14 +196,41 @@ value every built-in verb produces — and hands it to `runPlan`. That is not a
 formality: it is how a plugin's changes get `--commit`, the staged-changes
 guard and the commit message conventions without implementing any of them.
 
+### What loading costs, and when it happens
+
+A plugin's code is imported only when something it declared is actually
+reached. Four things do that, and nothing else:
+
+| What you type | What loads |
+|---|---|
+| `nav --help`, `nav issue list` | nothing |
+| `nav <plugin-noun> …` | that plugin's `./core` and `./cli` |
+| a verb a plugin contributes to | that plugin's `./core` and `./cli` |
+| a query term a plugin declared | that plugin's `./core` |
+| `nav doctor` | every plugin's `./core`, to run its checks |
+
+So a contribution is a bargain you make openly: a column on `issue list` means
+that listing loads the plugin, because the column cannot be drawn without it. A
+plugin that contributes nothing to a command costs that command nothing at all
+— measured, not assumed, by the performance suite.
+
+A command that reads no tree can say so with `"needsCore": false`, and then
+even its own plugin's format half stays unloaded.
+
 ### Developing one
 
 `NAVBOOK_PLUGIN_PATH` is a colon-separated list of directories, each a plugin
-package, loaded ahead of the store. Nothing has to be installed or published:
+package, loaded ahead of the store — so a plugin you are writing shadows an
+installed copy of itself. Nothing has to be installed or published:
 
 ```console
 $ NAVBOOK_PLUGIN_PATH=~/code/navbook-plugin-jira nav jira sync
 ```
+
+`packages/cli/test/fixtures/plugin-probe` in this repository is a complete
+worked example: one noun with two verbs, an option on `issue open`, a column
+and a `--json` key on `issue list`, a section on `issue show`, a query term, a
+tree location and a doctor check, in about a hundred lines.
 
 The web part is a Nuxt layer merged at build time, so the client is built with
 the plugins it is meant to have:
