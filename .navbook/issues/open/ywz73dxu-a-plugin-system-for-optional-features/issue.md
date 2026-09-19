@@ -4,7 +4,7 @@ author: Claude <noreply@anthropic.com>
 created: 2026-09-19T09:27:49Z
 labels: [enhancement]
 feature: plugins
-subtasks: [pr9o3vcf, xc4mkmvb, ck26xs8w, c8o454ym, z3ckvcyl]
+subtasks: [pr9o3vcf, xc4mkmvb, ck26xs8w, c8o454ym, z3ckvcyl, vhjlm2mg]
 ---
 
 Optional features that not every project wants — test reports attached to pull
