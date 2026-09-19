@@ -330,6 +330,17 @@ describe("features", () => {
       /^feature: auth$/m,
     );
 
+    // The same value again, under `ext.kb`, which is what the host's own
+    // list-row fragment selects. A plugin's SDL extends a type but nothing
+    // extends a fragment, so this is the only way a feature chip is drawn on a
+    // row the host fetched (spec 02 §2.12).
+    const listed = ok<{ issues: { id: string; ext: { kb?: { features: string[] } } }[] }>(
+      await h.gql(`query { issues { id ext } }`),
+    ).issues;
+    assert.deepEqual(listed.find((issue) => issue.id === one.issue.id)?.ext.kb, {
+      features: ["auth"],
+    });
+
     const both = ok<Payload>(
       await h.gql(OPEN_ISSUE, {
         input: { title: "Bill by seat", body: "Body.", features: ["auth", "billing-invoices"] },

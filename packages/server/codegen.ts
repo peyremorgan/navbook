@@ -22,6 +22,10 @@ const config: CodegenConfig = {
         useTypeImports: true,
         enumsAsTypes: true,
         contextType: "../context.ts#GraphQLCtx",
+        // `Entity.ext` is whatever the loaded plugins put in it, so the
+        // generated type says exactly that and no more: the server never reads
+        // a key of it, and a shape here would be a promise nothing keeps.
+        scalars: { JSON: "Record<string, unknown>" },
         mappers: {
           Issue: "../mappers.ts#IssueParent",
           Pr: "../mappers.ts#PrParent",

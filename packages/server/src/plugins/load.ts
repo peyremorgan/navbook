@@ -93,6 +93,7 @@ export async function loadServerPlugins(opts: LoadOptions): Promise<LoadedPlugin
       service: (service) => runtime.addService(service),
       onMutation: (listener) => runtime.onMutation(listener),
       entityInput: (bridge) => runtime.addBridge(bridge),
+      entityExt: (read) => runtime.addExtReader(plugin.manifest.short, read),
       api: { run, invalidInput, requireText, checkComposed, commitInfo },
     };
     await serverEntry.activate(host);

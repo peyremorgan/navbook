@@ -15,7 +15,7 @@
  */
 
 import type * as NavbookCore from "@navbook/core";
-import type { Identity, PluginManifest } from "@navbook/core";
+import type { EntityRecord, Identity, PluginManifest } from "@navbook/core";
 import type { Config } from "../config.ts";
 import type { GraphQLCtx } from "../context.ts";
 import type { AuthorCache } from "../people.ts";
@@ -115,6 +115,21 @@ export interface ServerPluginHost {
    * its own mutation.
    */
   entityInput(bridge: EntityInputBridge): void;
+  /**
+   * What this plugin has to say about an entity, for `Entity.ext`.
+   *
+   * The counterpart of `entityInput`, for reads rather than writes, and it
+   * exists for something a plugin's *web* half cannot do. `extend type Issue`
+   * adds a field, but a GraphQL fragment cannot be extended — so the host's
+   * own list-row fragment, written in this repository, can never name it, and
+   * a plugin's badge on a row the host fetched would have nothing to draw.
+   *
+   * Whatever this returns appears under the plugin's short name on every issue
+   * and pull request the API serves. It is called once per entity in a
+   * listing, so it reads the record it is handed and nothing else: a lookup
+   * here would be one lookup per row.
+   */
+  entityExt(read: (entity: EntityRecord) => unknown): void;
   /**
    * The pieces a resolver needs to behave like a built-in one.
    *

@@ -1,4 +1,4 @@
-import type { GraphQLResolveInfo } from 'graphql';
+import type { GraphQLResolveInfo, GraphQLScalarType, GraphQLScalarTypeConfig } from 'graphql';
 import type { IssueParent, PrParent, EntityParent, CommentParent, LinkNodeParent, DiagnosticParent, CommitParent, CommitRangeParent, ChangesParent, ChangedFileParent } from '../mappers.ts';
 import type { GraphQLCtx } from '../context.ts';
 export type Maybe<T> = T | null;
@@ -12,6 +12,22 @@ export type Scalars = {
   Boolean: { input: boolean; output: boolean; }
   Int: { input: number; output: number; }
   Float: { input: number; output: number; }
+  /**
+   * Fields the loaded plugins contribute, keyed by plugin short name.
+   *
+   * The one place this schema promises a shape it does not describe, and it exists
+   * because of what a plugin's web half cannot do. A plugin may add a field to
+   * `Issue` with `extend type Issue`, but a GraphQL fragment cannot be extended:
+   * the host's own list-row fragment is written in this repository and cannot name
+   * a field it has never heard of. So a client that draws a plugin's data on a row
+   * the host fetched has no way to ask for it.
+   *
+   * This is that way. The host selects `ext` once, every loaded plugin fills its
+   * own key, and a plugin's component reads `entity.ext.<short>`. The typed fields
+   * stay: `ext.kb.features` and `features` are the same value, and a query written
+   * by the plugin itself should ask for the latter.
+   */
+  JSON: { input: Record<string, unknown>; output: Record<string, unknown>; }
 };
 
 /**
@@ -196,6 +212,8 @@ export type Entity = {
   body: Scalars['String']['output'];
   comments: Array<Comment>;
   created: Scalars['String']['output'];
+  /** What the loaded plugins contribute, keyed by plugin short name. */
+  ext: Scalars['JSON']['output'];
   id: Scalars['ID']['output'];
   kind: Kind;
   labels: Array<Scalars['String']['output']>;
@@ -269,6 +287,7 @@ export type Issue = Entity & {
   deadline?: Maybe<Scalars['String']['output']>;
   /** The issue this one duplicates. */
   duplicateOf?: Maybe<Scalars['ID']['output']>;
+  ext: Scalars['JSON']['output'];
   id: Scalars['ID']['output'];
   kind: Kind;
   labels: Array<Scalars['String']['output']>;
@@ -467,6 +486,7 @@ export type Pr = Entity & {
   commits: CommitRange;
   created: Scalars['String']['output'];
   draft: Scalars['Boolean']['output'];
+  ext: Scalars['JSON']['output'];
   id: Scalars['ID']['output'];
   kind: Kind;
   labels: Array<Scalars['String']['output']>;
@@ -827,6 +847,7 @@ export type ResolversTypes = {
   ID: ResolverTypeWrapper<Scalars['ID']['output']>;
   Int: ResolverTypeWrapper<Scalars['Int']['output']>;
   Issue: ResolverTypeWrapper<IssueParent>;
+  JSON: ResolverTypeWrapper<Scalars['JSON']['output']>;
   Kind: Kind;
   LinkIssueInput: LinkIssueInput;
   LinkIssuePayload: ResolverTypeWrapper<Omit<LinkIssuePayload, 'child' | 'parent'> & { child: ResolversTypes['Issue'], parent: ResolversTypes['Issue'] }>;
@@ -876,6 +897,7 @@ export type ResolversParentTypes = {
   ID: Scalars['ID']['output'];
   Int: Scalars['Int']['output'];
   Issue: IssueParent;
+  JSON: Scalars['JSON']['output'];
   LinkIssueInput: LinkIssueInput;
   LinkIssuePayload: Omit<LinkIssuePayload, 'child' | 'parent'> & { child: ResolversParentTypes['Issue'], parent: ResolversParentTypes['Issue'] };
   LinkNode: LinkNodeParent;
@@ -992,6 +1014,7 @@ export type IssueResolvers<ContextType = GraphQLCtx, ParentType extends Resolver
   created?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   deadline?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   duplicateOf?: Resolver<Maybe<ResolversTypes['ID']>, ParentType, ContextType>;
+  ext?: Resolver<ResolversTypes['JSON'], ParentType, ContextType>;
   id?: Resolver<ResolversTypes['ID'], ParentType, ContextType>;
   kind?: Resolver<ResolversTypes['Kind'], ParentType, ContextType>;
   labels?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
@@ -1006,6 +1029,10 @@ export type IssueResolvers<ContextType = GraphQLCtx, ParentType extends Resolver
   title?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 };
+
+export interface JsonScalarConfig extends GraphQLScalarTypeConfig<ResolversTypes['JSON'], any> {
+  name: 'JSON';
+}
 
 export type LinkIssuePayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['LinkIssuePayload'] = ResolversParentTypes['LinkIssuePayload']> = {
   child?: Resolver<ResolversTypes['Issue'], ParentType, ContextType>;
@@ -1058,6 +1085,7 @@ export type PrResolvers<ContextType = GraphQLCtx, ParentType extends ResolversPa
   commits?: Resolver<ResolversTypes['CommitRange'], ParentType, ContextType, RequireFields<PrCommitsArgs, 'limit'>>;
   created?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   draft?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
+  ext?: Resolver<ResolversTypes['JSON'], ParentType, ContextType>;
   id?: Resolver<ResolversTypes['ID'], ParentType, ContextType>;
   kind?: Resolver<ResolversTypes['Kind'], ParentType, ContextType>;
   labels?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
@@ -1149,6 +1177,7 @@ export type Resolvers<ContextType = GraphQLCtx> = {
   DoctorReport?: DoctorReportResolvers<ContextType>;
   Entity?: EntityResolvers<ContextType>;
   Issue?: IssueResolvers<ContextType>;
+  JSON?: GraphQLScalarType;
   LinkIssuePayload?: LinkIssuePayloadResolvers<ContextType>;
   LinkNode?: LinkNodeResolvers<ContextType>;
   MergedInfo?: MergedInfoResolvers<ContextType>;

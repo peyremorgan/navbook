@@ -36,6 +36,11 @@ export function activate(host) {
     },
   });
 
+  // What this plugin has to say about an entity, on the host's own fragments.
+  host.entityExt((entity) => ({
+    tags: host.core.readStringOrList(entity.fm, "srvprobe-tag"),
+  }));
+
   host.resolvers({
     Query: {
       srvprobe: () => ({ note }),

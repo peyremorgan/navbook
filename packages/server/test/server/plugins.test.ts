@@ -85,6 +85,46 @@ describe("a plugin's schema", () => {
   });
 });
 
+describe("Entity.ext", () => {
+  it("is an empty object when nothing is loaded", async () => {
+    const harness = await startHarness();
+    try {
+      await harness.gql(
+        `mutation { openIssue(input: { title: "Plain", body: "Body." }) { issue { id } } }`,
+      );
+      const result = await harness.gql<{ issues: { ext: Record<string, unknown> }[] }>(
+        "{ issues { ext } }",
+      );
+      assert.deepEqual(result.errors, [], JSON.stringify(result.errors));
+      // Empty rather than null: a client reads `ext.kb?.features` without
+      // first checking that the field is there.
+      assert.deepEqual(result.data?.issues[0]?.ext, {});
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("carries each loaded plugin's reading under its short name", async () => {
+    const log = logFile("ext");
+    const harness = await startHarness({ env: probeEnv(log.path) });
+    try {
+      await harness.gql(
+        `mutation { openIssue(input: { title: "Tagged", body: "Body." }) { issue { id } } }`,
+      );
+      const result = await harness.gql<{
+        issues: { ext: { srvprobe?: { tags: string[] } } }[];
+      }>("{ issues { ext } }");
+      assert.deepEqual(result.errors, [], JSON.stringify(result.errors));
+      // The probe registers no frontmatter on open, so the reading is empty —
+      // what is asserted is that the key is present and shaped, which is what
+      // a row badge checks before it draws anything.
+      assert.deepEqual(result.data?.issues[0]?.ext.srvprobe, { tags: [] });
+    } finally {
+      await harness.stop();
+    }
+  });
+});
+
 describe("a plugin's service", () => {
   it("starts before the port opens and stops on shutdown", async () => {
     const log = logFile("service");

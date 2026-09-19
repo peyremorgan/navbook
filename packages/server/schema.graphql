@@ -7,6 +7,23 @@
 #
 # Timestamps are ISO 8601 strings with second precision, as they are on disk.
 
+"""
+Fields the loaded plugins contribute, keyed by plugin short name.
+
+The one place this schema promises a shape it does not describe, and it exists
+because of what a plugin's web half cannot do. A plugin may add a field to
+`Issue` with `extend type Issue`, but a GraphQL fragment cannot be extended:
+the host's own list-row fragment is written in this repository and cannot name
+a field it has never heard of. So a client that draws a plugin's data on a row
+the host fetched has no way to ask for it.
+
+This is that way. The host selects `ext` once, every loaded plugin fills its
+own key, and a plugin's component reads `entity.ext.<short>`. The typed fields
+stay: `ext.kb.features` and `features` are the same value, and a query written
+by the plugin itself should ask for the latter.
+"""
+scalar JSON
+
 "What issues and pull requests have in common (spec 02 §2.5, §2.7)."
 interface Entity {
   id: ID!
@@ -33,6 +50,8 @@ interface Entity {
   "Markdown body, trimmed."
   body: String!
   comments: [Comment!]!
+  "What the loaded plugins contribute, keyed by plugin short name."
+  ext: JSON!
 }
 
 enum Kind {
@@ -88,6 +107,7 @@ type Issue implements Entity {
   milestone: String
   body: String!
   comments: [Comment!]!
+  ext: JSON!
   """
   The blob hash of `issue.md` as it now stands.
 
@@ -146,6 +166,7 @@ type Pr implements Entity {
   milestone: String
   body: String!
   comments: [Comment!]!
+  ext: JSON!
   "The blob hash of `pr.md` as it now stands; see `Issue.baseSha`."
   baseSha: String!
 

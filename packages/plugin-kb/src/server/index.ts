@@ -140,6 +140,12 @@ export function activate(host: ServerPluginHost): void {
     },
   });
 
+  // The same value `Issue.features` gives, on the host's own list-row
+  // fragment. A plugin's fragment cannot extend one the host wrote, so a
+  // feature chip beside an issue in a listing has no other way to be drawn;
+  // `entity.ext.kb.features` is what the row badge reads (see `entityExt`).
+  host.entityExt((entity) => ({ features: readFeatures(entity.fm) }));
+
   host.resolvers({
     Query: {
       // `sync.read` rather than `ctx.repo()`, which is what every built-in

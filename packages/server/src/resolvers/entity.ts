@@ -82,6 +82,10 @@ function sharedFields<P>(record: (parent: P) => EntityRecord) {
     milestone: (parent: P) => text(record(parent).fm, "milestone"),
     body: (parent: P) => record(parent).body.trim(),
     comments: (parent: P) => record(parent).comments,
+    // Whatever the loaded plugins have to say about this entity, keyed by
+    // short name. Empty on a server with no plugins, which is why the field is
+    // non-null: a client writes `ext.kb?.features` and never checks for `ext`.
+    ext: (parent: P, _args: unknown, ctx: GraphQLCtx) => ctx.plugins.entityExt(record(parent)),
     // Of the text the record was parsed from, not of the file as it is now:
     // a field resolver runs after its parent's transaction has let go, and a
     // hash taken then could name a version the rest of the payload does not.

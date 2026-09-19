@@ -8,14 +8,22 @@
  * would be a schema that changed shape after the first request.
  */
 
+import type { EntityRecord } from "@navbook/core";
 import type { GraphQLCtx } from "../context.ts";
 import type { PluginResolvers } from "../schema.ts";
 import type { EntityInputBridge, MutationEvent, PluginService } from "./host.ts";
+
+/** One plugin's contribution to `Entity.ext`, under the name it appears at. */
+interface ExtReader {
+  short: string;
+  read: (entity: EntityRecord) => unknown;
+}
 
 export class PluginRuntime {
   readonly resolvers: PluginResolvers[] = [];
   readonly services: PluginService[] = [];
   readonly bridges: EntityInputBridge[] = [];
+  readonly extReaders: ExtReader[] = [];
   #listeners: ((event: MutationEvent) => void)[] = [];
   #report: (line: string) => void;
 
@@ -33,6 +41,37 @@ export class PluginRuntime {
 
   addBridge(bridge: EntityInputBridge): void {
     this.bridges.push(bridge);
+  }
+
+  addExtReader(short: string, read: (entity: EntityRecord) => unknown): void {
+    this.extReaders.push({ short, read });
+  }
+
+  /**
+   * `Entity.ext` for one entity: every plugin's slice, under its short name.
+   *
+   * An empty object when nothing registered, which is what a server with no
+   * plugins serves — the field is non-null because a client should be able to
+   * write `entity.ext.kb?.features` without first checking that `ext` is there.
+   *
+   * A reader that throws costs its own key rather than the request. This runs
+   * once per row of every listing, and a plugin's bug should not be the reason
+   * somebody cannot see their issues.
+   */
+  entityExt(entity: EntityRecord): Record<string, unknown> {
+    const ext: Record<string, unknown> = {};
+    for (const { short, read } of this.extReaders) {
+      try {
+        ext[short] = read(entity);
+      } catch (error) {
+        this.#report(
+          `plugin '${short}' could not read ${entity.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+    return ext;
   }
 
   /** Frontmatter every plugin wants on a newly composed entity. */
