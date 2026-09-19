@@ -103,6 +103,7 @@ const current = computed<EntityEdit>(() => ({
 }));
 
 const staleEdits = useStaleEdit({ refetch, resend: (change) => save(change) });
+const slots = useNavbookSlots();
 const edits = usePendingEdits<EntityEdit>({
   resend: (change) => save(change),
   // A refusal that arrives after leaving the page has no field to sit under.
@@ -431,6 +432,22 @@ async function unlink(child: string): Promise<void> {
               <DueDate v-if="shown.deadline" :deadline="shown.deadline" />
             </template>
           </FieldEditor>
+
+          <!--
+            Whatever plugin layers registered for an issue, after the fields
+            this format defines and before the actions. A panel gets the entity
+            and whether a save is in flight, and emits `save` with a patch —
+            the same contract every editor above it has, so a plugin's panel
+            saves through the same guarded path (spec 06 §6.3).
+          -->
+          <component
+            :is="panel.component"
+            v-for="(panel, index) in slots.panels('issue')"
+            :key="`panel-${index}`"
+            :entity="shown"
+            :saving="edits.saving.value"
+            @save="save"
+          />
 
           <section class="space-y-2 border-t border-default pt-4">
             <UButton

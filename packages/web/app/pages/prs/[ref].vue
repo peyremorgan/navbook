@@ -247,6 +247,7 @@ const { mutate: patch, loading: patching } = useMutation(UPDATE_PR, {
   context: { handled: true },
 });
 const staleEdits = useStaleEdit({ refetch, resend: (change) => save(change) });
+const slots = useNavbookSlots();
 const edits = usePendingEdits<EntityEdit>({
   resend: (change) => save(change),
   // A refusal that arrives after leaving the page has no field to sit under.
@@ -617,6 +618,17 @@ const branchHint = computed(() => refusedOn.value);
             :save="edits.field('milestone')"
             :disabled="branchHint !== null"
             @save="(values: string[]) => save({ milestone: values[0] ?? null })"
+          />
+
+          <!-- What plugin layers registered for a pull request; see the issue page. -->
+          <component
+            :is="panel.component"
+            :is-disabled="branchHint !== null"
+            v-for="(panel, index) in slots.panels('pr')"
+            :key="`panel-${index}`"
+            :entity="shown"
+            :saving="edits.saving.value"
+            @save="save"
           />
 
           <p class="break-all border-t border-default pt-4 text-xs text-muted">{{ pr.path }}</p>

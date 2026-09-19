@@ -114,6 +114,9 @@ async function main(): Promise<void> {
 
   // The installed shim rather than a guess at where the module lives: pnpm's
   // store layout puts that somewhere with a hash in it.
+  // `process.env` is spread whole into both children, which is what carries
+  // `NAVBOOK_WEB_PLUGINS` to the build and `NAVBOOK_PLUGIN_PATH` to the API —
+  // so developing a plugin against this stack needs nothing set here.
   const web = run("web", join(PACKAGE_ROOT, "node_modules", ".bin", "nuxi"), ["dev"], {
     ...process.env,
     NUXT_TELEMETRY_DISABLED: "1",

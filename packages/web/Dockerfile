@@ -29,6 +29,14 @@ COPY packages/server/package.json packages/server/
 COPY packages/web packages/web
 
 RUN pnpm install --frozen-lockfile --filter navbook-workspace --filter "@navbook/web..."
+
+# The plugins whose web layers are compiled into this bundle. Unlike every
+# other setting here, this one is a *build* argument: a Nuxt layer's pages and
+# components are compiled in, so changing which plugins the client has is a
+# rebuild rather than a restart. `compose.yaml` passes it from NAVBOOK_PLUGINS.
+ARG NAVBOOK_WEB_PLUGINS=""
+ENV NAVBOOK_WEB_PLUGINS=$NAVBOOK_WEB_PLUGINS
+
 RUN pnpm --filter @navbook/web build
 
 

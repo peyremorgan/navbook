@@ -11,6 +11,7 @@
 import type { IssueListItemFragment } from "~~/src/generated/gql/graphql";
 
 const props = defineProps<{ issue: IssueListItemFragment }>();
+const slots = useNavbookSlots();
 </script>
 
 <template>
@@ -75,5 +76,17 @@ const props = defineProps<{ issue: IssueListItemFragment }>();
         </UBadge>
       </NuxtLink>
     </div>
+
+    <!--
+      Outside the link, for the reason the feature chips are: the row is a
+      link, and a plugin's badge may be one too — a link inside a link is not
+      something a browser will draw.
+    -->
+    <component
+      :is="badge.component"
+      v-for="(badge, index) in slots.rowBadges()"
+      :key="`badge-${index}`"
+      :entity="props.issue"
+    />
   </div>
 </template>

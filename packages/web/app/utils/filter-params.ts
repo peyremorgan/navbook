@@ -47,6 +47,36 @@ export interface FilterState {
   deadline: DeadlineState[];
   /** The search box verbatim; `splitTerms` turns it into `text` terms. */
   text: string;
+  /**
+   * Values for parameters plugins added, by parameter name (spec 02 §2.12).
+   *
+   * Kept apart from the named keys rather than mixed in, so every function
+   * here stays total over the format's own filter and a plugin cannot shadow
+   * one of its keys by choosing the same name.
+   */
+  ext: Record<string, string[]>;
+}
+
+/**
+ * Filter parameters plugin layers registered.
+ *
+ * A module-level array rather than something read from the slot registry,
+ * because everything in this file is a pure function over a query string and
+ * has to stay unit-testable without mounting an app. A layer's Nuxt plugin
+ * registers into the slots, and the slots push here.
+ */
+export const FILTER_EXTENSIONS: { param: string; apiField: string }[] = [];
+
+/** Register a plugin's filter parameter. Called by the slot registry. */
+export function registerFilterParam(param: string, apiField: string): void {
+  if (!FILTER_EXTENSIONS.some((entry) => entry.param === param)) {
+    FILTER_EXTENSIONS.push({ param, apiField });
+  }
+}
+
+/** Forget every registered parameter. For tests. */
+export function resetFilterParams(): void {
+  FILTER_EXTENSIONS.length = 0;
 }
 
 /** What a query string with none of our parameters in it means. */
@@ -61,6 +91,7 @@ export function emptyFilter(): FilterState {
     reviewers: [],
     deadline: [],
     text: "",
+    ext: {},
   };
 }
 
@@ -74,7 +105,8 @@ export function isEmptyFilter(filter: FilterState): boolean {
     filter.features.length === 0 &&
     filter.reviewers.length === 0 &&
     filter.deadline.length === 0 &&
-    filter.text.trim() === ""
+    filter.text.trim() === "" &&
+    Object.values(filter.ext).every((values) => values.length === 0)
   );
 }
 
@@ -195,6 +227,11 @@ export function queryToFilter(query: RouteQuery, keys: FilterKeys): FilterState 
     reviewers: queryValues(query.reviewer),
     deadline: deadlineStates(query.deadline, keys.deadlines ?? []),
     text: joinTerms(queryValues(query.q).flatMap(splitTerms)),
+    ext: Object.fromEntries(
+      FILTER_EXTENSIONS.map(({ param }) => [param, queryValues(query[param])]).filter(
+        ([, values]) => (values as string[]).length > 0,
+      ),
+    ),
   };
 }
 
@@ -224,6 +261,7 @@ export function filterToQuery(filter: FilterState): Record<string, string[]> {
     "deadline",
     filter.deadline.map((state) => state.toLowerCase()),
   );
+  for (const { param } of FILTER_EXTENSIONS) put(param, filter.ext[param] ?? []);
   const terms = splitTerms(filter.text);
   if (terms.length > 0) query.q = [joinTerms(terms)];
   return query;
@@ -240,6 +278,12 @@ export function toEntityFilter(filter: FilterState): EntityFilter {
   if (filter.features.length > 0) entityFilter.features = [...filter.features];
   if (filter.reviewers.length > 0) entityFilter.reviewers = [...filter.reviewers];
   if (filter.deadline.length > 0) entityFilter.deadline = [...filter.deadline];
+  for (const { param, apiField } of FILTER_EXTENSIONS) {
+    const values = filter.ext[param] ?? [];
+    // Cast because the field is one a plugin's SDL added: the generated type
+    // describes the core schema, and cannot know about it.
+    if (values.length > 0) (entityFilter as Record<string, unknown>)[apiField] = [...values];
+  }
   const terms = splitTerms(filter.text);
   if (terms.length > 0) entityFilter.text = terms;
   return entityFilter;

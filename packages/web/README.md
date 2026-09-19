@@ -143,6 +143,32 @@ is how to try both sides of the server's
 [authorization policy](../server/README.md#who-is-allowed-in), and the refusal
 page, against a `nav-server` started with one.
 
+## Plugins
+
+A plugin's web part is a **Nuxt layer**: a directory with a `nuxt.config.ts`
+and whatever `app/pages`, `app/components` and `app/composables` it needs, which
+this build merges by convention. `NAVBOOK_WEB_PLUGINS` names the packages whose
+layers to include, space-separated:
+
+```sh
+NAVBOOK_WEB_PLUGINS="@navbook/plugin-kb" pnpm --filter @navbook/web build
+```
+
+This is the one thing about a Navbook deployment that is decided when the
+bundle is **built** rather than when the container starts. Everything else —
+the API's address, the identity provider — is read from `config.json` at boot,
+so one artefact serves every deployment. A layer's pages and components are
+compiled in, so they cannot be. Changing which plugins the client has is
+therefore `docker compose build`, not a restart, and `compose.yaml` passes
+`NAVBOOK_PLUGINS` through as a build argument for exactly that reason.
+
+A layer's own pages are reachable as soon as it is merged. To appear anywhere
+the host already draws — a tab in the header, a panel on an issue, a field on
+the new-issue form, a chip in a filter bar, a badge on a row — it registers
+with `useNavbookSlots()` from one of its own Nuxt plugin files, which run
+before the first render. `app/composables/useNavbookSlots.ts` is the list of
+slots and what each one is given.
+
 ## Deploying it
 
 ```sh

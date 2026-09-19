@@ -30,6 +30,12 @@ const features = ref<string[]>(featureFromQuery(route.query.feature));
 /** Pre-filled when the page was reached from an issue's "add subtask". */
 const parent = ref(String(route.query.parent ?? ""));
 
+// What plugin fields have been filled in, merged into the mutation's input.
+// One object rather than a ref per field, because the host cannot know what a
+// plugin will add and a plugin should not have to ask for state of its own.
+const slots = useNavbookSlots();
+const extra = ref<Record<string, unknown>>({});
+
 /** A `?feature=` parameter, however the router spelled it. */
 function featureFromQuery(raw: unknown): string[] {
   const list = Array.isArray(raw) ? raw : [raw];
@@ -73,6 +79,11 @@ async function submit(): Promise<void> {
     rank: placed,
     deadline: normalizeOptional(deadline.value),
     parent: normalizeOptional(parent.value),
+    // A plugin's fields last, and cast because they are fields its own SDL
+    // added: the generated input type describes the core schema and cannot
+    // know about them. Last also means a plugin cannot quietly replace one of
+    // the format's own values with its own.
+    ...(extra.value as Record<string, unknown>),
   });
   if (payload) await navigateTo(`/issues/${payload.issue.id}`);
 }
@@ -81,6 +92,15 @@ async function submit(): Promise<void> {
 <template>
   <form class="mx-auto max-w-3xl space-y-5" data-testid="new-issue-form" @submit.prevent="submit">
     <h1 class="text-xl font-semibold">File an issue</h1>
+
+    <!-- Fields plugin layers registered, before the built-in ones they know nothing about. -->
+    <component
+      :is="field.component"
+      v-for="(field, index) in slots.formFields('issue-new')"
+      :key="`field-${index}`"
+      v-model:extra="extra"
+      :query="route.query"
+    />
 
     <UFormField label="Title" required>
       <UInput
