@@ -20,6 +20,7 @@ import {
   queryToFilter,
   toEntityFilter,
 } from "~/utils/filter-params";
+import { INBOX_GROUPINGS } from "~/utils/inbox";
 import {
   buildEntityPatch,
   describeEntityEdit,
@@ -278,7 +279,11 @@ describe("registered cache policies", () => {
 });
 
 describe("resetting", () => {
-  it("empties the registry and the filter list together", () => {
+  it("empties the registry and every list it pushes to", () => {
+    // Three of the slots keep a copy outside this registry, so that the pure
+    // functions over them stay testable without an app. A reset that emptied
+    // only the registry would leak a plugin's parameter, field or grouping
+    // from one test file into the next.
     const slots = useNavbookSlots();
     slots.register({
       navLinks: [{ label: "X", to: "/x", icon: "i" }],
@@ -292,9 +297,17 @@ describe("resetting", () => {
           options: () => [],
         },
       ],
+      entityFields: [{ field: "x", label: "X", read: () => [] }],
+      inboxGroups: [{ key: "x", label: "X", icon: "i", values: () => [], matches: () => false }],
+      cache: { typePolicies: { X: { keyFields: ["id"] } } },
     });
     resetNavbookSlots();
     assert.deepEqual(slots.navLinks(), []);
+    assert.deepEqual(slots.entityFields(), []);
+    assert.deepEqual(slots.inboxGroups(), []);
+    assert.deepEqual(slots.typePolicies(), {});
     assert.deepEqual(FILTER_EXTENSIONS, []);
+    assert.deepEqual(PATCH_EXTENSIONS, []);
+    assert.deepEqual(INBOX_GROUPINGS, []);
   });
 });

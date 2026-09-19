@@ -155,8 +155,11 @@ describe("what the file server is configured to serve", { skip: bundleMissing() 
   });
 
   it("has the directory indexes the try_files rule prefers over it", () => {
+    // Two routes this client always has. A plugin layer's route would prove
+    // the same rule and make this suite depend on which plugins the bundle
+    // was built with (spec 06 §6.3) — and the nginx rule does not.
     assert.ok(existsSync(join(generated, "issues", "index.html")));
-    assert.ok(existsSync(join(generated, "features", "index.html")));
+    assert.ok(existsSync(join(generated, "prs", "index.html")));
   });
 
   it("has the hashed assets the long cache is for", () => {

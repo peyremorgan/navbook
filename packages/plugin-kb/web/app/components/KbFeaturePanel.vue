@@ -19,6 +19,13 @@ import type { EntityEdit } from "~/utils/patch";
 const props = defineProps<{
   /** The entity as the page shows it, pending edits already laid over it. */
   entity: EntityEdit;
+  /**
+   * Whether any save on the page is in flight.
+   *
+   * Declared and not read: `fieldSave` says what this field needs, and a prop
+   * a component does not declare is passed through onto its root element —
+   * which would put `saving="false"` into the rendered HTML.
+   */
   saving: boolean;
   /** The save covering plugin fields, so this reads as a built-in editor does. */
   fieldSave?: FieldSave;

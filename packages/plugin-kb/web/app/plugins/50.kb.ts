@@ -5,17 +5,18 @@
  * soon as the layer is in the build. Everything here is the other half: the
  * places on somebody else's page where a feature belongs.
  *
- * Numbered `50` so it runs after the host's own numbered plugins (`01.config`
- * through `03.apollo`) and before the first render. Apollo reads its cache
- * configuration when it is created, so `cache` below has to be registered
- * before `03.apollo` runs — which is why the registration is a plugin at all
- * rather than something each component does for itself.
+ * It has to run before the host's Apollo client is built, because Apollo reads
+ * its cache configuration once and a type policy registered afterwards would
+ * apply only to what had not been read yet. `enforce: "pre"` is what puts it
+ * there. That is also why these registrations are a Nuxt plugin at all rather
+ * than something each component does for itself.
  */
 
 import { defineNuxtPlugin } from "#app";
 import KbFeatureChips from "../components/KbFeatureChips.vue";
 import KbFeatureField from "../components/KbFeatureField.vue";
 import KbFeaturePanel from "../components/KbFeaturePanel.vue";
+import { featureSlugs } from "../utils/feature-registry";
 import { readKbFeatures } from "../utils/features";
 
 /**
@@ -28,10 +29,8 @@ function sameSlug(a: string, b: string): boolean {
 
 export default defineNuxtPlugin({
   name: "navbook-plugin-kb",
-  // Before the app mounts, and before Apollo is built: `enforce: "pre"` puts
-  // this ahead of the host's unnumbered plugins, and the number ahead of
-  // nothing — the host's cache plugin is `03`, so ordering is what the file
-  // name says and this comment exists to stop it being renamed thoughtlessly.
+  // See the note at the top of this file: the `cache` registration below is
+  // only read if it is there before the client is built.
   enforce: "pre",
   setup() {
     useNavbookSlots().register({
@@ -68,9 +67,10 @@ export default defineNuxtPlugin({
           label: "Feature",
           icon: "i-lucide-layers",
           nouns: ["issue", "pr"],
-          // Read at the moment the menu is drawn, from the cache the registry
-          // query filled; a menu that fetched on open would open empty.
-          options: () => useKbFeatures().slugs.value,
+          // Called during the filter bar's render, outside any component's
+          // setup — so it reads the shared registry rather than starting a
+          // query (see `utils/feature-registry.ts`).
+          options: () => featureSlugs(),
         },
       ],
 
