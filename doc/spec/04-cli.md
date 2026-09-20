@@ -314,28 +314,63 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   §2.10](02-data-model.md)). The file is the record and it is never refused;
   what the warning prevents is somebody approving their own work and believing
   they have moved the decision.
-- `nav pr merge <id> [--no-ff] [-y|--yes] [--no-sync-source]` — from the target
-  branch: `git merge` the source branch with the PR directory moved to
-  `prs/merged/` inside the merge commit, then record the `merged:` block in a
-  follow-up commit (the merge SHA is unknowable inside the merge itself). When
-  the merge can fast-forward and `--no-ff` was not given, there is no merge
-  commit to carry the move, so the archive and the `merged:` block are written
-  together in the immediate follow-up commit that [02 §2.8](02-data-model.md)
-  allows; the block then has no `commit:` key, because no merge commit exists
-  to name.
+- `nav pr merge <id> [--method METHOD] [-y|--yes] [--no-sync-source]` — from
+  the target branch: land the source branch by the merge method the marker
+  declares ([02 §2.10](02-data-model.md)), with the PR directory moved to
+  `prs/merged/` and the `merged:` block recorded. `--method` chooses another
+  method for this merge alone and takes any of the six names §2.10 defines; a
+  name it does not define is exit 1 before anything is read or written.
 
-  That follow-up commit lands on the target and nowhere else, so a source
-  branch that outlives the merge — `dev` into `main` — would be left one commit
-  behind it, with the same pull request reading `merged` on one branch and
-  `open` on the other, which is exactly what `--all-refs` would then report.
-  Once the merge is recorded, `nav pr merge` therefore fast-forwards the source
-  branch to the target and prints `Fast-forwarded <source> to <target>`. It is
-  only ever a fast-forward of a local branch that nothing is standing on: a
-  source that is a remote-tracking ref, or a branch this clone does not hold,
-  is not touched and not mentioned; one that has commits the target does not,
-  or that another worktree has checked out, is left where it is with a warning
-  saying so — never a merge, never a commit, never a conflict. `--no-sync-source`
-  moves the target and nothing else. `--continue` performs the same step.
+  | Method | What it runs | Where the directory move goes |
+  |--------|--------------|-------------------------------|
+  | `auto` | a fast-forward where the branches allow one, else a merge commit | inside the merge commit, or the follow-up where it fast-forwarded |
+  | `merge` | a merge commit, always | inside the merge commit |
+  | `merge-ff` | a fast-forward, only | the follow-up commit |
+  | `rebase` | the source replayed onto the target, then a fast-forward | the follow-up commit |
+  | `rebase-no-ff` | the same replay, then a merge commit | inside the merge commit |
+  | `squash` | the whole of the source's change as one commit | inside the squash commit |
+
+  The `merged:` block is always written in a commit of its own, because the SHA
+  of the commit that lands the branch is unknowable inside that commit. Where
+  the method lands no commit of its own, that follow-up carries the directory
+  move as well — the immediate follow-up [02 §2.8](02-data-model.md) allows —
+  and the block has no `commit:` key, because there is no commit to name.
+
+  `merge-ff` MUST exit 1 without writing anything when the branches cannot
+  fast-forward, saying what would make one possible. It is the one method that
+  refuses to merge, and what it refuses is a shape of history rather than a
+  review state, which is why it is not the gate [02 §2.7](02-data-model.md)
+  forbids.
+
+  A replay that conflicts stops exactly as a merge that conflicts does, and is
+  finished the same way (`--continue`, below). A replay a tool cannot start —
+  a source branch whose commits it is unable to rewrite — is reported rather
+  than quietly performed as some other method.
+
+  The commit that records `merged:` lands on the target and nowhere else, so a
+  source branch that outlives the merge — `dev` into `main` — would be left one
+  commit behind it, with the same pull request reading `merged` on one branch
+  and `open` on the other, which is exactly what `--all-refs` would then
+  report. Once the merge is recorded, `nav pr merge` therefore fast-forwards
+  the source branch to the target and prints `Fast-forwarded <source> to
+  <target>`. It is only ever a fast-forward of a local branch that nothing is
+  standing on: a source that is a remote-tracking ref, or a branch this clone
+  does not hold, is not touched and not mentioned; one that has commits the
+  target does not, or that another worktree has checked out, is left where it
+  is with a warning saying so — never a merge, never a commit, never a
+  conflict. `--no-sync-source` moves the target and nothing else. `--continue`
+  performs the same step.
+
+  A method that rewrote the source's commits is reported for what it did
+  instead. `rebase` and `rebase-no-ff` move the branch onto the commits the
+  replay produced and print `Rebased <source> onto <target>`: the one move that
+  is not a fast-forward, made only because rewriting that branch is precisely
+  what the method asked for, and made under the same limits as the
+  fast-forward — never to a remote-tracking ref, never under another worktree.
+  `squash` moves nothing and prints that the source's commits are not on the
+  target, because the commit that replaced them is not one anything on that
+  branch can fast-forward to; deleting the branch, or resetting it by hand, is
+  the user's decision and not the tool's.
 
   When the repository declares a review policy ([02 §2.10](02-data-model.md))
   and the pull request's decision is not `approved`, it MUST print what is
@@ -350,9 +385,13 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   resolution. `nav pr merge` never aborts a conflicted merge: the author's
   resolution is worth keeping, and the remaining steps (moving the directory
   and recording `merged:`) are exactly what is easy to forget. `--continue`
-  refuses while any path is still unmerged, and infers the pull request from
-  `MERGE_HEAD` when no ID is given. An unmet policy is reported here as a
-  warning and never as a question: the merge is already under way, and the
+  refuses while any path is still unmerged. With no ID it infers the pull
+  request, the method and the target branch from state the interrupted merge
+  recorded beside the repository — not inside the tracker, which is a merge
+  away from being rewritten — and falls back to `MERGE_HEAD` for a merge git is
+  holding that Navbook did not start. `MERGE_HEAD` alone would not do: a
+  replay and a squash both stop without one. An unmet policy is reported here
+  as a warning and never as a question: the merge is already under way, and the
   moment to have asked has passed.
 
 ### Features — `nav feature <verb>`
@@ -454,7 +493,7 @@ Doctor checks (E = error → exit 2, W = warning → exit 0 with report):
 | D12 | The `parent` chain loops, an issue naming itself included | E |
 | D13 | The layout and schema of `specs/`: a feature directory name that is not a slug, a file directly in `specs/`, a feature directory with no `feature.md`, or a `feature.md` or document missing a required key ([2.11](02-data-model.md)) | E |
 | D14 | An entity's `feature` names a slug with no `specs/<slug>/` directory in this tree | W |
-| D15 | `navbook.json` is not a JSON object, or its `review` or `plugins` declaration is malformed ([2.10](02-data-model.md), [2.12](02-data-model.md)) | E |
+| D15 | `navbook.json` is not a JSON object, or its `review`, `merge` or `plugins` declaration is malformed ([2.10](02-data-model.md), [2.12](02-data-model.md)) | E |
 
 An extension ([02 §2.12](02-data-model.md)) MAY add checks over the data it
 defines. They are numbered `X-<short>-<n>` — outside the `D` series, which
@@ -483,8 +522,8 @@ nobody has fetched, and an error would make the order in which two branches
 land a correctness question. D13 is an error because a directory that violates
 the layout can be read by nothing.
 
-D15 reports one diagnostic per fault it finds, so a marker that mistypes both
-policy keys names both. It is an error because a policy nobody can read is a
+D15 reports one diagnostic per fault it finds, so a marker that mistypes two of
+its policy keys names both. It is an error because a policy nobody can read is a
 policy nobody is following, and the file is small enough that whoever wrote it
 can see what is wrong. It never stops a command: every reader falls back to the
 defaults of [02 §2.10](02-data-model.md), reports the fault, and carries on.

@@ -12,7 +12,12 @@ import { type ParsedFile, parseFile, readMerged, readPersonList } from "./files.
 import { blobSha } from "./hash.ts";
 import { dedupePeople, type Person, parsePerson } from "./person.ts";
 import { type PluginDeclarationReading, parsePluginDeclaration } from "./plugins.ts";
-import { parseReviewPolicy, type ReviewPolicyReading } from "./policy.ts";
+import {
+  type MergePolicyReading,
+  parseMergePolicy,
+  parseReviewPolicy,
+  type ReviewPolicyReading,
+} from "./policy.ts";
 import { parseDirName, SLUG_PATTERN } from "./slug.ts";
 
 export type NavTree = ReadonlyMap<string, string>;
@@ -116,6 +121,8 @@ export interface Repo {
   reserved: string[];
   /** The review policy the marker declares, and what was wrong with it (§2.10). */
   reviewPolicy: ReviewPolicyReading;
+  /** The merge policy the marker declares, and what was wrong with it (§2.10). */
+  mergePolicy: MergePolicyReading;
   /** The plugins the marker declares, and what was wrong with it (§2.12). */
   plugins: PluginDeclarationReading;
   /**
@@ -193,6 +200,7 @@ export function parseTree(
     commentsLoaded: opts.commentsLoaded ?? "all",
     reserved,
     reviewPolicy: parseReviewPolicy(markerText),
+    mergePolicy: parseMergePolicy(markerText),
     plugins: parsePluginDeclaration(markerText),
     ext,
     extProblems,

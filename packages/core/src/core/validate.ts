@@ -676,15 +676,20 @@ export function isValidCommentFileName(name: string): boolean {
  * but nothing stops for it: every reader has already fallen back to the
  * defaults by the time this reports what it found.
  *
- * The two readings are taken independently and can report the same fault —
+ * The three readings are taken independently and can report the same fault —
  * text that is not JSON is neither a policy nor a declaration — so identical
  * messages are collapsed. One diagnostic per distinct fault is what §2.10 asks
- * for, and saying "is not valid JSON" twice about one file says nothing twice.
+ * for, and saying "is not valid JSON" three times about one file says nothing
+ * twice over.
  */
 function checkMarker(repo: Repo): Diagnostic[] {
   const seen = new Set<string>();
   const out: Diagnostic[] = [];
-  for (const problem of [...repo.reviewPolicy.problems, ...repo.plugins.problems]) {
+  for (const problem of [
+    ...repo.reviewPolicy.problems,
+    ...repo.mergePolicy.problems,
+    ...repo.plugins.problems,
+  ]) {
     if (seen.has(problem)) continue;
     seen.add(problem);
     out.push({ check: "D15", level: "error", path: NAV_MARKER, message: problem });

@@ -131,6 +131,25 @@ describe("parseTree", () => {
       assert.deepEqual(repo.reviewPolicy.problems, ["is not valid JSON"]);
       assert.deepEqual(repo.problems, [], "which is D15's business, not the walk's");
     });
+
+    it("reads the merge policy out of it too", () => {
+      const repo = parseTree(
+        tree({ "navbook.json": '{"version": 1, "merge": {"method": "rebase"}}' }),
+      );
+      assert.deepEqual(repo.mergePolicy.policy, { method: "rebase" });
+      assert.equal(repo.mergePolicy.declared, true);
+      // Reading one policy says nothing about the other.
+      assert.equal(repo.reviewPolicy.declared, false);
+    });
+
+    it("declares no merge policy for a tree that has none", () => {
+      const repo = parseTree(tree({ "issues/open/bqlybac0-x/issue.md": issue() }));
+      assert.deepEqual(repo.mergePolicy, {
+        policy: { method: "auto" },
+        declared: false,
+        problems: [],
+      });
+    });
   });
 
   it("preserves unknown extra files inside an entity directory", () => {

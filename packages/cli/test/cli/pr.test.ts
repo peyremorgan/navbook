@@ -79,6 +79,20 @@ function declarePolicy(repo: TempRepo, review: unknown): void {
   repo.commitAll("chore: declare a review policy");
 }
 
+/** Declare a merge policy in the marker, on the branch checked out now. */
+function declareMergePolicy(repo: TempRepo, merge: unknown): void {
+  repo.write(".navbook/navbook.json", `${JSON.stringify({ version: 1, merge }, null, 2)}\n`);
+  repo.commitAll("chore: declare a merge policy");
+}
+
+/** Subjects of the commits `branch` has and `main`'s starting point did not. */
+function subjectsOn(repo: TempRepo, branch: string): string[] {
+  return repo
+    .git(["log", "--format=%s", branch])
+    .stdout.split("\n")
+    .filter((line) => line !== "");
+}
+
 /** Approve the fixture pull request as somebody, from its own branch. */
 function approveAs(repo: TempRepo, email: string, id: string): void {
   repo.git(["config", "user.email", email]);
@@ -1210,10 +1224,10 @@ describe("nav pr merge", () => {
     }
   });
 
-  it("honours --no-ff even when a fast-forward was possible", () => {
+  it("honours --method merge even when a fast-forward was possible", () => {
     const { repo } = withOpenPr();
     try {
-      repo.nav(["pr", "merge", "dk3m", "--no-ff"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      repo.nav(["pr", "merge", "dk3m", "--method", "merge"], { NAV_NOW: "2026-08-07T12:00:00Z" });
       assert.match(repo.git(["log", "--merges", "--format=%s"]).stdout, /Merge #dk3mp2x9/);
     } finally {
       repo.cleanup();
@@ -1378,6 +1392,366 @@ describe("nav pr merge", () => {
       const result = repo.nav(["pr", "merge", "dk3m"]);
       assert.equal(result.code, 1);
       assert.match(result.stderr, /targets 'main'/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+/**
+ * The merge method the marker declares — spec 02 §2.10.
+ *
+ * What each method leaves in `main`'s history is the whole of what a method
+ * is, so that is what these assert: how many merge commits, whether the
+ * source's own commits are on the target, and what became of the branch.
+ */
+describe("the merge policy", () => {
+  it("merges by `auto` when the marker declares nothing, as it always has", () => {
+    const { repo } = withOpenPr();
+    try {
+      const result = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(repo.git(["log", "--merges", "--oneline"]).stdout.trim(), "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  // Declaring a policy is itself a commit on `main`, so these branches have
+  // diverged by the time the merge runs — which is why `squash` is what they
+  // declare: it is the one method whose result no other could be mistaken for,
+  // whatever the branches happen to allow.
+  it("reads the method out of the marker, with no flag given", () => {
+    const { repo } = withOpenPr();
+    try {
+      declareMergePolicy(repo, { method: "squash" });
+      const result = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /^Squash commit [0-9a-f]{12}$/m);
+      assert.equal(repo.git(["log", "--merges", "--oneline"]).stdout.trim(), "");
+      assert.equal(subjectsOn(repo, "main").includes("feat: rework auth tokens"), false);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("lets --method override the marker for one merge", () => {
+    const { repo } = withOpenPr();
+    try {
+      declareMergePolicy(repo, { method: "squash" });
+      const result = repo.nav(["pr", "merge", "dk3m", "--method", "merge"], {
+        NAV_NOW: "2026-08-07T12:00:00Z",
+      });
+      assert.equal(result.code, 0, result.stderr);
+      assert.doesNotMatch(result.stdout, /was squashed/);
+      assert.match(repo.git(["log", "--merges", "--format=%s"]).stdout, /Merge #dk3mp2x9/);
+      assert.equal(subjectsOn(repo, "main").includes("feat: rework auth tokens"), true);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("rejects a method it does not define, before reading anything", () => {
+    const { repo } = withOpenPr();
+    try {
+      const result = repo.nav(["pr", "merge", "dk3m", "--method", "rebase-ff"]);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /'rebase-ff' is not a merge method/);
+      assert.match(result.stderr, /auto, merge, merge-ff, rebase, rebase-no-ff, squash/);
+      assert.equal(
+        existsSync(join(repo.dir, ".navbook/prs/merged/dk3mp2x9-refactor-auth")),
+        false,
+        "nothing was merged",
+      );
+      assert.equal(repo.git(["status", "--porcelain"]).stdout.trim(), "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("warns about a marker it cannot read, and merges by the default", () => {
+    const { repo } = withOpenPr();
+    try {
+      declareMergePolicy(repo, { method: "fast-forward-ish" });
+      const result = repo.nav(["pr", "merge", "dk3m"], { NAV_NOW: "2026-08-07T12:00:00Z" });
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stderr, /'merge\.method' must be one of auto, merge/);
+      assert.match(result.stderr, /using the default/);
+      // `auto`, which is a merge commit here because declaring the policy moved
+      // `main` on: the point is that it merged at all rather than refusing.
+      assert.match(repo.git(["log", "--merges", "--format=%s"]).stdout, /Merge #dk3mp2x9/);
+      // The same fault, reported once, as the error doctor exits 2 for.
+      const doctor = repo.nav(["doctor"]);
+      assert.equal(doctor.code, 2);
+      assert.equal(doctor.stdout.match(/D15/g)?.length, 1);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  describe("merge-ff", () => {
+    it("fast-forwards where it can", () => {
+      const { repo } = withOpenPr();
+      try {
+        const result = repo.nav(["pr", "merge", "dk3m", "--method", "merge-ff"], {
+          NAV_NOW: "2026-08-07T12:00:00Z",
+        });
+        assert.equal(result.code, 0, result.stderr);
+        assert.equal(repo.git(["log", "--merges", "--oneline"]).stdout.trim(), "");
+        assert.equal(/^ {2}commit:/m.test(prFile(repo, "merged")), false);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("refuses where it cannot, and writes nothing at all", () => {
+      const { repo } = withOpenPr({ advanceMain: true });
+      try {
+        const before = repo.git(["rev-parse", "main"]).stdout.trim();
+        const result = repo.nav(["pr", "merge", "dk3m", "--method", "merge-ff"]);
+        assert.equal(result.code, 1);
+        assert.match(result.stderr, /cannot fast-forward into main/);
+        assert.match(result.stderr, /this repository merges by 'merge-ff'/);
+        assert.match(result.stderr, /nav pr merge --method rebase/);
+        assert.equal(repo.git(["rev-parse", "main"]).stdout.trim(), before, "main did not move");
+        assert.equal(repo.git(["status", "--porcelain"]).stdout.trim(), "");
+      } finally {
+        repo.cleanup();
+      }
+    });
+  });
+
+  describe("rebase", () => {
+    it("replays the branch onto the target and fast-forwards, leaving no merge", () => {
+      const { repo } = withOpenPr({ advanceMain: true });
+      try {
+        const result = repo.nav(["pr", "merge", "dk3m", "--method", "rebase"], {
+          NAV_NOW: "2026-08-07T12:00:00Z",
+        });
+        assert.equal(result.code, 0, result.stderr);
+        assert.equal(repo.git(["log", "--merges", "--oneline"]).stdout.trim(), "");
+        assert.match(result.stdout, /^Rebased feat\/auth onto main$/m);
+        assert.equal(result.stdout.includes("Merge commit"), false);
+
+        const subjects = subjectsOn(repo, "main");
+        assert.equal(subjects.includes("feat: rework auth tokens"), true, "the work is on main");
+        assert.equal(subjects.includes("feat: unrelated work on main"), true);
+        // Replayed, not merged: the branch's own commit is not the one main has.
+        assert.equal(branchesApart(repo, "main", "feat/auth"), "0\t0");
+        // No merge commit exists, so the block names none.
+        assert.equal(/^ {2}commit:/m.test(prFile(repo, "merged")), false);
+        assert.equal(repo.nav(["doctor"]).code, 0);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("leaves the branch alone under --no-sync-source, and still replays", () => {
+      const { repo } = withOpenPr({ advanceMain: true });
+      try {
+        const before = repo.git(["rev-parse", "feat/auth"]).stdout.trim();
+        const result = repo.nav(["pr", "merge", "dk3m", "--method", "rebase", "--no-sync-source"], {
+          NAV_NOW: "2026-08-07T12:00:00Z",
+        });
+        assert.equal(result.code, 0, result.stderr);
+        assert.equal(repo.git(["rev-parse", "feat/auth"]).stdout.trim(), before);
+        assert.equal(repo.git(["log", "--merges", "--oneline"]).stdout.trim(), "");
+        assert.equal(
+          subjectsOn(repo, "main").includes("feat: rework auth tokens"),
+          true,
+          "the work still landed",
+        );
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("stops on a conflict and --continue finishes it", () => {
+      const { repo } = withOpenPr();
+      try {
+        // Both branches touch the same line, so the replay cannot be automatic.
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        repo.write("app.txt", "feature edit\n");
+        repo.commitAll("feat: edit the shared file");
+        repo.git(["checkout", "--quiet", "main"]);
+        repo.write("app.txt", "main edit\n");
+        repo.commitAll("feat: edit it on main too");
+
+        const stopped = repo.nav(["pr", "merge", "dk3m", "--method", "rebase"]);
+        assert.equal(stopped.code, 1);
+        assert.match(stopped.stderr, /replaying #dk3mp2x9 produced conflicts/);
+        assert.match(stopped.stderr, /the replay left HEAD on feat\/auth/);
+        assert.match(stopped.stderr, /'--continue' returns to main/);
+        assert.match(stopped.stderr, /git rebase --abort/);
+
+        repo.write("app.txt", "resolved\n");
+        repo.git(["add", "app.txt"]);
+        const finished = repo.nav(["pr", "merge", "--continue"], {
+          NAV_NOW: "2026-08-07T12:00:00Z",
+        });
+        assert.equal(finished.code, 0, finished.stderr);
+        assert.match(finished.stdout, /^Merged #dk3mp2x9/m);
+        assert.match(finished.stdout, /^Rebased feat\/auth onto main$/m);
+        assert.equal(repo.git(["log", "--merges", "--oneline"]).stdout.trim(), "");
+        assert.equal(repo.git(["rev-parse", "--abbrev-ref", "HEAD"]).stdout.trim(), "main");
+        assert.equal(repo.nav(["doctor"]).code, 0);
+      } finally {
+        repo.cleanup();
+      }
+    });
+  });
+
+  describe("rebase-no-ff", () => {
+    it("replays the branch and then makes the merge commit anyway", () => {
+      const { repo } = withOpenPr({ advanceMain: true });
+      try {
+        const result = repo.nav(["pr", "merge", "dk3m", "--method", "rebase-no-ff"], {
+          NAV_NOW: "2026-08-07T12:00:00Z",
+        });
+        assert.equal(result.code, 0, result.stderr);
+        assert.match(repo.git(["log", "--merges", "--format=%s"]).stdout, /Merge #dk3mp2x9/);
+        assert.match(result.stdout, /^Rebased feat\/auth onto main$/m);
+        // Semi-linear: the merge commit's second parent sits directly on top of
+        // what main was, so the history reads as one line with a join on it.
+        const sha = repo.git(["rev-list", "--merges", "-1", "HEAD"]).stdout.trim();
+        assert.match(prFile(repo, "merged"), new RegExp(`commit: ${sha}`));
+        assert.equal(
+          subjectsOn(repo, "main").includes("feat: rework auth tokens"),
+          true,
+          "the work is on main",
+        );
+        assert.equal(repo.nav(["doctor"]).code, 0);
+      } finally {
+        repo.cleanup();
+      }
+    });
+  });
+
+  describe("squash", () => {
+    it("lands one commit and says the branch cannot be fast-forwarded", () => {
+      const { repo } = withOpenPr({ advanceMain: true });
+      try {
+        const before = repo.git(["rev-parse", "feat/auth"]).stdout.trim();
+        const result = repo.nav(["pr", "merge", "dk3m", "--method", "squash"], {
+          NAV_NOW: "2026-08-07T12:00:00Z",
+        });
+        assert.equal(result.code, 0, result.stderr);
+        assert.match(result.stdout, /^Squash commit [0-9a-f]{12}$/m);
+        assert.match(result.stdout, /feat\/auth was squashed; its own commits are not on main/);
+        assert.equal(result.stderr, "", "not a warning: this is the method working");
+
+        assert.equal(repo.git(["log", "--merges", "--oneline"]).stdout.trim(), "");
+        const subjects = subjectsOn(repo, "main");
+        assert.equal(subjects.includes("feat: rework auth tokens"), false, "not its own commits");
+        assert.equal(subjects.includes("Merge #dk3mp2x9: Refactor auth"), true);
+        // The branch is untouched: nothing on it can reach what replaced it.
+        assert.equal(repo.git(["rev-parse", "feat/auth"]).stdout.trim(), before);
+        // The change itself did land.
+        assert.equal(
+          existsSync(join(repo.dir, "auth.txt")),
+          true,
+          "the source's change is in the working tree",
+        );
+        const sha = repo.git(["rev-parse", "HEAD~1"]).stdout.trim();
+        assert.match(prFile(repo, "merged"), new RegExp(`commit: ${sha}`));
+        assert.equal(repo.nav(["doctor"]).code, 0);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("stops on a conflict and --continue finishes it, with no MERGE_HEAD to go on", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.git(["checkout", "--quiet", "feat/auth"]);
+        repo.write("app.txt", "feature edit\n");
+        repo.commitAll("feat: edit the shared file");
+        repo.git(["checkout", "--quiet", "main"]);
+        repo.write("app.txt", "main edit\n");
+        repo.commitAll("feat: edit it on main too");
+
+        const stopped = repo.nav(["pr", "merge", "dk3m", "--method", "squash"]);
+        assert.equal(stopped.code, 1);
+        assert.match(stopped.stderr, /merging #dk3mp2x9 produced conflicts/);
+        assert.match(stopped.stderr, /git reset --merge/);
+        assert.equal(
+          existsSync(join(repo.dir, ".git/MERGE_HEAD")),
+          false,
+          "a squash leaves none, which is why the note exists",
+        );
+
+        repo.write("app.txt", "resolved\n");
+        repo.git(["add", "app.txt"]);
+        const finished = repo.nav(["pr", "merge", "--continue"], {
+          NAV_NOW: "2026-08-07T12:00:00Z",
+        });
+        assert.equal(finished.code, 0, finished.stderr);
+        assert.match(finished.stdout, /^Merged #dk3mp2x9/m);
+        assert.match(finished.stdout, /^Squash commit [0-9a-f]{12}$/m);
+        assert.equal(repo.git(["log", "--merges", "--oneline"]).stdout.trim(), "");
+        assert.equal(repo.nav(["doctor"]).code, 0);
+      } finally {
+        repo.cleanup();
+      }
+    });
+  });
+
+  it("forgets a stopped merge that git was told to abandon", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      repo.write("app.txt", "feature edit\n");
+      repo.commitAll("feat: edit the shared file");
+      repo.git(["checkout", "--quiet", "main"]);
+      repo.write("app.txt", "main edit\n");
+      repo.commitAll("feat: edit it on main too");
+
+      assert.equal(repo.nav(["pr", "merge", "dk3m", "--method", "rebase"]).code, 1);
+      // `git` puts the repository back without knowing what Navbook wrote down,
+      // so the note must not outlive what it describes and block every merge.
+      // The abort lands on `feat/auth`, which is where the replay was: exactly
+      // what the message that stopped said would happen.
+      repo.git(["rebase", "--abort"]);
+      assert.equal(repo.git(["rev-parse", "--abbrev-ref", "HEAD"]).stdout.trim(), "feat/auth");
+      repo.git(["checkout", "--quiet", "main"]);
+
+      // The same conflict is waiting, since the branches still disagree — but
+      // it is reached, which is the point: a stale note would have refused
+      // before git was asked to merge anything at all.
+      const again = repo.nav(["pr", "merge", "dk3m", "--method", "merge"], {
+        NAV_NOW: "2026-08-07T12:00:00Z",
+      });
+      assert.equal(again.code, 1);
+      assert.doesNotMatch(again.stderr, /already in progress/);
+      assert.match(again.stderr, /merging #dk3mp2x9 produced conflicts/);
+
+      repo.write("app.txt", "resolved\n");
+      repo.git(["add", "app.txt"]);
+      const finished = repo.nav(["pr", "merge", "--continue"], {
+        NAV_NOW: "2026-08-07T12:00:00Z",
+      });
+      assert.equal(finished.code, 0, finished.stderr);
+      assert.match(repo.git(["log", "--merges", "--format=%s"]).stdout, /Merge #dk3mp2x9/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses to start a second merge on top of one that stopped", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["checkout", "--quiet", "feat/auth"]);
+      repo.write("app.txt", "feature edit\n");
+      repo.commitAll("feat: edit the shared file");
+      repo.git(["checkout", "--quiet", "main"]);
+      repo.write("app.txt", "main edit\n");
+      repo.commitAll("feat: edit it on main too");
+
+      assert.equal(repo.nav(["pr", "merge", "dk3m", "--method", "squash"]).code, 1);
+      const again = repo.nav(["pr", "merge", "dk3m", "--method", "squash"]);
+      assert.equal(again.code, 1);
+      assert.match(again.stderr, /merging #dk3mp2x9 is already in progress/);
+      assert.match(again.stderr, /nav pr merge --continue/);
     } finally {
       repo.cleanup();
     }

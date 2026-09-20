@@ -21,7 +21,12 @@ import { dirname, join, posix, relative, sep } from "node:path";
 import { parseCommentFileName } from "../core/comments.ts";
 import type { FileOp } from "../core/ops.ts";
 import { type PluginDeclarationReading, parsePluginDeclaration } from "../core/plugins.ts";
-import { parseReviewPolicy, type ReviewPolicyReading } from "../core/policy.ts";
+import {
+  type MergePolicyReading,
+  parseMergePolicy,
+  parseReviewPolicy,
+  type ReviewPolicyReading,
+} from "../core/policy.ts";
 import { needsComments, type Query } from "../core/query.ts";
 import { parseDirName } from "../core/slug.ts";
 import {
@@ -134,6 +139,18 @@ export function loadRepoForQuery(ws: WsCtx, query: Query, kind: EntityKind): Rep
  */
 export function readReviewPolicy(ws: WsCtx): ReviewPolicyReading {
   return parseReviewPolicy(readMarker(ws));
+}
+
+/**
+ * Read the merge policy the marker declares (spec 02 §2.10).
+ *
+ * Read from the working tree for the same reason {@link readReviewPolicy} is:
+ * the method belongs to the repository somebody is merging *in*, not to
+ * whichever branch the pull request was written on. A source branch that
+ * declared `squash` cannot decide how the target lands it.
+ */
+export function readMergePolicy(ws: WsCtx): MergePolicyReading {
+  return parseMergePolicy(readMarker(ws));
 }
 
 /**

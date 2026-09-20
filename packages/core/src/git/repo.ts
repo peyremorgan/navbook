@@ -233,10 +233,33 @@ export function isTreeClean(cwd: string): boolean {
 
 /** True when a merge is currently in progress. */
 export function isMergeInProgress(cwd: string): boolean {
-  const gitDir = gitMaybe(["rev-parse", "--git-dir"], { cwd });
-  if (!gitDir) return false;
-  const absolute = gitDir.startsWith("/") ? gitDir : join(cwd, gitDir);
-  return existsSync(join(absolute, "MERGE_HEAD"));
+  const dir = resolvedGitDir(cwd);
+  return dir !== null && existsSync(join(dir, "MERGE_HEAD"));
+}
+
+/**
+ * True when a replay (`git rebase`) is currently in progress.
+ *
+ * Both backends are looked for: the merge backend keeps `rebase-merge/`, the
+ * apply backend `rebase-apply/`, and which one ran is the user's `git` config
+ * rather than anything Navbook chose.
+ */
+export function isReplayInProgress(cwd: string): boolean {
+  const dir = resolvedGitDir(cwd);
+  if (dir === null) return false;
+  return existsSync(join(dir, "rebase-merge")) || existsSync(join(dir, "rebase-apply"));
+}
+
+/** The git directory as an absolute path, or null outside a repository. */
+function resolvedGitDir(cwd: string): string | null {
+  const dir = gitMaybe(["rev-parse", "--git-dir"], { cwd });
+  if (!dir) return null;
+  return dir.startsWith("/") ? dir : join(cwd, dir);
+}
+
+/** Check a branch out, which a replay left HEAD off of. */
+export function checkoutBranch(cwd: string, branch: string): void {
+  git(["checkout", "--quiet", branch], { cwd });
 }
 
 /** Absolute path of the repository's git directory. */
