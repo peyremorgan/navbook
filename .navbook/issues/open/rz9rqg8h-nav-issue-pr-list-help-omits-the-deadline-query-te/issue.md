@@ -14,7 +14,7 @@ $ nav issue list --help | grep -c deadline:
 
 $ nav issue list deadline:none
 ID         STATUS  TITLE
-#cwy1hbzp  open    Login times out
+#…        open    Login times out
 
 $ nav __complete issue list | grep deadline
 deadline:
