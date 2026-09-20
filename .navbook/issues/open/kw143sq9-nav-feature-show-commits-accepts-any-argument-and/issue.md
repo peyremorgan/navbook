@@ -25,19 +25,19 @@ A repository with two commits touching the feature:
 $ nav feature show auth --commits 10 | tail -4
 
 recent commits (2):
-  0d35efdf  docs(issue): open #cwy1hbzp
+  0d35efdf  docs(issue): open an issue against the feature
   956ddaad  docs(feature): create auth
 
 $ nav feature show auth --commits abc | tail -4
   none
 
 issues and pull requests (1):
-  #cwy1hbzp  open   Login times out
+  #…        open   Login times out
 $ echo $?
 0
 
 $ nav feature show auth --commits 2.5 | tail -4
-  #cwy1hbzp  open   Login times out
+  #…        open   Login times out
 
 recent commits (0):
   none
@@ -50,7 +50,7 @@ $ echo $?
 Every other numeric flag refuses:
 
 ```console
-$ nav issue show cwy1 --depth abc
+$ nav issue show <id> --depth abc
 nav: --depth takes a whole number of levels          (exit 1)
 $ nav issue open "x" --rank abc -m "b"
 nav: --rank must be a number
