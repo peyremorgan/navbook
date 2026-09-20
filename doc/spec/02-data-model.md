@@ -320,7 +320,7 @@ Closes: bqlybac0
 | `draft` | MAY | boolean | Not yet requesting review |
 | `reviewer` | MAY | person or list of persons | Who is asked to review (below) |
 | `labels`, `assignee`, `milestone`, `feature` | MAY | as issues | |
-| `merged` | MAY | map | Added at/after merge: `date`, `by` (person), `commit` (40-hex merge commit, added in a follow-up commit since it cannot be known inside the merge itself) |
+| `merged` | MAY | map | Added at/after merge: `date`, `by` (person), `commit` (the 40-hex commit that landed the branch, added in a follow-up commit since it cannot be known inside that commit itself; absent where the merge produced no commit of its own, as a fast-forward does — see the merge policy of §2.10) |
 | `resolution` | MAY | string | For `prs/closed/`: `declined`, `superseded`, `abandoned` RECOMMENDED |
 | `superseded-by` | MAY | ID | With `resolution: superseded` |
 
@@ -392,8 +392,9 @@ ask, and one that does is still not asking.
    accumulate as comment files, all on the source branch. Asking someone to
    review is an edit to `reviewer` on `pr.md`; answering is a comment file, and
    never an edit to `pr.md` (§2.7).
-3. **Merge** — the source branch is merged into `target`; the PR directory is
-   moved to `prs/merged/` either inside the merge commit or in an immediate
+3. **Merge** — the source branch is landed on `target` by whichever of the
+   methods of §2.10 the repository asks for; the PR directory is moved to
+   `prs/merged/` either inside the commit that lands it or in an immediate
    follow-up on the target branch. The full discussion is thereby archived in
    the target's history. The `merged:` block SHOULD be recorded.
 4. **Decline / abandon** — the branch is simply never merged. To keep a durable
@@ -422,10 +423,11 @@ ask, and one that does is still not asking.
 
 `navbook.json`, at the top of the root directory, is the **marker**: its
 presence is what identifies the directory that contains it as a Navbook root
-(§2.1). It MUST be a JSON object. This revision defines three keys, `version`,
-whose value MUST be the integer `1`, `review`, the review policy below, and
-`plugins`, the declaration of §2.12; tools MUST ignore keys they do not
-recognize, and MUST NOT reject a marker for carrying them.
+(§2.1). It MUST be a JSON object. This revision defines four keys, `version`,
+whose value MUST be the integer `1`, `review`, the review policy below,
+`merge`, the merge policy below it, and `plugins`, the declaration of §2.12;
+tools MUST ignore keys they do not recognize, and MUST NOT reject a marker for
+carrying them.
 
 A tool MUST NOT require the marker in order to read a `.navbook/` directory: a
 repository using the default name and predating this revision has none, and
@@ -436,8 +438,8 @@ locatable.
 ### The review policy
 
 `review`, when present, MUST be an object. It says how the reviews of §2.7 are
-counted, and it is the one thing in the marker a tool reads rather than merely
-finds.
+counted, which is the first of the two things in the marker a tool reads rather
+than merely finds.
 
 ```json
 {
@@ -468,6 +470,61 @@ refused to run would say less than a listing with a warning on it.
 therefore what every reading of that decision reports, and a tool MAY say that
 a policy is unmet wherever saying so is useful. It remains subject to §2.7: no
 tool refuses an operation because of it.
+
+### The merge policy
+
+`merge`, when present, MUST be an object. It says how step 3 of §2.8 lands a
+pull request — which is to say what shape the merge leaves in the target
+branch's history — and it is the second thing in the marker a tool reads rather
+than merely finds.
+
+```json
+{
+  "version": 1,
+  "merge": {
+    "method": "rebase"
+  }
+}
+```
+
+| Key | Req. | Type | Default | Meaning |
+|-----|------|------|---------|---------|
+| `method` | MAY | one of the six names below | `auto` | How the source branch is landed on `target` |
+
+| `method` | What lands on `target` |
+|----------|------------------------|
+| `auto` | A fast-forward where the branches allow one, otherwise a merge commit |
+| `merge` | A merge commit, always, including where a fast-forward was possible |
+| `merge-ff` | A fast-forward, only; a merge that cannot fast-forward MUST NOT be performed |
+| `rebase` | The source's commits replayed onto `target`, then a fast-forward |
+| `rebase-no-ff` | The same replay, then a merge commit rather than the fast-forward |
+| `squash` | One commit carrying the whole of the source's change |
+
+`auto` is what §2.8 describes with no policy declared, so a repository that
+declares none, and one that predates this revision, land a pull request
+identically.
+
+The first three methods preserve the source's commits as they stand and are
+therefore always available. The last three rewrite them, so a tool MAY be
+unable to carry one out — a replay that conflicts, or a source branch it
+cannot rewrite — and MUST then report what stopped it rather than fall back to
+another method. Which commits a method leaves behind also decides where the
+directory move of §2.8 can go: a method that lands a commit of its own
+(`merge`, `rebase-no-ff`, `squash`, and `auto` where it makes a merge commit)
+MAY move the directory inside that commit, while one that does not (`merge-ff`,
+`rebase`, and `auto` where it fast-forwards) MUST use the immediate follow-up
+commit, and the `merged:` block then has no `commit` key to write.
+
+A malformed merge policy is read exactly as a malformed review policy is:
+reported under D15, defaulted rather than propagated, and never a reason to
+refuse to read the tree.
+
+**A method is a default, not a mandate.** It is what a tool lands a pull
+request with when nothing says otherwise, and a tool MAY offer a way to choose
+another method for a single merge ([04 §4.3](04-cli.md)). It is not subject to
+§2.7, because it says nothing about reviews: `merge-ff` refusing a merge that
+cannot fast-forward is a statement about the shape of two branches, which no
+review could change.
 
 `specs/`, at the top of the root directory, holds features (§2.11).
 
