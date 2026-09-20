@@ -5,9 +5,12 @@
  * lands the branch, so the merge is performed with `--no-commit` and committed
  * only after the move is staged (spec 02 §2.8).
  *
- * Each operation has a blocking form and an `Async` twin. They share their
- * arguments and their reading of what git said, so the two cannot drift: the
- * only difference between them is which runner they hand the command to.
+ * Each operation the API server's pull needs has a blocking form and an
+ * `Async` twin. They share their arguments and their reading of what git said,
+ * so the two cannot drift: the only difference between them is which runner
+ * they hand the command to. The replay and squash below have no twin, because
+ * the server never performs them — it fast-forwards a tracker it did not
+ * write, while these rewrite commits somebody is waiting at a terminal for.
  */
 
 import { git, gitAsync, gitRun, gitRunAsync } from "./exec.ts";
@@ -125,4 +128,79 @@ function conflicted(result: { code: number; stdout: string }): string[] {
 export function mergeHead(cwd: string): string | null {
   const result = gitRun(["rev-parse", "--verify", "--quiet", "MERGE_HEAD"], { cwd });
   return result.code === 0 ? result.stdout.trim() : null;
+}
+
+/* ----------------------------------------------------- replay and squash */
+
+const squashArgs = (source: string): string[] => ["merge", "--squash", "--quiet", source];
+const REBASE_CONTINUE = ["rebase", "--continue"];
+
+/**
+ * An editor that answers instantly and changes nothing.
+ *
+ * `git rebase --continue` opens the message of the commit it is completing
+ * unless told not to. There is nobody to close it: the message is the one the
+ * author already wrote, and a replay that hung waiting on `vi` inside a tool
+ * would look exactly like a tool that had crashed.
+ */
+const NO_EDITOR = { GIT_EDITOR: "true" };
+
+/** What a replay of the source's commits onto another base came to. */
+export type ReplayOutcome = "replayed" | "conflict";
+
+export interface ReplayResult {
+  outcome: ReplayOutcome;
+  /** The tip of the replayed commits; null while a conflict is unresolved. */
+  tip: string | null;
+}
+
+/**
+ * Replay `source`'s commits since `upstream` onto `onto` (spec 04 §4.3).
+ *
+ * `git rebase --onto` rather than a range of cherry-picks, because a pull
+ * request branch that merged its target back in is ordinary and a cherry-pick
+ * refuses a merge commit, while a rebase flattens it — which is what somebody
+ * asking for a linear history meant.
+ *
+ * What `source` is decides what moves. A branch name is rebased *in place*:
+ * git leaves that branch pointing at the replayed commits, which is what
+ * "rebase the branch" says and the only way the branch can end up on them. A
+ * SHA detaches HEAD instead and leaves every ref alone, which is what a caller
+ * that must not touch the branch — `--no-sync-source`, a remote-tracking ref,
+ * a branch another worktree stands on — passes for exactly that reason.
+ *
+ * Either way HEAD is left on the replay and not on the target branch, so the
+ * caller checks the target out again before landing anything.
+ */
+export function replayOnto(
+  cwd: string,
+  onto: string,
+  upstream: string,
+  source: string,
+): ReplayResult {
+  const result = gitRun(["rebase", "--quiet", "--onto", onto, upstream, source], {
+    cwd,
+    env: NO_EDITOR,
+  });
+  if (result.code !== 0) return { outcome: "conflict", tip: null };
+  return { outcome: "replayed", tip: git(HEAD, { cwd }).trim() };
+}
+
+/** Carry on with a replay whose conflicts have been resolved and staged. */
+export function continueReplay(cwd: string): ReplayResult {
+  const result = gitRun(REBASE_CONTINUE, { cwd, env: NO_EDITOR });
+  if (result.code !== 0) return { outcome: "conflict", tip: null };
+  return { outcome: "replayed", tip: git(HEAD, { cwd }).trim() };
+}
+
+/**
+ * Stage the whole of `source`'s change as one commit's worth, without
+ * committing it, so the caller can add the PR directory move before it lands.
+ *
+ * Note that git records no `MERGE_HEAD` for a squash — the commit it produces
+ * has one parent and is not a merge — which is why a squash interrupted by a
+ * conflict cannot be recognized from the repository alone.
+ */
+export function squashMerge(cwd: string, source: string): MergeOutcome {
+  return mergeOutcome(gitRun(squashArgs(source), { cwd }).code);
 }

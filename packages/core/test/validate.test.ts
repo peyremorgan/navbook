@@ -617,7 +617,7 @@ describe("D12 loops in the tree", () => {
   });
 });
 
-describe("D15 the review policy", () => {
+describe("D15 the marker", () => {
   const marker = (value: unknown): Record<string, string> => ({
     "navbook.json": JSON.stringify(value),
   });
@@ -661,6 +661,39 @@ describe("D15 the review policy", () => {
       diagnostics.map((d) => d.path),
       ["navbook.json", "navbook.json"],
     );
+  });
+
+  it("passes a well-formed merge policy", () => {
+    assert.deepEqual(codes(marker({ version: 1, merge: { method: "rebase-no-ff" } })), []);
+  });
+
+  it("flags a `merge` that is not an object", () => {
+    assert.deepEqual(codes(marker({ merge: "rebase" })), ["D15"]);
+  });
+
+  it("flags a merge method it does not define, and names the ones it does", () => {
+    const diagnostics = validateTree(tree(marker({ merge: { method: "ff-only" } })));
+    assert.deepEqual(
+      diagnostics.map((d) => d.check),
+      ["D15"],
+    );
+    assert.match(String(diagnostics[0]?.message), /'merge\.method' must be one of auto, merge/);
+  });
+
+  it("flags a fault in each policy, since neither excuses the other", () => {
+    const diagnostics = validateTree(
+      tree(marker({ review: { minApprovals: 0 }, merge: { method: "ff-only" } })),
+    );
+    assert.deepEqual(
+      diagnostics.map((d) => d.check),
+      ["D15", "D15"],
+    );
+  });
+
+  it("says text that is not JSON once, though every policy reports it", () => {
+    // Both readings conclude the same thing about the same file; D15 collapses
+    // identical messages so the report says it once.
+    assert.deepEqual(codes({ "navbook.json": "{ oops" }), ["D15"]);
   });
 
   it("is an error, so the pre-commit hook stops a marker nobody can read", () => {

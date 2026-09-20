@@ -5,7 +5,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { EntityKind } from "@navbook/core";
+import { type EntityKind, MERGE_METHODS } from "@navbook/core";
 import { Command, Option } from "commander";
 import { cmdComplete } from "./commands/complete.ts";
 import { cmdDoctor } from "./commands/doctor.ts";
@@ -206,14 +206,11 @@ function buildPrCommand(getCtx: () => Ctx): Command {
   pr.command("merge")
     .argument("[id]", "ID or unambiguous prefix")
     .description("merge a pull request into the checked-out target branch")
-    .option("--no-ff", "always create a merge commit")
+    .option("--method <name>", `how to land it (${MERGE_METHODS.join(" | ")})`)
     .option("--continue", "finish a merge that stopped for conflict resolution")
     .option("-y, --yes", "merge without asking when the review policy is not met")
     .option("--no-sync-source", "leave the source branch behind instead of fast-forwarding it")
-    // Commander models `--no-ff` as the negation of an implicit `--ff`.
-    .action((id: string | undefined, opts) =>
-      cmdPrMerge(getCtx(), id, { ...opts, noFf: opts.ff === false }),
-    );
+    .action((id: string | undefined, opts) => cmdPrMerge(getCtx(), id, opts));
 
   addSharedVerbs(pr, "pr", getCtx, {
     // No extra columns here: `cmdPrList` owns the PR listing's columns, because

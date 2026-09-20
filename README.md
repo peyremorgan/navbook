@@ -145,6 +145,32 @@ neither of them ever refuses: Navbook records reviews and enforces nothing
 ([spec 01 §1.7](doc/spec/01-functionality.md)). Leave the key out and one
 approval is enough, which is what every repository did before it existed.
 
+The marker also says what shape a merge should leave in the target branch's
+history, so a project's merges look the same whoever runs them:
+
+```json
+{
+  "version": 1,
+  "merge": {
+    "method": "rebase"
+  }
+}
+```
+
+| `method` | What lands on the target |
+|---|---|
+| `auto` | Fast-forward where the branches allow one, otherwise a merge commit. The default. |
+| `merge` | A merge commit, always. |
+| `merge-ff` | A fast-forward, only; `nav pr merge` stops if one is not possible. |
+| `rebase` | The branch's commits replayed onto the target, then a fast-forward. |
+| `rebase-no-ff` | The same replay, then a merge commit — semi-linear history. |
+| `squash` | The whole branch as one commit. |
+
+`nav pr merge --method <name>` takes any of them for a single merge. Unlike
+the review policy this one can stop a merge, but only ever over the shape of
+two branches: `merge-ff` says so and tells you what would make a fast-forward
+possible.
+
 ## Commands
 
 Everything is noun-verb, with one verb vocabulary shared by both entity kinds.
@@ -173,7 +199,7 @@ usually enough. A full directory name works too.
 | `nav pr review <id> --approve` | Record a verdict bound to a specific revision. Without a flag the verdict is `comment`: a review that judges nothing. |
 | `nav pr list awaiting:me@example.com` | Pull requests waiting on one person. `reviewer:` and `review:approved` filter the same listing. |
 | `nav pr list --all-refs` | Find PRs on branches you have fetched but not checked out. |
-| `nav pr merge <id>` | Merge into the checked-out target, archiving the discussion into its history, then fast-forward the source branch so it does not keep the PR open; `--no-sync-source` skips that. Says what a declared review policy is missing, and asks; `--yes` answers in advance. |
+| `nav pr merge <id>` | Merge into the checked-out target, archiving the discussion into its history, then fast-forward the source branch so it does not keep the PR open; `--no-sync-source` skips that. `--method` picks how it lands, overriding the marker. Says what a declared review policy is missing, and asks; `--yes` answers in advance. |
 | `nav feature open <title>` | Create a feature under `specs/`. `--slug` names its directory; the title otherwise. |
 | `nav feature show <slug>` | Its documents, the issues and pull requests that name it, and the commits that touched any of them. |
 | `nav feature spec add <slug> <title>` | Add a specification document. `nav feature spec edit` opens one in `$EDITOR`. |

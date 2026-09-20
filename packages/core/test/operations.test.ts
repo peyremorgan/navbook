@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { newCommentFile, newIssueFile, newPrFile, readRevisions } from "../src/core/files.ts";
+import type { MergeMethod } from "../src/core/policy.ts";
 import { emptyQuery } from "../src/core/query.ts";
 import type { EntityRecord } from "../src/core/tree.ts";
 import { git } from "../src/git/exec.ts";
@@ -535,11 +536,112 @@ describe("ops: updating and merging a pull request", () => {
   it("records a merge commit when a fast-forward is refused", () => {
     inPrWorkspace((ws, dir) => {
       git(["checkout", "-q", "main"], { cwd: dir });
-      const result = executePrMerge(ws, planPrMerge(ws, "ppp1", { noFf: true }));
+      const result = executePrMerge(ws, planPrMerge(ws, "ppp1", { method: "merge" }));
       assert.match(result.mergeSha ?? "", /^[0-9a-f]{40}$/);
+      assert.equal(result.method, "merge");
       // The source tip is a parent of the merge commit, so it fast-forwards too.
       assert.equal(result.source.outcome, "fast-forwarded");
       assert.equal(branchesApart(dir, "main", "feature"), "0\t0");
+    });
+  });
+
+  it("plans the strategy each method asks for, without performing any of it", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "main"], { cwd: dir });
+      const strategyOf = (method: MergeMethod): string =>
+        planPrMerge(ws, "ppp1", { method }).strategy;
+      // `main` can fast-forward here, so `auto` and `merge-ff` agree.
+      assert.equal(strategyOf("auto"), "fast-forward");
+      assert.equal(strategyOf("merge-ff"), "fast-forward");
+      assert.equal(strategyOf("merge"), "merge-commit");
+      assert.equal(strategyOf("rebase"), "replay-fast-forward");
+      assert.equal(strategyOf("rebase-no-ff"), "replay-merge-commit");
+      assert.equal(strategyOf("squash"), "squash");
+      assert.equal(resolveSha(dir, "main"), resolveSha(dir, "HEAD"), "planning moved nothing");
+      assert.equal(git(["status", "--porcelain"], { cwd: dir }).trim(), "");
+    });
+  });
+
+  it("takes the method from the marker when the caller names none", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "main"], { cwd: dir });
+      writeFileSync(
+        join(dir, ".navbook", "navbook.json"),
+        `${JSON.stringify({ version: 1, merge: { method: "squash" } }, null, 2)}\n`,
+      );
+      git(["add", "-A"], { cwd: dir });
+      git(["commit", "-qm", "declare a merge policy"], { cwd: dir });
+
+      const plan = planPrMerge(ws, "ppp1");
+      assert.equal(plan.method, "squash");
+      assert.equal(plan.strategy, "squash");
+      assert.equal(plan.mergePolicy.declared, true);
+      // And the caller's own choice still wins over it.
+      assert.equal(planPrMerge(ws, "ppp1", { method: "merge" }).strategy, "merge-commit");
+    });
+  });
+
+  it("refuses merge-ff where the branches have diverged, and moves nothing", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "main"], { cwd: dir });
+      writeFileSync(join(dir, "other.txt"), "unrelated\n");
+      git(["add", "-A"], { cwd: dir });
+      git(["commit", "-qm", "unrelated"], { cwd: dir });
+      const before = resolveSha(dir, "main");
+
+      assert.throws(
+        () => planPrMerge(ws, "ppp1", { method: "merge-ff" }),
+        (error: unknown) => error instanceof WorkspaceError && error.code === "precondition",
+      );
+      assert.equal(resolveSha(dir, "main"), before);
+      assert.equal(git(["status", "--porcelain"], { cwd: dir }).trim(), "");
+    });
+  });
+
+  it("replays the branch onto the target and moves it there", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "main"], { cwd: dir });
+      writeFileSync(join(dir, "other.txt"), "unrelated\n");
+      git(["add", "-A"], { cwd: dir });
+      git(["commit", "-qm", "unrelated"], { cwd: dir });
+
+      const result = executePrMerge(ws, planPrMerge(ws, "ppp1", { method: "rebase" }));
+      assert.equal(result.mergeSha, null, "a replay then a fast-forward creates no merge commit");
+      assert.equal(result.source.outcome, "rebased");
+      assert.equal(git(["log", "--merges", "--oneline"], { cwd: dir }).trim(), "");
+      assert.equal(branchesApart(dir, "main", "feature"), "0\t0");
+      assert.match(
+        git(["reflog", "show", "-1", "feature"], { cwd: dir }),
+        /nav pr merge #ppp11111: rebased onto main/,
+      );
+    });
+  });
+
+  it("leaves the source where it is when a squash replaces its commits", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "main"], { cwd: dir });
+      const before = resolveSha(dir, "feature");
+
+      const result = executePrMerge(ws, planPrMerge(ws, "ppp1", { method: "squash" }));
+      assert.match(result.mergeSha ?? "", /^[0-9a-f]{40}$/);
+      assert.deepEqual(result.source, { ref: "feature", outcome: "squashed" });
+      assert.equal(resolveSha(dir, "feature"), before, "nothing on it could reach the target");
+      assert.equal(git(["log", "--merges", "--oneline"], { cwd: dir }).trim(), "");
+      assert.equal(readFileSync(join(dir, "app.txt"), "utf8"), "changed\n");
+    });
+  });
+
+  it("does not rewrite a source branch it was told to leave alone", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "main"], { cwd: dir });
+      const before = resolveSha(dir, "feature");
+
+      const plan = planPrMerge(ws, "ppp1", { method: "rebase", syncSource: false });
+      assert.equal(plan.rewriteSource, false, "a detached replay, so no ref moves");
+      const result = executePrMerge(ws, plan);
+      assert.deepEqual(result.source, { ref: "feature", outcome: "disabled" });
+      assert.equal(resolveSha(dir, "feature"), before);
+      assert.equal(git(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: dir }).trim(), "main");
     });
   });
 

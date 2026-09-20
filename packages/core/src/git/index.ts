@@ -12,6 +12,7 @@ export * from "./exec.ts";
 export * from "./history.ts";
 export * from "./index-ops.ts";
 export * from "./merge.ts";
+export * from "./merge-state.ts";
 export * from "./refscan.ts";
 export * from "./remote.ts";
 export * from "./repo.ts";

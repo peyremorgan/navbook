@@ -20,7 +20,12 @@ import {
   RevisionUnchangedError,
 } from "../core/ops.ts";
 import { parsePerson, sameEmail } from "../core/person.ts";
-import type { ReviewPolicyReading } from "../core/policy.ts";
+import {
+  type MergeMethod,
+  type MergePolicyReading,
+  type ReviewPolicyReading,
+  rewritesSource,
+} from "../core/policy.ts";
 import { matchesQuery, type Query } from "../core/query.ts";
 import { type ReviewSummary, reviewSummary } from "../core/review.ts";
 import { allEntities, type EntityRecord, parseTree, type Repo } from "../core/tree.ts";
@@ -31,11 +36,21 @@ import {
   canFastForward,
   commitMerge,
   conflictedPaths,
+  continueReplay,
   fastForward,
   isAlreadyMerged,
   mergeHead,
   mergeNoCommit,
+  replayOnto,
+  squashMerge,
 } from "../git/merge.ts";
+import {
+  clearPendingMerge,
+  type MergeStage,
+  type PendingMerge,
+  readPendingMerge,
+  writePendingMerge,
+} from "../git/merge-state.ts";
 import {
   batchResolve,
   catBlobs,
@@ -46,9 +61,11 @@ import {
   type Ref,
 } from "../git/refscan.ts";
 import {
+  checkoutBranch,
   currentBranch,
   defaultBranch,
   isMergeInProgress,
+  isReplayInProgress,
   isTreeClean,
   resolveSha,
   updateBranch,
@@ -61,6 +78,7 @@ import {
   loadRepo,
   nowIso,
   type RunPlanResult,
+  readMergePolicy,
   readReviewPolicy,
   repoPath,
   requireNavbook,
@@ -575,7 +593,21 @@ export function stringField(entity: EntityRecord, key: string): string {
 
 /* -------------------------------------------------------------------- merge */
 
-export type MergeStrategy = "fast-forward" | "merge-commit";
+/**
+ * How the source branch is put onto the target.
+ *
+ * One per shape of history, not one per method: `auto` and `merge-ff` both
+ * resolve to a plain fast-forward or a plain merge commit, and the method that
+ * chose it stops mattering the moment the choice is made. What is left is
+ * exactly the four things git can be asked to do, plus the replay that
+ * precedes two of them.
+ */
+export type MergeStrategy =
+  | "fast-forward"
+  | "merge-commit"
+  | "replay-fast-forward"
+  | "replay-merge-commit"
+  | "squash";
 
 /**
  * Where the pull request stands against the policy this repository declares.
@@ -599,6 +631,10 @@ export interface MergePlan {
   sourceRef: string;
   /** The checked-out branch it merges into. */
   targetBranch: string;
+  /** The method this merge lands by, whoever chose it. */
+  method: MergeMethod;
+  /** The marker's merge policy, and any fault found reading it (spec 02 §2.10). */
+  mergePolicy: MergePolicyReading;
   strategy: MergeStrategy;
   /** The merge commit message, unused by a fast-forward. */
   message: string;
@@ -606,10 +642,20 @@ export interface MergePlan {
   review: MergeReview;
   /** Whether to bring the source branch up to the target afterwards. */
   syncSource: boolean;
+  /**
+   * Whether the replay will be handed the source *branch* and so rewrite it.
+   *
+   * False for every method that keeps the source's commits, and false for a
+   * replay that must not touch the branch — one told `--no-sync-source`, one
+   * whose source is a remote-tracking ref, one another worktree is standing
+   * on. Such a replay runs on a detached HEAD and leaves every ref alone.
+   */
+  rewriteSource: boolean;
 }
 
 export interface MergeOptions {
-  noFf?: boolean;
+  /** Land by this method instead of the one the marker declares (spec 02 §2.10). */
+  method?: MergeMethod;
   /** Leave the source branch where it is; the default moves it (see {@link SourceSync}). */
   syncSource?: boolean;
 }
@@ -622,12 +668,21 @@ export interface MergeOptions {
  * with the same pull request reading `merged` on one branch and `open` on the
  * other. Fast-forwarding the source closes that gap; anything short of a
  * fast-forward is a person's business, and is reported rather than attempted.
+ *
+ * The two exceptions are the methods that rewrite the source's commits, and
+ * both are the method working rather than a gap to close: a replay moves the
+ * branch onto the commits it produced, and a squash leaves it alone because
+ * nothing on it can reach the one commit that replaced it.
  */
 export type SourceSyncOutcome =
   /** The branch now points where the target does. */
   | "fast-forwarded"
   /** It already did. */
   | "up-to-date"
+  /** It was replayed onto the target, and now points there. */
+  | "rebased"
+  /** Its change landed as one commit that it cannot fast-forward to. */
+  | "squashed"
   /** A remote-tracking ref, or a branch this clone does not hold: not ours to move. */
   | "not-local"
   /** It has commits the target does not, so it cannot fast-forward. */
@@ -647,10 +702,12 @@ export interface SourceSync {
 
 export interface MergeResult {
   entity: EntityRecord;
-  /** The merge commit, or null when the branch fast-forwarded. */
+  /** The commit that landed the branch, or null where the method made none. */
   mergeSha: string | null;
   /** Where the pull request now lives, relative to the Navbook directory. */
   dirPath: string;
+  /** The method it was landed by, which decides how `source` reads. */
+  method: MergeMethod;
   /** What the reviews said when the merge was made. */
   review: MergeReview;
   /** What became of the source branch. */
@@ -665,14 +722,12 @@ function mergeReview(ws: WsCtx, entity: EntityRecord): MergeReview {
 
 /** Check a merge can proceed and decide how it would be performed. */
 export function planPrMerge(ws: WsCtx, ref: string, opts: MergeOptions = {}): MergePlan {
-  if (isMergeInProgress(ws.repoRoot)) {
-    wsFail("precondition", "a merge is already in progress", [
-      "finish it with 'nav pr merge --continue', or 'git merge --abort'",
-    ]);
-  }
+  requireNothingInFlight(ws);
   if (!isTreeClean(ws.repoRoot)) {
     wsFail("precondition", "the working tree has changes; commit or stash them before merging");
   }
+  // Clean, and nothing in flight: whatever the last merge left behind is over.
+  clearPendingMerge(ws.repoRoot);
 
   const branch = currentBranch(ws.repoRoot);
   if (!branch) wsFail("precondition", "HEAD is detached; check out the target branch");
@@ -690,22 +745,125 @@ export function planPrMerge(ws: WsCtx, ref: string, opts: MergeOptions = {}): Me
     ]);
   }
 
-  const fastForwardable = opts.noFf !== true && canFastForward(ws.repoRoot, sourceRef);
+  const mergePolicy = readMergePolicy(ws);
+  const method = opts.method ?? mergePolicy.policy.method;
+  const syncSource = opts.syncSource !== false;
   return {
     entity,
     sourceRef,
     targetBranch: branch,
-    strategy: fastForwardable ? "fast-forward" : "merge-commit",
+    method,
+    mergePolicy,
+    strategy: strategyFor(ws, method, entity, sourceRef, branch),
     message: mergeMessage(entity),
     review: mergeReview(ws, entity),
-    syncSource: opts.syncSource !== false,
+    syncSource,
+    rewriteSource:
+      rewritesSource(method) &&
+      method !== "squash" &&
+      syncSource &&
+      isFreeLocalBranch(ws, sourceRef),
   };
+}
+
+/**
+ * Nothing half-done: neither git's idea of an unfinished operation, nor ours.
+ *
+ * A replay and a squash both stop in states git does not call "a merge in
+ * progress", so asking git alone would let a second `nav pr merge` start on
+ * top of the first and lose whichever conflicts had already been resolved.
+ */
+function requireNothingInFlight(ws: WsCtx): void {
+  const pending = readPendingMerge(ws.repoRoot);
+  // A note outlives what it describes: `git rebase --abort` and
+  // `git reset --merge` put the repository back without knowing about it. So
+  // the note only stands in the way while something is actually half-done —
+  // git holding a merge or a rebase, or a resolution sitting in the index that
+  // the clean-tree check below refuses to merge over. Anything else is a note
+  // about an operation that is over, and `planPrMerge` throws it away.
+  if (pending && (isMergeInProgress(ws.repoRoot) || isReplayInProgress(ws.repoRoot))) {
+    wsFail("precondition", `merging #${pending.id} is already in progress`, [
+      "finish it with 'nav pr merge --continue'",
+    ]);
+  }
+  if (pending && !isTreeClean(ws.repoRoot)) {
+    wsFail("precondition", `merging #${pending.id} is already in progress`, [
+      "finish it with 'nav pr merge --continue'",
+      `or abandon it with '${ABANDON[pending.stage]}'`,
+    ]);
+  }
+  if (isMergeInProgress(ws.repoRoot)) {
+    wsFail("precondition", "a merge is already in progress", [
+      "finish it with 'nav pr merge --continue', or 'git merge --abort'",
+    ]);
+  }
+  if (isReplayInProgress(ws.repoRoot)) {
+    wsFail("precondition", "a rebase is already in progress", [
+      "finish it with 'git rebase --continue', or 'git rebase --abort'",
+    ]);
+  }
+}
+
+/**
+ * The shape of history a method asks for, given what the branches allow.
+ *
+ * The one refusal in this file that is not about the tracker's state:
+ * `merge-ff` says the target's history is to stay linear without rewriting
+ * anybody's commits, and two branches that have diverged cannot both be had.
+ * Spec 02 §2.7 is untouched by it — what it refuses is a shape, and no review
+ * could change the answer.
+ */
+function strategyFor(
+  ws: WsCtx,
+  method: MergeMethod,
+  entity: EntityRecord,
+  sourceRef: string,
+  branch: string,
+): MergeStrategy {
+  switch (method) {
+    case "auto":
+      return canFastForward(ws.repoRoot, sourceRef) ? "fast-forward" : "merge-commit";
+    case "merge":
+      return "merge-commit";
+    case "merge-ff":
+      if (canFastForward(ws.repoRoot, sourceRef)) return "fast-forward";
+      return wsFail(
+        "precondition",
+        `#${entity.id} cannot fast-forward into ${branch}, and this repository merges by 'merge-ff'`,
+        [
+          `rebase the branch onto ${branch}, or merge ${branch} into it and try again`,
+          "or land this one by another method: nav pr merge --method rebase",
+        ],
+      );
+    case "rebase":
+      return "replay-fast-forward";
+    case "rebase-no-ff":
+      return "replay-merge-commit";
+    case "squash":
+      return "squash";
+  }
+}
+
+/** True when `ref` is a local branch this worktree may rewrite. */
+function isFreeLocalBranch(ws: WsCtx, ref: string): boolean {
+  if (resolveSha(ws.repoRoot, `refs/heads/${ref}`) === null) return false;
+  return worktreeHolding(ws.repoRoot, ref) === null;
 }
 
 /** Carry out a merge the caller has decided to go ahead with. */
 export function executePrMerge(ws: WsCtx, plan: MergePlan): MergeResult {
   const recorded = landMerge(ws, plan);
-  return { ...recorded, source: syncSourceBranch(ws, plan) };
+  return {
+    ...recorded,
+    source: syncSourceBranch(ws, {
+      id: plan.entity.id,
+      sourceRef: plan.sourceRef,
+      targetBranch: plan.targetBranch,
+      syncSource: plan.syncSource,
+      method: plan.method,
+      rewroteSource: plan.rewriteSource,
+    }),
+  };
 }
 
 /** A merge result before the source branch has been looked at. */
@@ -713,18 +871,130 @@ type Recorded = Omit<MergeResult, "source">;
 
 /** Land the source branch on the target and record the pull request as merged. */
 function landMerge(ws: WsCtx, plan: MergePlan): Recorded {
-  if (plan.strategy === "fast-forward") {
-    // A fast-forward creates no commit to carry the move, so the archive
-    // happens in the immediate follow-up commit that spec 02 §2.8 allows.
-    fastForward(ws.repoRoot, plan.sourceRef);
-    return recordMergedBlock(ws, archiveIntoIndex(ws, plan.entity.id), null, plan.review);
+  const cwd = ws.repoRoot;
+  switch (plan.strategy) {
+    case "fast-forward":
+      // A fast-forward creates no commit to carry the move, so the archive
+      // happens in the immediate follow-up commit that spec 02 §2.8 allows.
+      // Nothing is noted down first: a fast-forward cannot stop half-done.
+      fastForward(cwd, plan.sourceRef);
+      return recordMerged(ws, plan.entity.id, plan.method, null, plan.review);
+
+    case "merge-commit":
+      noteMerge(ws, plan, "merge");
+      if (mergeNoCommit(cwd, plan.sourceRef) === "conflict")
+        stopForConflicts(ws, plan.entity.id, "merge");
+      return landStaged(ws, plan.entity.id, plan.message, plan.method, plan.review);
+
+    case "squash":
+      noteMerge(ws, plan, "squash");
+      if (squashMerge(cwd, plan.sourceRef) === "conflict")
+        stopForConflicts(ws, plan.entity.id, "squash");
+      return landStaged(ws, plan.entity.id, plan.message, plan.method, plan.review);
+
+    case "replay-fast-forward":
+    case "replay-merge-commit":
+      return landReplay(ws, plan);
+  }
+}
+
+/**
+ * Replay the source's commits onto the target, then land what came out.
+ *
+ * The replay leaves HEAD on the commits it produced and not on the target
+ * branch — that is what a rebase does, whether it rewrote a branch or detached
+ * — so the target is checked out again before anything is committed to it.
+ */
+function landReplay(ws: WsCtx, plan: MergePlan): Recorded {
+  const cwd = ws.repoRoot;
+  const base = mergeBase(cwd, "HEAD", plan.sourceRef);
+  const onto = resolveSha(cwd, "HEAD");
+  if (base === null || onto === null) {
+    wsFail(
+      "precondition",
+      `could not compute a merge base between '${plan.targetBranch}' and '${plan.sourceRef}'`,
+    );
   }
 
-  if (mergeNoCommit(ws.repoRoot, plan.sourceRef) === "conflict") conflictStop(ws, plan.entity.id);
-  // The move is staged into the merge itself (04 §4.3), so the commit that
+  noteMerge(ws, plan, "replay");
+  // The branch name rewrites the branch; its SHA leaves every ref alone.
+  const what = plan.rewriteSource
+    ? plan.sourceRef
+    : (resolveSha(cwd, plan.sourceRef) ?? plan.sourceRef);
+  const replay = replayOnto(cwd, onto, base, what);
+  if (replay.tip === null) {
+    // A rebase leaves HEAD on what it is replaying, not on the target. Worth
+    // saying, because it is the one conflict a person resolves somewhere other
+    // than where they started — and because `git rebase --abort` puts them
+    // back there rather than on the branch they ran the merge from.
+    stopForConflicts(
+      ws,
+      plan.entity.id,
+      "replay",
+      `the replay left HEAD on ${plan.rewriteSource ? plan.sourceRef : "a detached HEAD"}; '--continue' returns to ${plan.targetBranch}`,
+    );
+  }
+  return landReplayed(ws, plan, replay.tip);
+}
+
+/** Put the replayed commits on the target, by whichever of the two ways was asked for. */
+function landReplayed(
+  ws: WsCtx,
+  plan: Pick<MergePlan, "entity" | "strategy" | "targetBranch" | "message" | "method" | "review">,
+  tip: string,
+): Recorded {
+  const cwd = ws.repoRoot;
+  checkoutBranch(cwd, plan.targetBranch);
+
+  if (plan.strategy === "replay-fast-forward") {
+    fastForward(cwd, tip);
+    return recordMerged(ws, plan.entity.id, plan.method, null, plan.review);
+  }
+  // The replay sits directly on the target, so this merge cannot conflict; it
+  // is `--no-ff` precisely to make the commit a fast-forward would not.
+  if (mergeNoCommit(cwd, tip) === "conflict") stopForConflicts(ws, plan.entity.id, "merge");
+  return landStaged(ws, plan.entity.id, plan.message, plan.method, plan.review);
+}
+
+/**
+ * Commit what a merge or a squash staged, with the directory move folded in.
+ *
+ * The note comes off as soon as that commit exists: from here the branch is
+ * landed, and a `--continue` that came back would have nothing left to finish
+ * and no conflicts to preserve. What can still fail is the `merged:` block,
+ * and {@link recordMergedBlock} says plainly what is left to do by hand.
+ */
+function landStaged(
+  ws: WsCtx,
+  id: string,
+  message: string,
+  method: MergeMethod,
+  review: MergeReview,
+): Recorded {
+  // The move is staged into the commit itself (04 §4.3), so the commit that
   // lands the branch is also the commit that files the discussion as merged.
-  const archived = archiveIntoIndex(ws, plan.entity.id);
-  return recordMergedBlock(ws, archived, commitMerge(ws.repoRoot, plan.message), plan.review);
+  const archived = archiveIntoIndex(ws, id);
+  const sha = commitMerge(ws.repoRoot, message);
+  clearPendingMerge(ws.repoRoot);
+  return recordMergedBlock(ws, archived, sha, method, review);
+}
+
+/**
+ * Archive and record where the method landed no commit of its own.
+ *
+ * A fast-forward moved a branch pointer and nothing more, so both the
+ * directory move and the `merged:` block go into the one follow-up commit that
+ * spec 02 §2.8 allows, and the block names no commit because none exists.
+ */
+function recordMerged(
+  ws: WsCtx,
+  id: string,
+  method: MergeMethod,
+  sha: string | null,
+  review: MergeReview,
+): Recorded {
+  clearPendingMerge(ws.repoRoot);
+  return recordMergedBlock(ws, archiveIntoIndex(ws, id), sha, method, review);
 }
 
 /** Finish a merge that was interrupted by conflicts. */
@@ -733,15 +1003,122 @@ export function continuePrMerge(
   ref?: string,
   opts: Pick<MergeOptions, "syncSource"> = {},
 ): MergeResult {
-  if (isMergeInProgress(ws.repoRoot)) {
-    const conflicts = conflictedPaths(ws.repoRoot);
-    if (conflicts.length > 0) {
-      wsFail("merge-unresolved", "the merge still has unresolved conflicts", [
-        ...conflicts.map((path) => `  ${path}`),
-        "resolve them, 'git add' each one, then run 'nav pr merge --continue' again",
+  const pending = readPendingMerge(ws.repoRoot);
+  return pending ? continueNoted(ws, pending, opts) : continueFromMergeHead(ws, ref, opts);
+}
+
+/**
+ * Pick a merge back up from the note it left (spec 04 §4.3).
+ *
+ * The note is preferred over anything the caller passes, and over `MERGE_HEAD`
+ * where both exist, because it is the only thing that knows the method and the
+ * branch to come back to. An ID given here is therefore redundant rather than
+ * wrong, and is ignored rather than made into an error.
+ */
+function continueNoted(
+  ws: WsCtx,
+  pending: PendingMerge,
+  opts: Pick<MergeOptions, "syncSource">,
+): MergeResult {
+  const syncSource = opts.syncSource === false ? false : pending.syncSource;
+  const { entity } = locatePr(ws, pending.id);
+  // Read before the archive moves the directory, so the reviews are still
+  // where the entity says they are.
+  const review = mergeReview(ws, entity);
+  const message = mergeMessage(entity);
+
+  const recorded =
+    pending.stage === "replay"
+      ? resumeReplay(ws, pending, entity, message, review)
+      : resumeStaged(ws, pending, entity, message, review);
+
+  return {
+    ...recorded,
+    source: syncSourceBranch(ws, {
+      id: pending.id,
+      sourceRef: pending.sourceRef,
+      targetBranch: pending.targetBranch,
+      syncSource,
+      method: pending.method,
+      rewroteSource: pending.rewroteSource,
+    }),
+  };
+}
+
+/** Carry on with a replay whose conflicts the author has resolved. */
+function resumeReplay(
+  ws: WsCtx,
+  pending: PendingMerge,
+  entity: EntityRecord,
+  message: string,
+  review: MergeReview,
+): Recorded {
+  const cwd = ws.repoRoot;
+  let tip: string | null;
+  if (isReplayInProgress(cwd)) {
+    refuseWhileUnmerged(ws, "replay");
+    tip = continueReplay(cwd).tip;
+    if (tip === null) stopForConflicts(ws, pending.id, "replay");
+  } else {
+    // The author finished the rebase themselves; the replayed commits are
+    // wherever it left them, which is the branch if it was rewritten in place.
+    tip = resolveSha(cwd, pending.rewroteSource ? pending.sourceRef : "HEAD");
+    if (tip === null) {
+      wsFail("merge-ambiguous", `could not find the commits replayed for #${pending.id}`, [
+        `if the rebase was abandoned, start again: nav pr merge ${pending.id}`,
       ]);
     }
   }
+
+  return landReplayed(
+    ws,
+    {
+      entity,
+      strategy: pending.method === "rebase" ? "replay-fast-forward" : "replay-merge-commit",
+      targetBranch: pending.targetBranch,
+      message,
+      method: pending.method,
+      review,
+    },
+    tip,
+  );
+}
+
+/** Commit a merge or squash whose conflicts the author has resolved. */
+function resumeStaged(
+  ws: WsCtx,
+  pending: PendingMerge,
+  entity: EntityRecord,
+  message: string,
+  review: MergeReview,
+): Recorded {
+  refuseWhileUnmerged(ws, pending.stage);
+  // A squash leaves no `MERGE_HEAD`, and a merge whose conflicts were
+  // committed by hand no longer has one either: either way what is left is an
+  // ordinary commit of whatever is staged, which is what `landStaged` makes.
+  if (pending.stage === "squash" || isMergeInProgress(ws.repoRoot)) {
+    return landStaged(ws, entity.id, message, pending.method, review);
+  }
+  const archived = archiveIntoIndex(ws, entity.id);
+  const sha = resolveSha(ws.repoRoot, "HEAD");
+  clearPendingMerge(ws.repoRoot);
+  return recordMergedBlock(ws, archived, sha, pending.method, review);
+}
+
+/**
+ * Finish a merge git is holding that Navbook did not start.
+ *
+ * What `--continue` did before merges left a note, kept for exactly that case:
+ * a `git merge` somebody ran by hand, or one begun by a `nav` old enough not
+ * to have written one. It can only ever be a merge commit, since that is the
+ * one shape `MERGE_HEAD` describes.
+ */
+function continueFromMergeHead(
+  ws: WsCtx,
+  ref: string | undefined,
+  opts: Pick<MergeOptions, "syncSource">,
+): MergeResult {
+  if (isMergeInProgress(ws.repoRoot)) refuseWhileUnmerged(ws, "merge");
 
   const { entity, sourceRef } = pendingMergePr(ws, ref);
   // Read before the archive moves the directory, so the reviews are still
@@ -752,14 +1129,36 @@ export function continuePrMerge(
   const mergeSha = inProgress
     ? commitMerge(ws.repoRoot, mergeMessage(entity))
     : (resolveSha(ws.repoRoot, "HEAD") ?? null);
-  const recorded = recordMergedBlock(ws, archived, mergeSha, review);
+  const recorded = recordMergedBlock(ws, archived, mergeSha, "merge", review);
   const source = syncSourceBranch(ws, {
-    entity,
+    id: entity.id,
     sourceRef,
     targetBranch: currentBranch(ws.repoRoot) ?? "HEAD",
     syncSource: opts.syncSource !== false,
+    method: "merge",
+    rewroteSource: false,
   });
   return { ...recorded, source };
+}
+
+/** Refuse to finish anything while git still has paths nobody has resolved. */
+function refuseWhileUnmerged(ws: WsCtx, stage: MergeStage): void {
+  const conflicts = conflictedPaths(ws.repoRoot);
+  if (conflicts.length === 0) return;
+  wsFail("merge-unresolved", `the ${stageNoun(stage)} still has unresolved conflicts`, [
+    ...conflicts.map((path) => `  ${path}`),
+    `resolve them, 'git add' each one, then run 'nav pr merge --continue' again`,
+  ]);
+}
+
+interface SyncInput {
+  id: string;
+  sourceRef: string;
+  targetBranch: string;
+  syncSource: boolean;
+  method: MergeMethod;
+  /** Whether the replay already moved this branch onto its new commits. */
+  rewroteSource: boolean;
 }
 
 /**
@@ -769,26 +1168,54 @@ export function continuePrMerge(
  * every other case is reported and left exactly as it was. The check that the
  * branch is behind the target is made here rather than on the plan, because it
  * is only after the merge that the source is known to be an ancestor of HEAD.
+ *
+ * A replay is the one move that arrives here already made — git rewrote the
+ * branch as part of rebasing it — so what is left for this to do is the same
+ * fast-forward as ever, over the archive commit; only the word for it changes.
+ * A squash arrives with nothing to do at all.
  */
-function syncSourceBranch(
-  ws: WsCtx,
-  plan: Pick<MergePlan, "entity" | "sourceRef" | "targetBranch" | "syncSource">,
-): SourceSync {
-  const ref = plan.sourceRef;
-  if (!plan.syncSource) return { ref, outcome: "disabled" };
+function syncSourceBranch(ws: WsCtx, input: SyncInput): SourceSync {
+  const ref = input.sourceRef;
+  if (!input.syncSource) return { ref, outcome: "disabled" };
+  // Its commits were replaced by one that nothing on that branch can reach.
+  // Deleting it, or resetting it by hand, is the user's call and not ours.
+  if (input.method === "squash") return { ref, outcome: "squashed" };
 
   const cwd = ws.repoRoot;
+  const moved = input.rewroteSource ? "rebased" : "fast-forwarded";
   const from = resolveSha(cwd, `refs/heads/${ref}`);
   if (from === null) return { ref, outcome: "not-local" };
   const to = resolveSha(cwd, "HEAD");
-  if (to === null || from === to) return { ref, outcome: "up-to-date" };
+  if (to === null || from === to) {
+    return { ref, outcome: input.rewroteSource ? "rebased" : "up-to-date" };
+  }
   if (!isAncestor(cwd, from, to)) return { ref, outcome: "diverged" };
 
   const worktree = worktreeHolding(cwd, ref);
   if (worktree !== null) return { ref, outcome: "checked-out", worktree };
 
-  updateBranch(cwd, ref, to, from, `nav pr merge #${plan.entity.id}: to ${plan.targetBranch}`);
-  return { ref, outcome: "fast-forwarded" };
+  const how = input.rewroteSource
+    ? `rebased onto ${input.targetBranch}`
+    : `to ${input.targetBranch}`;
+  updateBranch(cwd, ref, to, from, `nav pr merge #${input.id}: ${how}`);
+  return { ref, outcome: moved };
+}
+
+/** Write down what this merge is doing, before the step that can stop. */
+function noteMerge(ws: WsCtx, plan: MergePlan, stage: MergeStage): void {
+  writePendingMerge(ws.repoRoot, {
+    id: plan.entity.id,
+    sourceRef: plan.sourceRef,
+    targetBranch: plan.targetBranch,
+    method: plan.method,
+    stage,
+    syncSource: plan.syncSource,
+    rewroteSource: plan.rewriteSource,
+  });
+}
+
+function stageNoun(stage: MergeStage): string {
+  return stage === "replay" ? "rebase" : "merge";
 }
 
 function mergeMessage(entity: EntityRecord): string {
@@ -854,6 +1281,7 @@ function recordMergedBlock(
   ws: WsCtx,
   entity: EntityRecord,
   mergeSha: string | null,
+  method: MergeMethod,
   review: MergeReview,
 ): Recorded {
   const merged: MergedBlock = {
@@ -878,20 +1306,37 @@ function recordMergedBlock(
   }
   applyOps(ws, plan.ops);
   commit(ws.repoRoot, composeMessage(plan.message, plan.trailers));
-  return { entity, mergeSha, dirPath: entity.dirPath, review };
+  return { entity, mergeSha, dirPath: entity.dirPath, method, review };
 }
 
 /**
- * Leave the merge in progress and say exactly how to finish it. The merge is
- * not aborted: the author's conflict resolution is worth keeping, and
- * `--continue` performs the archive step they would otherwise have to remember.
+ * Leave the operation in progress and say exactly how to finish it.
+ *
+ * Nothing is aborted: the author's conflict resolution is worth keeping, and
+ * `--continue` performs the archive step they would otherwise have to
+ * remember. The note this merge wrote is left in place for it to read.
+ *
+ * How to abandon it differs by what is half-done, and only one of the three is
+ * `git merge --abort`: a squash leaves no `MERGE_HEAD` for that to find, and a
+ * replay is a rebase.
  */
-function conflictStop(ws: WsCtx, id: string): never {
-  wsFail("merge-conflict", `merging #${id} produced conflicts`, [
+function stopForConflicts(ws: WsCtx, id: string, stage: MergeStage, where?: string): never {
+  wsFail("merge-conflict", `${stageVerb(stage)} #${id} produced conflicts`, [
     ...conflictedPaths(ws.repoRoot).map((path) => `  ${path}`),
+    ...(where ? [where] : []),
     "resolve them, 'git add' each one, then run 'nav pr merge --continue'",
-    "or abandon the merge with 'git merge --abort'",
+    `or abandon it with '${ABANDON[stage]}'`,
   ]);
+}
+
+const ABANDON: Record<MergeStage, string> = {
+  merge: "git merge --abort",
+  replay: "git rebase --abort",
+  squash: "git reset --merge",
+};
+
+function stageVerb(stage: MergeStage): string {
+  return stage === "replay" ? "replaying" : "merging";
 }
 
 export interface LocatedPr {

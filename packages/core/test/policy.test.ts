@@ -1,5 +1,5 @@
 /**
- * The review policy a marker declares — spec 02 §2.10.
+ * The policies a marker declares — spec 02 §2.10.
  *
  * Two properties are worth more than any individual case here. A repository
  * that declares nothing must read exactly as it did before the key existed,
@@ -10,9 +10,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  DEFAULT_MERGE_POLICY,
   DEFAULT_REVIEW_POLICY,
+  describeMergeMethod,
   describeReviewPolicy,
+  MERGE_METHODS,
+  parseMergePolicy,
   parseReviewPolicy,
+  rewritesSource,
 } from "../src/core/policy.ts";
 
 const marker = (value: unknown): string => JSON.stringify(value, null, 2);
@@ -190,5 +195,98 @@ describe("describeReviewPolicy", () => {
       describeReviewPolicy({ selfReview: true, minApprovals: 1 }),
       "1 approval required, self-review on",
     );
+  });
+});
+
+describe("parseMergePolicy", () => {
+  it("declares nothing for a repository with no marker at all", () => {
+    const reading = parseMergePolicy(undefined);
+    assert.deepEqual(reading, { policy: DEFAULT_MERGE_POLICY, declared: false, problems: [] });
+  });
+
+  it("declares nothing for the marker `nav init` writes", () => {
+    const reading = parseMergePolicy(marker({ version: 1 }));
+    assert.deepEqual(reading, { policy: DEFAULT_MERGE_POLICY, declared: false, problems: [] });
+  });
+
+  it("defaults to `auto`, which is how a merge behaved before the key existed", () => {
+    assert.equal(DEFAULT_MERGE_POLICY.method, "auto");
+  });
+
+  it("reads each of the six methods", () => {
+    for (const method of MERGE_METHODS) {
+      const reading = parseMergePolicy(marker({ version: 1, merge: { method } }));
+      assert.deepEqual(reading, { policy: { method }, declared: true, problems: [] });
+    }
+  });
+
+  it("counts an empty policy as declared, since somebody wrote it down", () => {
+    const reading = parseMergePolicy(marker({ version: 1, merge: {} }));
+    assert.deepEqual(reading, { policy: DEFAULT_MERGE_POLICY, declared: true, problems: [] });
+  });
+
+  it("defaults a method it does not define, and names the ones it does", () => {
+    const reading = parseMergePolicy(marker({ version: 1, merge: { method: "ff-only" } }));
+    assert.deepEqual(reading.policy, DEFAULT_MERGE_POLICY);
+    assert.equal(reading.declared, true);
+    assert.deepEqual(reading.problems, [
+      "'merge.method' must be one of auto, merge, merge-ff, rebase, rebase-no-ff, squash",
+    ]);
+  });
+
+  it("defaults a method of the wrong type entirely", () => {
+    for (const value of [1, true, null, ["rebase"], { method: "rebase" }]) {
+      const reading = parseMergePolicy(marker({ version: 1, merge: { method: value } }));
+      assert.deepEqual(reading.policy, DEFAULT_MERGE_POLICY, `for ${JSON.stringify(value)}`);
+      assert.equal(reading.problems.length, 1);
+    }
+  });
+
+  it("refuses a `merge` that is not an object, and defaults", () => {
+    for (const value of ["rebase", 3, [], null]) {
+      const reading = parseMergePolicy(marker({ version: 1, merge: value }));
+      assert.deepEqual(reading, {
+        policy: DEFAULT_MERGE_POLICY,
+        declared: false,
+        problems: ["'merge' must be an object"],
+      });
+    }
+  });
+
+  it("reports text that is not JSON the same way the review policy does", () => {
+    // The same words, because D15 collapses identical messages and a file that
+    // is not JSON is one fault, not one per key that could not be read.
+    assert.deepEqual(parseMergePolicy("{ oops").problems, ["is not valid JSON"]);
+    assert.deepEqual(parseMergePolicy("[]").problems, ["is not a JSON object"]);
+  });
+
+  it("reads its own key and leaves the review policy's alone", () => {
+    const text = marker({
+      version: 1,
+      review: { minApprovals: 2 },
+      merge: { method: "squash" },
+    });
+    assert.equal(parseMergePolicy(text).policy.method, "squash");
+    assert.equal(parseReviewPolicy(text).policy.minApprovals, 2);
+    // A fault in one is not a fault in the other: each falls back on its own.
+    const half = marker({ version: 1, review: { minApprovals: 0 }, merge: { method: "rebase" } });
+    assert.equal(parseMergePolicy(half).policy.method, "rebase");
+    assert.deepEqual(parseMergePolicy(half).problems, []);
+    assert.equal(parseReviewPolicy(half).problems.length, 1);
+  });
+});
+
+describe("rewritesSource", () => {
+  it("is true for exactly the three methods that do not keep the source's commits", () => {
+    assert.deepEqual(MERGE_METHODS.filter(rewritesSource), ["rebase", "rebase-no-ff", "squash"]);
+  });
+});
+
+describe("describeMergeMethod", () => {
+  it("says what every method does, so none can be added without a sentence", () => {
+    for (const method of MERGE_METHODS) {
+      assert.equal(typeof describeMergeMethod(method), "string");
+      assert.notEqual(describeMergeMethod(method), "");
+    }
   });
 });

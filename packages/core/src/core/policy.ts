@@ -1,16 +1,20 @@
 /**
- * The review policy a marker declares — spec 02 §2.10.
+ * The policies a marker declares — spec 02 §2.10.
  *
- * This is the one thing in `navbook.json` a tool reads rather than merely
- * finds. It says how the reviews of §2.7 are counted: whether a pull request's
- * own author is among its reviewers, and how many approvals a decision of
- * `approved` takes.
+ * These are the two things in `navbook.json` a tool reads rather than merely
+ * finds. The review policy says how the reviews of §2.7 are counted: whether a
+ * pull request's own author is among its reviewers, and how many approvals a
+ * decision of `approved` takes. The merge policy says what shape a merge
+ * leaves in the target branch's history.
  *
- * The defaults are §2.7 without a policy, so a repository that declares none —
- * and one written before the key existed — is read exactly as it was.
+ * Both default to what the spec describes without them, so a repository that
+ * declares neither — and one written before the keys existed — is read exactly
+ * as it was, and both fall back per key rather than propagating a fault.
  *
- * Nothing here is a gate. A policy changes what the decision counts, and what
- * a tool may say about it; it never changes what a tool will do (§2.7).
+ * Neither is a gate over a review state. A review policy changes what the
+ * decision counts, and what a tool may say about it; it never changes what a
+ * tool will do (§2.7). A merge method changes the history a merge writes, and
+ * says nothing about reviews at all.
  */
 
 /** How reviews are counted. */
@@ -101,3 +105,117 @@ export function describeReviewPolicy(policy: ReviewPolicy): string {
   const approvals = policy.minApprovals === 1 ? "1 approval" : `${policy.minApprovals} approvals`;
   return `${approvals} required, self-review ${policy.selfReview ? "on" : "off"}`;
 }
+
+/* ------------------------------------------------------------ merge policy */
+
+/**
+ * How a pull request is landed on its target — spec 02 §2.10.
+ *
+ * Six shapes of history, not six ways of deciding whether to merge: the method
+ * says what the target branch looks like afterwards, and nothing else. That is
+ * why it sits outside §2.7 while the review policy above sits inside it, and
+ * why `merge-ff` may refuse where no review state ever could.
+ */
+export type MergeMethod = "auto" | "merge" | "merge-ff" | "rebase" | "rebase-no-ff" | "squash";
+
+/** Every method, in the order a message listing them should read. */
+export const MERGE_METHODS: readonly MergeMethod[] = [
+  "auto",
+  "merge",
+  "merge-ff",
+  "rebase",
+  "rebase-no-ff",
+  "squash",
+];
+
+/** True for a name this revision defines. */
+export function isMergeMethod(value: unknown): value is MergeMethod {
+  return typeof value === "string" && (MERGE_METHODS as readonly string[]).includes(value);
+}
+
+/** True for the three methods that rewrite the source's commits rather than keep them. */
+export function rewritesSource(method: MergeMethod): boolean {
+  return method === "rebase" || method === "rebase-no-ff" || method === "squash";
+}
+
+/** What a repository lands its pull requests with. */
+export interface MergePolicy {
+  /** The method used when nothing overrides it for a single merge. */
+  method: MergeMethod;
+}
+
+export const DEFAULT_MERGE_POLICY: MergePolicy = { method: "auto" };
+
+/** A marker read for its merge policy: what it asks for, and what was wrong with it. */
+export interface MergePolicyReading {
+  /** What to land by — the declared policy, with any unreadable key defaulted. */
+  policy: MergePolicy;
+  /** True when the marker carries a usable `merge` object. */
+  declared: boolean;
+  /** One message per fault, in key order; empty when there is nothing wrong. */
+  problems: string[];
+}
+
+/** The reading of a repository that declares nothing, which is most of them. */
+export const NO_MERGE_POLICY: MergePolicyReading = {
+  policy: DEFAULT_MERGE_POLICY,
+  declared: false,
+  problems: [],
+};
+
+/**
+ * Read the merge policy out of a marker's text.
+ *
+ * The twin of {@link parseReviewPolicy}, and deliberately its mirror image:
+ * same fallbacks, same refusal to throw, same faults returned to be reported
+ * under D15. A marker somebody mistyped should not stop them merging any more
+ * than it should stop them listing — it should merge the way a repository that
+ * declared nothing merges, and say so.
+ */
+export function parseMergePolicy(markerText: string | undefined): MergePolicyReading {
+  if (markerText === undefined) return NO_MERGE_POLICY;
+
+  let marker: unknown;
+  try {
+    marker = JSON.parse(markerText);
+  } catch {
+    return { policy: DEFAULT_MERGE_POLICY, declared: false, problems: ["is not valid JSON"] };
+  }
+  if (!isPlainObject(marker)) {
+    return { policy: DEFAULT_MERGE_POLICY, declared: false, problems: ["is not a JSON object"] };
+  }
+
+  const merge = marker.merge;
+  if (merge === undefined) return NO_MERGE_POLICY;
+  if (!isPlainObject(merge)) {
+    return {
+      policy: DEFAULT_MERGE_POLICY,
+      declared: false,
+      problems: ["'merge' must be an object"],
+    };
+  }
+
+  const problems: string[] = [];
+  let { method } = DEFAULT_MERGE_POLICY;
+
+  if (merge.method !== undefined) {
+    if (isMergeMethod(merge.method)) method = merge.method;
+    else problems.push(`'merge.method' must be one of ${MERGE_METHODS.join(", ")}`);
+  }
+
+  return { policy: { method }, declared: true, problems };
+}
+
+/** A method in one line, for a tool that has room to say how it will merge. */
+export function describeMergeMethod(method: MergeMethod): string {
+  return MERGE_METHOD_SUMMARIES[method];
+}
+
+const MERGE_METHOD_SUMMARIES: Record<MergeMethod, string> = {
+  auto: "fast-forward where possible, otherwise a merge commit",
+  merge: "always a merge commit",
+  "merge-ff": "fast-forward only",
+  rebase: "rebase, then fast-forward",
+  "rebase-no-ff": "rebase, then a merge commit",
+  squash: "squash into a single commit",
+};
