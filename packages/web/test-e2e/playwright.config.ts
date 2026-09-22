@@ -47,7 +47,6 @@ export default defineConfig({
     ...pluginSuites().map((dir, index) => ({ name: `plugin-${index}`, testDir: dir })),
   ],
   testMatch: "**/*.spec.ts",
-  globalTeardown: "./helpers/teardown.ts",
   // One worker across every project, for the reason given above: they share
   // one repository behind one server, so a second project running beside the
   // first would contend for it.

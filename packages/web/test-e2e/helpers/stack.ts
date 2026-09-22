@@ -124,6 +124,15 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     },
   });
 
+  // A last resort, for the worker that goes without its teardown running: an
+  // interrupted run, a teardown that overran its time. `exit` handlers are
+  // synchronous, so this is a signal and not a wait — but a server that is
+  // told to go is not one left polling a deleted clone for a day.
+  const killOnExit = (): void => {
+    if (server.exitCode === null) server.kill("SIGKILL");
+  };
+  process.once("exit", killOnExit);
+
   return {
     appUrl,
     apiUrl,
@@ -131,6 +140,7 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     repo,
     serverErrors: () => errors,
     async stop() {
+      process.off("exit", killOnExit);
       await closeStatic();
       if (server.exitCode === null) {
         const exited = new Promise<void>((done) => server.once("exit", () => done()));

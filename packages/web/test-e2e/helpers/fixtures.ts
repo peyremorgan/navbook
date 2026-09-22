@@ -22,21 +22,6 @@ export interface Fixtures {
   signedIn: Page;
 }
 
-let shared: Promise<Stack> | null = null;
-
-/** The one stack, started on first use and stopped by the global teardown. */
-export function stack(): Promise<Stack> {
-  shared ??= startStack();
-  return shared;
-}
-
-export async function stopStack(): Promise<void> {
-  if (shared === null) return;
-  const running = await shared;
-  shared = null;
-  await running.stop();
-}
-
 /**
  * A stack of one spec's own, for the things the shared one cannot show.
  *
@@ -47,11 +32,30 @@ export function ownStack(options: StackOptions): Promise<Stack> {
   return startStack(options);
 }
 
-export const test = base.extend<Fixtures>({
-  // biome-ignore lint/correctness/noEmptyPattern: Playwright's fixture signature
-  stack: async ({}, use) => {
-    await use(await stack());
-  },
+export const test = base.extend<Pick<Fixtures, "signedIn">, Pick<Fixtures, "stack">>({
+  /**
+   * One stack per worker, stopped when the worker is.
+   *
+   * Worker-scoped rather than held in module state, because a worker is not
+   * the run. Playwright replaces the worker after a test fails, and each new
+   * one starts with fresh module state; the old one's server was left behind,
+   * still polling its clone every two seconds, and the next run was slower for
+   * every one of them. A `globalTeardown` cannot stop it either: that runs in
+   * the runner, where no worker's module state is visible. The code after
+   * `use` is the one place Playwright promises to run whenever a worker goes.
+   */
+  stack: [
+    // biome-ignore lint/correctness/noEmptyPattern: Playwright's fixture signature
+    async ({}, use) => {
+      const running = await startStack();
+      try {
+        await use(running);
+      } finally {
+        await running.stop();
+      }
+    },
+    { scope: "worker" },
+  ],
 
   signedIn: async ({ page, stack: running }, use) => {
     await signIn(page, running);
