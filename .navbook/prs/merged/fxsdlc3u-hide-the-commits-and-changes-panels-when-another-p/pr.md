@@ -9,6 +9,9 @@ revisions:
   - head: 03a794ea970b04489c1403faf2882feff6f556f0
     base: c18300b54b859e12c675358ec19299a91b9b6f7a
     date: 2026-09-22T12:11:24Z
+merged:
+  date: 2026-09-22T12:21:41Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #mik7ws42.
