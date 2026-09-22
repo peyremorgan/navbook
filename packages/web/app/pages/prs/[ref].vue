@@ -459,28 +459,30 @@ const branchHint = computed(() => refusedOn.value);
         typed, a description being edited and every patch loaded by path are
         component state, and switching tabs to check a file must not throw
         them away. A tab is mounted the first time it is opened and kept.
+        The directive sits on a wrapper because it does nothing on
+        QueryState, whose loaded state is a bare slot with no root element.
       -->
-      <QueryState
-        v-if="visited.commits"
-        v-show="tab === 'commits'"
-        :loading="commitsLoading && commits === null"
-        :error="commitsError"
-        :skeleton-rows="4"
-        @retry="refetchCommits()"
-      >
-        <CommitTable v-if="commits" :commits="commits.commits" :total="commits.total" />
-      </QueryState>
+      <div v-if="visited.commits" v-show="tab === 'commits'">
+        <QueryState
+          :loading="commitsLoading && commits === null"
+          :error="commitsError"
+          :skeleton-rows="4"
+          @retry="refetchCommits()"
+        >
+          <CommitTable v-if="commits" :commits="commits.commits" :total="commits.total" />
+        </QueryState>
+      </div>
 
-      <QueryState
-        v-if="visited.changes"
-        v-show="tab === 'changes'"
-        :loading="changesLoading && changes === null"
-        :error="changesError"
-        :skeleton-rows="6"
-        @retry="refetchChanges()"
-      >
-        <DiffView v-if="changes" :pr-ref="pr.id" :changes="changes" />
-      </QueryState>
+      <div v-if="visited.changes" v-show="tab === 'changes'">
+        <QueryState
+          :loading="changesLoading && changes === null"
+          :error="changesError"
+          :skeleton-rows="6"
+          @retry="refetchChanges()"
+        >
+          <DiffView v-if="changes" :pr-ref="pr.id" :changes="changes" />
+        </QueryState>
+      </div>
 
       <div v-show="tab === 'conversation'" class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
         <div class="space-y-6">

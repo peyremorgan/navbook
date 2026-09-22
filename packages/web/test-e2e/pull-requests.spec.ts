@@ -279,6 +279,23 @@ test("opens on the conversation, and puts the tab in the address bar", async ({
   await expect(signedIn.getByTestId("pr-comment-thread")).toBeVisible();
 });
 
+test("shows only the selected tab once the others have been read", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0001`);
+  const commits = signedIn.getByTestId("pr-commits");
+  const changes = signedIn.getByTestId("changes-summary");
+
+  await signedIn.getByTestId("pr-tab-commits").click();
+  await expect(commits).toBeVisible();
+  await signedIn.getByTestId("pr-tab-changes").click();
+  await expect(changes).toBeVisible();
+  await expect(commits).toBeHidden();
+
+  await signedIn.getByTestId("pr-tab-conversation").click();
+  await expect(signedIn.getByTestId("pr-comment-thread")).toBeVisible();
+  await expect(changes).toBeHidden();
+  await expect(commits).toBeHidden();
+});
+
 test("lists the commits the branch brings, oldest first", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/prs/bbbb0001?tab=commits`);
   const table = signedIn.getByTestId("pr-commits");
