@@ -3,6 +3,7 @@ title: "PR page: Commits and Changes panels stay visible after switching tabs"
 author: Claude <noreply@anthropic.com>
 created: 2026-09-22T12:07:39Z
 labels: [bug]
+assignees: ["Claude <noreply@anthropic.com>"]
 ---
 
 Reported on the pull request page of the web client:
