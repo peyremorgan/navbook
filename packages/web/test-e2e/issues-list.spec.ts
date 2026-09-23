@@ -122,6 +122,26 @@ test("searches title, body and comments", async ({ signedIn, stack }) => {
   await expect(signedIn.getByText("No issues match this filter")).toBeVisible();
 });
 
+test("finds an issue by its own ID", async ({ signedIn, stack }) => {
+  // `cafe0005` is the one id nothing in the fixture mentions in prose, so a
+  // row that appears for it appeared because the id itself was matched. The
+  // spellings are the three a reader has to hand: the partial id every other
+  // surface accepts, the whole one, and the one carrying the `#` a comment
+  // writes it with.
+  for (const term of ["cafe", "cafe0005", "%23cafe0005"]) {
+    await signedIn.goto(`${stack.appUrl}/issues?q=${term}`);
+    await expect(signedIn.getByTestId("issue-row-cafe0005")).toBeVisible();
+    await expect(signedIn.getByTestId("issue-row-aaaa0001")).toHaveCount(0);
+  }
+
+  // An id is matched from its first character only, and never below four, so
+  // neither of these reaches one and an ordinary word search is unchanged.
+  for (const term of ["caf", "afe0005"]) {
+    await signedIn.goto(`${stack.appUrl}/issues?q=${term}`);
+    await expect(signedIn.getByText("No issues match this filter")).toBeVisible();
+  }
+});
+
 test("puts what is typed into the search box into the address bar", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/issues`);
   await signedIn.getByTestId("filter-text").fill("deadline");

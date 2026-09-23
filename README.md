@@ -220,7 +220,9 @@ nav issue list status:closed label:bug assignee:example.com "timeout"
 
 `status:`, `label:`, `assignee:`, `author:`, `milestone:`, `feature:`,
 `deadline:overdue|none`, and bare words that match the title, description or
-any comment body. Terms AND together; the default query is `status:open`.
+any comment body — or the entity's own ID, from four characters, so `ywz7`
+and `#ywz73dxu` both find `#ywz73dxu`. Terms AND together; the default query is
+`status:open`.
 
 `--sort priority|deadline|newest` reads the listing in a different order.
 Sorting is a front end's reading and never an order the files hold, so it is

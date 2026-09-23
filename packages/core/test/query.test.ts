@@ -178,6 +178,41 @@ describe("matchesQuery", () => {
     assert.deepEqual(matching(entities, "timeout"), ["aaaaaaa1", "bbbbbbb2", "ccccccc3"]);
   });
 
+  it("finds an entity by its own ID, which mentions of it are written with", () => {
+    const entities = build([
+      { id: "ywz73dxu", title: "A plugin system" },
+      { id: "sle5dwk9", title: "Unrelated", body: "Blocked on #ywz73dxu landing." },
+    ]);
+    // Every spelling a reader has to hand: the partial ID, the whole one, and
+    // the one with the `#` every mention carries.
+    for (const term of ["ywz7", "ywz73dxu", "#ywz73dxu"]) {
+      assert.deepEqual(matching(entities, term), ["sle5dwk9", "ywz73dxu"], term);
+    }
+  });
+
+  it("takes a whole directory name, which is what a path gives you", () => {
+    const entities = build([{ id: "ywz73dxu", title: "A plugin system" }]);
+    assert.deepEqual(matching(entities, "ywz73dxu-slug"), ["ywz73dxu"]);
+  });
+
+  it("does not let a term of three characters reach an ID", () => {
+    const entities = build([{ id: "ywz73dxu", title: "A plugin system" }]);
+    assert.deepEqual(matching(entities, "ywz"), []);
+  });
+
+  it("matches an ID only from its first character, so a word search is unchanged", () => {
+    const entities = build([{ id: "ywz73dxu", title: "A plugin system" }]);
+    assert.deepEqual(matching(entities, "z73dxu"), []);
+  });
+
+  it("ANDs an ID term with the rest", () => {
+    const entities = build([
+      { id: "ywz73dxu", labels: ["bug"] },
+      { id: "ywz73dxa", labels: ["enhancement"] },
+    ]);
+    assert.deepEqual(matching(entities, "ywz7", "label:bug"), ["ywz73dxu"]);
+  });
+
   it("ANDs free-text terms", () => {
     const entities = build([
       { id: "aaaaaaa1", title: "Login timeout" },
