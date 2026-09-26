@@ -101,7 +101,7 @@ export type EntityFilter = {
   reviews?: Array<ReviewDecision> | null | undefined;
   /** Absent or empty means any status; the listing is not narrowed by one. */
   status?: Array<Status> | null | undefined;
-  /** Free text, matched against title, body and comments. */
+  /** Free text, matched against title, body and comments, and against the entity's own ID from four characters. */
   text?: Array<string> | null | undefined;
 };
 

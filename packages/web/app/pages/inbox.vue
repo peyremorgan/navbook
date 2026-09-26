@@ -113,7 +113,7 @@ const unfinished = computed(() => (finished.value ? "" : " Finished work is not 
 const emptyDescription = computed(() => {
   if (emptiness.value === "narrowed") return "Widen the rail, or search for less.";
   if (emptiness.value === "searched") {
-    return `No issue or pull request of yours has those words in its title, body or comments.${unfinished.value}`;
+    return `No issue or pull request of yours has those words in its ID, title, body or comments.${unfinished.value}`;
   }
   // The address is worth saying out loud exactly here. An inbox that is empty
   // because the tree spells somebody's name a second way looks identical to one
