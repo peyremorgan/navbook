@@ -25,10 +25,16 @@
  * Every figure is the median of RUNS samples (default 5), with the slowest in
  * brackets. A query's time runs from the request leaving to the whole response
  * arriving, so on a page load it includes waiting behind the other four.
+ *
+ * With PROFILE set, no server is started: twenty full tree loads are taken
+ * under the CPU profiler instead, and the functions and files with the most
+ * self time are printed — which is how to tell parsing from reading from
+ * everything else before choosing what to make faster.
  */
 
 import { spawnSync } from "node:child_process";
 import { cpSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { Session } from "node:inspector/promises";
 import { join } from "node:path";
 import { loadRepo, makeWsCtx } from "@navbook/core";
 import { print } from "graphql";
@@ -41,6 +47,7 @@ const SLOW = Number(process.env.SLOW ?? 0);
 const PULL = Number(process.env.PULL ?? 2000);
 const RUNS = Number(process.env.RUNS ?? 5);
 const VERBOSE = Boolean(process.env.VERBOSE);
+const PROFILE = Boolean(process.env.PROFILE);
 const SOURCE = join(import.meta.dirname, "..", "..", "..", ".navbook");
 
 // --- the fixture ------------------------------------------------------------
@@ -184,6 +191,54 @@ function start(pullIntervalMs: number): Promise<ServerHandle> {
   });
 }
 
+/** Where `loads` tree loads spend their own time, by function and by file. */
+async function profileLoads(load: () => void, loads: number): Promise<void> {
+  const session = new Session();
+  session.connect();
+  await session.post("Profiler.enable");
+  await session.post("Profiler.setSamplingInterval", { interval: 100 });
+  await session.post("Profiler.start");
+  for (let i = 0; i < loads; i++) load();
+  const { profile } = await session.post("Profiler.stop");
+  session.disconnect();
+
+  const root = join(import.meta.dirname, "..", "..", "..");
+  const where = (url: string) =>
+    url
+      .replace(/^file:\/\//, "")
+      .replace(/.*node_modules\//, "")
+      .replace(`${root}/`, "") || "(native)";
+  const nodes = new Map(profile.nodes.map((node) => [node.id, node]));
+  const byFunction = new Map<string, number>();
+  const byFile = new Map<string, number>();
+  let total = 0;
+  profile.samples?.forEach((id, i) => {
+    const frame = nodes.get(id)?.callFrame;
+    const us = profile.timeDeltas?.[i] ?? 0;
+    if (!frame) return;
+    total += us;
+    const file = where(frame.url);
+    const fn = `${frame.functionName || "(anonymous)"}  ${file}:${frame.lineNumber + 1}`;
+    byFunction.set(fn, (byFunction.get(fn) ?? 0) + us);
+    byFile.set(file, (byFile.get(file) ?? 0) + us);
+  });
+
+  const top = (map: Map<string, number>, n: number) =>
+    [...map]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, n)
+      .map(
+        ([key, us]) =>
+          `  ${(us / 1000 / loads).toFixed(1).padStart(7)} ms  ${((100 * us) / total).toFixed(1).padStart(5)}%  ${key}`,
+      )
+      .join("\n");
+  console.log(
+    `\nself time per load, over ${loads} loads (${(total / 1000 / loads).toFixed(0)} ms each)`,
+  );
+  console.log(`\nby file\n${top(byFile, 12)}`);
+  console.log(`\nby function\n${top(byFunction, 25)}`);
+}
+
 type Row = Record<Name | "page", number[]>;
 const emptyRow = (): Row =>
   Object.fromEntries([...NAMES, "page"].map((name) => [name, [] as number[]])) as Row;
@@ -212,45 +267,51 @@ try {
     spawnSync("git", ["fetch", "--quiet", "origin"], { cwd: dir, env: fixture.env }),
   );
 
-  const alone = emptyRow();
-  const warm = emptyRow();
-  const warmServer = await start(3_600_000);
-  try {
-    await page(warmServer); // pays the one fetch, and warms the JIT
-    for (const name of NAMES) {
-      for (let i = 0; i < RUNS; i++) alone[name].push(await query(warmServer, name));
+  if (PROFILE) {
+    console.log(`tree      ${entities} entities, ${files} files (K=${K})`);
+    console.log(`loadRepo  all ${cell(loadAll)} ms, without comments ${cell(loadNone)} ms`);
+    await profileLoads(() => loadRepo(ws), 20);
+  } else {
+    const alone = emptyRow();
+    const warm = emptyRow();
+    const warmServer = await start(3_600_000);
+    try {
+      await page(warmServer); // pays the one fetch, and warms the JIT
+      for (const name of NAMES) {
+        for (let i = 0; i < RUNS; i++) alone[name].push(await query(warmServer, name));
+      }
+      for (let i = 0; i < RUNS; i++) record(warm, await page(warmServer));
+    } finally {
+      await warmServer.close();
     }
-    for (let i = 0; i < RUNS; i++) record(warm, await page(warmServer));
-  } finally {
-    await warmServer.close();
-  }
 
-  const idle = emptyRow();
-  const idleServer = await start(PULL);
-  try {
-    await page(idleServer);
-    for (let i = 0; i < RUNS; i++) {
-      await sleep(PULL + 50);
-      record(idle, await page(idleServer));
+    const idle = emptyRow();
+    const idleServer = await start(PULL);
+    try {
+      await page(idleServer);
+      for (let i = 0; i < RUNS; i++) {
+        await sleep(PULL + 50);
+        record(idle, await page(idleServer));
+      }
+    } finally {
+      await idleServer.close();
     }
-  } finally {
-    await idleServer.close();
-  }
 
-  const pad = (s: string, n: number) => s.padStart(n);
-  const line = (label: string, row: Partial<Row>) =>
-    label.padEnd(18) +
-    [...NAMES, "page" as const]
-      .map((name) => pad(row[name]?.length ? cell(row[name]) : "—", 14))
-      .join("");
-  console.log(`tree      ${entities} entities, ${files} files (K=${K}), Issue #${target}`);
-  console.log(`loadRepo  all ${cell(loadAll)} ms, without comments ${cell(loadNone)} ms`);
-  console.log(`fetch     ${fetchMs.toFixed(0)} ms (SLOW=${SLOW}), pull interval ${PULL} ms`);
-  console.log(`runs      ${RUNS}; median (slowest), ms\n`);
-  console.log("".padEnd(18) + [...NAMES, "page"].map((name) => pad(name, 14)).join(""));
-  console.log(line("alone, warm", alone));
-  console.log(line("page, warm", warm));
-  console.log(line("page, after idle", idle));
+    const pad = (s: string, n: number) => s.padStart(n);
+    const line = (label: string, row: Partial<Row>) =>
+      label.padEnd(18) +
+      [...NAMES, "page" as const]
+        .map((name) => pad(row[name]?.length ? cell(row[name]) : "—", 14))
+        .join("");
+    console.log(`tree      ${entities} entities, ${files} files (K=${K}), Issue #${target}`);
+    console.log(`loadRepo  all ${cell(loadAll)} ms, without comments ${cell(loadNone)} ms`);
+    console.log(`fetch     ${fetchMs.toFixed(0)} ms (SLOW=${SLOW}), pull interval ${PULL} ms`);
+    console.log(`runs      ${RUNS}; median (slowest), ms\n`);
+    console.log("".padEnd(18) + [...NAMES, "page"].map((name) => pad(name, 14)).join(""));
+    console.log(line("alone, warm", alone));
+    console.log(line("page, warm", warm));
+    console.log(line("page, after idle", idle));
+  }
 } finally {
   fixture.cleanup();
 }
