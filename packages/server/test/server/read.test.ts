@@ -248,6 +248,30 @@ describe("reads", () => {
     // the cross-ref scan's own answer stands.
     assert.ok(errorCode(response) !== null);
   });
+
+  // Last in this block, because it adds a comment the earlier tests do not expect.
+  it("answers an entity's comments however the tree it came from was read", async () => {
+    ok(
+      await h.gql(
+        `mutation { addComment(input: { kind: ISSUE, ref: "${bug}", body: "Reproduced." }) { comment { id } } }`,
+      ),
+    );
+    // A listing reads the tree without comments; the field must still find them.
+    const listed = ok<{ issues: { id: string; comments: { body: string }[] }[] }>(
+      await h.gql(`query { issues { id comments { body } } }`),
+    );
+    assert.deepEqual(
+      listed.issues.find((issue) => issue.id === bug)?.comments.map((c) => c.body.trim()),
+      ["Reproduced."],
+    );
+    const shown = ok<{ issue: { comments: { body: string }[] } }>(
+      await h.gql(`query Show($ref: ID!) { issue(ref: $ref) { comments { body } } }`, { ref: bug }),
+    );
+    assert.deepEqual(
+      shown.issue.comments.map((c) => c.body.trim()),
+      ["Reproduced."],
+    );
+  });
 });
 
 /**

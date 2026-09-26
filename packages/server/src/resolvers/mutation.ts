@@ -104,7 +104,7 @@ function commitInfo(result: RunPlanResult, pushed: boolean): CommitInfo {
  */
 function afterWrite(ctx: GraphQLCtx): Repo {
   ctx.invalidateRepo();
-  return ctx.loadRepo();
+  return ctx.loadRepo("all");
 }
 
 /** One entity from an already-loaded tree. */

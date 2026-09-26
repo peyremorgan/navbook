@@ -12,6 +12,8 @@
  */
 
 import {
+  type CommentScope,
+  type EntityRecord,
   type Identity,
   loadRepo,
   makeWsCtx,
@@ -19,6 +21,7 @@ import {
   type ReviewPolicyReading,
   readReviewPolicy,
   type WsCtx,
+  withComments,
 } from "@navbook/core";
 import type { RevisionCache } from "./changes.ts";
 import type { Config } from "./config.ts";
@@ -37,7 +40,9 @@ export interface GraphQLCtx {
    * as much as rendering the repository.
    *
    * Read under the repository lock, because a field resolver runs after its
-   * parent's transaction has already released it.
+   * parent's transaction has already released it. Read without comments, which
+   * are most of what a parse costs and which no link needs; a field that wants
+   * an entity's asks {@link commented}.
    */
   repo(): Promise<Repo>;
   /**
@@ -49,8 +54,19 @@ export interface GraphQLCtx {
    * large repository doubled what the request cost (#esqpmn7i), and could
    * describe a tree a write had moved in between. Call it only inside
    * `sync.read` or `sync.write`, where the tree is held still.
+   *
+   * `comments` says whose comments to read; the fields read the others through
+   * {@link commented} if they need them.
    */
-  loadRepo(): Repo;
+  loadRepo(comments: CommentScope): Repo;
+  /**
+   * The entity with its comments, read when the tree it came from left them out.
+   *
+   * Every resolver that reads an entity's comments goes through this, so a
+   * record from a read without them answers with its comments, not with an
+   * empty list. Read under the lock, at most once per record per request.
+   */
+  commented(entity: EntityRecord): Promise<EntityRecord>;
   /**
    * How this repository counts reviews (spec 02 §2.10), read at most once.
    *
@@ -105,14 +121,24 @@ export function makeGraphQLCtx(opts: MakeContextOptions): GraphQLCtx {
   // share one load rather than queueing one apiece behind the lock.
   let memo: Promise<Repo> | null = null;
   let policyMemo: Promise<ReviewPolicyReading> | null = null;
+  const commentMemo = new WeakMap<EntityRecord, Promise<EntityRecord>>();
   return {
     viewer: opts.viewer,
     ws,
-    repo: () => (memo ??= opts.sync.locked(() => loadRepo(ws))),
-    loadRepo: () => {
-      const repo = loadRepo(ws);
+    repo: () => (memo ??= opts.sync.locked(() => loadRepo(ws, { comments: "none" }))),
+    loadRepo: (comments) => {
+      const repo = loadRepo(ws, { comments });
       memo = Promise.resolve(repo);
       return repo;
+    },
+    commented: (entity) => {
+      if (entity.commentsLoaded) return Promise.resolve(entity);
+      let read = commentMemo.get(entity);
+      if (!read) {
+        read = opts.sync.locked(() => withComments(ws, entity));
+        commentMemo.set(entity, read);
+      }
+      return read;
     },
     reviewPolicy: () => (policyMemo ??= opts.sync.locked(() => readReviewPolicy(ws))),
     invalidateRepo: () => {

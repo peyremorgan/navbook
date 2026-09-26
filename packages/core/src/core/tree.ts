@@ -45,6 +45,18 @@ export const ENTITY_DIR: Record<EntityKind, string> = { issue: "issues", pr: "pr
 /** Whose `comments/` directories a tree read opened (see `readNavTree`). */
 export type CommentScope = "all" | "prs" | "none";
 
+/**
+ * Whether a read with `scope` opens the comments of the entity at `dirPath`.
+ *
+ * One rule for the walk that skips the directories and for the records that
+ * say they were skipped, so the two cannot disagree. An archived pull request
+ * lives under `archive/`, not `prs/`, and is outside `prs` like any issue.
+ */
+export function commentsInScope(scope: CommentScope, dirPath: string): boolean {
+  if (scope === "all") return true;
+  return scope === "prs" && dirPath.startsWith(`${ENTITY_DIR.pr}/`);
+}
+
 export interface CommentRecord {
   id: string;
   fileName: string;
@@ -84,6 +96,12 @@ export interface EntityRecord {
   body: string;
   title: string;
   comments: CommentRecord[];
+  /**
+   * False when the read this record came from left its comments out, so that
+   * `comments` is empty for that reason rather than because there are none.
+   * `withComments` reads them.
+   */
+  commentsLoaded: boolean;
   /** Extra files inside the entity directory, preserved untouched (§2.1). */
   extraFiles: string[];
 }
@@ -205,7 +223,7 @@ export function parseTree(files: NavTree, opts: { commentsLoaded?: CommentScope 
 
   const orphans: OrphanDirectory[] = [];
   for (const draft of [...drafts.values()].sort((a, b) => (a.dirPath < b.dirPath ? -1 : 1))) {
-    const record = materialize(draft, files, problems, orphans);
+    const record = materialize(draft, files, problems, orphans, opts.commentsLoaded ?? "all");
     if (!record) continue;
     (record.kind === "issue" ? issues : prs).push(record);
     if (!byId.has(record.id)) byId.set(record.id, record);
@@ -460,6 +478,7 @@ function materialize(
   files: NavTree,
   problems: StructuralProblem[],
   orphans: OrphanDirectory[],
+  scope: CommentScope,
 ): EntityRecord | null {
   const parsedName = parseDirName(draft.dirName);
   if (!parsedName) return null;
@@ -485,9 +504,44 @@ function materialize(
   const parsed = parseOrReport(files, draft.entityFile, problems);
   if (!parsed) return null;
 
+  const comments = commentRecords(draft.comments, files, problems);
+
+  return {
+    kind: draft.kind,
+    id: parsedName.id,
+    slug: parsedName.slug,
+    dirName: draft.dirName,
+    status: draft.status,
+    archived: draft.archived,
+    archiveYear: draft.archiveYear,
+    dirPath: draft.dirPath,
+    filePath: draft.entityFile,
+    blobSha: blobSha(files.get(draft.entityFile) ?? ""),
+    parsed,
+    fm: parsed.fm,
+    body: parsed.body,
+    title: typeof parsed.fm.title === "string" ? parsed.fm.title : "",
+    comments,
+    commentsLoaded: commentsInScope(scope, draft.dirPath),
+    extraFiles: draft.extraFiles.sort(),
+  };
+}
+
+/**
+ * One entity's comments, oldest first, from the files named in `paths`.
+ *
+ * `paths` maps each comment's file name to its path in `files`. A name that is
+ * not a comment's, or a file that does not parse, is left out; the parse
+ * failure goes to `problems`.
+ */
+export function commentRecords(
+  paths: ReadonlyMap<string, string>,
+  files: NavTree,
+  problems: StructuralProblem[],
+): CommentRecord[] {
   const comments: CommentRecord[] = [];
-  for (const name of [...draft.comments.keys()].sort()) {
-    const path = draft.comments.get(name) as string;
+  for (const name of [...paths.keys()].sort()) {
+    const path = paths.get(name) as string;
     const meta = parseCommentFileName(name);
     if (!meta) continue;
     const commentParsed = parseOrReport(files, path, problems);
@@ -506,25 +560,7 @@ function materialize(
       parsed: commentParsed,
     });
   }
-
-  return {
-    kind: draft.kind,
-    id: parsedName.id,
-    slug: parsedName.slug,
-    dirName: draft.dirName,
-    status: draft.status,
-    archived: draft.archived,
-    archiveYear: draft.archiveYear,
-    dirPath: draft.dirPath,
-    filePath: draft.entityFile,
-    blobSha: blobSha(files.get(draft.entityFile) ?? ""),
-    parsed,
-    fm: parsed.fm,
-    body: parsed.body,
-    title: typeof parsed.fm.title === "string" ? parsed.fm.title : "",
-    comments,
-    extraFiles: draft.extraFiles.sort(),
-  };
+  return comments;
 }
 
 /** Every entity in the repository, issues first. */

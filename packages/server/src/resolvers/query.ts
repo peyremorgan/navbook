@@ -20,6 +20,7 @@ import {
   resolveSha,
   runDoctor,
   treePeople,
+  withComments,
 } from "@navbook/core";
 import type { GraphQLCtx } from "../context.ts";
 import { invalidInput, run } from "../errors.ts";
@@ -44,7 +45,13 @@ export const Query: QueryResolvers = {
     run(() => ctx.sync.read(() => listEntities(ctx.ws, "issue", toQuery(args.filter, today(ctx))))),
 
   issue: (_parent, args, ctx) =>
-    run(() => ctx.sync.read(() => resolveEntity(ctx.loadRepo(), args.ref, "issue"))),
+    run(() =>
+      ctx.sync.read(() =>
+        // Every other entity's comments are most of a parse and none of the
+        // answer; this one's are read inside the same transaction.
+        withComments(ctx.ws, resolveEntity(ctx.loadRepo("none"), args.ref, "issue")),
+      ),
+    ),
 
   prs: (_parent, args, ctx) =>
     run(() =>
@@ -78,12 +85,12 @@ export const Query: QueryResolvers = {
       }),
     ),
 
-  // With the whole tree rather than `listFeatures`' lighter read, because a
-  // feature's `issues` and `prs` fields need it anyway.
-  features: (_parent, _args, ctx) => run(() => ctx.sync.read(() => ctx.loadRepo().features)),
+  // Through `ctx.loadRepo` rather than `listFeatures`, so that a feature's
+  // `issues` and `prs` fields read the same parse.
+  features: (_parent, _args, ctx) => run(() => ctx.sync.read(() => ctx.loadRepo("none").features)),
 
   feature: (_parent, args, ctx) =>
-    run(() => ctx.sync.read(() => resolveFeature(ctx.loadRepo(), args.slug))),
+    run(() => ctx.sync.read(() => resolveFeature(ctx.loadRepo("none"), args.slug))),
 
   doctor: (_parent, _args, ctx) =>
     run(() => ctx.sync.read(() => ({ diagnostics: runDoctor(ctx.ws).diagnostics }))),

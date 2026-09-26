@@ -9,6 +9,7 @@
 
 import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
+import type { EntityRecord, Repo } from "@navbook/core";
 import type { Config } from "../../src/config.ts";
 import { makeGraphQLCtx } from "../../src/context.ts";
 import { RepoSync } from "../../src/sync.ts";
@@ -16,6 +17,14 @@ import { makeFixture } from "../helpers/temprepo.ts";
 
 const fixture = makeFixture({ noRemote: true });
 after(() => fixture.cleanup());
+
+// One issue with a comment, so there is something for a read without comments to leave out.
+fixture.server.fileIssue("Commented on", "Body.", "cmntd001");
+fixture.server.write(
+  ".navbook/issues/open/cmntd001-commented-on/comments/2026-08-03T141207Z-rply0001.md",
+  "---\nauthor: bob@example.com\n---\n\nReproduced.\n",
+);
+fixture.server.commitAll("comment");
 
 function makeCtx() {
   const config: Config = {
@@ -43,7 +52,7 @@ function makeCtx() {
 describe("the request's tree", () => {
   it("is the parse a root resolver made, not a second one", async () => {
     const ctx = makeCtx();
-    const parsed = await ctx.sync.read(() => ctx.loadRepo());
+    const parsed = await ctx.sync.read(() => ctx.loadRepo("all"));
     assert.equal(await ctx.repo(), parsed);
   });
 
@@ -55,8 +64,35 @@ describe("the request's tree", () => {
 
   it("is parsed afresh after a write drops it", async () => {
     const ctx = makeCtx();
-    const before = await ctx.sync.read(() => ctx.loadRepo());
+    const before = await ctx.sync.read(() => ctx.loadRepo("all"));
     ctx.invalidateRepo();
     assert.notEqual(await ctx.repo(), before);
+  });
+});
+
+describe("an entity's comments", () => {
+  const find = (repo: Repo): EntityRecord => repo.byId.get("cmntd001") as EntityRecord;
+
+  it("are read when the tree it came from left them out", async () => {
+    const ctx = makeCtx();
+    const bare = find(await ctx.sync.read(() => ctx.loadRepo("none")));
+    assert.deepEqual(bare.comments, []);
+    const read = await ctx.commented(bare);
+    assert.deepEqual(
+      read.comments.map((comment) => comment.id),
+      ["rply0001"],
+    );
+  });
+
+  it("are read once per record, however many fields ask", async () => {
+    const ctx = makeCtx();
+    const bare = find(await ctx.sync.read(() => ctx.loadRepo("none")));
+    assert.equal(await ctx.commented(bare), await ctx.commented(bare));
+  });
+
+  it("are not read again when the tree already had them", async () => {
+    const ctx = makeCtx();
+    const full = find(await ctx.sync.read(() => ctx.loadRepo("all")));
+    assert.equal(await ctx.commented(full), full);
   });
 });

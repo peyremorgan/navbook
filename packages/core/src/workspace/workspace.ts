@@ -30,8 +30,10 @@ import { needsComments, type Query } from "../core/query.ts";
 import { parseDirName } from "../core/slug.ts";
 import {
   type CommentScope,
-  ENTITY_DIR,
+  commentRecords,
+  commentsInScope,
   type EntityKind,
+  type EntityRecord,
   NAV_MARKER,
   type NavTree,
   parseTree,
@@ -79,7 +81,7 @@ function walk(
     const childRel = rel === "" ? entry.name : `${rel}/${entry.name}`;
     const childAbs = join(absolute, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === "comments" && !wanted(rel, comments)) continue;
+      if (entry.name === "comments" && !commentsInScope(comments, rel)) continue;
       walk(childAbs, childRel, files, comments);
     } else if (entry.isFile()) {
       files.set(childRel, readFileSync(childAbs, "utf8"));
@@ -87,10 +89,33 @@ function walk(
   }
 }
 
-/** Whether the `comments/` directory of the entity at `rel` is in scope. */
-function wanted(rel: string, comments: CommentScope): boolean {
-  if (comments === "all") return true;
-  return comments === "prs" && rel.startsWith(`${ENTITY_DIR.pr}/`);
+/**
+ * The entity with its comments, reading them when its tree left them out.
+ *
+ * For a reader that loaded the tree without comments, which is most of what a
+ * load costs (#esqpmn7i), and then needs one entity's. They are read from the
+ * working tree as it is now, so call it where the tree is held still. A comment
+ * that does not parse is left out, as a full load leaves it out; reporting it
+ * is `doctor`'s job, and `doctor` always reads everything.
+ */
+export function withComments(ws: WsCtx, entity: EntityRecord): EntityRecord {
+  if (entity.commentsLoaded) return entity;
+  const dir = `${entity.dirPath}/comments`;
+  const files = new Map<string, string>();
+  const paths = new Map<string, string>();
+  let entries: Dirent<string>[] = [];
+  try {
+    entries = readdirSync(join(ws.navRoot, dir), { withFileTypes: true, encoding: "utf8" });
+  } catch {
+    // No `comments/` at all, which is an entity nobody has commented on yet.
+  }
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const path = `${dir}/${entry.name}`;
+    files.set(path, readFileSync(join(ws.navRoot, dir, entry.name), "utf8"));
+    paths.set(entry.name, path);
+  }
+  return { ...entity, comments: commentRecords(paths, files, []), commentsLoaded: true };
 }
 
 /** Load the repository model from the working tree. */
