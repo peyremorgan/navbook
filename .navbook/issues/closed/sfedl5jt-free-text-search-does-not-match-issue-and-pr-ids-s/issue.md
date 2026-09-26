@@ -4,6 +4,7 @@ author: Claude <noreply@anthropic.com>
 created: 2026-09-23T09:02:20Z
 labels: [bug, enhancement, web]
 assignee: Claude <noreply@anthropic.com>
+resolution: fixed
 ---
 
 Searching the web client's search box for an issue or pull request ID finds
