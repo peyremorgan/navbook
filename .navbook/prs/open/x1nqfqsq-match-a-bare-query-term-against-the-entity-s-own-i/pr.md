@@ -114,3 +114,5 @@ holds for the whole eight characters, not necessarily the first four. An ID
 beginning `bugs` would be matched by a search for `bugs`. That is one extra row
 in a filter rather than a wrong answer, and narrowing the rule to avoid it
 would cost more than it saves.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
