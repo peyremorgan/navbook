@@ -41,6 +41,17 @@ export interface GraphQLCtx {
    */
   repo(): Promise<Repo>;
   /**
+   * Parse the tree now, and keep it as this request's `repo()`.
+   *
+   * For a root resolver whose fields go on to ask for the tree: it parses it
+   * once, inside its own transaction, and the fields read that same parse
+   * rather than making a second one after the lock has let go — which on a
+   * large repository doubled what the request cost (#esqpmn7i), and could
+   * describe a tree a write had moved in between. Call it only inside
+   * `sync.read` or `sync.write`, where the tree is held still.
+   */
+  loadRepo(): Repo;
+  /**
    * How this repository counts reviews (spec 02 §2.10), read at most once.
    *
    * Separate from `repo()` because most requests that need the policy do not
@@ -98,6 +109,11 @@ export function makeGraphQLCtx(opts: MakeContextOptions): GraphQLCtx {
     viewer: opts.viewer,
     ws,
     repo: () => (memo ??= opts.sync.locked(() => loadRepo(ws))),
+    loadRepo: () => {
+      const repo = loadRepo(ws);
+      memo = Promise.resolve(repo);
+      return repo;
+    },
     reviewPolicy: () => (policyMemo ??= opts.sync.locked(() => readReviewPolicy(ws))),
     invalidateRepo: () => {
       memo = null;

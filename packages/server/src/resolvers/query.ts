@@ -8,16 +8,15 @@
 
 import {
   calendarDateOf,
-  findEntity,
-  findFeature,
   formatPerson,
   listEntities,
-  listFeatures,
   listPrsAcrossRefs,
   loadRepo,
   mergePeople,
   readPr,
   readReviewPolicy,
+  resolveEntity,
+  resolveFeature,
   resolveSha,
   runDoctor,
   treePeople,
@@ -45,7 +44,7 @@ export const Query: QueryResolvers = {
     run(() => ctx.sync.read(() => listEntities(ctx.ws, "issue", toQuery(args.filter, today(ctx))))),
 
   issue: (_parent, args, ctx) =>
-    run(() => ctx.sync.read(() => findEntity(ctx.ws, "issue", args.ref))),
+    run(() => ctx.sync.read(() => resolveEntity(ctx.loadRepo(), args.ref, "issue"))),
 
   prs: (_parent, args, ctx) =>
     run(() =>
@@ -79,9 +78,12 @@ export const Query: QueryResolvers = {
       }),
     ),
 
-  features: (_parent, _args, ctx) => run(() => ctx.sync.read(() => listFeatures(ctx.ws))),
+  // With the whole tree rather than `listFeatures`' lighter read, because a
+  // feature's `issues` and `prs` fields need it anyway.
+  features: (_parent, _args, ctx) => run(() => ctx.sync.read(() => ctx.loadRepo().features)),
 
-  feature: (_parent, args, ctx) => run(() => ctx.sync.read(() => findFeature(ctx.ws, args.slug))),
+  feature: (_parent, args, ctx) =>
+    run(() => ctx.sync.read(() => resolveFeature(ctx.loadRepo(), args.slug))),
 
   doctor: (_parent, _args, ctx) =>
     run(() => ctx.sync.read(() => ({ diagnostics: runDoctor(ctx.ws).diagnostics }))),
