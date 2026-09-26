@@ -9,6 +9,14 @@
  */
 
 import { Document, isMap, isScalar, isSeq, parseDocument } from "yaml";
+import {
+  type FlatFrontmatter,
+  type FlatList,
+  type FlatScalar,
+  flatToPlain,
+  isFlatList,
+  parseFlatYaml,
+} from "./flat-yaml.ts";
 
 export interface NavDoc {
   /** Mutable YAML document; only ever written through {@link patchDoc}. */
@@ -20,24 +28,40 @@ export interface NavDoc {
   dirty: boolean;
   /** Parse errors reported by the YAML parser, if any. */
   errors: string[];
+  /**
+   * The frontmatter as the fast reader read it, when it could (see
+   * `flat-yaml.ts`). The readers below answer from it while nothing has been
+   * written, and `doc` is only parsed when something needs it.
+   */
+  flat?: FlatFrontmatter;
 }
 
 export class FrontmatterError extends Error {}
 
 const DELIMITER = /^---[ \t]*\r?$/;
 
-/** Split a Navbook file into its YAML block and its body. */
+/**
+ * Split a Navbook file into its YAML block and its body.
+ *
+ * Walks the lines by index rather than splitting the file into them: the body
+ * is most of the text and is handed back whole, so there is no reason to cut
+ * it into lines only to join them again.
+ */
 export function splitFrontmatter(text: string): { yaml: string; body: string } {
-  const lines = text.split("\n");
-  if (!DELIMITER.test(lines[0] ?? "")) {
+  const firstEnd = text.indexOf("\n");
+  if (!DELIMITER.test(firstEnd === -1 ? text : text.slice(0, firstEnd))) {
     throw new FrontmatterError("file must start with a '---' frontmatter delimiter at byte 0");
   }
-  for (let i = 1; i < lines.length; i++) {
-    if (DELIMITER.test(lines[i] as string)) {
-      const yaml = lines.slice(1, i).join("\n");
-      const body = lines.slice(i + 1).join("\n");
+  let start = firstEnd + 1;
+  while (firstEnd !== -1) {
+    const end = text.indexOf("\n", start);
+    if (DELIMITER.test(end === -1 ? text.slice(start) : text.slice(start, end))) {
+      const yaml = text.slice(firstEnd + 1, Math.max(firstEnd + 1, start - 1));
+      const body = end === -1 ? "" : text.slice(end + 1);
       return { yaml: yaml === "" ? "" : `${yaml}\n`, body };
     }
+    if (end === -1) break;
+    start = end + 1;
   }
   throw new FrontmatterError("frontmatter block is not closed by a '---' line");
 }
@@ -45,9 +69,31 @@ export function splitFrontmatter(text: string): { yaml: string; body: string } {
 /** Parse a Navbook file into a {@link NavDoc}. Throws only on a missing block. */
 export function parseDoc(text: string): NavDoc {
   const { yaml, body } = splitFrontmatter(text);
+  const flat = parseFlatYaml(yaml);
+  if (flat) {
+    // What the fast reader accepts, `yaml` parses without errors; the
+    // Document is built only if something asks for it, which reading never does.
+    let doc: Document | undefined;
+    return {
+      get doc(): Document {
+        doc ??= parseDocument(yaml, { keepSourceTokens: false });
+        return doc;
+      },
+      rawYaml: yaml,
+      body,
+      dirty: false,
+      errors: [],
+      flat,
+    };
+  }
   const doc = parseDocument(yaml, { keepSourceTokens: false });
   const errors = doc.errors.map((e) => e.message);
   return { doc, rawYaml: yaml, body, dirty: false, errors };
+}
+
+/** The fast reader's frontmatter, while nothing has been written over it. */
+function flatOf(nav: NavDoc): FlatFrontmatter | undefined {
+  return nav.dirty ? undefined : nav.flat;
 }
 
 /** Build a fresh document with no keys and an empty body. */
@@ -82,6 +128,8 @@ function serializeYaml(doc: Document): string {
 
 /** All frontmatter as plain JavaScript values (unknown keys included). */
 export function toPlain(nav: NavDoc): Record<string, unknown> {
+  const flat = flatOf(nav);
+  if (flat) return flatToPlain(flat);
   const value = nav.doc.toJS({ maxAliasCount: 100 });
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -98,6 +146,17 @@ const NULL_SOURCES = new Set(["", "~", "null", "Null", "NULL"]);
  * text keeps those hand-written files usable instead of merely diagnosable.
  */
 export function stringAt(nav: NavDoc, path: readonly (string | number)[]): string | undefined {
+  const flat = flatOf(nav);
+  if (flat && path.length <= 2) {
+    const found = flatNode(flat, path);
+    if (found === undefined || isFlatList(found)) return undefined;
+    if (typeof found.value === "string") return found.value;
+    if (found.value === null) {
+      const source = found.source;
+      return source !== undefined && NULL_SOURCES.has(source) ? undefined : source;
+    }
+    return found.source ?? String(found.value);
+  }
   const node = path.length === 1 ? nav.doc.get(path[0] as string, true) : nav.doc.getIn(path, true);
   if (node === undefined || node === null) return undefined;
   if (!isScalar(node)) return undefined;
@@ -110,17 +169,26 @@ export function stringAt(nav: NavDoc, path: readonly (string | number)[]): strin
 
 /** Number of items in a sequence at `path`, or null when it is not a sequence. */
 export function seqLength(nav: NavDoc, path: readonly (string | number)[]): number | null {
+  const flat = flatOf(nav);
+  if (flat && path.length <= 2) {
+    const found = flatNode(flat, path);
+    return found !== undefined && isFlatList(found) ? found.items.length : null;
+  }
   const node = path.length === 1 ? nav.doc.get(path[0] as string, true) : nav.doc.getIn(path, true);
   return isSeq(node) ? node.items.length : null;
 }
 
 /** True when the frontmatter has the key at all (even with a null value). */
 export function hasKey(nav: NavDoc, key: string): boolean {
+  const flat = flatOf(nav);
+  if (flat) return flat.nodes.has(key);
   return isMap(nav.doc.contents) && nav.doc.has(key);
 }
 
 /** Ordered list of frontmatter keys, as they appear in the file. */
 export function keysInOrder(nav: NavDoc): string[] {
+  const flat = flatOf(nav);
+  if (flat) return [...flat.keys];
   if (!isMap(nav.doc.contents)) return [];
   return nav.doc.contents.items.map((item) =>
     String((item.key as { value?: unknown })?.value ?? ""),
@@ -169,4 +237,16 @@ export function appendListItem(nav: NavDoc, key: string, item: unknown): NavDoc 
   }
   nav.dirty = true;
   return nav;
+}
+
+/** The node at a one- or two-step path: a key, then an index into its list. */
+function flatNode(
+  flat: FlatFrontmatter,
+  path: readonly (string | number)[],
+): FlatScalar | FlatList | undefined {
+  const node = flat.nodes.get(String(path[0]));
+  if (path.length === 1 || node === undefined) return node;
+  const index = path[1];
+  if (!isFlatList(node) || typeof index !== "number") return undefined;
+  return node.items[index];
 }
