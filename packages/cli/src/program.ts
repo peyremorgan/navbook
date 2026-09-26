@@ -70,7 +70,8 @@ const QUERY_HELP = `Query terms AND together. Terms:
   review:DECISION             pending, approved or changes-requested; PRs only
   awaiting:EMAIL              asked to review it and has not yet; PRs only
   WORD or "some phrase"       case-insensitive substring of the title,
-                              description, or any comment body
+                              description, or any comment body; also the
+                              entity's own ID, from four characters
 Same-key terms OR for single-valued fields (status, author, milestone, review)
 and AND for multi-valued ones (label, assignee, feature, reviewer, awaiting).
 The default query is status:open.`;

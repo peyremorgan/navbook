@@ -278,7 +278,7 @@ export type EntityFilter = {
   reviews?: InputMaybe<Array<ReviewDecision>>;
   /** Absent or empty means any status; the listing is not narrowed by one. */
   status?: InputMaybe<Array<Status>>;
-  /** Free text, matched against title, body and comments. */
+  /** Free text, matched against title, body and comments, and against the entity's own ID from four characters. */
   text?: InputMaybe<Array<Scalars['String']['input']>>;
 };
 

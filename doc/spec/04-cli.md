@@ -442,7 +442,7 @@ kind. Terms AND together:
 | `milestone:M` | Exact milestone |
 | `feature:SLUG` | `SLUG` ∈ the entity's `feature` ([02 §2.11](02-data-model.md)) |
 | `deadline:overdue\|none` | `overdue`: a `deadline` strictly before today; `none`: no `deadline` at all. Issues only |
-| bare word / quoted string | Case-insensitive substring of title, description, or any comment body |
+| bare word / quoted string | Case-insensitive substring of title, description, or any comment body; also the entity's own ID, when the term is a prefix of `<id>-<slug>` ([02 §2.3](02-data-model.md)) of length ≥ 4, with an optional leading `#` |
 
 A query naming no status matches every status. The `status:open` default above
 is one the `list` commands supply for themselves, not a property of the
