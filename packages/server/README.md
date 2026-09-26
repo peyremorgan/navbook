@@ -66,7 +66,12 @@ provider the server cannot reach at start is spelled out instead, with
 or either alongside the discovery document, is refused rather than guessed at.
 
 `--pull-interval-ms` is how stale a *read* may let its view of the remote
-become; a mutation always fetches first. `--git-timeout-ms` is how long any
+become; a mutation always fetches first. The server pulls in the background
+that often, so a read never waits for the network; while that background pull
+is failing, or has not yet succeeded since startup, each read pulls for itself
+once the interval has passed, as it would with no background pull at all. `0`
+turns the background pull off and makes every read fetch first.
+`--git-timeout-ms` is how long any
 one fetch or push may take: one that runs longer is stopped and its request
 fails with `SYNC_FAILED`, so a remote that has stopped answering costs one
 request rather than every request queued behind it. A stopped push leaves its

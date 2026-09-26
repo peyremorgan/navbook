@@ -123,6 +123,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     // A stopped fetch or push is the operator's news as much as the client's.
     report,
   });
+  sync.start();
 
   // One per process, beside the clone it describes: the history it walks is
   // this checkout's, and the committer it leaves out is this clone's own.
@@ -157,6 +158,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
       // send anything again.
       server.closeIdleConnections();
       await closed;
+      await sync.stop();
       // Never cut an operation in half: a mutation between its commit and its
       // push is the one moment the clone's state depends on finishing.
       await sync.drain();

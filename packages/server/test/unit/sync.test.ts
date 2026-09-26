@@ -41,6 +41,8 @@ interface Scripted {
   pushThrows?: Error;
   /** Hold every push until this resolves, so something can be queued behind it. */
   pushGate?: Promise<void>;
+  /** Hold every fetch until this resolves. */
+  fetchGate?: Promise<void>;
 }
 
 interface Recorder {
@@ -61,6 +63,7 @@ function recorder(script: Scripted = {}): Recorder {
   const git: SyncGit = {
     fetchRemote: async (_cwd, remote, opts) => {
       timeouts.push(opts?.timeoutMs);
+      await script.fetchGate;
       calls.push(`fetch ${remote}`);
       if (script.fetchThrows) throw script.fetchThrows;
     },
@@ -240,6 +243,143 @@ describe("RepoSync.read", () => {
     const { sync, calls } = makeSync({}, { remote: null });
     assert.equal(await sync.read(() => "offline"), "offline");
     assert.deepEqual(calls, []);
+  });
+});
+
+describe("RepoSync background pull", () => {
+  const stoppedFetch = new GitTimeoutError(["fetch", "--quiet", "--prune", "origin"], 500);
+
+  it("keeps reads off the network once it has pulled", async () => {
+    const { sync, calls, advance } = makeSync({}, { ttl: 10_000 });
+    // Until it has, a read pulls for itself: the clone may be days old.
+    await sync.read(() => undefined);
+    assert.deepEqual(calls, ["fetch origin"]);
+
+    await sync.refresh();
+    advance(60_000);
+    assert.equal(await sync.read(() => "answer"), "answer");
+    assert.deepEqual(calls, ["fetch origin", "fetch origin"]);
+  });
+
+  it("merges what it fetched", async () => {
+    const { sync, calls } = makeSync({ behind: [true], fastForwardable: true }, { ttl: 10_000 });
+    await sync.refresh();
+    assert.deepEqual(calls, ["fetch origin", "fast-forward"]);
+  });
+
+  it("does not hold the clone while it fetches", async () => {
+    // The point of it: a read arriving mid-fetch is answered from the clone as
+    // it stands, not after the network has had its say.
+    const script: Scripted = {};
+    const { sync } = makeSync(script, { ttl: 10_000 });
+    await sync.refresh();
+    const fetch = gate();
+    script.fetchGate = fetch.closed;
+
+    const refreshed = sync.refresh();
+    await settle();
+    const read = sync.read(() => "not waiting");
+    const late = new Promise((resolve) => setTimeout(resolve, 500, "waited on the fetch"));
+    assert.equal(await Promise.race([read, late]), "not waiting");
+    fetch.open();
+    await Promise.all([read, refreshed]);
+  });
+
+  it("never fetches while a push is on the network", async () => {
+    // Both update the remote-tracking ref, and git fails whichever loses the
+    // race for its lock file.
+    const push = gate();
+    const { sync, calls } = makeSync({ pushGate: push.closed }, { ttl: 10_000 });
+    const write = sync.write(
+      () => undefined,
+      () => true,
+    );
+    await settle();
+    const refreshed = sync.refresh();
+    await settle();
+    assert.deepEqual(calls, ["fetch origin"]);
+
+    push.open();
+    await Promise.all([write, refreshed]);
+    assert.deepEqual(calls, ["fetch origin", "push origin main -> ok", "fetch origin"]);
+  });
+
+  it("hands reads back their own pull when it fails, and says so once", async () => {
+    const script: Scripted = { fetchThrows: stoppedFetch };
+    const { sync, reported } = makeSync(script, { ttl: 10_000, timeout: 500 });
+    await sync.refresh();
+    await sync.refresh();
+    assert.equal(reported.length, 1);
+    assert.match(reported[0] as string, /background pull failed.*git fetch --quiet --prune origin/);
+
+    // What a read then reports is what it would have reported anyway.
+    await assert.rejects(
+      sync.read(() => undefined),
+      (error: unknown) => {
+        assert.equal(extensionsOf(error).code, "SYNC_FAILED");
+        return true;
+      },
+    );
+
+    delete script.fetchThrows;
+    await sync.refresh();
+    assert.match(reported.at(-1) as string, /background pull recovered/);
+  });
+
+  it("leaves a conflict for the next read to report", async () => {
+    const { sync, calls } = makeSync({ behind: [true], merges: ["conflict"] }, { ttl: 10_000 });
+    await sync.refresh();
+    await assert.rejects(
+      sync.read(() => undefined),
+      (error: unknown) => {
+        assert.equal(extensionsOf(error).code, "SYNC_CONFLICT");
+        return true;
+      },
+    );
+    assert.deepEqual(calls, [
+      "fetch origin",
+      "merge -> conflict",
+      "abort-merge",
+      "fetch origin",
+      "merge -> conflict",
+      "abort-merge",
+    ]);
+  });
+
+  it("starts at once, and only with a remote and an interval", async () => {
+    // An interval of 0 asks every read to fetch first, which only the read can do.
+    for (const opts of [{ ttl: 0 }, { ttl: 10_000, remote: null }]) {
+      const { sync, calls } = makeSync({}, opts);
+      sync.start();
+      await settle();
+      await sync.stop();
+      assert.deepEqual(calls, []);
+    }
+
+    const { sync, calls } = makeSync({}, { ttl: 10_000 });
+    sync.start();
+    await settle();
+    await sync.stop();
+    assert.deepEqual(calls, ["fetch origin"]);
+  });
+
+  it("stops, waiting for a pull in flight and starting no other", async () => {
+    const fetch = gate();
+    const { sync, calls } = makeSync({ fetchGate: fetch.closed }, { ttl: 5 });
+    sync.start();
+    await settle();
+
+    let stopped = false;
+    const stopping = sync.stop().then(() => {
+      stopped = true;
+    });
+    await settle();
+    assert.equal(stopped, false);
+
+    fetch.open();
+    await stopping;
+    await settle();
+    assert.deepEqual(calls, ["fetch origin"]);
   });
 });
 
