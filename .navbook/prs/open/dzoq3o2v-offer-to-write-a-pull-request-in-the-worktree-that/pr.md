@@ -67,11 +67,11 @@ The refusal now says when a worktree was passed over for being unclean, so the a
 Added in revision 2. When the source is a local branch that no worktree has checked out, the same five verbs offer to check it out into a temporary worktree:
 
 ```console
-$ nav pr comment rmkm --commit -m "Read."
-#rmkm1p1v is on 'feat/auth', which no worktree has checked out
+$ nav pr comment <id> --commit -m "Read."
+#<id> is on 'feat/auth', which no worktree has checked out
 Check it out in a temporary worktree and write it there? [y/N] y
-Commented on #rmkm1p1v  .navbook/prs/open/rmkm1p1v-feat-auth/comments/...md  (#...)
-Committed docs(pr): comment on #rmkm1p1v
+Commented on #<id>  .navbook/prs/open/<id>-feat-auth/comments/...md  (#...)
+Committed docs(pr): comment on #<id>
 written in a temporary worktree on 'feat/auth', since removed
 ```
 
