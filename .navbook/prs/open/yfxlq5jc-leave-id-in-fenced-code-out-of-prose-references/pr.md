@@ -1,5 +1,5 @@
 ---
-title: "Leave #id in fenced code out of prose references"
+title: "Leave #id in fenced code and code spans out of prose references"
 author: Claude <noreply@anthropic.com>
 created: 2026-09-27T02:48:09Z
 target: dev
