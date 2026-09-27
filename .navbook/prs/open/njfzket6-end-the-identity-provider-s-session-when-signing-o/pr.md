@@ -35,11 +35,19 @@ With both set and a valid `id_token_hint` for the current session, Better Auth d
 
 ## Verified
 
-- `vitest run` in `packages/web`: 315 tests, 5 of them new (plus one new assertion in the existing discovery test), all pass. New tests:
+- `vitest run` in `packages/web`: 384 tests after the rebase and self-review (originally 315, 5 of them new) (plus one new assertion in the existing discovery test), all pass. New tests:
   - `test/nuxt/oidc.test.ts`: `endsSessions` with and without the endpoint, and with an unreadable document. `signoutRedirect` goes to the end-session endpoint with `id_token_hint` and `post_logout_redirect_uri=<app>/signed-out`, without `audience`, and with the user removed.
   - `test/node/dev-issuer.test.ts`: the end-session redirect, the page shown with no redirect, and refusals.
   - A mutation check (reverting the redirect URI and the `extraQueryParams` override) makes the new `oidc` test fail.
 - `nuxi typecheck`, `tsc -p tsconfig.tools.json --noEmit` and `biome check` are clean.
-- **Not run:** the Playwright e2e suite. It needs a web build and Chromium, and /tmp on this machine is 98% full. Please run `pnpm --filter @navbook/web test:e2e` before merging. After deploying, check manually on the tracker that Sign out → Sign in again shows the Better Auth login form.
+- **Playwright e2e** (rebased onto `dev` at 7e18cf6): 154/154 pass. "stays signed out after signing out" fails against `dev`'s old `logout` (no request to `/end-session`). After deploying, check manually on the tracker that Sign out → Sign in again shows the Better Auth login form.
+
+## Self-review fixes (3f51cc0)
+
+- **Race with a refused operation:** an operation answered UNAUTHENTICATED while signing out made the Apollo error link call `login()`. That redirect to `/authorize` could overtake the one to `/end-session` and leave the provider's session alive. `login()` now does nothing while a sign-out is under way. New e2e test "is not signed back in by a refusal that lands while signing out" holds the end-session navigation, releases a refused query, and asserts no `/authorize` request. It fails with the guard removed.
+- **Back-forward cache:** `signoutRedirect` settles only when the page is restored without having left. `logout` returned early and left a guarded page with no token; it now lands on `/signed-out`.
+- **`client_id` alongside `id_token_hint`:** oidc-client-ts leaves it out when there is a hint. Better Auth's confirmation fallback (a hint it cannot verify) keeps the redirect back only for a request that names its client. It is added exactly once; unit tests cover both with and without an id token.
+- **Dev issuer:** refuses a `client_id` the hint was not issued to, and a malformed `post_logout_redirect_uri` (400, not 500); accepts a hint whose `aud` is a list.
+- Also: e2e asserts `/signed-out` comes back with no `state` in the address and no `oidc.*` record in storage (oidc-client-ts 3.5.0 sends no `state` without state data).
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
