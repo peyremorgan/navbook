@@ -4,6 +4,7 @@ author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-20T12:37:28Z
 labels: [bug, cli]
 feature: [cli, features]
+resolution: fixed
 ---
 
 `--commits` is parsed to a `Number` deliberately, so that a bad value arrives intact rather than rounded — the comment on the sibling `--rank` option says why: "a value the command must refuse has to reach it intact rather than arrive silently rounded or defaulted."
