@@ -22,6 +22,9 @@ revisions:
     base: 25f48ac623c5253b06e8209f9b684a024a4bd515
     date: 2026-09-27T02:05:31Z
 reviewer: Morgan PEYRE <morgan.peyre@brickcode.tech>
+merged:
+  date: 2026-09-27T02:06:09Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Closes #tvxw30h3.
