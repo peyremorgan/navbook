@@ -11,6 +11,9 @@ revisions:
   - head: 7cf104a8fa0f209df96c39f2093f381ea9798e0e
     base: 7e18cf64b1d246d2fceace05d209c007a94bcc5e
     date: 2026-09-27T12:58:31Z
+  - head: 145e7e5939d43af26b589266f1e91637d3d011de
+    base: 5a7718e8e09e5677bb4bbd5d8357056dd6e7dc4a
+    date: 2026-09-27T17:30:00Z
 ---
 
 Fixes #x8otoby0: nothing in the web client asked before a navigation threw away typed, unsaved work.
