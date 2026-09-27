@@ -5,6 +5,7 @@ created: 2026-09-20T12:37:00Z
 assignee: Claude <noreply@anthropic.com>
 labels: [bug]
 feature: plugins
+resolution: fixed
 ---
 
 Five documents on `dev` describe plugins as shipped, and nothing on `dev` implements them.
