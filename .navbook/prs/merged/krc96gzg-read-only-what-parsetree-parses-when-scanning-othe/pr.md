@@ -13,6 +13,9 @@ revisions:
   - head: ee8beaf6008c4bd62adadbf17acea4cbf3ee414b
     base: e91a2aad24734a50699f89447bb982a0702ebe5e
     date: 2026-09-27T20:08:03Z
+merged:
+  date: 2026-09-27T20:09:06Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #u0a6u6ev.
