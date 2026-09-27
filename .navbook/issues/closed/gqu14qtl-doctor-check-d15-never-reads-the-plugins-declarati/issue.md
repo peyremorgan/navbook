@@ -5,6 +5,7 @@ created: 2026-09-20T12:36:27Z
 assignee: Claude <noreply@anthropic.com>
 labels: [bug, doctor]
 feature: [doctor, plugins]
+resolution: fixed
 ---
 
 `checkMarker` collects the faults of exactly two readings — `repo.reviewPolicy.problems` and `repo.mergePolicy.problems`. `policy.ts` defines `parseReviewPolicy` and `parseMergePolicy` and no third parser, and `Repo` carries no third reading. There is no validation of `plugins` at all.
