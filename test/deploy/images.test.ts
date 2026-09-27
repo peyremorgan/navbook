@@ -146,15 +146,17 @@ describe("the Dockerfiles", () => {
   });
 
   it("starts the API under an init that reaps what git leaves behind", () => {
-    // git hands its background gc and maintenance to PID 1 and never waits on
-    // them. Node does not reap children it did not start, so under Node as PID 1
-    // every one stays a zombie until the container restarts (#rcsql1v9). In the
-    // image rather than as Compose's `init: true`, so a pod gets it too.
+    // Why, in the Dockerfile's comment above the ENTRYPOINT and in #rcsql1v9.
     assert.match(read(DOCKERFILES.api), /apk add --no-cache .*\btini\b/);
 
-    const entrypoint = instructions(DOCKERFILES.api).findLast((line) =>
-      /^ENTRYPOINT\s/i.test(line),
-    );
-    assert.equal(entrypoint, 'ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]');
+    const entrypoint =
+      instructions(DOCKERFILES.api)
+        .findLast((line) => /^ENTRYPOINT\s/i.test(line))
+        ?.replace(/^ENTRYPOINT\s+/i, "") ?? "";
+    assert.ok(entrypoint.startsWith("["), "the API ENTRYPOINT is not in exec form");
+    const argv = JSON.parse(entrypoint) as string[];
+    assert.equal(argv[0], "/sbin/tini", "the API image does not start through tini");
+    assert.ok(argv.includes("-s"), "tini is not a subreaper, so it reaps nothing when not PID 1");
+    assert.equal(argv.at(-1), "/entrypoint.sh", "tini does not hand over to the entrypoint");
   });
 });

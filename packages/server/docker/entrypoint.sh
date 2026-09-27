@@ -8,7 +8,9 @@
 # the commits are by and how to authenticate. Then it steps out of the way —
 # `exec`, so the server is the direct child of the image's init (tini, which
 # reaps the processes git leaves behind) and `docker stop` reaches the signal
-# handler that drains a mutation between its commit and its push.
+# handler that drains a mutation between its commit and its push. Before that
+# `exec` there is no handler: a stop during the first fetch ends it at once,
+# and the next start finishes the seed (see below).
 #
 # Nothing is written into the volume's git config. Identity and credentials are
 # passed through the environment (`GIT_CONFIG_COUNT` and friends), which every

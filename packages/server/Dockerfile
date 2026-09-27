@@ -51,11 +51,11 @@ FROM node:24-alpine
 # fails the request rather than hanging it.
 #
 # tini, because git does not wait for everything it starts: an auto gc or
-# maintenance run carries on in the background after the command returns, and
-# is handed to PID 1 when it exits. Node reaps only the children it spawned, so
-# with the server as PID 1 each of those stays a zombie until the container
-# restarts. In the image rather than as Compose's `init: true`, so that a pod
-# gets it too.
+# maintenance run is detached to carry on after the command that started it
+# returns, and is re-parented to PID 1 when it finishes. Node reaps only the
+# children it spawned, so with the server as PID 1 every such leftover stayed a
+# zombie until the container restarted (#rcsql1v9). In the image rather than as
+# Compose's `init: true`, so that a pod gets it too.
 RUN apk add --no-cache git ca-certificates tini
 ENV GIT_TERMINAL_PROMPT=0 \
     NODE_ENV=production \
@@ -93,5 +93,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD \
   node -e "const p=process.env.NAV_SERVER_PORT||4000;fetch('http://127.0.0.1:'+p+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 
 # tini forwards the signals it receives, so `docker stop` still reaches the
-# server's drain.
-ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]
+# server's drain. `-s` makes it a subreaper, so it still collects the leftovers
+# when something else is PID 1: Compose's `init: true`, `docker run --init`, or
+# a pod sharing its process namespace.
+ENTRYPOINT ["/sbin/tini", "-s", "--", "/entrypoint.sh"]

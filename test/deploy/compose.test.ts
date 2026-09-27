@@ -23,7 +23,11 @@ const composeText = readFileSync(COMPOSE_FILE, "utf8");
 const compose = parseYaml(composeText) as {
   services: Record<
     string,
-    { environment?: Record<string, string>; labels?: Record<string, string> }
+    {
+      environment?: Record<string, string>;
+      labels?: Record<string, string>;
+      entrypoint?: unknown;
+    }
   >;
   networks: Record<string, { external?: boolean; name?: string }>;
   volumes: Record<string, unknown>;
@@ -178,6 +182,12 @@ describe("the deployment descriptor", () => {
         `${name} advertises a different network than it joins`,
       );
     }
+  });
+
+  it("leaves the API image its own entrypoint, the init that reaps git's leftovers", () => {
+    // An `entrypoint:` here replaces the image's whole ENTRYPOINT, tini included,
+    // and the server would be PID 1 again (#rcsql1v9).
+    assert.equal(compose.services.api?.entrypoint, undefined);
   });
 
   it("keeps the clone in a volume, since it is the only durable state there is", () => {
