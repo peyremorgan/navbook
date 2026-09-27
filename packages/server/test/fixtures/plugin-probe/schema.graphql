@@ -1,0 +1,21 @@
+extend type Query {
+  """
+  What the probe was configured with, and what it has seen.
+  """
+  srvprobe: SrvProbe!
+}
+
+type SrvProbe {
+  """
+  The note the deployment set, or null.
+  """
+  note: String
+  """
+  Commit subjects this plugin has been told about, oldest first.
+  """
+  seen: [String!]!
+  """
+  Tags read through the frontmatter key this plugin registered.
+  """
+  tags: [String!]!
+}

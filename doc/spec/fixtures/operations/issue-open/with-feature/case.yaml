@@ -1,5 +1,6 @@
 spec-version: 1
 description: one feature is written as a scalar and several as a flow list
+plugins: ["@navbook/plugin-kb"]
 init: {from: before}
 run:
   command: [issue, open, "Add TOTP", --feature, auth, --feature, billing, -m, "Body.", --commit]

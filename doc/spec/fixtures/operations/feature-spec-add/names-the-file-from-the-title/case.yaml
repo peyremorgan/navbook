@@ -1,5 +1,6 @@
 spec-version: 1
 description: a document is filed under the name its title slugs to, and the commit names the file
+plugins: ["@navbook/plugin-kb"]
 init: {from: before}
 run:
   command: [feature, spec, add, auth, "Session policy", -m, "Sessions expire after 30 days.", --commit]

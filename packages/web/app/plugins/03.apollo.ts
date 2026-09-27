@@ -113,13 +113,19 @@ export default defineNuxtPlugin((nuxtApp) => {
     });
   });
 
+  // How the loaded plugin layers want their own types and root fields cached.
+  // Read before the cache is built rather than merged into it afterwards:
+  // Apollo reads its configuration once, and a policy added later would apply
+  // only to what had not been read yet.
+  const slots = useNavbookSlots();
+
   const cache = new InMemoryCache({
     possibleTypes: { Entity: ["Issue", "Pr"] },
     typePolicies: {
+      // A layer's policies first, so one naming a type this client already
+      // knows about cannot quietly change how it is keyed.
+      ...slots.typePolicies(),
       Issue: { keyFields: ["id"] },
-      // A feature is named by its slug, a document by its path within one.
-      Feature: { keyFields: ["slug"] },
-      Spec: { keyFields: ["path"] },
       Commit: { keyFields: ["sha"] },
       Pr: { keyFields: ["id"] },
       Comment: { keyFields: ["id"] },
@@ -130,13 +136,12 @@ export default defineNuxtPlugin((nuxtApp) => {
       Viewer: { keyFields: ["email"] },
       Query: {
         fields: {
+          ...slots.queryFields(),
           // A listing is the whole matching set for one filter, and two
           // filters are two different sets: without this, Apollo would hand
           // the label-filtered listing back for the unfiltered one.
           issues: { keyArgs: ["filter"] },
           prs: { keyArgs: ["filter", "allRefs"] },
-          features: { keyArgs: [] },
-          feature: { keyArgs: ["slug"] },
         },
       },
     },

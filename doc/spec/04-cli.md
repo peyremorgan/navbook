@@ -70,8 +70,7 @@ resolved by precedence, and the refusal MUST name the extension that was
 skipped: a tree where the same word means two things depending on load order
 is worse than one where it means nothing.
 
-Extensions are the subject of *Plugins* below, which is reserved: the
-reference implementation does not yet let one add to its command tree.
+Extensions are the subject of the next section.
 
 ### Setup
 
@@ -110,19 +109,7 @@ reference implementation does not yet let one add to its command tree.
   everything it may have installed), with the same confirm-or-`--yes`
   behavior.
 
-### Plugins — `nav plugin <verb>` (reserved)
-
-> **Reserved.** This section specifies a surface the reference implementation
-> does not yet provide: `nav plugin` is not one of its commands, and it loads
-> no plugins. What [02 §2.12](02-data-model.md) reserves — the namespaces and
-> the `plugins` declaration — *is* in force, and a tool must already preserve
-> data it finds there. This section describes how a machine comes to have a
-> plugin, and is the contract the implementation will be held to when it does;
-> the performance requirement below binds from then, since until a plugin can
-> be installed there is nothing to measure it on. Two of its rules bind already,
-> because they constrain a tool that has no plugins at all: a tool MUST NOT
-> fetch or execute code because a repository's marker names it, and MUST NOT
-> use the `nav-` prefix for anything else.
+### Plugins — `nav plugin <verb>`
 
 A **plugin** is how an extension ([02 §2.12](02-data-model.md)) reaches this
 CLI. The format names extensions and says where their data may live; this
@@ -619,7 +606,7 @@ a house style.
 - No automatic archiving, renumbering, or "cleanup" — every mutation is an
   explicit command.
 - No plugin code loaded for a command whose declaration does not name it
-  (§4.3, *Plugins*, reserved), and nothing installed on a repository's say-so.
+  (§4.3), and nothing installed on a repository's say-so.
 
 ## 4.5 Git hooks
 

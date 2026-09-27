@@ -78,7 +78,6 @@ describe("toIssueQuery and toPrQuery", () => {
           assignees: ["a@x.invalid"],
           authors: ["b@x.invalid"],
           milestones: ["v1"],
-          features: ["auth"],
           deadline: ["OVERDUE", "NONE"],
           text: ["crash"],
         },
@@ -90,13 +89,15 @@ describe("toIssueQuery and toPrQuery", () => {
         assignees: ["a@x.invalid"],
         authors: ["b@x.invalid"],
         milestones: ["v1"],
-        features: ["auth"],
         reviewers: [],
         reviews: [],
         awaiting: [],
         deadline: ["overdue", "none"],
         today: TODAY,
         text: ["crash"],
+        // No plugin terms: the API's filter is the schema's fields, and a
+        // plugin adds its own rather than smuggling one through these.
+        ext: {},
       },
     );
   });
@@ -110,7 +111,6 @@ describe("toIssueQuery and toPrQuery", () => {
           assignees: ["a@x.invalid"],
           authors: ["b@x.invalid"],
           milestones: ["v1"],
-          features: ["auth"],
           reviewers: ["c@x.invalid"],
           reviews: ["CHANGES_REQUESTED", "PENDING"],
           awaiting: ["d@x.invalid"],
@@ -124,13 +124,13 @@ describe("toIssueQuery and toPrQuery", () => {
         assignees: ["a@x.invalid"],
         authors: ["b@x.invalid"],
         milestones: ["v1"],
-        features: ["auth"],
         reviewers: ["c@x.invalid"],
         reviews: ["changes-requested", "pending"],
         awaiting: ["d@x.invalid"],
         deadline: [],
         today: TODAY,
         text: ["crash"],
+        ext: {},
       },
     );
   });
@@ -146,6 +146,12 @@ describe("toIssueQuery and toPrQuery", () => {
     );
     assert.deepEqual([issue.reviewers, issue.reviews, issue.awaiting], [[], [], []]);
     assert.deepEqual(toPrQuery({ deadline: ["OVERDUE"] } as never, TODAY).deadline, []);
+  });
+
+  it("carries the terms plugins read out of their own fields, on either noun", () => {
+    const ext = { features: ["auth"] };
+    assert.deepEqual(toIssueQuery({ labels: ["bug"] }, TODAY, ext).ext, ext);
+    assert.deepEqual(toPrQuery(null, TODAY, ext).ext, ext);
   });
 
   it("leaves an unmentioned key empty, which filters by none of its values", () => {

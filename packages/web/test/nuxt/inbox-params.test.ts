@@ -7,7 +7,8 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, it } from "vitest";
+import { afterEach, beforeEach, describe, it } from "vitest";
+import { registerInboxGrouping, resetInboxGroupings } from "../../app/utils/inbox";
 import {
   defaultInboxParams,
   type InboxParams,
@@ -15,12 +16,31 @@ import {
   queryToInboxParams,
 } from "../../app/utils/inbox-params";
 
+/**
+ * A grouping standing in for a plugin's.
+ *
+ * This page owns `view`, `kind`, `status`, `sort` and `q`, and nothing else —
+ * a group is a layer's, and the parameter behind it appears in the URL only
+ * because one registered it (spec 02 §2.12). `values` and `matches` are never
+ * reached from here; what is under test is the address bar.
+ */
+const TOPICS = {
+  key: "topic",
+  label: "Topic",
+  icon: "i-lucide-tag",
+  values: () => [],
+  matches: () => false,
+};
+
+beforeEach(() => registerInboxGrouping(TOPICS));
+afterEach(() => resetInboxGroupings());
+
 describe("defaultInboxParams", () => {
   it("is what a URL with none of our parameters means", () => {
     assert.deepEqual(defaultInboxParams(), {
       view: "everything",
       kind: "any",
-      feature: null,
+      ext: {},
       finished: false,
       // Priority, unlike the listings: this page answers "what next", which is
       // the question a rank was written down to answer (spec 02 §2.5).
@@ -41,7 +61,7 @@ describe("queryToInboxParams", () => {
       queryToInboxParams({
         view: "reviews",
         kind: "pr",
-        feature: "authentication",
+        topic: "authentication",
         status: "all",
         sort: "newest",
         q: "deadline",
@@ -49,7 +69,7 @@ describe("queryToInboxParams", () => {
       {
         view: "reviews",
         kind: "pr",
-        feature: "authentication",
+        ext: { topic: "authentication" },
         finished: true,
         sort: "newest",
         text: "deadline",
@@ -70,23 +90,27 @@ describe("queryToInboxParams", () => {
     assert.equal(params.finished, true);
   });
 
-  it("carries a slug through as written, since it is not one of our words", () => {
-    // Folding it here would make the round trip lossy, and the rail would
-    // stop recognising the entry it had just written. `sameFeature` is where
-    // the case is forgiven instead.
-    assert.equal(queryToInboxParams({ feature: "Authentication" }).feature, "Authentication");
+  it("carries a group's value through as written, since it is not one of our words", () => {
+    // Folding it here would make the round trip lossy, and the rail would stop
+    // recognising the entry it had just written. The group's own `matches` is
+    // where the case is forgiven instead.
+    assert.equal(queryToInboxParams({ topic: "Authentication" }).ext.topic, "Authentication");
+  });
+
+  it("ignores a parameter no group registered", () => {
+    assert.deepEqual(queryToInboxParams({ nosuch: "x" }), defaultInboxParams());
   });
 
   it("falls back to the default for a word it does not know", () => {
-    const params = queryToInboxParams({ view: "mine", kind: "feature", status: "open" });
+    const params = queryToInboxParams({ view: "mine", kind: "topic", status: "open" });
     assert.equal(params.view, "everything");
     assert.equal(params.kind, "any");
     assert.equal(params.finished, false);
   });
 
   it("reads a blank parameter as an absent one", () => {
-    assert.deepEqual(queryToInboxParams({ view: "", feature: "  ", q: "" }), defaultInboxParams());
-    assert.deepEqual(queryToInboxParams({ view: null, feature: undefined }), defaultInboxParams());
+    assert.deepEqual(queryToInboxParams({ view: "", topic: "  ", q: "" }), defaultInboxParams());
+    assert.deepEqual(queryToInboxParams({ view: null, topic: undefined }), defaultInboxParams());
   });
 
   it("splits and rejoins the search box, as the listings do", () => {
@@ -118,28 +142,35 @@ describe("queryToInboxParams", () => {
 describe("inboxParamsToQuery", () => {
   const base = { sort: "priority" as const };
   const cases: InboxParams[] = [
-    { view: "everything", kind: "any", feature: null, finished: false, text: "", ...base },
+    { view: "everything", kind: "any", ext: {}, finished: false, text: "", ...base },
     {
       view: "assigned",
       kind: "issue",
-      feature: "billing",
+      ext: { topic: "billing" },
       finished: true,
       text: "deadline",
       ...base,
     },
-    { view: "authored", kind: "pr", feature: null, finished: false, text: "", ...base },
-    { view: "reviews", kind: "any", feature: "auth", finished: true, text: '"two words"', ...base },
-    // A slug nobody lowercased, which has to come back exactly as it went in.
+    { view: "authored", kind: "pr", ext: {}, finished: false, text: "", ...base },
+    {
+      view: "reviews",
+      kind: "any",
+      ext: { topic: "auth" },
+      finished: true,
+      text: '"two words"',
+      ...base,
+    },
+    // A value nobody lowercased, which has to come back exactly as it went in.
     {
       view: "everything",
       kind: "any",
-      feature: "Authentication",
+      ext: { topic: "Authentication" },
       finished: false,
       text: "",
       ...base,
     },
-    { view: "everything", kind: "any", feature: null, finished: false, text: "", sort: "deadline" },
-    { view: "everything", kind: "any", feature: null, finished: false, text: "", sort: "newest" },
+    { view: "everything", kind: "any", ext: {}, finished: false, text: "", sort: "deadline" },
+    { view: "everything", kind: "any", ext: {}, finished: false, text: "", sort: "newest" },
   ];
 
   it("round-trips every combination", () => {
@@ -153,7 +184,7 @@ describe("inboxParamsToQuery", () => {
       inboxParamsToQuery({
         view: "reviews",
         kind: "any",
-        feature: null,
+        ext: {},
         finished: false,
         sort: "priority",
         text: "",
@@ -167,7 +198,7 @@ describe("inboxParamsToQuery", () => {
       inboxParamsToQuery({
         view: "everything",
         kind: "any",
-        feature: null,
+        ext: {},
         finished: false,
         sort: "newest",
         text: "",
@@ -182,8 +213,8 @@ describe("inboxParamsToQuery", () => {
     });
   });
 
-  it("drops a feature that is present but empty", () => {
-    assert.deepEqual(inboxParamsToQuery({ ...defaultInboxParams(), feature: "" }), {});
+  it("drops a group's value that is present but empty", () => {
+    assert.deepEqual(inboxParamsToQuery({ ...defaultInboxParams(), ext: { topic: "" } }), {});
   });
 
   it("is stable: serialising twice changes nothing", () => {

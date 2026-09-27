@@ -224,9 +224,27 @@ Three mutations have a shape worth knowing:
   in a repository with a clean filter, end-of-line conversion or SHA-256
   objects. Hand it back unchanged; nothing else about it is a contract.
 
+### Plugins
+
+The schema is extended by plugins ([`doc/plugins.md`](../../doc/plugins.md)).
+Every package the served clone declares in `navbook.json` must be installed
+beside `nav-server`, or the server refuses to start and says which — a browser
+user would otherwise meet an absence with nothing to explain it.
+`NAVBOOK_PLUGIN_PATH` loads one that is being developed without declaring it.
+A plugin's own settings come from `NAV_SERVER_<SHORT>_*` variables, and a
+required one that is missing is refused at startup like the server's own.
+
+A plugin adds types and fields to the schema, runs long-lived services — started
+before the port opens, stopped before the clone is released — and hears every
+mutation once it has committed, with whether the push went through. `Entity.ext` carries what each
+loaded plugin says about an entity, under its short name: an empty object on a
+server with none, so a client can read `ext.kb?.features` without checking.
+
 ### Features
 
-`Feature` and `Spec` project the `specs/` tree of spec 02 §2.11: an identity
+Served by the knowledge-base plugin, `@navbook/plugin-kb`, and absent from the
+schema without it. `Feature` and `Spec` project the `specs/` tree of spec 02
+§2.11: an identity
 card, the documents beside it, and — derived rather than stored — the issues
 and pull requests that name the feature. `Feature.commits` is the one field
 that reads history instead of the tree: it reports commits that changed the

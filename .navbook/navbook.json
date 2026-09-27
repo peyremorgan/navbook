@@ -3,5 +3,8 @@
   "review": {
     "selfReview": true,
     "minApprovals": 1
+  },
+  "plugins": {
+    "@navbook/plugin-kb": {}
   }
 }

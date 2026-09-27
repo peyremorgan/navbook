@@ -1,8 +1,10 @@
 spec-version: 1
-description: D15 rejects a plugins declaration that is a list of names rather than an object
+description: D15 names each declared plugin whose settings are not an object, and keeps the one that is
 init: {from: tree, date: 2026-09-02T12:00:00Z}
 run: {command: [doctor, --json]}
 expect:
   exit: 2
   diagnostics:
+    - {check: D15, level: error, path: .navbook/navbook.json}
+    - {check: D15, level: error, path: .navbook/navbook.json}
     - {check: D15, level: error, path: .navbook/navbook.json}

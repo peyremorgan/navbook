@@ -113,15 +113,24 @@ export function toGqlVerdict(value: unknown): Verdict | null {
  * over the union would compile too, but a key the union has is a key it could
  * read on the wrong noun — the bug the two inputs exist to rule out.
  */
-export function toIssueQuery(filter: IssueFilter | null | undefined, today: string): Query {
-  const query = sharedQuery(filter, today);
+export function toIssueQuery(
+  filter: IssueFilter | null | undefined,
+  today: string,
+  /** Terms plugins read out of the fields their own SDL added (spec 02 §2.12). */
+  ext: Record<string, string[]> = {},
+): Query {
+  const query = sharedQuery(filter, today, ext);
   if (filter?.deadline) query.deadline = filter.deadline.map((state) => DEADLINE_IN[state]);
   return query;
 }
 
 /** The pull request half of `toIssueQuery`. */
-export function toPrQuery(filter: PrFilter | null | undefined, today: string): Query {
-  const query = sharedQuery(filter, today);
+export function toPrQuery(
+  filter: PrFilter | null | undefined,
+  today: string,
+  ext: Record<string, string[]> = {},
+): Query {
+  const query = sharedQuery(filter, today, ext);
   if (filter?.reviewers) query.reviewers = [...filter.reviewers];
   if (filter?.reviews) query.reviews = filter.reviews.map((decision) => DECISION_IN[decision]);
   if (filter?.awaiting) query.awaiting = [...filter.awaiting];
@@ -129,16 +138,20 @@ export function toPrQuery(filter: PrFilter | null | undefined, today: string): Q
 }
 
 /** The keys both nouns have, which is most of them. */
-function sharedQuery(filter: IssueFilter | PrFilter | null | undefined, today: string): Query {
+function sharedQuery(
+  filter: IssueFilter | PrFilter | null | undefined,
+  today: string,
+  ext: Record<string, string[]>,
+): Query {
   const query = emptyQuery();
   query.today = today;
+  query.ext = ext;
   if (!filter) return query;
   if (filter.status) query.status = filter.status.map(toCoreStatus);
   if (filter.labels) query.labels = [...filter.labels];
   if (filter.assignees) query.assignees = [...filter.assignees];
   if (filter.authors) query.authors = [...filter.authors];
   if (filter.milestones) query.milestones = [...filter.milestones];
-  if (filter.features) query.features = [...filter.features];
   if (filter.text) query.text = [...filter.text];
   return query;
 }

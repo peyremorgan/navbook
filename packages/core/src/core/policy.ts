@@ -1,9 +1,8 @@
 /**
- * The policies a marker declares — spec 02 §2.10 — and the extensions it
- * names (§2.12).
+ * The policies a marker declares — spec 02 §2.10.
  *
- * The two policies are the things in `navbook.json` a tool reads rather than
- * merely finds. The review policy says how the reviews of §2.7 are counted: whether a
+ * These are the two things in `navbook.json` a tool reads rather than merely
+ * finds. The review policy says how the reviews of §2.7 are counted: whether a
  * pull request's own author is among its reviewers, and how many approvals a
  * decision of `approved` takes. The merge policy says what shape a merge
  * leaves in the target branch's history.
@@ -220,89 +219,3 @@ const MERGE_METHOD_SUMMARIES: Record<MergeMethod, string> = {
   "rebase-no-ff": "rebase, then a merge commit",
   squash: "squash into a single commit",
 };
-
-/* ------------------------------------------------------ plugin declaration */
-
-/**
- * What a repository says its tree contains — spec 02 §2.12.
- *
- * Data about the tree, never instruction to a tool: a name here is read to
- * report what is missing, and is never permission to fetch or execute
- * anything. That rule lives in the tool; what lives here is the shape.
- */
-export interface PluginDeclaration {
-  /**
-   * Each extension's name for itself, and the settings it carries.
-   *
-   * A null-prototype object, so that only a declared name is found in it:
-   * `plugins.toString` is undefined, and a plugin named `__proto__` is an
-   * entry like any other.
-   */
-  plugins: Record<string, Record<string, unknown>>;
-}
-
-/** A marker read for its plugin declaration: what it names, and what was wrong with it. */
-export interface PluginReading {
-  /** The declared extensions, with any entry that is not usable left out. */
-  declaration: PluginDeclaration;
-  /** True when the marker carries a usable `plugins` object. */
-  declared: boolean;
-  /** One message per fault, in key order; empty when there is nothing wrong. */
-  problems: string[];
-}
-
-/**
- * Read the plugin declaration out of a marker's text.
- *
- * The third of the marker's readings, and the mirror image of the other two:
- * same fallbacks, same refusal to throw, same faults returned to be reported
- * under D15. §2.12 has a malformed declaration read "exactly as a malformed
- * review policy is", whose keys fall back independently (§2.10), so an entry
- * falls back on its own to not being declared: one mistyped entry costs that
- * entry and no other.
- *
- * Only the shape is checked. The key is the extension's own name for itself —
- * an npm package name here — and §2.12 leaves its grammar to whoever names
- * extensions, so it is not held to the short-name grammar of a namespace; it
- * must only be a name, which the empty string is not. What the settings hold
- * is the extension's business, checked under its own `X-<short>-<n>` codes
- * (spec 04 §4.3) if at all.
- *
- * Every call returns objects of its own, so a caller that adds to the
- * declaration it was handed changes no other reading.
- */
-export function parsePluginDeclaration(markerText: string | undefined): PluginReading {
-  if (markerText === undefined) return nothingDeclared();
-
-  let marker: unknown;
-  try {
-    marker = JSON.parse(markerText);
-  } catch {
-    return nothingDeclared(["is not valid JSON"]);
-  }
-  if (!isPlainObject(marker)) return nothingDeclared(["is not a JSON object"]);
-
-  const declared = marker.plugins;
-  if (declared === undefined) return nothingDeclared();
-  if (!isPlainObject(declared)) return nothingDeclared(["'plugins' must be an object"]);
-
-  const problems: string[] = [];
-  const plugins = emptyPlugins();
-  for (const [name, settings] of Object.entries(declared)) {
-    // The name is JSON-quoted, since a package name carries the `/` and `.` a
-    // key path would, and any quote of its own comes out escaped.
-    if (name === "") problems.push(`'plugins' entry "" must name an extension`);
-    else if (!isPlainObject(settings)) {
-      problems.push(`'plugins' entry ${JSON.stringify(name)} must be an object`);
-    } else plugins[name] = settings;
-  }
-  return { declaration: { plugins }, declared: true, problems };
-}
-
-function nothingDeclared(problems: string[] = []): PluginReading {
-  return { declaration: { plugins: emptyPlugins() }, declared: false, problems };
-}
-
-function emptyPlugins(): Record<string, Record<string, unknown>> {
-  return Object.create(null) as Record<string, Record<string, unknown>>;
-}

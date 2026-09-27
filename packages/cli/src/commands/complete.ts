@@ -6,27 +6,54 @@
  * dialects is what makes ID and slug completion possible at all.
  */
 
-import { allEntities, type EntityKind, loadRepo, queryTermsFor } from "@navbook/core";
+import {
+  allEntities,
+  type CommandSpec,
+  type EntityKind,
+  loadRepo,
+  queryTermsFor,
+} from "@navbook/core";
 import type { Ctx } from "../context.ts";
-import { featureSlugs } from "./feature.ts";
+import type { LoadedPlugin } from "../plugins/resolve.ts";
+import type { PluginRuntime } from "../plugins/runtime.ts";
 
-const ROOT_COMMANDS = ["issue", "pr", "feature", "init", "id", "doctor", "install", "uninstall"];
+const ROOT_COMMANDS = ["issue", "pr", "plugin", "init", "id", "doctor", "install", "uninstall"];
+const PLUGIN_VERBS = ["install", "remove", "update", "list"];
 const SHARED_VERBS = ["open", "list", "show", "edit", "comment", "close", "reopen", "delete"];
 const ISSUE_VERBS = [...SHARED_VERBS, "link", "unlink"];
 const PR_VERBS = [...SHARED_VERBS, "update", "request", "review", "merge"];
-const FEATURE_VERBS = ["open", "list", "show", "edit", "spec"];
-const SPEC_VERBS = ["add", "edit", "list"];
 
-export function cmdComplete(ctx: Ctx, words: string[]): void {
-  for (const candidate of completionsFor(ctx, words)) ctx.stdout.write(`${candidate}\n`);
+export async function cmdComplete(
+  ctx: Ctx,
+  words: string[],
+  plugins?: PluginRuntime,
+): Promise<void> {
+  for (const candidate of await completionsFor(ctx, words, plugins)) {
+    ctx.stdout.write(`${candidate}\n`);
+  }
 }
 
-function completionsFor(ctx: Ctx, words: string[]): string[] {
+async function completionsFor(
+  ctx: Ctx,
+  words: string[],
+  plugins?: PluginRuntime,
+): Promise<string[]> {
+  // Plugin nouns and verbs come from manifests, so completion costs no import
+  // however many plugins are installed (spec 04 §4.3).
+  const pluginNouns = [...(plugins?.commands.nouns.keys() ?? [])];
+  const rootCommands = [...ROOT_COMMANDS, ...pluginNouns];
+
   const [noun, verb] = words;
-  if (noun === undefined) return ROOT_COMMANDS;
-  if (noun === "feature") return featureCompletions(ctx, words);
+  if (noun === undefined) return rootCommands;
+  if (noun === "plugin") return verb === undefined ? PLUGIN_VERBS : [];
+  if (plugins?.commands.nouns.has(noun)) {
+    const owner = plugins.commands.nouns.get(noun);
+    return owner === undefined
+      ? []
+      : pluginCompletions(ctx, plugins, owner.plugin, owner.spec, words.slice(1));
+  }
   if (noun !== "issue" && noun !== "pr") {
-    return words.length === 1 ? ROOT_COMMANDS : [];
+    return words.length === 1 ? rootCommands : [];
   }
 
   const kind: EntityKind = noun === "issue" ? "issue" : "pr";
@@ -35,9 +62,16 @@ function completionsFor(ctx: Ctx, words: string[]): string[] {
   if (!verbs.includes(verb)) return [];
 
   if (verb === "list") {
-    // Only the terms this noun has (spec 04 §4.3), offered only where they work.
-    const keys = queryTermsFor(kind).map((term) => `${term.key}:`);
-    return [...keys, ...labels(ctx), ...features(ctx)];
+    // Only the terms this noun has (spec 04 §4.3), offered only where they
+    // work; a plugin's come from its manifest. A plugin's *values* cost an
+    // import, and only for a verb whose manifest declared `completions` — so
+    // completing `nav pr list` loads nothing when no plugin contributes there.
+    return [
+      ...queryTermsFor(kind).map((term) => `${term.key}:`),
+      ...(plugins?.queryKeys(kind) ?? []).map((key) => `${key.key}:`),
+      ...(await pluginListValues(ctx, kind, plugins)),
+      ...labels(ctx),
+    ];
   }
   if (verb === "open") return [];
   // Every other verb takes an ID as its first argument.
@@ -45,41 +79,51 @@ function completionsFor(ctx: Ctx, words: string[]): string[] {
 }
 
 /**
- * `nav feature …`, whose second word may be a verb or the `spec` group.
+ * Verbs a plugin's noun offers, walked down whatever has been typed so far.
  *
- * Slugs are offered wherever one is expected, and document names once the
- * feature is known — which is the whole reason completion is written here
- * rather than in three shell dialects.
+ * Declarations only. A plugin's *values* — the slugs and ids its arguments
+ * take — need the plugin itself, and are offered through a completer it
+ * registers; those cost an import and are asked for only once the noun and
+ * the verb are on the line.
  */
-function featureCompletions(ctx: Ctx, words: string[]): string[] {
-  const [, verb, third] = words;
-  if (verb === undefined) return FEATURE_VERBS;
+async function pluginCompletions(
+  ctx: Ctx,
+  plugins: PluginRuntime,
+  plugin: LoadedPlugin,
+  spec: CommandSpec,
+  rest: readonly string[],
+): Promise<string[]> {
+  const children = spec.commands ?? [];
+  const [next, ...deeper] = rest;
 
-  if (verb === "spec") {
-    if (third === undefined) return SPEC_VERBS;
-    if (!SPEC_VERBS.includes(third)) return [];
-    if (words.length === 3) return featureSlugs(ctx);
-    // `spec edit <slug> <file>` is the one place a document name is wanted.
-    if (third === "edit" && words.length === 4) return specNames(ctx, words[3] as string);
-    return [];
+  // Still walking down the verb tree: the names come from the manifest, so
+  // nothing is loaded to offer them.
+  if (children.length > 0) {
+    if (next === undefined) return children.map((child) => child.name);
+    const child = children.find((candidate) => candidate.name === next);
+    return child === undefined ? [] : pluginCompletions(ctx, plugins, plugin, child, deeper);
   }
 
-  if (!FEATURE_VERBS.includes(verb)) return [];
-  if (verb === "list" || verb === "open") return [];
-  return words.length === 2 ? featureSlugs(ctx) : [];
+  // At a leaf. The argument being typed is the one at this position, and it
+  // offers values only if the manifest named a completer for it — which is
+  // what makes asking the plugin a declared cost rather than a surprise.
+  const argument = (spec.arguments ?? [])[rest.length];
+  if (argument?.complete === undefined) return [];
+  return plugins.completions(ctx, plugin, argument.complete, [...rest]);
 }
 
-function specNames(ctx: Ctx, slug: string): string[] {
-  try {
-    const feature = loadRepo(ctx, { comments: "none" }).featureBySlug.get(slug);
-    return feature ? feature.specs.map((spec) => spec.fileName) : [];
-  } catch {
-    return [];
+/** Values plugins offer for this listing's terms; loads their CLI entries. */
+async function pluginListValues(
+  ctx: Ctx,
+  kind: EntityKind,
+  plugins?: PluginRuntime,
+): Promise<string[]> {
+  if (plugins === undefined) return [];
+  const out: string[] = [];
+  for (const handlers of await plugins.handlersFor(ctx, `${kind} list`)) {
+    out.push(...(handlers.listCompletions?.() ?? []));
   }
-}
-
-function features(ctx: Ctx): string[] {
-  return featureSlugs(ctx).map((slug) => `feature:${slug}`);
+  return out;
 }
 
 /**

@@ -7,7 +7,7 @@
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
-import { FEATURES_QUERY, ISSUES_QUERY } from "~/graphql/queries";
+import { ISSUES_QUERY } from "~/graphql/queries";
 import { distinctValues } from "~/utils/entities";
 import { normalizeList, normalizeOptional, parseRankInput } from "~/utils/patch";
 import { pageTitle } from "~/utils/title";
@@ -25,22 +25,17 @@ const assignees = ref<string[]>([]);
 const milestone = ref("");
 const rank = ref("");
 const deadline = ref("");
-/** Pre-filled when the page was reached from a feature's "file an issue". */
-const features = ref<string[]>(featureFromQuery(route.query.feature));
 /** Pre-filled when the page was reached from an issue's "add subtask". */
 const parent = ref(String(route.query.parent ?? ""));
 
-/** A `?feature=` parameter, however the router spelled it. */
-function featureFromQuery(raw: unknown): string[] {
-  const list = Array.isArray(raw) ? raw : [raw];
-  return list.filter((item): item is string => typeof item === "string" && item.trim() !== "");
-}
+// What plugin fields have been filled in, merged into the mutation's input.
+// One object rather than a ref per field, because the host cannot know what a
+// plugin will add and a plugin should not have to ask for state of its own.
+const slots = useNavbookSlots();
+const extra = ref<Record<string, unknown>>({});
 
 /* For labels, the only source of suggestions there is; see the detail page. */
 const { result: listing } = useQuery(ISSUES_QUERY, { filter: {} }, { fetchPolicy: "cache-first" });
-const { result: featureList } = useQuery(FEATURES_QUERY, undefined, {
-  fetchPolicy: "cache-first",
-});
 /* Asked of the server, which knows who is around; the listing does not. */
 const people = usePeople();
 const known = computed(() => {
@@ -48,8 +43,6 @@ const known = computed(() => {
   return {
     labels: distinctValues(issues, (item) => item.labels),
     milestones: distinctValues(issues, (item) => (item.milestone ? [item.milestone] : [])),
-    // A real registry, unlike the labels above.
-    features: (featureList.value?.features ?? []).map((feature) => feature.slug),
   };
 });
 
@@ -69,10 +62,14 @@ async function submit(): Promise<void> {
     labels: normalizeList(labels.value),
     assignees: normalizeList(assignees.value),
     milestone: normalizeOptional(milestone.value),
-    features: normalizeList(features.value),
     rank: placed,
     deadline: normalizeOptional(deadline.value),
     parent: normalizeOptional(parent.value),
+    // A plugin's fields last, and cast because they are fields its own SDL
+    // added: the generated input type describes the core schema and cannot
+    // know about them. Last also means a plugin cannot quietly replace one of
+    // the format's own values with its own.
+    ...(extra.value as Record<string, unknown>),
   });
   if (payload) await navigateTo(`/issues/${payload.issue.id}`);
 }
@@ -81,6 +78,15 @@ async function submit(): Promise<void> {
 <template>
   <form class="mx-auto max-w-3xl space-y-5" data-testid="new-issue-form" @submit.prevent="submit">
     <h1 class="text-xl font-semibold">File an issue</h1>
+
+    <!-- Fields plugin layers registered, before the built-in ones they know nothing about. -->
+    <component
+      :is="field.component"
+      v-for="(field, index) in slots.formFields('issue-new')"
+      :key="`field-${index}`"
+      v-model:extra="extra"
+      :query="route.query"
+    />
 
     <UFormField label="Title" required>
       <UInput
@@ -127,15 +133,6 @@ async function submit(): Promise<void> {
       </UFormField>
       <UFormField label="Deadline" description="The day the work is wanted.">
         <UInput v-model="deadline" type="date" class="w-full" data-testid="new-deadline" />
-      </UFormField>
-      <UFormField label="Features" description="The concepts this work belongs to.">
-        <CreatableSelect
-          v-model="features"
-          :suggestions="known.features"
-          placeholder="Attach to a feature"
-          icon="i-lucide-layers"
-          testid="new-features"
-        />
       </UFormField>
       <UFormField label="Parent" description="File it under another issue, by id or prefix.">
         <UInput v-model="parent" class="w-full" data-testid="new-parent" />

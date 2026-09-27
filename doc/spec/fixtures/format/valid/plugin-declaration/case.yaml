@@ -1,0 +1,5 @@
+spec-version: 1
+description: a well-formed plugin declaration parses with no diagnostics, though nothing it names is installed
+init: {from: tree, date: 2026-09-02T12:00:00Z}
+run: {command: [doctor, --json]}
+expect: {exit: 0, diagnostics: []}

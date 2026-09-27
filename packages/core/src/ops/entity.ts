@@ -102,7 +102,7 @@ export function sortEntities(entities: readonly EntityRecord[]): EntityRecord[] 
  * any day (spec 05 §5.4).
  */
 export function parseListQuery(ws: WsCtx, terms: readonly string[], kind: EntityKind): Query {
-  const query = parseQuery([...terms], kind);
+  const query = parseQuery([...terms], kind, ws.ext);
   if (isQueryError(query)) wsFail("invalid-input", query.message);
   if (query.status.length === 0) query.status = defaultStatuses();
   query.today = calendarDateOf(ws.now());
@@ -129,12 +129,14 @@ export function listEntities(
 ): EntityRecord[] {
   if (opts.entities) {
     const { policy } = readReviewPolicy(ws);
-    return sortEntities(opts.entities.filter((entity) => matchesQuery(query, entity, policy)));
+    return sortEntities(
+      opts.entities.filter((entity) => matchesQuery(query, entity, policy, ws.ext)),
+    );
   }
   const repo = loadRepoForQuery(ws, query, kind);
   const { policy } = repo.reviewPolicy;
   return sortEntities(
-    selectEntities(repo, kind).filter((entity) => matchesQuery(query, entity, policy)),
+    selectEntities(repo, kind).filter((entity) => matchesQuery(query, entity, policy, ws.ext)),
   );
 }
 

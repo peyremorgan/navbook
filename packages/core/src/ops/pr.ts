@@ -354,7 +354,7 @@ export function listPrsAcrossRefs(ws: WsCtx, query: Query): FoundPr[] {
   // pull request is counted by how this checkout counts (spec 02 §2.10).
   const { policy } = readReviewPolicy(ws);
   const found = dropSettledOnTarget(ws, listBranchRefs(ws.repoRoot), scanRefsForOpenPrs(ws));
-  return found.filter((entry) => matchesQuery(query, entry.entity, policy));
+  return found.filter((entry) => matchesQuery(query, entry.entity, policy, ws.ext));
 }
 
 /**
@@ -397,7 +397,11 @@ export function scanRefsForOpenPrs(ws: WsCtx): FoundPr[] {
         if (content !== undefined) files.set(`${PR_OPEN_DIR}/${dirName}/${path}`, content);
       }
 
-      const entity = parseTree(files).prs[0];
+      // A pull request read out of another branch is parsed with this
+      // checkout's extensions, as it is counted by this checkout's policy: the
+      // alternative is asking what that branch declared, which is a second
+      // answer to a question that has one (spec 02 §2.10).
+      const entity = parseTree(files, { ext: ws.ext }).prs[0];
       if (!entity) continue;
 
       const existing = byId.get(entity.id);

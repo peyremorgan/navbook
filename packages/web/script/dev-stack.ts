@@ -26,6 +26,24 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = join(HERE, "..");
 const SERVER_ENTRY = join(PACKAGE_ROOT, "..", "server", "src", "main.ts");
 
+/**
+ * The knowledge base, for the API this stack starts.
+ *
+ * The fixture repository has features in it, so the server has to have the
+ * plugin that defines them — exactly as the deployment it stands in for does,
+ * and as the end-to-end helper does. The client half is `NAVBOOK_WEB_PLUGINS`,
+ * which this package's `dev:stack` script sets; a plugin you are writing
+ * yourself goes on `NAVBOOK_PLUGIN_PATH` beside this one, since `process.env`
+ * is spread whole into both children.
+ */
+const KB_PLUGIN = join(PACKAGE_ROOT, "..", "plugin-kb");
+
+/** `NAVBOOK_PLUGIN_PATH` with this repository's own plugin on it. */
+function pluginPath(): string {
+  const given = process.env.NAVBOOK_PLUGIN_PATH;
+  return given === undefined || given === "" ? KB_PLUGIN : `${given}:${KB_PLUGIN}`;
+}
+
 /** Ports `public/config.json` names, so the defaults need no configuration. */
 const ISSUER_PORT = 9000;
 const API_PORT = 4000;
@@ -81,6 +99,7 @@ async function main(): Promise<void> {
     // server shells out to git and has to be able to find it.
     repoEnv = { ...process.env, ...fixture.env, PATH: process.env.PATH };
   }
+  repoEnv = { ...repoEnv, NAVBOOK_PLUGIN_PATH: pluginPath() };
 
   // One spelling of the host throughout. `public/config.json` says localhost,
   // and a token's `iss` claim is compared as a string, so the issuer has to
@@ -114,6 +133,9 @@ async function main(): Promise<void> {
 
   // The installed shim rather than a guess at where the module lives: pnpm's
   // store layout puts that somewhere with a hash in it.
+  // `process.env` is spread whole, which is what carries `NAVBOOK_WEB_PLUGINS`
+  // to the build — so developing a plugin's web half against this stack is a
+  // matter of naming it there and nothing else.
   const web = run("web", join(PACKAGE_ROOT, "node_modules", ".bin", "nuxi"), ["dev"], {
     ...process.env,
     NUXT_TELEMETRY_DISABLED: "1",

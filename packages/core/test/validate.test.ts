@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { NavTree } from "../src/core/tree.ts";
 import {
-  type Check,
+  type CheckId,
   checkRevisionsAppendOnly,
   checkTimestampSkew,
   type Diagnostic,
@@ -27,7 +27,7 @@ const comment = (extra = "", body = "Reproduced."): string =>
   `---\nauthor: bob@example.com\n${extra}---\n\n${body}\n`;
 
 const tree = (entries: Record<string, string>): NavTree => new Map(Object.entries(entries));
-const codes = (entries: Record<string, string>, opts: ValidateOptions = {}): Check[] =>
+const codes = (entries: Record<string, string>, opts: ValidateOptions = {}): CheckId[] =>
   validateTree(tree(entries), opts).map((d) => d.check);
 
 /** Validate, asking for the repairs a `--fix` run would plan. */
@@ -713,7 +713,7 @@ describe("D15 the marker", () => {
       diagnostics.map((d) => d.check),
       ["D15", "D15"],
     );
-    assert.match(String(diagnostics[0]?.message), /'plugins' entry "@navbook\/plugin-kb" must be/);
+    assert.match(String(diagnostics[0]?.message), /'plugins\.@navbook\/plugin-kb' must be/);
   });
 
   it("flags a fault in the plugins beside one in a policy, naming both", () => {

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "plugins": {
+    "@navbook/plugin-kb": {},
+    "@acme/navbook-plugin-reports": {
+      "retainDays": 30,
+      "branches": [
+        "main"
+      ]
+    }
+  }
+}

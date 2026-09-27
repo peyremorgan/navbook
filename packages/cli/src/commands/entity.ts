@@ -29,6 +29,7 @@ import {
   parentNode,
   parseListQuery,
   planEntityDelete,
+  type Repo,
   readAssignees,
   readDeadline,
   readLabels,
@@ -49,7 +50,7 @@ import { openInEditor } from "../editor.ts";
 import { fail } from "../errors.ts";
 import { askYesNo } from "../prompt.ts";
 import { renderDetail } from "../render/detail.ts";
-import { type Column, renderTable } from "../render/table.ts";
+import { type Column, renderTable, terminalWidth } from "../render/table.ts";
 import { parseSortOrder, sortListing } from "../sort.ts";
 import { composeFile } from "./compose.ts";
 import { warnPolicyProblems } from "./policy.ts";
@@ -165,12 +166,7 @@ function renderList(
     values.push((e) => readDeadline(e.fm) ?? "");
   }
   const rows = entities.map((entity) => values.map((value) => value(entity)));
-  return renderTable(columns, rows, { colors: ctx.colors, width: terminalWidth(ctx) });
-}
-
-function terminalWidth(ctx: Ctx): number | undefined {
-  const columns = ctx.stdout.columns;
-  return typeof columns === "number" && columns > 20 ? columns : undefined;
+  return renderTable(columns, rows, { colors: ctx.colors, width: terminalWidth(ctx.stdout) });
 }
 
 /* --------------------------------------------------------------------- show */
@@ -178,6 +174,10 @@ function terminalWidth(ctx: Ctx): number | undefined {
 export interface ShowOptions extends GlobalFlags {
   /** Levels of subtasks to render; issue-only, one by default. */
   depth?: number;
+  /** Extra JSON keys, merged into the `--json` object (spec 02 §2.12). */
+  jsonExtra?: (entity: EntityRecord) => Record<string, unknown>;
+  /** Sections plugins append after the built-in detail. */
+  sections?: ((entity: EntityRecord, repo: Repo) => string[])[];
 }
 
 export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOptions): void {
@@ -210,6 +210,10 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
                 },
               }
             : {}),
+          // A plugin's keys last, so one that names a key this format defines
+          // cannot quietly replace it — the format's answer is the one a
+          // reader of `nav --json` is entitled to (spec 04 §4.2).
+          ...(opts.jsonExtra?.(entity) ?? {}),
           comments: entity.comments.map((comment) => commentJson(ctx.navDir, comment)),
         }),
       )}\n`,
@@ -234,6 +238,13 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
         : { reviewPolicy: reading }),
     })}\n`,
   );
+  // After the detail rather than woven into it: a plugin's section is its own
+  // to lay out, and one that could interleave with the built-in fields would
+  // make the rendering depend on which plugins are installed.
+  for (const section of opts.sections ?? []) {
+    const lines = section(entity, repo);
+    if (lines.length > 0) ctx.stdout.write(`\n${lines.join("\n")}\n`);
+  }
 }
 
 /* --------------------------------------------------------------------- edit */

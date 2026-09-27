@@ -41,6 +41,7 @@ export function runDoctor(ws: WsCtx, opts: DoctorOptions = {}): DoctorReport {
   const repo = opts.staged ? stagedRepo(ws) : loadRepo(ws);
   const diagnostics = sortDiagnostics([
     ...validateRepo(repo, {
+      ext: ws.ext,
       commitMessages: recentCommitMessages(ws, opts),
       // Repairs are planned only for a run that can apply them, and a disputed
       // subtask is settled only where there is history to justify removing
@@ -125,7 +126,7 @@ function stagedRepo(ws: WsCtx): Repo {
     const content = stagedContent(ws.repoRoot, path);
     if (content !== null) files.set(path.slice(prefix.length), content);
   }
-  return parseTree(files);
+  return parseTree(files, { ext: ws.ext });
 }
 
 /**

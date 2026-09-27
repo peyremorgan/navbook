@@ -76,10 +76,11 @@ complete Navbook clients for reading.
 
 `specs/` holds **features** — the standing concepts work attaches to. A feature
 is a directory named after itself, holding a `feature.md` and however many
-specification documents describe it. Features are on their way to becoming a
-plugin ([`@navbook/plugin-kb`](doc/plugins.md)), because not every project
-wants them; the format defines them either way, so a tree using them is
-readable by any Navbook. An issue joins one by naming it:
+specification documents describe it. They come from
+[`@navbook/plugin-kb`](packages/plugin-kb/README.md), a plugin, because not
+every project wants them; the format defines them all the same, so a tree using
+them is readable by any Navbook and a `nav` without the plugin preserves them
+untouched. An issue joins one by naming it:
 
 ```console
 $ nav feature open "Authentication" --slug auth -m "Signing in, sessions, tokens."
@@ -207,6 +208,7 @@ usually enough. A full directory name works too.
 | `nav issue open <title> --feature <slug>` | File it against a feature. Repeatable; `nav issue list feature:auth` finds them again. |
 | `nav issue open <title> --rank 20 --deadline 2026-10-01` | Say where it sits in the queue and when it is wanted. `nav issue list --sort priority` reads them back; the web client reorders by dragging. |
 | `nav doctor [--fix]` | Check the tree against the specification. |
+| `nav plugin install` | Install the plugins this repository declares and this machine lacks. `nav plugin list/update/remove` manage them. |
 
 `--commit` on any mutating command wraps the change in a well-formed
 Conventional Commits `docs` commit (`docs(issue): close #bqlybac0`,
@@ -283,6 +285,14 @@ to exist first:
   reach the remote as; the person a commit is *for* comes from their own token
   and is recorded as `author:`.
 
+Plugins are the one exception to "edit `.env` and restart". A plugin's server
+half is installed beside `nav-server` and its web half is compiled into the
+bundle, so `NAVBOOK_PLUGINS` is a *build* argument: change it and run
+`docker compose build`. The repository still decides which of them it uses, in
+its own `navbook.json`, and the API refuses to start if it declares one the
+image does not carry — so a mismatch is found at deploy time rather than as a
+quiet absence in somebody's browser.
+
 The API container makes its own clone on the first start and keeps it in a
 volume. That volume is not a database — it can be deleted, and the next start
 fetches the repository again. Changing any value in `.env` is an edit and a
@@ -305,14 +315,14 @@ boot — are in [`packages/server`](packages/server/README.md#deploying-it) and
 
 Navbook's core is issues, pull requests and the format they live in. Anything a
 project might not want — test reports on a pull request, a bridge to a chat
-platform, the knowledge base above — is meant to be a plugin: an npm package
-the repository names in `navbook.json` and each machine installs.
+platform, the knowledge base above — is a plugin: an npm package the repository
+names in `navbook.json` and each machine installs.
 
-The format reserves where a plugin's data may live and how a repository
-declares one ([spec 02 §2.12](doc/spec/02-data-model.md)), and every Navbook
-already preserves data it finds there. The `nav plugin` commands that install
-them are specified ([spec 04 §4.3](doc/spec/04-cli.md), *Plugins*) and not
-yet built.
+```console
+$ nav plugin install          # install what this repository declares
+$ nav plugin list
+@navbook/plugin-kb  0.4.0  declared
+```
 
 A repository naming a plugin never causes anything to be fetched or run:
 declaring is one act, installing is another, and they are made by different
@@ -339,7 +349,7 @@ pnpm check         # lint and type-check
 pnpm bench         # the performance budget, on its own machine
 ```
 
-The repository is a pnpm workspace of four packages. `packages/core`
+The repository is a pnpm workspace of five packages. `packages/core`
 (`@navbook/core`) is the whole implementation — format logic, git plumbing,
 workspace I/O, and the operations behind each verb — and knows nothing about
 terminals. `packages/cli` (`@navbook/cli`) adds argument parsing, `$EDITOR`,
@@ -350,6 +360,11 @@ the same operations the CLI runs. `packages/web`
 it: a static single-page app that sends fields and lets the server compose the
 files, so nothing about the format ships to a browser
 ([spec 05 §5.2](doc/spec/05-implementation.md), [06 §6.3](doc/spec/06-future.md)).
+`packages/plugin-kb`
+([`@navbook/plugin-kb`](packages/plugin-kb/README.md)) is the knowledge base,
+and the first plugin: features, `specs/` and the `feature:` key are implemented
+there rather than in the core, and it is what proves the plugin surface is
+enough to build on — it uses every part of it.
 Development needs no build step outside the web client: a library's entry point
 is its TypeScript source, and Node runs it directly.
 

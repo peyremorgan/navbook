@@ -19,7 +19,7 @@
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
-import { FEATURES_QUERY, ISSUE_QUERY, ISSUES_QUERY } from "~/graphql/queries";
+import { ISSUE_QUERY, ISSUES_QUERY } from "~/graphql/queries";
 import { buildCommentTree, countComments } from "~/utils/comments";
 import { distinctValues, shortId } from "~/utils/entities";
 import { describeApiError, reparentConflict } from "~/utils/errors";
@@ -66,12 +66,7 @@ useHead({
  * a value that is not in it.
  */
 const { result: listing } = useQuery(ISSUES_QUERY, { filter: {} }, { fetchPolicy: "cache-first" });
-// Features are one exception: they are real directories, so their list is the
-// registry rather than a guess made from whatever the listing mentions.
-const { result: featureList } = useQuery(FEATURES_QUERY, undefined, {
-  fetchPolicy: "cache-first",
-});
-// People are the other, and a stronger one: a listing can only ever name
+// People are the exception, and a strong one: a listing can only ever name
 // somebody already written down somewhere, so the person nobody has assigned
 // anything to yet — the one you most need to pick — is exactly the one it
 // could never offer. The server reads them from its history and its tree.
@@ -82,10 +77,10 @@ const known = computed(() => {
   return {
     labels: distinctValues(issues, (item) => item.labels),
     milestones: distinctValues(issues, (item) => (item.milestone ? [item.milestone] : [])),
-    features: (featureList.value?.features ?? []).map((feature) => feature.slug),
   };
 });
 
+const slots = useNavbookSlots();
 const comments = computed(() => buildCommentTree(issue.value?.comments ?? []));
 const commentCount = computed(() => countComments(comments.value));
 const subtaskCount = computed(() => countSubtasks(issue.value?.subtasks ?? []));
@@ -97,7 +92,12 @@ const current = computed<EntityEdit>(() => ({
   labels: [...(issue.value?.labels ?? [])],
   assignees: [...(issue.value?.assignees ?? [])],
   milestone: issue.value?.milestone ?? null,
-  features: [...(issue.value?.features ?? [])],
+  // Values for the fields plugin layers added, read off `Entity.ext` by the
+  // layer that knows what it put there (spec 06 §6.3). Empty with no plugins
+  // loaded, and then every function over an edit ignores it.
+  ext: Object.fromEntries(
+    slots.entityFields().map((field) => [field.field, field.read(issue.value?.ext ?? {})]),
+  ),
   rank: issue.value?.rank ?? null,
   deadline: issue.value?.deadline ?? null,
 }));
@@ -385,16 +385,6 @@ async function unlink(child: string): Promise<void> {
             @save="(assignees: string[]) => save({ assignees })"
           />
           <LabelEditor
-            title="Features"
-            icon="i-lucide-layers"
-            testid="features"
-            link-to="/features/"
-            :values="shown.features"
-            :suggestions="known.features"
-            :save="edits.field('features')"
-            @save="(features: string[]) => save({ features })"
-          />
-          <LabelEditor
             title="Milestone"
             icon="i-lucide-flag"
             testid="milestone"
@@ -431,6 +421,23 @@ async function unlink(child: string): Promise<void> {
               <DueDate v-if="shown.deadline" :deadline="shown.deadline" />
             </template>
           </FieldEditor>
+
+          <!--
+            Whatever plugin layers registered for an issue, after the fields
+            this format defines and before the actions. A panel gets the entity
+            and whether a save is in flight, and emits `save` with a patch —
+            the same contract every editor above it has, so a plugin's panel
+            saves through the same guarded path (spec 06 §6.3).
+          -->
+          <component
+            :is="panel.component"
+            v-for="(panel, index) in slots.panels('issue')"
+            :key="`panel-${index}`"
+            :entity="shown"
+            :saving="edits.saving.value"
+            :field-save="edits.field('ext')"
+            @save="save"
+          />
 
           <section class="space-y-2 border-t border-default pt-4">
             <UButton

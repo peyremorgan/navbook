@@ -174,28 +174,6 @@ test("puts the rail in the address bar, and reads it back", async ({ signedIn, s
   await expect(signedIn.getByTestId("inbox-row-aaaa0001")).toBeVisible();
 });
 
-test("narrows to one feature, and offers one nothing carries so it can be dropped", async ({
-  signedIn,
-  stack,
-}) => {
-  await signedIn.goto(`${stack.appUrl}/inbox?feature=authentication`);
-  await expect(signedIn.getByTestId("inbox-row-aaaa0001")).toBeVisible();
-  await expect(signedIn.getByTestId("inbox-row-bbbb0002")).toHaveCount(0);
-  await expect(signedIn.getByTestId("inbox-feature-authentication")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-
-  // A slug the inbox does not hold is still shown, or there would be no
-  // control to take it off with.
-  await signedIn.goto(`${stack.appUrl}/inbox?feature=nothing-carries-this`);
-  await expect(signedIn.getByText("Nothing matches this view")).toBeVisible();
-  await expect(count(signedIn, "inbox-feature-nothing-carries-this")).toHaveText("0");
-  await signedIn.getByTestId("inbox-feature-any").click();
-  await expect(signedIn).not.toHaveURL(/feature=/);
-  await expect(signedIn.getByTestId("inbox-row-aaaa0001")).toBeVisible();
-});
-
 test("searches the same words the listings do", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/inbox?q=unreliable`);
   await expect(signedIn.getByTestId("inbox-row-aaaa0001")).toBeVisible();
@@ -308,14 +286,18 @@ test.describe("on a phone", () => {
 /**
  * The ids the inbox shows, in the order it shows them.
  *
- * The feature chips inside a row are `inbox-row-feature-…`, so they are
- * excluded rather than read as rows of their own.
+ * A row's id is eight hex characters, and anything else under `inbox-row-` is
+ * a badge a plugin layer put inside the row rather than a row of its own
+ * (`useNavbookSlots`). Matching the id rather than excluding each plugin by
+ * name keeps this locator true of a build with any set of them.
  */
 const inboxOrder = async (page: import("@playwright/test").Page): Promise<string[]> =>
   page
-    .locator("[data-testid^=inbox-row-]:not([data-testid^=inbox-row-feature-])")
+    .locator("[data-testid^=inbox-row-]")
     .evaluateAll((rows) =>
-      rows.map((row) => (row.getAttribute("data-testid") ?? "").replace("inbox-row-", "")),
+      rows
+        .map((row) => (row.getAttribute("data-testid") ?? "").replace("inbox-row-", ""))
+        .filter((id) => /^[0-9a-z]{8}$/.test(id)),
     );
 
 /**

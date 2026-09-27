@@ -27,7 +27,6 @@ export const FILTER_KEYS = [
   "assignee",
   "author",
   "milestone",
-  "feature",
   "reviewer",
   "deadline",
   "q",
@@ -47,13 +46,54 @@ export interface FilterState {
   assignees: string[];
   authors: string[];
   milestones: string[];
-  features: string[];
   /** Asked to review it; pull requests only (spec 02 §2.7). */
   reviewers: string[];
   /** Where it stands against its deadline; issues only (spec 02 §2.5). */
   deadline: DeadlineState[];
   /** The search box verbatim; `splitTerms` turns it into `text` terms. */
   text: string;
+  /**
+   * Values for parameters plugins added, by parameter name (spec 02 §2.12).
+   *
+   * Kept apart from the named keys rather than mixed in, so every function
+   * here stays total over the format's own filter and a plugin cannot shadow
+   * one of its keys by choosing the same name.
+   */
+  ext: Record<string, string[]>;
+}
+
+/**
+ * Filter parameters plugin layers registered.
+ *
+ * A module-level array rather than something read from the slot registry,
+ * because everything in this file is a pure function over a query string and
+ * has to stay unit-testable without mounting an app. A layer's Nuxt plugin
+ * registers into the slots, and the slots push here.
+ */
+export const FILTER_EXTENSIONS: { param: string; apiField: string }[] = [];
+
+/** Register a plugin's filter parameter. Called by the slot registry. */
+export function registerFilterParam(param: string, apiField: string): void {
+  if (!FILTER_EXTENSIONS.some((entry) => entry.param === param)) {
+    FILTER_EXTENSIONS.push({ param, apiField });
+  }
+}
+
+/** Forget every registered parameter. For tests. */
+export function resetFilterParams(): void {
+  FILTER_EXTENSIONS.length = 0;
+}
+
+/**
+ * Every parameter the filter owns, registered ones included.
+ *
+ * A function rather than a constant because a layer registers at boot, and a
+ * frozen list read at module load would have been read first. It matters for
+ * `withoutFilter`: a plugin's parameter the filter did not claim would be
+ * carried from one listing to the next as though it belonged to the page.
+ */
+export function filterKeys(): string[] {
+  return [...FILTER_KEYS, ...FILTER_EXTENSIONS.map((entry) => entry.param)];
 }
 
 /** What a query string with none of our parameters in it means. */
@@ -64,10 +104,10 @@ export function emptyFilter(): FilterState {
     assignees: [],
     authors: [],
     milestones: [],
-    features: [],
     reviewers: [],
     deadline: [],
     text: "",
+    ext: {},
   };
 }
 
@@ -78,10 +118,10 @@ export function isEmptyFilter(filter: FilterState): boolean {
     filter.assignees.length === 0 &&
     filter.authors.length === 0 &&
     filter.milestones.length === 0 &&
-    filter.features.length === 0 &&
     filter.reviewers.length === 0 &&
     filter.deadline.length === 0 &&
-    filter.text.trim() === ""
+    filter.text.trim() === "" &&
+    Object.values(filter.ext).every((values) => values.length === 0)
   );
 }
 
@@ -170,7 +210,7 @@ export function joinTerms(terms: readonly string[]): string {
  */
 export function filterQuery(query: RouteQuery): Record<string, string[]> {
   const kept: Record<string, string[]> = {};
-  for (const key of FILTER_KEYS) {
+  for (const key of filterKeys()) {
     const list = queryValues(query[key]);
     if (list.length > 0) kept[key] = list;
   }
@@ -180,7 +220,7 @@ export function filterQuery(query: RouteQuery): Record<string, string[]> {
 /** Everything the filter does not own, left exactly as it was found. */
 export function withoutFilter(query: RouteQuery): RouteQuery {
   const rest: RouteQuery = { ...query };
-  for (const key of FILTER_KEYS) delete rest[key];
+  for (const key of filterKeys()) delete rest[key];
   return rest;
 }
 
@@ -200,12 +240,16 @@ export function queryToFilter(query: RouteQuery, keys: FilterKeys): FilterState 
     assignees: queryValues(query.assignee),
     authors: queryValues(query.author),
     milestones: queryValues(query.milestone),
-    features: queryValues(query.feature),
     // Dropped on a listing that has none, as a deadline is: `?reviewer=` on the
     // issue list reads as no narrowing, not as a term the API would refuse.
     reviewers: keys.reviewers === true ? queryValues(query.reviewer) : [],
     deadline: deadlineStates(query.deadline, keys.deadlines ?? []),
     text: joinTerms(queryValues(query.q).flatMap(splitTerms)),
+    ext: Object.fromEntries(
+      FILTER_EXTENSIONS.map(({ param }) => [param, queryValues(query[param])]).filter(
+        ([, values]) => (values as string[]).length > 0,
+      ),
+    ),
   };
 }
 
@@ -229,12 +273,12 @@ export function filterToQuery(filter: FilterState): Record<string, string[]> {
   put("assignee", filter.assignees);
   put("author", filter.authors);
   put("milestone", filter.milestones);
-  put("feature", filter.features);
   put("reviewer", filter.reviewers);
   put(
     "deadline",
     filter.deadline.map((state) => state.toLowerCase()),
   );
+  for (const { param } of FILTER_EXTENSIONS) put(param, filter.ext[param] ?? []);
   const terms = splitTerms(filter.text);
   if (terms.length > 0) query.q = [joinTerms(terms)];
   return query;
@@ -272,7 +316,12 @@ function sharedFilter(filter: FilterState): Omit<IssueFilter & PrFilter, "status
   if (filter.assignees.length > 0) shared.assignees = [...filter.assignees];
   if (filter.authors.length > 0) shared.authors = [...filter.authors];
   if (filter.milestones.length > 0) shared.milestones = [...filter.milestones];
-  if (filter.features.length > 0) shared.features = [...filter.features];
+  for (const { param, apiField } of FILTER_EXTENSIONS) {
+    const values = filter.ext[param] ?? [];
+    // Cast because the field is one a plugin's SDL added: the generated type
+    // describes the core schema, and cannot know about it.
+    if (values.length > 0) (shared as Record<string, unknown>)[apiField] = [...values];
+  }
   const terms = splitTerms(filter.text);
   if (terms.length > 0) shared.text = terms;
   return shared;

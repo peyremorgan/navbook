@@ -7,7 +7,8 @@
  * convention. Which is which is `QUERY_TERMS`'s `combines`, below.
  */
 
-import { readAssignees, readDeadline, readFeatures, readLabels, readReviewers } from "./files.ts";
+import { type CoreExtensions, NO_EXTENSIONS } from "./extensions.ts";
+import { readAssignees, readDeadline, readLabels, readReviewers } from "./files.ts";
 import { personMatches } from "./person.ts";
 import { DEFAULT_REVIEW_POLICY, type ReviewPolicy } from "./policy.ts";
 import { isAwaiting, REVIEW_DECISIONS, type ReviewDecision, reviewSummary } from "./review.ts";
@@ -19,7 +20,6 @@ export interface Query {
   assignees: string[];
   authors: string[];
   milestones: string[];
-  features: string[];
   /** `reviewer:` — who the pull request asks for a review (spec 02 §2.7). */
   reviewers: string[];
   /** `review:` — the decision the reviews add up to. */
@@ -37,6 +37,8 @@ export interface Query {
    */
   today: string | null;
   text: string[];
+  /** Values given for each registered term, by key (spec 02 §2.12). */
+  ext: Record<string, string[]>;
 }
 
 /** What `deadline:` can ask (spec 04 §4.3). */
@@ -47,14 +49,18 @@ export interface QueryError {
   message: string;
 }
 
-/** The keys of the query grammar (spec 04 §4.3). */
+/**
+ * The keys of the query grammar core owns (spec 04 §4.3).
+ *
+ * A plugin's terms are not among them: they are registered (spec 02 §2.12),
+ * parsed into `Query.ext`, and matched by the plugin that registered them.
+ */
 export type QueryKey =
   | "status"
   | "label"
   | "assignee"
   | "author"
   | "milestone"
-  | "feature"
   | "reviewer"
   | "review"
   | "awaiting"
@@ -89,7 +95,6 @@ export const QUERY_TERMS: readonly QueryTerm[] = [
   { key: "assignee", combines: "and" },
   { key: "author", combines: "or" },
   { key: "milestone", combines: "or" },
-  { key: "feature", combines: "and" },
   { key: "reviewer", only: "pr", lacks: "reviews", combines: "and" },
   { key: "review", only: "pr", lacks: "reviews", combines: "or" },
   { key: "awaiting", only: "pr", lacks: "reviews", combines: "and" },
@@ -119,13 +124,13 @@ export function emptyQuery(): Query {
     assignees: [],
     authors: [],
     milestones: [],
-    features: [],
     reviewers: [],
     reviews: [],
     awaiting: [],
     deadline: [],
     today: null,
     text: [],
+    ext: {},
   };
 }
 
@@ -142,13 +147,26 @@ export function defaultStatuses(): Status[] {
 }
 
 /** Parse query terms. Unknown `key:value` shapes are treated as free text. */
-export function parseQuery(terms: readonly string[], kind: EntityKind): Query | QueryError {
+export function parseQuery(
+  terms: readonly string[],
+  kind: EntityKind,
+  ext: CoreExtensions = NO_EXTENSIONS,
+): Query | QueryError {
   const query = emptyQuery();
   for (const term of terms) {
     if (term.trim() === "") continue;
     const match = KEYED_TERM.exec(term);
     if (!match) {
-      query.text.push(term);
+      // A term shaped `key:value` whose key no plugin claims is free text, as
+      // an unrecognised built-in key is: that is what makes `http://x` search
+      // for a URL rather than fail as a malformed term.
+      const registered = registeredTerm(term, kind, ext);
+      if (registered === null) {
+        query.text.push(term);
+        continue;
+      }
+      if ("message" in registered) return registered;
+      query.ext[registered.key] = [...(query.ext[registered.key] ?? []), registered.value];
       continue;
     }
     const key = match[1] as QueryKey;
@@ -182,9 +200,6 @@ export function parseQuery(terms: readonly string[], kind: EntityKind): Query | 
         break;
       case "author":
         query.authors.push(value);
-        break;
-      case "feature":
-        query.features.push(value);
         break;
       case "reviewer":
         query.reviewers.push(value);
@@ -228,13 +243,46 @@ export function isQueryError(value: Query | QueryError): value is QueryError {
 }
 
 /**
+ * Read a term a plugin registered, or null when none claims its key.
+ *
+ * Null rather than an error for an unclaimed key, because the caller's next
+ * move is to treat the term as free text — the same courtesy the built-in
+ * grammar extends to anything it does not recognise. A *claimed* key with a
+ * value its owner refuses is an error, and is reported with the term in hand.
+ */
+function registeredTerm(
+  term: string,
+  kind: EntityKind,
+  ext: CoreExtensions,
+): { key: string; value: string } | QueryError | null {
+  const colon = term.indexOf(":");
+  if (colon <= 0) return null;
+  const key = term.slice(0, colon);
+  const def = ext.queryKeys.find((candidate) => candidate.key === key);
+  if (def === undefined) return null;
+  if (!def.kinds.includes(kind)) {
+    return {
+      message: `'${key}:' does not describe ${kind === "issue" ? "an issue" : "a pull request"}`,
+    };
+  }
+  const value = term.slice(colon + 1).trim();
+  if (value === "") return { message: `query term '${term}' is missing a value` };
+  if (def.parse === undefined) return { key, value };
+  const parsed = def.parse(value);
+  return typeof parsed === "string" ? { key, value: parsed } : parsed;
+}
+
+/**
  * True when evaluating the query requires the entity's comments to be loaded.
  *
  * A text search reads their bodies; `review:` and `awaiting:` read the verdicts
  * in their frontmatter, since that is where a review lives (spec 02 §2.6).
  */
-export function needsComments(query: Query): boolean {
-  return query.text.length > 0 || query.reviews.length > 0 || query.awaiting.length > 0;
+export function needsComments(query: Query, ext: CoreExtensions = NO_EXTENSIONS): boolean {
+  if (query.text.length > 0 || query.reviews.length > 0 || query.awaiting.length > 0) return true;
+  return ext.queryKeys.some(
+    (def) => def.needsComments === true && query.ext[def.key] !== undefined,
+  );
 }
 
 /**
@@ -248,8 +296,20 @@ export function matchesQuery(
   query: Query,
   entity: EntityRecord,
   policy: ReviewPolicy = DEFAULT_REVIEW_POLICY,
+  ext: CoreExtensions = NO_EXTENSIONS,
 ): boolean {
   if (query.status.length > 0 && !query.status.includes(entity.status)) return false;
+
+  // Registered terms first: they are the cheapest way a query can fail, since
+  // a plugin's key is absent from most entities, and every term ANDs.
+  for (const [key, values] of Object.entries(query.ext)) {
+    const def = ext.queryKeys.find((candidate) => candidate.key === key);
+    // A term parsed under one extension set and matched under another: the
+    // reading it was parsed with is gone, so nothing can be concluded, and
+    // matching nothing is the answer that does not invent members.
+    if (def === undefined) return false;
+    if (!def.matches(values, entity)) return false;
+  }
 
   const labels = readLabels(entity.fm).map((l) => l.toLowerCase());
   for (const wanted of query.labels) {
@@ -268,10 +328,6 @@ export function matchesQuery(
 
   // Slugs are lowercase by grammar, so folding case here only forgives a query
   // typed with a capital; it can never widen what a well-formed tree matches.
-  const features = readFeatures(entity.fm).map((f) => f.toLowerCase());
-  for (const wanted of query.features) {
-    if (!features.includes(wanted.toLowerCase())) return false;
-  }
 
   if (query.deadline.length > 0 && !matchesDeadline(query, entity)) return false;
 

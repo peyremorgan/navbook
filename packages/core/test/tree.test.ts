@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, describe, it } from "node:test";
+import { mergeExtensions } from "../src/core/extensions.ts";
 import {
   allIds,
   type CommentScope,
@@ -149,14 +150,14 @@ describe("parseTree", () => {
       const repo = parseTree(
         tree({ "navbook.json": '{"version": 1, "plugins": {"@navbook/plugin-kb": {}}}' }),
       );
-      assert.deepEqual({ ...repo.plugins.declaration.plugins }, { "@navbook/plugin-kb": {} });
+      assert.deepEqual(Object.fromEntries(repo.plugins.plugins), { "@navbook/plugin-kb": {} });
       assert.equal(repo.plugins.declared, true);
       assert.deepEqual(repo.plugins.problems, []);
     });
 
     it("declares no plugins for a tree that has no marker", () => {
       const repo = parseTree(tree({ "issues/open/bqlybac0-x/issue.md": issue() }));
-      assert.deepEqual(Object.keys(repo.plugins.declaration.plugins), []);
+      assert.equal(repo.plugins.plugins.size, 0);
       assert.equal(repo.plugins.declared, false);
       assert.deepEqual(repo.plugins.problems, []);
     });
@@ -321,6 +322,39 @@ describe("readNavTree comment scope", () => {
     // paying for the issue comments beside it (spec 05 §5.2's budget).
     assert.deepEqual(paths("prs"), ["prs/open/dk3mp2x9-y/comments/2026-08-03T141207Z-q8zm3vp1.md"]);
   });
+
+  it("skips an archived entity's comments as it skips a live one's", () => {
+    write("archive/2025/issues/closed/aaaaaaa1-z/issue.md", "---\n---\n\nb\n");
+    write("archive/2025/issues/closed/aaaaaaa1-z/comments/2026-08-03T141207Z-a1a1a1a1.md", "c");
+    try {
+      assert.deepEqual(paths("none"), []);
+      assert.equal(paths("all").length, 3);
+    } finally {
+      rmSync(join(root, "archive"), { recursive: true, force: true });
+    }
+  });
+
+  it("lists a directory named comments that is not an entity's, whatever the scope", () => {
+    // Only an entity's own `comments/` holds comments (§2.6). The same name in
+    // a plugin's directory, or in an entity's extension namespace (§2.12), is
+    // that plugin's data: leaving it out of a lighter read would hand the
+    // plugin a different tree depending on what else the caller wanted.
+    const theirs = [
+      "issues/open/bqlybac0-x/probe/comments/notes.json",
+      "specs/auth/comments/2026-08-03T141207Z-b2b2b2b2.md",
+      "specs/comments/index.md",
+    ];
+    for (const path of theirs) write(path, "x");
+    try {
+      for (const scope of ["all", "prs", "none"] as const) {
+        const listed = [...readNavTree(root, { comments: scope }).keys()];
+        for (const path of theirs) assert.ok(listed.includes(path), `${scope} left out ${path}`);
+      }
+    } finally {
+      rmSync(join(root, "specs"), { recursive: true, force: true });
+      rmSync(join(root, "issues/open/bqlybac0-x/probe"), { recursive: true, force: true });
+    }
+  });
 });
 
 describe("readNavTree reads only what parseTree parses", () => {
@@ -349,9 +383,41 @@ describe("readNavTree reads only what parseTree parses", () => {
   it("lists them without opening them", { skip: asRoot }, () => {
     const repo = parseTree(readNavTree(root));
     assert.deepEqual(repo.problems, []);
-    assert.deepEqual(repo.reserved, ["reports/coverage.json"]);
+    // No plugin owns `specs/` here, so it is as uninterpreted as `reports/`:
+    // listed, and never opened (spec 02 §2.12).
+    assert.deepEqual(repo.reserved, [
+      "reports/coverage.json",
+      "specs/auth/diagram.png",
+      "specs/auth/feature.md",
+    ]);
     assert.deepEqual(repo.issues[0]?.extraFiles, ["issues/open/bqlybac0-x/reports.json"]);
-    assert.deepEqual(repo.features[0]?.extraFiles, ["specs/auth/diagram.png"]);
+  });
+
+  it("opens only what the plugin owning a location asks for", { skip: asRoot }, () => {
+    const opened: string[] = [];
+    const ext = mergeExtensions([
+      {
+        treeLocations: [
+          {
+            dir: "specs",
+            build: (files, paths) => {
+              for (const path of paths.filter((each) => each.endsWith(".md"))) {
+                files.get(path);
+                opened.push(path);
+              }
+              return { model: paths, problems: [] };
+            },
+          },
+        ],
+      },
+    ]);
+    const repo = parseTree(readNavTree(root), { ext });
+    assert.deepEqual(repo.problems, []);
+    assert.deepEqual(repo.reserved, ["reports/coverage.json"]);
+    // Handed every path under its directory, the image included, and the
+    // image's bytes left unread because the plugin never asked for them.
+    assert.deepEqual(repo.ext.get("specs"), ["specs/auth/diagram.png", "specs/auth/feature.md"]);
+    assert.deepEqual(opened, ["specs/auth/feature.md"]);
   });
 
   it("still fails on a file it must parse and cannot read", { skip: asRoot }, () => {
@@ -478,16 +544,6 @@ describe("treePeople", () => {
           `merged:\n  date: 2026-08-06T10:00:00Z\n  by: Mia <mia@example.com>\n---\n\nBody.\n`,
       }),
       ["ked@example.com", "Rae <rae@example.com>", "Mia <mia@example.com>"],
-    );
-  });
-
-  it("names a feature's author", () => {
-    assert.deepEqual(
-      people({
-        "specs/auth/feature.md":
-          "---\ntitle: Auth\nauthor: Fay <fay@example.com>\ncreated: 2026-08-01T09:00:00Z\n---\n\nBody.\n",
-      }),
-      ["Fay <fay@example.com>"],
     );
   });
 

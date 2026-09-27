@@ -45,7 +45,7 @@ const inbox = useInbox(scope);
 const selection = computed<InboxSelection>(() => ({
   view: view.params.value.view,
   kind: view.params.value.kind,
-  feature: view.params.value.feature,
+  ext: view.params.value.ext,
 }));
 
 const shown = computed(() =>

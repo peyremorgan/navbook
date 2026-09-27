@@ -1,5 +1,6 @@
 spec-version: 1
 description: a tool will not create a document called feature.md, whatever the author asks for
+plugins: ["@navbook/plugin-kb"]
 init: {from: before}
 run:
   command: [feature, spec, add, auth, "Something", --file, feature.md, -m, "x"]

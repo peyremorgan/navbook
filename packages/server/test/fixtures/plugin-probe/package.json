@@ -1,0 +1,45 @@
+{
+  "name": "@navbook/plugin-srvprobe",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A server plugin that adds a field, a service and a mutation listener, and records what it saw.",
+  "keywords": [
+    "navbook-plugin"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=24",
+    "navbook": "^1.0.0"
+  },
+  "exports": {
+    "./core": "./core.js",
+    "./server": "./server.js"
+  },
+  "navbook": {
+    "short": "srvprobe",
+    "spec": "SPEC.md",
+    "format": {
+      "root": [
+        "srvprobe"
+      ],
+      "frontmatterKeys": [
+        "srvprobe-tag"
+      ]
+    },
+    "server": {
+      "schema": "schema.graphql",
+      "services": true,
+      "config": [
+        {
+          "env": "NAV_SERVER_SRVPROBE_TOKEN",
+          "description": "the token the probe pretends to connect with",
+          "required": true
+        },
+        {
+          "env": "NAV_SERVER_SRVPROBE_NOTE",
+          "description": "something to echo back, if you like"
+        }
+      ]
+    }
+  }
+}

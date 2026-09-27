@@ -13,9 +13,7 @@ import type {
   CommitSummary,
   Diagnostic,
   EntityRecord,
-  FeatureRecord,
   LinkNode,
-  SpecRecord,
 } from "@navbook/core";
 import type { ChangedFileView, ChangesView } from "./changes.ts";
 
@@ -36,23 +34,10 @@ export interface PrParent {
 export type CommentParent = CommentRecord;
 export type LinkNodeParent = LinkNode;
 export type DiagnosticParent = Diagnostic;
-export type FeatureParent = FeatureRecord;
 export type CommitParent = CommitSummary;
 export type CommitRangeParent = CommitRange;
 export type ChangesParent = ChangesView;
 export type ChangedFileParent = ChangedFileView;
-
-/**
- * A document, and the feature that holds it.
- *
- * The feature comes along because a document's own record knows its path but
- * not which feature it belongs to, and every payload that returns one has to
- * say. It is also what an edit resolves against.
- */
-export interface SpecParent {
-  feature: FeatureRecord;
-  spec: SpecRecord;
-}
 
 /** Either kind, as `Entity` and `AddCommentPayload.entity` return it. */
 export type EntityParent = IssueParent | PrParent;

@@ -21,10 +21,10 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
 
-      - name: the tag must match both package versions
+      - name: the tag must match every package version
         run: |
           tagged="${GITHUB_REF_NAME#v}"
-          for pkg in core cli server; do
+          for pkg in core cli server plugin-kb; do
             packaged="$(node -p "require('./packages/$pkg/package.json').version")"
             if [ "$tagged" != "$packaged" ]; then
               echo "tag $GITHUB_REF_NAME does not match @navbook/$pkg version $packaged" >&2
@@ -54,8 +54,9 @@ jobs:
           pnpm --filter @navbook/core pack --pack-destination "$RUNNER_TEMP"
           pnpm --filter @navbook/cli pack --pack-destination "$RUNNER_TEMP"
           pnpm --filter @navbook/server pack --pack-destination "$RUNNER_TEMP"
+          pnpm --filter @navbook/plugin-kb pack --pack-destination "$RUNNER_TEMP"
 
-      - name: install both tarballs and run the CLI, as a consumer would
+      - name: install every tarball and run the CLI, as a consumer would
         run: |
           mkdir -p /tmp/smoke && cd /tmp/smoke && npm init -y >/dev/null
           npm install --silent "$RUNNER_TEMP"/navbook-core-*.tgz
@@ -66,6 +67,13 @@ jobs:
           ../node_modules/.bin/nav init
           ../node_modules/.bin/nav issue open "Release smoke test" -m "It runs."
           ../node_modules/.bin/nav doctor
+          # The knowledge base as a plugin, installed the way anyone installs
+          # one: from the store, then declared, then used.
+          XDG_DATA_HOME=/tmp/smoke/data \
+            ../node_modules/.bin/nav plugin install "$RUNNER_TEMP"/navbook-plugin-kb-*.tgz -y
+          node -e 'const f=".navbook/navbook.json",fs=require("fs");const m=JSON.parse(fs.readFileSync(f));m.plugins={"@navbook/plugin-kb":{}};fs.writeFileSync(f,JSON.stringify(m,null,2)+"\n")'
+          XDG_DATA_HOME=/tmp/smoke/data ../node_modules/.bin/nav feature open "Smoke" --slug smoke -m "It runs."
+          XDG_DATA_HOME=/tmp/smoke/data ../node_modules/.bin/nav feature list | grep -q smoke
           # The server ships schema.graphql beside dist/; --help proves the
           # binary resolves, and the suite below proves the schema does.
           ../node_modules/.bin/nav-server --help >/dev/null
@@ -82,5 +90,12 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: publish @navbook/server
         run: npm publish "$RUNNER_TEMP"/navbook-server-*.tgz --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Last, because it is the only one that depends on the others being
+      # published: its `@navbook/core` peer range has to resolve for anyone
+      # installing it from the registry rather than from a tarball.
+      - name: publish @navbook/plugin-kb
+        run: npm publish "$RUNNER_TEMP"/navbook-plugin-kb-*.tgz --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

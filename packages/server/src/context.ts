@@ -13,6 +13,7 @@
 
 import {
   type CommentScope,
+  type CoreExtensions,
   type EntityRecord,
   type Identity,
   makeWsCtx,
@@ -25,6 +26,7 @@ import {
 import type { RevisionCache } from "./changes.ts";
 import type { Config } from "./config.ts";
 import type { AuthorCache } from "./people.ts";
+import type { PluginRuntime } from "./plugins/runtime.ts";
 import type { RepoSync } from "./sync.ts";
 import type { TreeCache } from "./trees.ts";
 
@@ -92,6 +94,13 @@ export interface GraphQLCtx {
    */
   revisions: RevisionCache;
   config: Config;
+  /**
+   * What the loaded plugins registered.
+   *
+   * A plugin's own resolvers reach their settings and their services through
+   * this, and every mutation emits its event through it (spec 06 §6.2).
+   */
+  plugins: PluginRuntime;
 }
 
 export interface MakeContextOptions {
@@ -112,6 +121,10 @@ export interface MakeContextOptions {
    * guarantees every request agrees with the tree startup actually validated.
    */
   navDir?: string;
+  /** What the loaded plugins registered (spec 02 §2.12). */
+  ext?: CoreExtensions;
+  /** The plugin runtime, for resolvers and the mutation event. */
+  plugins: PluginRuntime;
 }
 
 export function makeGraphQLCtx(opts: MakeContextOptions): GraphQLCtx {
@@ -120,6 +133,7 @@ export function makeGraphQLCtx(opts: MakeContextOptions): GraphQLCtx {
     env: opts.env ?? process.env,
     identity: opts.viewer,
     ...(opts.navDir === undefined ? {} : { navDir: opts.navDir }),
+    ...(opts.ext === undefined ? {} : { ext: opts.ext }),
   });
 
   // The promise is what is memoized, so several field resolvers asking at once
@@ -130,6 +144,7 @@ export function makeGraphQLCtx(opts: MakeContextOptions): GraphQLCtx {
   return {
     viewer: opts.viewer,
     ws,
+    plugins: opts.plugins,
     repo: () => (memo ??= opts.sync.locked(() => opts.trees.at(ws, "none"))),
     loadRepo: (comments) => {
       const repo = opts.trees.at(ws, comments);

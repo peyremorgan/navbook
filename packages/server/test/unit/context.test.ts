@@ -12,6 +12,7 @@ import { after, describe, it } from "node:test";
 import type { EntityRecord, Repo } from "@navbook/core";
 import type { Config } from "../../src/config.ts";
 import { makeGraphQLCtx } from "../../src/context.ts";
+import { PluginRuntime } from "../../src/plugins/runtime.ts";
 import { RepoSync } from "../../src/sync.ts";
 import { TreeCache } from "../../src/trees.ts";
 import { makeFixture } from "../helpers/temprepo.ts";
@@ -48,6 +49,8 @@ function makeCtx() {
     revisions: {} as never,
     trees: new TreeCache({ repoRoot: fixture.server.dir, navDir: ".navbook", intervalMs: 0 }),
     env: fixture.env,
+    // No plugins: the case every one of these asks about.
+    plugins: new PluginRuntime(() => {}),
   });
 }
 

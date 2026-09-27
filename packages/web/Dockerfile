@@ -21,6 +21,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig
 COPY packages/cli/package.json packages/cli/
 COPY packages/core/package.json packages/core/
 COPY packages/server/package.json packages/server/
+COPY packages/plugin-kb packages/plugin-kb
 
 # The whole package, before the install rather than after it: `postinstall` runs
 # `nuxi prepare`, which reads this configuration and writes the .nuxt/ the build
@@ -29,6 +30,14 @@ COPY packages/server/package.json packages/server/
 COPY packages/web packages/web
 
 RUN pnpm install --frozen-lockfile --filter navbook-workspace --filter "@navbook/web..."
+
+# The plugins whose web layers are compiled into this bundle. Unlike every
+# other setting here, this one is a *build* argument: a Nuxt layer's pages and
+# components are compiled in, so changing which plugins the client has is a
+# rebuild rather than a restart. `compose.yaml` passes it from NAVBOOK_PLUGINS.
+ARG NAVBOOK_WEB_PLUGINS=""
+ENV NAVBOOK_WEB_PLUGINS=$NAVBOOK_WEB_PLUGINS
+
 RUN pnpm --filter @navbook/web build
 
 

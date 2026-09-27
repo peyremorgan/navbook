@@ -19,7 +19,6 @@ import {
   readPr,
   readReviewPolicy,
   resolveEntity,
-  resolveFeature,
   resolveSha,
   runDoctor,
   treePeople,
@@ -51,13 +50,21 @@ function today(ctx: GraphQLCtx): string {
  * other request since the tree last changed.
  */
 function listed(ctx: GraphQLCtx, kind: EntityKind, query: ListQuery): EntityRecord[] {
-  const repo = ctx.loadRepo(commentScopeFor(query, kind));
+  const repo = ctx.loadRepo(commentScopeFor(query, kind, ctx.ws.ext));
   return listEntities(ctx.ws, kind, query, { entities: kind === "issue" ? repo.issues : repo.prs });
 }
 
 export const Query: QueryResolvers = {
   issues: (_parent, args, ctx) =>
-    run(() => ctx.sync.read(() => listed(ctx, "issue", toIssueQuery(args.filter, today(ctx))))),
+    run(() =>
+      ctx.sync.read(() =>
+        listed(
+          ctx,
+          "issue",
+          toIssueQuery(args.filter, today(ctx), ctx.plugins.filterTerms(args.filter ?? {})),
+        ),
+      ),
+    ),
 
   issue: (_parent, args, ctx) =>
     run(() =>
@@ -73,7 +80,11 @@ export const Query: QueryResolvers = {
       ctx.sync.read((): PrParent[] => {
         // No guard against an issue's terms here: `PrFilter` has no key for
         // one, so validation refuses it before this runs (spec 04 §4.3).
-        const query = toPrQuery(args.filter, today(ctx));
+        const query = toPrQuery(
+          args.filter,
+          today(ctx),
+          ctx.plugins.filterTerms(args.filter ?? {}),
+        );
         // A pull request's files live on the branch it proposes to merge, so
         // the working tree usually does not hold them (spec 03 §3.5).
         if (args.allRefs) {
@@ -95,13 +106,6 @@ export const Query: QueryResolvers = {
         return { entity, refs: ref === null ? [] : [ref] };
       }),
     ),
-
-  // Through `ctx.loadRepo` rather than `listFeatures`, so that a feature's
-  // `issues` and `prs` fields read the same parse.
-  features: (_parent, _args, ctx) => run(() => ctx.sync.read(() => ctx.loadRepo("none").features)),
-
-  feature: (_parent, args, ctx) =>
-    run(() => ctx.sync.read(() => resolveFeature(ctx.loadRepo("none"), args.slug))),
 
   doctor: (_parent, _args, ctx) =>
     run(() => ctx.sync.read(() => ({ diagnostics: runDoctor(ctx.ws).diagnostics }))),

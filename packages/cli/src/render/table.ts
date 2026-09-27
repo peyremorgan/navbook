@@ -20,6 +20,19 @@ export interface TableOptions {
 
 const GAP = "  ";
 
+/**
+ * The width to fit a table to, or undefined for no limit.
+ *
+ * Undefined below a threshold as well as for a non-terminal: shrinking
+ * flexible columns into twenty characters produces something less readable
+ * than letting the line wrap, so there is a floor under which no width is
+ * better than the real one.
+ */
+export function terminalWidth(stdout: { columns?: number }): number | undefined {
+  const columns = stdout.columns;
+  return typeof columns === "number" && columns > 20 ? columns : undefined;
+}
+
 /** Render a table, shrinking flexible columns to fit the terminal width. */
 export function renderTable(
   columns: readonly Column[],

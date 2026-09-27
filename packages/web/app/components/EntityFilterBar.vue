@@ -4,11 +4,12 @@
   What the menus offer is passed in, and comes from one of two places. Labels
   and milestones are read off the listing currently on screen, because there is
   nowhere else they could come from: the format keeps no registry of them and
-  the server introduces none (spec 06 §6.6). Features and people are registries
-  the server can answer — real directories in one case, its own reading of its
-  history and tree in the other — so those menus are offered the actual list.
-  Every menu is creatable either way: you can filter by a label no visible
-  entity carries, or by somebody the repository has not heard of.
+  the server introduces none (spec 06 §6.6). People are a registry the server
+  can answer — its own reading of its history and tree — so that menu is
+  offered the actual list. Every menu is creatable either way: you can filter by
+  a label no visible entity carries, or by somebody the repository has not heard
+  of. A menu a plugin layer registered comes last and brings its own values
+  (`useNavbookSlots`).
 
   Status is chips rather than a menu because there are only ever two or three to
   choose from and it is the filter reached for most. Like every other control
@@ -43,11 +44,14 @@ const props = defineProps<{
   assignees: string[];
   authors: string[];
   milestones: string[];
-  features: string[];
   /** Absent for issues, which have no reviewers (spec 02 §2.7). */
   reviewers?: string[];
+  /** Which listing this is, so a plugin's menus can be the ones it offers. */
+  noun: "issue" | "pr";
   empty: boolean;
 }>();
+
+const slots = useNavbookSlots();
 
 const emit = defineEmits<{ patch: [Partial<FilterState>]; clear: [] }>();
 
@@ -83,34 +87,67 @@ function toggleDeadline(state: DeadlineState): void {
   });
 }
 
-const menus = computed(() => [
-  { key: "labels" as const, label: "Label", icon: "i-lucide-tag", options: props.labels },
-  { key: "assignees" as const, label: "Assignee", icon: "i-lucide-user", options: props.assignees },
-  { key: "authors" as const, label: "Author", icon: "i-lucide-pen-line", options: props.authors },
-  {
-    key: "milestones" as const,
-    label: "Milestone",
-    icon: "i-lucide-flag",
-    options: props.milestones,
-  },
-  { key: "features" as const, label: "Feature", icon: "i-lucide-layers", options: props.features },
+/**
+ * One menu: where it reads from and what choosing in it means.
+ *
+ * `values` and `patch` rather than a key into `FilterState`, because a plugin's
+ * menu is not a key of it — its values live in `filter.ext` under the parameter
+ * its layer registered. Naming both explicitly keeps one template over the two
+ * kinds, so a plugin's menu behaves and looks exactly like a built-in one.
+ */
+interface FilterMenu {
+  key: string;
+  label: string;
+  icon: string;
+  options: string[];
+  values: string[];
+  patch: (values: string[]) => Partial<FilterState>;
+}
+
+/** A menu over one of this filter's own list-valued keys. */
+function ownMenu(
+  key: "labels" | "assignees" | "authors" | "milestones" | "reviewers",
+  label: string,
+  icon: string,
+  options: string[],
+): FilterMenu {
+  return {
+    key,
+    label,
+    icon,
+    options,
+    values: props.filter[key] ?? [],
+    patch: (values) => ({ [key]: values }),
+  };
+}
+
+const menus = computed<FilterMenu[]>(() => [
+  ownMenu("labels", "Label", "i-lucide-tag", props.labels),
+  ownMenu("assignees", "Assignee", "i-lucide-user", props.assignees),
+  ownMenu("authors", "Author", "i-lucide-pen-line", props.authors),
+  ownMenu("milestones", "Milestone", "i-lucide-flag", props.milestones),
   // Only where the noun has one: an issue is never reviewed, and the API
   // refuses the term rather than matching nothing.
   ...(props.reviewers === undefined
     ? []
-    : [
-        {
-          key: "reviewers" as const,
-          label: "Reviewer",
-          icon: "i-lucide-eye",
-          options: props.reviewers,
-        },
-      ]),
+    : [ownMenu("reviewers", "Reviewer", "i-lucide-eye", props.reviewers)]),
+  // Last, so a plugin's menu never moves one of the format's own.
+  ...slots.filters(props.noun).map(
+    (slot): FilterMenu => ({
+      key: slot.param,
+      label: slot.label,
+      icon: slot.icon,
+      options: slot.options(),
+      values: props.filter.ext[slot.param] ?? [],
+      // The whole map, so two plugins' menus do not clear each other.
+      patch: (values) => ({ ext: { ...props.filter.ext, [slot.param]: values } }),
+    }),
+  ),
 ]);
 
 /** Values chosen across the menus, which is what the shut toggle reports. */
 const menuCount = computed(() =>
-  menus.value.reduce((count, menu) => count + props.filter[menu.key].length, 0),
+  menus.value.reduce((count, menu) => count + menu.values.length, 0),
 );
 
 /** Whether the menus are shown. Above `md` they always are, and this is idle. */
@@ -214,13 +251,13 @@ const menusId = useId();
       <CreatableSelect
         v-for="menu in menus"
         :key="menu.key"
-        :model-value="props.filter[menu.key]"
+        :model-value="menu.values"
         :suggestions="menu.options"
         :icon="menu.icon"
         :placeholder="menu.label"
         class="min-w-0"
         :testid="`filter-${menu.key}`"
-        @update:model-value="(value: string[]) => emit('patch', { [menu.key]: value })"
+        @update:model-value="(value: string[]) => emit('patch', menu.patch(value))"
       />
     </div>
 

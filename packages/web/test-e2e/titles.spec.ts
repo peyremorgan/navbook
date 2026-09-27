@@ -22,9 +22,6 @@ test("names each listing, so a history entry says which one it is", async ({ sig
   await signedIn.goto(`${stack.appUrl}/prs`);
   await expect(signedIn).toHaveTitle("Pull requests · Navbook");
 
-  await signedIn.goto(`${stack.appUrl}/features`);
-  await expect(signedIn).toHaveTitle("Features · Navbook");
-
   await signedIn.goto(`${stack.appUrl}/inbox`);
   await expect(signedIn).toHaveTitle("Inbox · Navbook");
 
@@ -39,14 +36,6 @@ test("names an issue and a pull request after the thing under it", async ({ sign
 
   await signedIn.goto(`${stack.appUrl}/prs/bbbb0001`);
   await expect(signedIn).toHaveTitle(/^#bbbb0001 .+ · Navbook$/);
-});
-
-test("names a feature, and a document within it", async ({ signedIn, stack }) => {
-  await signedIn.goto(`${stack.appUrl}/features/authentication`);
-  await expect(signedIn).toHaveTitle("Authentication · Navbook");
-
-  await signedIn.goto(`${stack.appUrl}/features/authentication/login-flow.md`);
-  await expect(signedIn).toHaveTitle("Login flow — Authentication · Navbook");
 });
 
 test("gives two different pages two different titles", async ({ signedIn, stack }) => {

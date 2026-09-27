@@ -19,12 +19,12 @@ import {
 } from "node:fs";
 import { dirname, join, posix, relative, sep } from "node:path";
 import { parseCommentFileName } from "../core/comments.ts";
+import type { CoreExtensions } from "../core/extensions.ts";
 import type { FileOp } from "../core/ops.ts";
+import { type PluginDeclarationReading, parsePluginDeclaration } from "../core/plugins.ts";
 import {
   type MergePolicyReading,
-  type PluginReading,
   parseMergePolicy,
-  parsePluginDeclaration,
   parseReviewPolicy,
   type ReviewPolicyReading,
 } from "../core/policy.ts";
@@ -36,6 +36,7 @@ import {
   commentsInScope,
   type EntityKind,
   type EntityRecord,
+  isEntityDirPath,
   NAV_MARKER,
   type NavTree,
   parseTree,
@@ -101,7 +102,9 @@ function walk(absolute: string, rel: string, paths: Set<string>, comments: Comme
   for (const entry of entries) {
     const childRel = rel === "" ? entry.name : `${rel}/${entry.name}`;
     if (entry.isDirectory()) {
-      if (entry.name === "comments" && !commentsInScope(comments, rel)) continue;
+      const skipped =
+        entry.name === "comments" && isEntityDirPath(rel) && !commentsInScope(comments, rel);
+      if (skipped) continue;
       walk(join(absolute, entry.name), childRel, paths, comments);
     } else if (entry.isFile()) {
       paths.add(childRel);
@@ -142,7 +145,10 @@ export function withComments(ws: WsCtx, entity: EntityRecord): EntityRecord {
 export function loadRepo(ws: WsCtx, opts: ReadTreeOptions = {}): Repo {
   requireNavbook(ws);
   const comments = opts.comments ?? "all";
-  return parseTree(readNavTree(ws.navRoot, { comments }), { commentsLoaded: comments });
+  return parseTree(readNavTree(ws.navRoot, { comments }), {
+    commentsLoaded: comments,
+    ext: ws.ext,
+  });
 }
 
 /**
@@ -151,16 +157,20 @@ export function loadRepo(ws: WsCtx, opts: ReadTreeOptions = {}): Repo {
  * A listing only ever examines entities of its own kind, so nothing else's
  * comments can change its answer. A pull-request listing always needs its own,
  * since it reports a derived review state (spec 02 §2.7); an issue listing
- * needs them only to search their text.
+ * needs them only to search their text, or when a term a plugin registered
+ * says it reads them (spec 02 §2.12).
+ *
+ * `ext` is required rather than defaulted: a caller that forgot it would read
+ * no comments for such a term, and the term would silently match wrongly.
  */
-export function commentScopeFor(query: Query, kind: EntityKind): CommentScope {
+export function commentScopeFor(query: Query, kind: EntityKind, ext: CoreExtensions): CommentScope {
   if (kind === "pr") return "prs";
-  return needsComments(query) ? "all" : "none";
+  return needsComments(query, ext) ? "all" : "none";
 }
 
 /** Load the repository for a listing of `kind`, reading the comments it needs. */
 export function loadRepoForQuery(ws: WsCtx, query: Query, kind: EntityKind): Repo {
-  return loadRepo(ws, { comments: commentScopeFor(query, kind) });
+  return loadRepo(ws, { comments: commentScopeFor(query, kind, ws.ext) });
 }
 
 /**
@@ -200,12 +210,16 @@ export function readMergePolicy(ws: WsCtx): MergePolicyReading {
 }
 
 /**
- * Read the extensions the marker declares (spec 02 §2.12).
+ * Read the plugin declaration the marker carries (spec 02 §2.12).
  *
- * From the working tree, like the two policies: what a clone says it
- * contains is what its own marker says, whichever branch is checked out.
+ * The counterpart of {@link readReviewPolicy}, for the caller that needs to
+ * know which plugins a tree was written by *before* it has a tree — which is
+ * every front end at startup, since what it reads here decides what parses the
+ * tree afterwards. An unreadable marker declares nothing, for the reason given
+ * above: agreeing with what `parseTree` will conclude matters more than
+ * reporting it twice.
  */
-export function readPluginDeclaration(ws: WsCtx): PluginReading {
+export function readPluginDeclaration(ws: WsCtx): PluginDeclarationReading {
   return parsePluginDeclaration(readMarker(ws));
 }
 

@@ -440,7 +440,7 @@ describe("readPluginDeclaration", () => {
       assert.equal(ws.navDir, ".issues");
       const reading = readPluginDeclaration(ws);
       assert.equal(reading.declared, true);
-      assert.deepEqual({ ...reading.declaration.plugins }, { "@navbook/plugin-kb": { depth: 2 } });
+      assert.deepEqual(Object.fromEntries(reading.plugins), { "@navbook/plugin-kb": { depth: 2 } });
     });
   });
 

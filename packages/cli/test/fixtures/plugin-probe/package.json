@@ -1,0 +1,99 @@
+{
+  "name": "@navbook/plugin-probe",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A plugin that exists to be observed: every entry records when it is imported.",
+  "keywords": [
+    "navbook-plugin"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=24",
+    "navbook": "^1.0.0"
+  },
+  "exports": {
+    "./core": "./core.js",
+    "./cli": "./cli.js"
+  },
+  "navbook": {
+    "short": "probe",
+    "spec": "SPEC.md",
+    "format": {
+      "root": [
+        "probe"
+      ],
+      "frontmatterKeys": [
+        "probe-tag"
+      ]
+    },
+    "core": {
+      "queryKeys": [
+        {
+          "key": "ptag",
+          "kinds": [
+            "issue",
+            "pr"
+          ],
+          "help": "ptag:T                      T is among the entity's probe tags"
+        }
+      ],
+      "doctorChecks": [
+        {
+          "id": "X-probe-1",
+          "level": "error",
+          "description": "the layout of probe/"
+        }
+      ],
+      "commitScopes": [
+        "probe"
+      ]
+    },
+    "cli": {
+      "commands": [
+        {
+          "name": "probe",
+          "description": "the probe plugin's own noun",
+          "commands": [
+            {
+              "name": "hello",
+              "description": "say hello, without reading the tree",
+              "needsCore": false,
+              "arguments": [
+                {
+                  "name": "who",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "name": "tags",
+              "description": "list every probe tag in the tree"
+            }
+          ]
+        }
+      ],
+      "contributions": [
+        {
+          "on": "issue open",
+          "options": [
+            {
+              "flags": "--probe-tag <tag>",
+              "description": "attach a probe tag",
+              "repeatable": true
+            }
+          ]
+        },
+        {
+          "on": "issue list",
+          "columns": true,
+          "jsonExtra": true,
+          "completions": true
+        },
+        {
+          "on": "issue show",
+          "showSection": true
+        }
+      ]
+    }
+  }
+}

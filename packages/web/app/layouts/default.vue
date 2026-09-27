@@ -15,10 +15,18 @@ const auth = useAuth();
 const { result } = useQuery(VIEWER_QUERY, null, { fetchPolicy: "cache-first" });
 const viewer = computed(() => result.value?.viewer ?? null);
 
+// Whatever plugin layers registered joins the built-in tabs, ordered rather
+// than appended: a plugin may belong beside Issues rather than after them.
+const slots = useNavbookSlots();
 const links = [
   { label: "Issues", to: "/issues", icon: "i-lucide-circle-dot", testid: "nav-issues" },
   { label: "Pull requests", to: "/prs", icon: "i-lucide-git-pull-request", testid: "nav-prs" },
-  { label: "Features", to: "/features", icon: "i-lucide-layers", testid: "nav-features" },
+  ...slots.navLinks().map((link) => ({
+    label: link.label,
+    to: link.to,
+    icon: link.icon,
+    testid: link.testid ?? `nav-${link.to.replace(/^\//, "")}`,
+  })),
 ];
 
 // Each listing's tab goes back to the listing as it was left, which means

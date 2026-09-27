@@ -13,6 +13,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { QUERY_TERMS } from "@navbook/core";
+import { pluginHelpRow } from "../../src/program.ts";
 import { makeTempRepo, type TempRepo } from "../helpers/temprepo.ts";
 
 let repo: TempRepo;
@@ -26,12 +27,6 @@ const LEVELS: Array<{ path: string[]; usage: RegExp }> = [
   { path: [], usage: /^Usage: nav \[options\] \[command\]/m },
   { path: ["issue"], usage: /^Usage: nav issue \[options\] \[command\]/m },
   { path: ["pr"], usage: /^Usage: nav pr \[options\] \[command\]/m },
-  { path: ["feature"], usage: /^Usage: nav feature \[options\] \[command\]/m },
-  { path: ["feature", "spec"], usage: /^Usage: nav feature spec \[options\] \[command\]/m },
-  {
-    path: ["feature", "spec", "add"],
-    usage: /^Usage: nav feature spec add \[options\] <slug> <title>/m,
-  },
   { path: ["issue", "open"], usage: /^Usage: nav issue open \[options\] <title>/m },
   { path: ["pr", "merge"], usage: /^Usage: nav pr merge \[options\] \[id\]/m },
 ];
@@ -59,14 +54,7 @@ describe("--help", () => {
 });
 
 describe("the help subcommand", () => {
-  for (const path of [
-    ["help"],
-    ["issue", "help"],
-    ["pr", "help"],
-    ["feature", "help"],
-    ["feature", "spec", "help"],
-    ["issue", "help", "open"],
-  ]) {
+  for (const path of [["help"], ["issue", "help"], ["pr", "help"], ["issue", "help", "open"]]) {
     it(`is gone: 'nav ${path.join(" ")}' is an unknown command`, () => {
       const result = repo.nav(path);
       assert.equal(result.code, 1, `stdout: ${result.stdout}`);
@@ -129,10 +117,31 @@ describe("the query grammar in 'list --help'", () => {
   it("names in the closing paragraph every term that ORs and every one that ANDs", () => {
     const issues = repo.nav(["issue", "list", "--help"]).stdout;
     assert.match(issues, /single-valued fields \(status, author, milestone, deadline\)/);
-    assert.match(issues, /multi-valued ones \(label, assignee, feature\)\./);
+    assert.match(issues, /multi-valued ones \(label, assignee\)\./);
     const prs = repo.nav(["pr", "list", "--help"]).stdout;
     assert.match(prs, /single-valued fields \(status, author, milestone, review\)/);
-    assert.match(prs, /multi-valued ones \(label, assignee, feature, reviewer, awaiting\)\./);
+    assert.match(prs, /multi-valued ones \(label, assignee, reviewer, awaiting\)\./);
+    // With no plugin there is no plugin term to speak for.
+    assert.doesNotMatch(`${issues}${prs}`, /A plugin's terms/);
+  });
+
+  it("aligns a plugin's help line whatever spacing its manifest used", () => {
+    const aligned = `  ${"ptag:T".padEnd(28)}T is among the probe tags`;
+    assert.deepEqual(pluginHelpRow("ptag:T   T is among the probe tags"), [aligned]);
+    assert.deepEqual(pluginHelpRow("  ptag:T\t\tT is among the probe tags  "), [aligned]);
+    // One space is part of the syntax, not the gap before the hint.
+    assert.deepEqual(pluginHelpRow("ptag:T  T is  spaced"), [
+      `  ${"ptag:T".padEnd(28)}T is  spaced`,
+    ]);
+  });
+
+  it("keeps a plugin's syntax and hint apart when either is unusual", () => {
+    assert.deepEqual(pluginHelpRow("ptag:T"), ["  ptag:T"]);
+    const wide = "component:NAME-OR-GLOB-PATTERN";
+    assert.deepEqual(pluginHelpRow(`${wide}  what it matches`), [
+      `  ${wide}`,
+      `  ${"".padEnd(28)}what it matches`,
+    ]);
   });
 
   it("gives every term it documents a description", () => {

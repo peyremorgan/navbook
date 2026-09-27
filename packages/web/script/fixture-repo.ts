@@ -24,26 +24,63 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+// The seeded tree has features in it, which are `@navbook/plugin-kb`'s
+// (spec 02 §2.12). The fixture uses the plugin's own operations for the same
+// reason it uses core's: composing the files by hand here would be a second
+// implementation of the format.
+import * as core from "@navbook/core";
 import {
-  addSpec,
   applyComment,
+  type CoreExtensions,
   closeEntity,
-  createFeature,
   currentAuthor,
+  type ExtensionParts,
   findEntity,
   makeWsCtx,
+  mergeExtensions,
   newCommentFile,
-  newFeatureFile,
   newIssueFile,
   newPrFile,
-  newSpecFile,
   openIssue,
   openPr,
+  type PluginManifest,
   parseFile,
   preparePrOpen,
   readRevisions,
-  specFileName,
 } from "@navbook/core";
+import {
+  activate as activateKb,
+  addSpec as addSpecOp,
+  createFeature as createFeatureOp,
+  newFeatureFile,
+  newSpecFile,
+  specFileName,
+} from "@navbook/plugin-kb/core";
+
+/**
+ * The knowledge base's format half, activated as a front end would.
+ *
+ * This script writes features, which are the plugin's (spec 02 §2.12), so it
+ * has to be the host for one: `activate` both hands the plugin the running
+ * core — it imports none of its own, see the plugin's `files.ts` — and returns
+ * the registrations that make `specs/` a directory `parseTree` knows about.
+ * Without the first, composing a `feature.md` throws; without the second, the
+ * feature it just wrote cannot be found to add a document to.
+ */
+const KB_EXTENSIONS = ((): CoreExtensions => {
+  const parts: ExtensionParts[] = [];
+  activateKb({
+    core,
+    // A real host reads these out of the package's `navbook` key and out of
+    // `navbook.json`. This script is a fixture writer, not a plugin loader:
+    // the format half reads neither, and building a loader here would be a
+    // second implementation of one to keep in step.
+    manifest: { short: "kb" } as PluginManifest,
+    settings: {},
+    register: (registered) => void parts.push(registered),
+  });
+  return mergeExtensions(parts);
+})();
 
 /** Fixed so a screenshot, a diff and an assertion all say the same thing. */
 export const FIXTURE_DATE = "2026-08-01T10:00:00Z";
@@ -203,7 +240,8 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     GIT_COMMITTER_DATE: date,
   });
 
-  const ws = (date: string, ids: string[]) => makeWsCtx({ cwd: dir, env: at(date, ids) });
+  const ws = (date: string, ids: string[]) =>
+    makeWsCtx({ cwd: dir, env: at(date, ids), ext: KB_EXTENSIONS });
 
   const issue = (
     date: string,
@@ -233,7 +271,10 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
           ...(input.labels ? { labels: input.labels } : {}),
           ...(input.assignee ? { assignee: input.assignee } : {}),
           ...(input.milestone ? { milestone: input.milestone } : {}),
-          ...(input.features ? { features: input.features } : {}),
+          // Under `ext`, because `feature:` is a key `@navbook/plugin-kb`
+          // owns rather than one this format defines (spec 02 §2.12) — the
+          // same route the API's `openIssue` takes for it.
+          ...(input.features ? { ext: { feature: input.features } } : {}),
           // Absence rather than falsehood: a rank of zero is a position.
           ...(input.rank === undefined ? {} : { rank: input.rank }),
           ...(input.deadline ? { deadline: input.deadline } : {}),
@@ -290,7 +331,8 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     input: { title: string; summary?: string },
   ): void => {
     const context = ws(date, []);
-    createFeature(
+    createFeatureOp(
+      core,
       context,
       {
         content: newFeatureFile({
@@ -308,7 +350,8 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
 
   const spec = (date: string, slug: string, input: { title: string; body: string }): void => {
     const context = ws(date, []);
-    addSpec(
+    addSpecOp(
+      core,
       context,
       slug,
       {

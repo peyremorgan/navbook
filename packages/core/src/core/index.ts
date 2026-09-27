@@ -6,6 +6,7 @@
  */
 
 export * from "./comments.ts";
+export * from "./extensions.ts";
 export * from "./files.ts";
 export * from "./frontmatter.ts";
 export * from "./hash.ts";
@@ -14,6 +15,7 @@ export * from "./json.ts";
 export * from "./links.ts";
 export * from "./ops.ts";
 export * from "./person.ts";
+export * from "./plugins.ts";
 export * from "./policy.ts";
 export * from "./query.ts";
 export * from "./refs.ts";

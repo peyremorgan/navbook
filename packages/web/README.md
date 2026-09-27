@@ -143,6 +143,55 @@ is how to try both sides of the server's
 [authorization policy](../server/README.md#who-is-allowed-in), and the refusal
 page, against a `nav-server` started with one.
 
+## Plugins
+
+A plugin's web part is a **Nuxt layer**: a directory with a `nuxt.config.ts`
+and whatever `app/pages`, `app/components` and `app/composables` it needs, which
+this build merges by convention. `NAVBOOK_WEB_PLUGINS` names the packages whose
+layers to include, space-separated:
+
+```sh
+NAVBOOK_WEB_PLUGINS="@navbook/plugin-kb" pnpm --filter @navbook/web build
+```
+
+This is the one thing about a Navbook deployment that is decided when the
+bundle is **built** rather than when the container starts. Everything else —
+the API's address, the identity provider — is read from `config.json` at boot,
+so one artefact serves every deployment. A layer's pages and components are
+compiled in, so they cannot be. Changing which plugins the client has is
+therefore `docker compose build`, not a restart, and `compose.yaml` passes
+`NAVBOOK_PLUGINS` through as a build argument for exactly that reason.
+
+This package's own scripts set `NAVBOOK_WEB_PLUGINS=@navbook/plugin-kb`,
+because this repository uses the knowledge base — `.navbook/navbook.json`
+declares it, and `specs/` is where these documents live. Unset it to see what a
+client without it looks like; nothing here needs it to build.
+
+A layer's own pages are reachable as soon as it is merged. To appear anywhere
+the host already draws — a tab in the header, a panel on an issue, a field on
+the new-issue form, a chip in a filter bar, a badge on a row, a group in the
+inbox — it registers with `useNavbookSlots()` from one of its own Nuxt plugin
+files, which run before the first render. `app/composables/useNavbookSlots.ts`
+is the list of slots and what each one is given.
+
+Two rules make that work, and both are worth knowing before writing a layer.
+
+**Generated types do not cross the boundary.** `codegen.ts` here reads
+`@navbook/server`'s schema and this package's documents, and nothing else — so
+this package builds whether or not any plugin is installed. A plugin generates
+its own client, from the composed schema, in its own package. The cost is that
+a plugin cannot spread a fragment defined here: a document registry is per
+package, so it writes out any selection of ours that it also needs, and its
+type check fails if the two drift.
+
+**`Entity.ext` is how a plugin draws on a row this package fetched.** A
+plugin's SDL can add a field to `Issue`, but nothing adds a field to a
+*fragment* — and `IssueListItem` lives here and has never heard of it. So
+`EntityCore` selects one map, `ext`, into which every loaded plugin puts what
+it has to say about that entity under its short name. A row badge reads
+`entity.ext.<short>`; there is no key at all when the plugin is not loaded, so
+a badge component has to render nothing rather than fail.
+
 ## Deploying it
 
 ```sh

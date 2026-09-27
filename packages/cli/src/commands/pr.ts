@@ -78,7 +78,13 @@ export interface PrOpenOptions extends GlobalFlags {
   assignee?: string[];
   reviewer?: string[];
   milestone?: string;
-  feature?: string[];
+  /**
+   * Frontmatter a plugin contributed, from an option it declared (§2.12).
+   *
+   * Written by the same composer that writes the format's own keys, so a
+   * plugin's value lands in the file exactly as a built-in one would.
+   */
+  ext?: Record<string, string | readonly string[]>;
 }
 
 export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
@@ -102,7 +108,7 @@ export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
         labels: opts.label,
         assignee: opts.assignee,
         milestone: opts.milestone,
-        features: opts.feature,
+        ...(opts.ext ? { ext: opts.ext } : {}),
       }),
     validate: validatePr,
   });

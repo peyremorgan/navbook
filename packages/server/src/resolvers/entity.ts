@@ -15,7 +15,6 @@ import {
   type Revision,
   readAssignees,
   readDeadline,
-  readFeatures,
   readLabels,
   readMerged,
   readRank,
@@ -23,6 +22,7 @@ import {
   readRevisions,
   reviewSummary,
   subtaskTree,
+  toIsoSeconds,
 } from "@navbook/core";
 import type { GraphQLCtx } from "../context.ts";
 import { invalidInput, run } from "../errors.ts";
@@ -30,6 +30,7 @@ import type {
   ChangedFileResolvers,
   ChangeStatus,
   CommentResolvers,
+  CommitResolvers,
   DiagnosticResolvers,
   EntityResolvers,
   IssueResolvers,
@@ -79,10 +80,13 @@ function sharedFields<P>(record: (parent: P) => EntityRecord) {
     labels: (parent: P) => readLabels(record(parent).fm),
     assignees: (parent: P) => readAssignees(record(parent).fm),
     milestone: (parent: P) => text(record(parent).fm, "milestone"),
-    features: (parent: P) => readFeatures(record(parent).fm),
     body: (parent: P) => record(parent).body.trim(),
     comments: async (parent: P, _args: unknown, ctx: GraphQLCtx) =>
       (await ctx.commented(record(parent))).comments,
+    // Whatever the loaded plugins have to say about this entity, keyed by
+    // short name. Empty on a server with no plugins, which is why the field is
+    // non-null: a client writes `ext.kb?.features` and never checks for `ext`.
+    ext: (parent: P, _args: unknown, ctx: GraphQLCtx) => ctx.plugins.entityExt(record(parent)),
     // Of the text the record was parsed from, not of the file as it is now:
     // a field resolver runs after its parent's transaction has let go, and a
     // hash taken then could name a version the rest of the payload does not.
@@ -214,4 +218,15 @@ export const Diagnostic: DiagnosticResolvers = {
   path: (diagnostic) => diagnostic.path,
   message: (diagnostic) => diagnostic.message,
   fixable: (diagnostic) => diagnostic.fix !== undefined,
+};
+
+/**
+ * A commit, as a history walk reports it.
+ *
+ * `Commit` stayed in this schema when features moved to a plugin, because a
+ * pull request's revision range is made of them too — so its one derived
+ * field belongs here as well.
+ */
+export const Commit: CommitResolvers = {
+  date: (commit) => toIsoSeconds(commit.date),
 };
