@@ -143,7 +143,8 @@ export class Maintenance {
         this.failing = false;
         return;
       }
-      this.failed(`git maintenance failed (exit ${result.code}): ${result.stderr.trim()}`);
+      const said = result.stderr.trim();
+      this.failed(`git maintenance failed (exit ${result.code})${said === "" ? "" : `: ${said}`}`);
     } catch (error) {
       // Stopped for a shutdown: said already, and nothing more to do.
       if (error instanceof GitStoppedError) return;

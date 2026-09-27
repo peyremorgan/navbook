@@ -16,6 +16,7 @@ import {
   mkdtempSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -386,16 +387,96 @@ describe("clearLeftoversAtStart", () => {
 });
 
 describe("gitsRunningIn", { skip: process.platform !== "linux" && "reads /proc" }, () => {
-  it("finds a git whose working directory is in the clone, and only there", async () => {
-    const repo = freshRepo();
-    const other = freshRepo();
-    const child = spawn("git", ["-c", "alias.nap=!sleep 30", "nap"], { cwd: join(repo.root) });
+  /** A git that naps, as a long `gc` would, started however the test says. */
+  async function napping(
+    use: (pid: number) => void,
+    args: string[],
+    opts: { cwd: string; env?: NodeJS.ProcessEnv },
+  ): Promise<void> {
+    const child = spawn("git", [...args, "-c", "alias.nap=!sleep 30", "nap"], {
+      cwd: opts.cwd,
+      env: { ...process.env, ...opts.env },
+    });
     try {
       await new Promise((resolve) => setTimeout(resolve, 300));
-      assert.ok(gitsRunningIn(repo.root).includes(child.pid as number));
-      assert.deepEqual(gitsRunningIn(other.root), []);
+      use(child.pid as number);
     } finally {
       child.kill("SIGKILL");
     }
+  }
+
+  it("finds a git whose working directory is in the clone, and only there", async () => {
+    const repo = freshRepo();
+    const other = freshRepo();
+    await napping(
+      (pid) => {
+        assert.ok(gitsRunningIn(repo.dirs, repo.root).includes(pid));
+        assert.ok(!gitsRunningIn(other.dirs, other.root).includes(pid));
+      },
+      [],
+      { cwd: repo.root },
+    );
+  });
+
+  it("finds a git pointed at the clone from elsewhere, by flag or by environment", async () => {
+    const repo = freshRepo();
+    const elsewhere = realpathSync(tmpdir());
+    const git = join(repo.root, ".git");
+    await napping(
+      (pid) => assert.ok(gitsRunningIn(repo.dirs, repo.root).includes(pid)),
+      [`--git-dir=${git}`],
+      {
+        cwd: elsewhere,
+      },
+    );
+    await napping(
+      (pid) => assert.ok(gitsRunningIn(repo.dirs, repo.root).includes(pid)),
+      ["--git-dir", git],
+      {
+        cwd: elsewhere,
+      },
+    );
+    await napping((pid) => assert.ok(gitsRunningIn(repo.dirs, repo.root).includes(pid)), [], {
+      cwd: elsewhere,
+      env: { GIT_DIR: git },
+    });
+  });
+
+  it("finds it when the clone is named through a symlink", async () => {
+    const repo = freshRepo();
+    const link = `${repo.root}-link`;
+    symlinkSync(repo.root, link);
+    after(() => rmSync(link, { force: true }));
+    // /proc gives the real path; the server may have been given the link.
+    await napping((pid) => assert.ok(gitsRunningIn(gitDirs(link), link).includes(pid)), [], {
+      cwd: repo.root,
+    });
+  });
+
+  it("finds a git at work in another worktree of the same repository", async () => {
+    const main = freshRepo();
+    spawnSync("git", [
+      "-C",
+      main.root,
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "commit",
+      "--allow-empty",
+      "-qm",
+      "x",
+    ]);
+    const linked = `${main.root}-linked`;
+    after(() => rmSync(linked, { recursive: true, force: true }));
+    spawnSync("git", ["-C", main.root, "worktree", "add", "-q", linked]);
+    // Serving the linked worktree, while a git works in the main one: the
+    // locks it may hold are in the repository both share.
+    await napping((pid) => assert.ok(gitsRunningIn(gitDirs(linked), linked).includes(pid)), [], {
+      cwd: main.root,
+    });
+    await napping((pid) => assert.ok(gitsRunningIn(main.dirs, main.root).includes(pid)), [], {
+      cwd: linked,
+    });
   });
 });

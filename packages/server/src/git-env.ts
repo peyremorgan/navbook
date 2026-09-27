@@ -28,20 +28,13 @@ export function appendGitConfig(env: NodeJS.ProcessEnv, key: string, value: stri
 }
 
 /**
- * A count read the way git reads it: `strtoul` in base 0, all of it.
- *
- * So leading blanks and a `+` are allowed, `0x` is hexadecimal and a leading
- * `0` octal — `010` is eight entries to git, and reading it as ten would put
- * the new one where git never looks. A negative count git takes for a huge
- * one and refuses; so does this.
+ * A count read the way git reads it: decimal, leading blanks and a `+`
+ * allowed, nothing after the digits. `010` is ten entries to git, not eight;
+ * `0x2` and a negative count it refuses, and so does this.
  */
 function gitCount(text: string): number | null {
-  const match = /^\s*\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)$/.exec(text);
-  if (match === null) return null;
-  const digits = match[1] as string;
-  if (/^0[xX]/.test(digits)) return Number.parseInt(digits.slice(2), 16);
-  if (digits.startsWith("0")) return Number.parseInt(digits, 8);
-  return Number.parseInt(digits, 10);
+  const match = /^\s*\+?([0-9]+)$/.exec(text);
+  return match === null ? null : Number.parseInt(match[1] as string, 10);
 }
 
 /**

@@ -160,6 +160,14 @@ describe("Maintenance reporting", () => {
     ]);
   });
 
+  it("says a failure git gave no reason for without a dangling colon", async () => {
+    const { maintenance, runs, reported } = harness();
+    maintenance.request();
+    runs[0]?.finish({ code: 1, stdout: "", stderr: "  \n" });
+    await settle();
+    assert.deepEqual(reported, ["nav-server: git maintenance failed (exit 1)"]);
+  });
+
   it("says a failing streak once, whatever each run failed of", async () => {
     const { maintenance, runs, reported, tidied, advance } = harness();
     const failures: ((run: PendingRun) => void)[] = [
@@ -167,6 +175,7 @@ describe("Maintenance reporting", () => {
       (run) => run.fail(new Error("git was not found on PATH")),
       (run) => run.fail(new GitTimeoutError(["maintenance"], 30 * 60_000)),
       (run) => run.finish({ code: 128, stdout: "", stderr: "fatal: bad object\n" }),
+      (run) => run.finish({ code: 1, stdout: "", stderr: "" }),
       (run) => run.finish(),
       (run) => run.fail(new GitTimeoutError(["maintenance"], 30 * 60_000)),
     ];

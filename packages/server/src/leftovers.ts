@@ -18,8 +18,16 @@
  * commit graphs and the multi-pack index are written to.
  */
 
-import { type Dirent, lstatSync, readdirSync, readFileSync, readlinkSync, rmSync } from "node:fs";
-import { join, relative } from "node:path";
+import {
+  type Dirent,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+} from "node:fs";
+import { join, relative, resolve } from "node:path";
 import { gitMaybe } from "@navbook/core";
 
 /** Where a clone keeps its refs and its objects. */
@@ -67,15 +75,20 @@ const TEMPORARIES: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["pack/multi-pack-index.d", ["tmp_"]],
 ];
 
-/** The clone's git directories, as git itself resolves them. */
+/**
+ * The clone's git directories, as git itself resolves them.
+ *
+ * Git answers relative to the directory it ran in unless told otherwise, and
+ * `--path-format=absolute` would tell it — but only from git 2.31, and the
+ * server has never asked for a git that new. So the answer is resolved here.
+ */
 export function gitDirs(repoRoot: string): GitDirs {
-  const answer = gitMaybe(
-    ["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-path", "objects"],
-    { cwd: repoRoot },
-  );
+  const answer = gitMaybe(["rev-parse", "--git-common-dir", "--git-path", "objects"], {
+    cwd: repoRoot,
+  });
   const [common, objects] = answer?.split("\n") ?? [];
   if (!common || !objects) throw new Error(`cannot find the git directories of ${repoRoot}`);
-  return { common, objects };
+  return { common: resolve(repoRoot, common), objects: resolve(repoRoot, objects) };
 }
 
 /** Every leftover of an interrupted housekeeping run in the clone, within `age`. */
@@ -149,7 +162,7 @@ export interface ClearOptions {
 export function clearLeftovers(dirs: GitDirs, repoRoot: string, opts: ClearOptions): void {
   const found = findLeftovers(dirs, age(opts));
   if (found.length === 0) return;
-  const running = opts.running ?? gitsRunningIn(repoRoot);
+  const running = opts.running ?? gitsRunningIn(dirs, repoRoot);
   if (opts.remove && running.length === 0) {
     removeLeftovers(found, repoRoot, opts.report);
     return;
@@ -205,25 +218,75 @@ export function findCutShort(dirs: GitDirs, age: LeftoverAge = {}): Leftover[] {
 }
 
 /**
- * The pids of the gits whose working directory is in the clone.
+ * The pids of the gits at work on the clone's repository.
  *
- * Read from /proc, so only on Linux — where the server's image runs — and
- * only the processes this one may look at; elsewhere it finds none, which
- * leaves the age of a file as the only guard, as it was.
+ * A git works on it when it runs in any of its worktrees, or in its git or
+ * object directory, or is pointed at them: by `GIT_DIR` and its kin in the
+ * environment it started with, or by `--git-dir` on its command line (which
+ * git only hands on to what it starts, so the command line has to be read
+ * too). Read from /proc, so only on Linux — where the server's image runs —
+ * and only for the processes this one may look at; elsewhere it finds none,
+ * which leaves the age of a file as the only guard, as it was.
  */
-export function gitsRunningIn(repoRoot: string): number[] {
+export function gitsRunningIn(dirs: GitDirs, repoRoot: string): number[] {
+  const places = [repoRoot, dirs.common, dirs.objects, ...worktrees(repoRoot)].map(real);
+  const within = (path: string): boolean =>
+    places.some((place) => path === place || path.startsWith(`${place}/`));
   const found: number[] = [];
   for (const entry of listing("/proc")) {
     if (!/^\d+$/.test(entry) || Number(entry) === process.pid) continue;
     try {
       if (!readFileSync(`/proc/${entry}/comm`, "utf8").startsWith("git")) continue;
       const cwd = readlinkSync(`/proc/${entry}/cwd`);
-      if (cwd === repoRoot || cwd.startsWith(`${repoRoot}/`)) found.push(Number(entry));
+      const named = [...pointedAt(entry)].map((path) => real(resolve(cwd, path)));
+      if (within(cwd) || named.some(within)) found.push(Number(entry));
     } catch {
       // Gone since the listing, or not ours to look at.
     }
   }
   return found;
+}
+
+/** The directories a process's environment and command line point git at. */
+function* pointedAt(pid: string): Generator<string> {
+  const read = (file: string): string[] => {
+    try {
+      return readFileSync(`/proc/${pid}/${file}`, "utf8").split("\0");
+    } catch {
+      return [];
+    }
+  };
+  for (const variable of read("environ")) {
+    const match = /^GIT_(?:DIR|COMMON_DIR|OBJECT_DIRECTORY|WORK_TREE)=(.+)$/.exec(variable);
+    if (match) yield match[1] as string;
+  }
+  const argv = read("cmdline");
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i] as string;
+    if (arg.startsWith("--git-dir=") || arg.startsWith("--work-tree=")) {
+      yield arg.slice(arg.indexOf("=") + 1);
+    } else if ((arg === "--git-dir" || arg === "--work-tree") && argv[i + 1]) {
+      yield argv[i + 1] as string;
+    }
+  }
+}
+
+/** Every worktree of the clone's repository, the main one included. */
+function worktrees(repoRoot: string): string[] {
+  const listed = gitMaybe(["worktree", "list", "--porcelain"], { cwd: repoRoot }) ?? "";
+  return listed
+    .split("\n")
+    .filter((line) => line.startsWith("worktree "))
+    .map((line) => line.slice("worktree ".length));
+}
+
+/** A path with its symlinks resolved, as /proc reports a working directory. */
+function real(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }
 
 /** How a leftover is named in the log. */

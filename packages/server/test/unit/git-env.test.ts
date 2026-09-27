@@ -60,17 +60,19 @@ describe("appendGitConfig", () => {
     assert.equal(gitSees(env, "maintenance.auto"), "false");
   });
 
-  it("reads a count as git reads it, octal and hexadecimal included", () => {
+  it("reads a count as git reads it: decimal, blanks and a plus allowed", () => {
     for (const [given, count] of [
       [" 1", 1],
       ["+1", 1],
       ["007", 7],
-      ["010", 8],
-      ["0x2", 2],
+      ["010", 10],
+      ["08", 8],
       ["0", 0],
     ] as const) {
       const env: NodeJS.ProcessEnv = { GIT_CONFIG_COUNT: given };
-      for (let i = 0; i < count; i++) {
+      // One more entry than the count names: misreading it as smaller would
+      // overwrite one of these, and larger would leave a gap git refuses.
+      for (let i = 0; i <= count; i++) {
         env[`GIT_CONFIG_KEY_${i}`] = `test.k${i}`;
         env[`GIT_CONFIG_VALUE_${i}`] = "v";
       }
@@ -78,20 +80,25 @@ describe("appendGitConfig", () => {
       assert.equal(env.GIT_CONFIG_COUNT, String(count + 1), `after '${given}'`);
       assert.equal(env[`GIT_CONFIG_KEY_${count}`], "maintenance.auto");
       assert.equal(gitSees(env, "maintenance.auto"), "false", `git's reading after '${given}'`);
-      if (count > 0) assert.equal(gitSees(env, `test.k${count - 1}`), "v");
+      for (let i = 0; i < count; i++) assert.equal(gitSees(env, `test.k${i}`), "v");
     }
   });
 
   it("refuses a count git would refuse, rather than guessing past it", () => {
-    for (const count of ["two", "-1", "1.5", "1 ", "  ", "08", "0x"]) {
+    for (const count of ["two", "-1", "1.5", "1 ", "  ", "0x2"]) {
       const env: NodeJS.ProcessEnv = { GIT_CONFIG_COUNT: count };
       assert.throws(
         () => appendGitConfig(env, "maintenance.auto", "false"),
         /GIT_CONFIG_COUNT is '.*', which git does not accept as a count/,
       );
       assert.deepEqual(env, { GIT_CONFIG_COUNT: count }, "a refused count is left untouched");
-      // And git agrees that it is no count at all.
-      assert.equal(gitSees({ GIT_CONFIG_COUNT: count }, "user.name"), null);
+      // And git refuses it too, with every entry it could want present.
+      const keyed: NodeJS.ProcessEnv = { GIT_CONFIG_COUNT: count };
+      for (let i = 0; i < 4; i++) {
+        keyed[`GIT_CONFIG_KEY_${i}`] = "user.name";
+        keyed[`GIT_CONFIG_VALUE_${i}`] = "x";
+      }
+      assert.equal(gitSees(keyed, "user.name"), null, `git accepted '${count}'`);
     }
   });
 });
