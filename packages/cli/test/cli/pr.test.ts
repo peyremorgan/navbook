@@ -5,7 +5,15 @@
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
@@ -1049,9 +1057,12 @@ describe("a pull request that only another branch holds", () => {
       const written = repo.nav(["pr", "comment", id, "-y", "--commit", "-m", "Read."]);
       assert.equal(written.code, 0, written.stderr);
       assert.match(written.stdout, /Commented on #dk3mp2x9/);
+      // As git records it: on macOS the temporary directory is reached through
+      // a symlink (/var → /private/var), and git names the resolved path.
+      const recorded = realpathSync(tree);
       assert.match(
         written.stderr,
-        new RegExp(`written in ${tree.replace(/[.*+?^$()|[\]\\]/g, "\\$&")}`),
+        new RegExp(`written in ${recorded.replace(/[.*+?^$()|[\]\\]/g, "\\$&")}`),
       );
 
       // The comment is on the source branch, and the checkout that asked for it
