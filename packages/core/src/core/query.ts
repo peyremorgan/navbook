@@ -47,14 +47,44 @@ export interface QueryError {
   message: string;
 }
 
-const KEYED_TERM =
-  /^(status|label|assignee|author|milestone|feature|reviewer|review|awaiting|deadline):(.*)$/;
+/** One keyed term of the query grammar (spec 04 §4.3). */
+export interface QueryTerm {
+  key: string;
+  /** The one noun that has the field, when only one does; both when absent. */
+  only?: EntityKind;
+  /** How several terms of this key combine: see the head of this file. */
+  combines: "and" | "or";
+}
 
-/** Terms that describe something only a pull request has (spec 04 §4.3). */
-const PR_ONLY_TERMS = ["reviewer", "review", "awaiting"] as const;
+/**
+ * Every keyed term the parser accepts, in the order help lists them.
+ *
+ * The one list the parser, `--help` and shell completion all read, so a term
+ * added here cannot reach one of them and miss another. `deadline` ORs
+ * although it is not single-valued in spirit: asking for both the overdue and
+ * the undated is a question with an answer, unlike two labels naming
+ * different things.
+ */
+export const QUERY_TERMS: readonly QueryTerm[] = [
+  { key: "status", combines: "or" },
+  { key: "label", combines: "and" },
+  { key: "assignee", combines: "and" },
+  { key: "author", combines: "or" },
+  { key: "milestone", combines: "or" },
+  { key: "feature", combines: "and" },
+  { key: "reviewer", only: "pr", combines: "and" },
+  { key: "review", only: "pr", combines: "or" },
+  { key: "awaiting", only: "pr", combines: "and" },
+  { key: "deadline", only: "issue", combines: "or" },
+];
 
-/** And one that describes something only an issue has (spec 02 §2.5). */
-const ISSUE_ONLY_TERMS = ["deadline"] as const;
+/** The terms a query over one noun accepts; the rest it refuses. */
+export function queryTermsFor(kind: EntityKind): QueryTerm[] {
+  return QUERY_TERMS.filter((term) => term.only === undefined || term.only === kind);
+}
+
+// Every key is `[a-z]+`, so none needs escaping in the alternation.
+const KEYED_TERM = new RegExp(`^(${QUERY_TERMS.map((term) => term.key).join("|")}):(.*)$`);
 
 export function emptyQuery(): Query {
   return {
@@ -98,10 +128,11 @@ export function parseQuery(terms: readonly string[], kind: EntityKind): Query | 
     const key = match[1] as string;
     const value = (match[2] as string).trim();
     if (value === "") return { message: `query term '${term}' is missing a value` };
-    if (kind === "issue" && (PR_ONLY_TERMS as readonly string[]).includes(key)) {
+    const only = QUERY_TERMS.find((known) => known.key === key)?.only;
+    if (kind === "issue" && only === "pr") {
       return { message: `'${key}:' describes a pull request; issues have no reviews` };
     }
-    if (kind === "pr" && (ISSUE_ONLY_TERMS as readonly string[]).includes(key)) {
+    if (kind === "pr" && only === "issue") {
       return { message: `'${key}:' describes an issue; pull requests have no deadline` };
     }
     switch (key) {

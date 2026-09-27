@@ -6,7 +6,9 @@ import {
   matchesQuery,
   needsComments,
   parseQuery,
+  QUERY_TERMS,
   type Query,
+  queryTermsFor,
 } from "../src/core/query.ts";
 import { type EntityRecord, type NavTree, parseTree } from "../src/core/tree.ts";
 
@@ -504,5 +506,42 @@ describe("the deadline query term", () => {
 
   it("rejects the term with no value, as every keyed term does", () => {
     assert.equal(isQueryError(parseQuery(["deadline:"], "issue")), true);
+  });
+});
+
+describe("QUERY_TERMS", () => {
+  /** A value each key accepts, so the refusal tested is the noun's, not the value's. */
+  const SAMPLE: Record<string, string> = {
+    status: "open",
+    review: "pending",
+    deadline: "none",
+  };
+
+  for (const term of QUERY_TERMS) {
+    const query = `${term.key}:${SAMPLE[term.key] ?? "x@example.com"}`;
+    for (const kind of ["issue", "pr"] as const) {
+      const has = term.only === undefined || term.only === kind;
+      it(`${has ? "accepts" : "refuses"} '${term.key}:' on ${kind === "issue" ? "issues" : "pull requests"}`, () => {
+        assert.equal(!isQueryError(parseQuery([query], kind)), has);
+        assert.equal(
+          queryTermsFor(kind).some((t) => t.key === term.key),
+          has,
+          "and queryTermsFor agrees with the parser",
+        );
+      });
+    }
+  }
+
+  it("names every key the parser reads as a keyed term, and no other", () => {
+    // An unknown key is free text, so it lands in `text` rather than a field.
+    for (const term of QUERY_TERMS) {
+      const kind = term.only ?? "issue";
+      const query = parseQuery([`${term.key}:${SAMPLE[term.key] ?? "x@example.com"}`], kind);
+      assert.ok(!isQueryError(query));
+      assert.deepEqual(query.text, [], `'${term.key}:' was read as free text`);
+    }
+    const unknown = parseQuery(["priority:high"], "issue");
+    assert.ok(!isQueryError(unknown));
+    assert.deepEqual(unknown.text, ["priority:high"]);
   });
 });

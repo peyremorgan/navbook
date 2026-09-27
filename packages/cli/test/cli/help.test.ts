@@ -12,6 +12,7 @@
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
+import { QUERY_TERMS } from "@navbook/core";
 import { makeTempRepo, type TempRepo } from "../helpers/temprepo.ts";
 
 let repo: TempRepo;
@@ -94,5 +95,40 @@ describe("the help subcommand", () => {
       known.stderr,
       "no leftover special-casing of the word 'help'",
     );
+  });
+});
+
+describe("the query grammar in 'list --help'", () => {
+  for (const kind of ["issue", "pr"] as const) {
+    const noun = kind === "issue" ? "issues" : "pull requests";
+
+    it(`documents every term 'nav ${kind} list' accepts, and none it refuses`, () => {
+      const help = repo.nav([kind, "list", "--help"]).stdout;
+      for (const term of QUERY_TERMS) {
+        const accepted = term.only === undefined || term.only === kind;
+        const listed = new RegExp(`^  ${term.key}:`, "m").test(help);
+        assert.equal(
+          listed,
+          accepted,
+          `'${term.key}:' ${accepted ? "is missing from" : "is offered by"} the help for ${noun}`,
+        );
+      }
+    });
+
+    it(`completes on 'nav ${kind} list' exactly the terms its help documents`, () => {
+      const offered = repo
+        .nav(["__complete", kind, "list"])
+        .stdout.split("\n")
+        .filter((line) => /^[a-z]+:$/.test(line));
+      const help = repo.nav([kind, "list", "--help"]).stdout;
+      const documented = [...help.matchAll(/^ {2}([a-z]+):/gm)].map((m) => `${m[1]}:`);
+      assert.deepEqual(offered, documented);
+    });
+  }
+
+  it("names in the closing paragraph every term that ORs and every one that ANDs", () => {
+    const help = repo.nav(["issue", "list", "--help"]).stdout;
+    assert.match(help, /single-valued fields \(status, author, milestone, deadline\)/);
+    assert.match(help, /multi-valued ones \(label, assignee, feature\)\./);
   });
 });

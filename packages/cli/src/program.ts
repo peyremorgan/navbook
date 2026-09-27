@@ -5,7 +5,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type EntityKind, MERGE_METHODS } from "@navbook/core";
+import { type EntityKind, MERGE_METHODS, queryTermsFor } from "@navbook/core";
 import { Command, Option } from "commander";
 import { cmdComplete } from "./commands/complete.ts";
 import { cmdDoctor } from "./commands/doctor.ts";
@@ -60,22 +60,71 @@ function readOwnVersion(): string {
 
 export const VERSION = readOwnVersion();
 
-const QUERY_HELP = `Query terms AND together. Terms:
-  status:open|closed|merged   entity status (path); 'merged' is PR-only
-  label:L                     L is among the entity's labels (repeatable, ANDs)
-  assignee:EMAIL              assignee address, or a fragment of its domain
-  author:EMAIL                author address, same matching
-  milestone:M                 exact milestone
-  feature:SLUG                SLUG is among the entity's features (repeatable, ANDs)
-  reviewer:EMAIL              asked to review it; PRs only, same matching
-  review:DECISION             pending, approved or changes-requested; PRs only
-  awaiting:EMAIL              asked to review it and has not yet; PRs only
-  WORD or "some phrase"       case-insensitive substring of the title,
-                              description, or any comment body; also the
-                              entity's own ID, from four characters
-Same-key terms OR for single-valued fields (status, author, milestone, review)
-and AND for multi-valued ones (label, assignee, feature, reviewer, awaiting).
-The default query is status:open.`;
+/**
+ * What each keyed term means, in the words `--help` uses.
+ *
+ * Only the prose lives here: which terms exist, which noun has them and how
+ * they combine all come from `QUERY_TERMS`, which the parser reads too. A term
+ * added there without a line here still gets listed, as `key:VALUE`.
+ */
+const TERM_HELP: Record<string, { syntax: string; hint: string[] }> = {
+  label: { syntax: "label:L", hint: ["L is among the entity's labels (repeatable, ANDs)"] },
+  assignee: { syntax: "assignee:EMAIL", hint: ["assignee address, or a fragment of its domain"] },
+  author: { syntax: "author:EMAIL", hint: ["author address, same matching"] },
+  milestone: { syntax: "milestone:M", hint: ["exact milestone"] },
+  feature: {
+    syntax: "feature:SLUG",
+    hint: ["SLUG is among the entity's features (repeatable, ANDs)"],
+  },
+  reviewer: { syntax: "reviewer:EMAIL", hint: ["asked to review it; same matching"] },
+  review: { syntax: "review:DECISION", hint: ["pending, approved or changes-requested"] },
+  awaiting: { syntax: "awaiting:EMAIL", hint: ["asked to review it and has not yet"] },
+  deadline: {
+    syntax: "deadline:overdue|none",
+    hint: ["overdue: due before today (UTC), strictly;", "none: no deadline at all"],
+  },
+};
+
+/** How wide the syntax column is, as the help has always aligned it. */
+const SYNTAX_WIDTH = 28;
+
+function helpRow(syntax: string, hint: readonly string[]): string[] {
+  return hint.map((line, i) => `  ${(i === 0 ? syntax : "").padEnd(SYNTAX_WIDTH)}${line}`);
+}
+
+/**
+ * The query grammar as `nav {issue,pr} list --help` states it.
+ *
+ * Built per noun, so neither page offers a term its own parser refuses.
+ */
+function queryHelp(kind: EntityKind): string {
+  const terms = queryTermsFor(kind);
+  const rows = terms.flatMap(({ key }) => {
+    if (key === "status") {
+      const statuses = kind === "issue" ? "open|closed" : "open|closed|merged";
+      return helpRow(`status:${statuses}`, ["entity status (path)"]);
+    }
+    const help = TERM_HELP[key] ?? { syntax: `${key}:VALUE`, hint: [""] };
+    return helpRow(help.syntax, help.hint);
+  });
+  const combining = (combines: "and" | "or") =>
+    terms
+      .filter((term) => term.combines === combines)
+      .map((term) => term.key)
+      .join(", ");
+  return [
+    "Query terms AND together. Terms:",
+    ...rows,
+    ...helpRow('WORD or "some phrase"', [
+      "case-insensitive substring of the title,",
+      "description, or any comment body; also the",
+      "entity's own ID, from four characters",
+    ]),
+    `Same-key terms OR for single-valued fields (${combining("or")})`,
+    `and AND for multi-valued ones (${combining("and")}).`,
+    "The default query is status:open.",
+  ].join("\n");
+}
 
 /**
  * Help for `--commit`, naming the subject the verb commits under (spec 03 §3.2).
@@ -397,7 +446,7 @@ export function addSharedVerbs(
     .command("list")
     .argument("[query...]", "query terms; default status:open")
     .description(`list ${kind === "issue" ? "issues" : "pull requests"} matching a query`)
-    .addHelpText("after", `\n${QUERY_HELP}`)
+    .addHelpText("after", `\n${queryHelp(kind)}`)
     .option("--json", "one JSON object per entity, newline-delimited");
   shared.configureList?.(list);
   list.action((terms: string[], opts) =>
