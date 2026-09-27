@@ -5,6 +5,7 @@ created: 2026-09-17T21:57:59Z
 assignee: Claude <noreply@anthropic.com>
 labels: [bug]
 feature: web
+resolution: fixed
 ---
 
 Nothing in the web client asks before navigating away from unsaved work. A
