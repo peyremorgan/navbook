@@ -5,6 +5,7 @@ created: 2026-09-18T08:42:43Z
 assignee: Claude <noreply@anthropic.com>
 labels: [bug]
 feature: [cli, doctor, format]
+resolution: fixed
 ---
 
 Reported by Morgan, about to approve a pull request from the main checkout on `dev`:
