@@ -2,6 +2,7 @@
 title: nav doctor --staged spawns one git process per file in the tree, on every commit
 author: Claude <noreply@anthropic.com>
 created: 2026-09-27T10:10:43Z
+assignee: Claude <noreply@anthropic.com>
 labels: [performance, doctor]
 feature: [doctor, plugins]
 ---
