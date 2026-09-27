@@ -4,7 +4,7 @@
 
 import type { Trailer } from "../core/ops.ts";
 import type { NavTree } from "../core/tree.ts";
-import { blobSizes, readBlobsBySha } from "./blobs.ts";
+import { BLOB_BATCH_BYTES, blobSizes, MAX_READ_BYTES, readBlobsBySha } from "./blobs.ts";
 import { git, gitRun, splitLines, splitNul } from "./exec.ts";
 
 /** Repository-relative paths currently staged in the index. */
@@ -29,7 +29,7 @@ export interface StagedReadLimits {
   batch: number;
 }
 
-const STAGED_READ_LIMITS: StagedReadLimits = { prefetch: 1024 * 1024, batch: 64 * 1024 * 1024 };
+const STAGED_READ_LIMITS: StagedReadLimits = { prefetch: 1024 * 1024, batch: BLOB_BATCH_BYTES };
 
 /**
  * The files staged under `dir`, as a tree keyed by their path below it.
@@ -67,12 +67,12 @@ export function stagedTree(
     if (path.startsWith(prefix)) shaOf.set(path.slice(prefix.length), sha);
   }
 
-  const sizes = blobSizes(cwd, [...new Set(shaOf.values())]);
-  const small = [...sizes].filter(([, size]) => size <= limits.prefetch);
+  const sizes = blobSizes(cwd, [...new Set(shaOf.values())], { what: "staged" });
+  const sizeOf = new Map(sizes.map((blob) => [blob.sha, blob.size]));
   const contents = readBlobsBySha(
     cwd,
-    small.map(([sha, size]) => ({ sha, size })),
-    limits.batch,
+    sizes.filter((blob) => blob.size <= limits.prefetch),
+    { what: "staged", batchBytes: limits.batch },
   );
 
   return {
@@ -82,8 +82,13 @@ export function stagedTree(
       if (sha === undefined) return undefined;
       let text = contents.get(sha);
       if (text === undefined) {
-        const maxBuffer = (sizes.get(sha) as number) + 1024;
-        text = git(["cat-file", "blob", sha], { cwd, maxBuffer });
+        const size = sizeOf.get(sha) as number;
+        if (size > MAX_READ_BYTES) {
+          throw new Error(
+            `staged ${key} is ${size} bytes, more than the ${MAX_READ_BYTES} Navbook reads`,
+          );
+        }
+        text = git(["cat-file", "blob", sha], { cwd, maxBuffer: size + 1024 });
         contents.set(sha, text);
       }
       return text;

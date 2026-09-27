@@ -3,11 +3,11 @@
  *
  * A pull request's files live on the branch it proposes to merge (spec 03
  * §3.5), so listing open PRs means enumerating refs, not walking the working
- * tree. Blobs are read through a single `git cat-file --batch` process so the
- * cost is one subprocess rather than one per file.
+ * tree. Their blobs are read through `blobs.ts`, a few `cat-file --batch`
+ * processes for the lot rather than one per file.
  */
 
-import { catObjects } from "./blobs.ts";
+import { catObjects, MAX_READ_BYTES } from "./blobs.ts";
 import { GitError, git, gitMaybe, gitRun, splitLines, splitNul } from "./exec.ts";
 
 export interface Ref {
@@ -42,13 +42,6 @@ export function listBranchRefs(cwd: string): Ref[] {
   return refs;
 }
 
-/**
- * How much one {@link catBlobs} may send back. Its callers ask by path and do
- * not know the sizes, so the cap is fixed; a reader that does know them uses
- * {@link readBlobsBySha}, which sizes each batch instead.
- */
-const CAT_BLOBS_MAX_BUFFER = 256 * 1024 * 1024;
-
 export interface BlobRequest {
   ref: string;
   path: string;
@@ -65,7 +58,9 @@ export function catBlobs(cwd: string, requests: readonly BlobRequest[]): Map<str
   return catObjects(
     cwd,
     requests.map((request) => `${request.ref}:${request.path}`),
-    CAT_BLOBS_MAX_BUFFER,
+    // Asked by path, so the sizes are not known and cannot size the buffer;
+    // a reader that knows them uses `readBlobsBySha` (`blobs.ts`) instead.
+    MAX_READ_BYTES,
   );
 }
 

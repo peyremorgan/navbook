@@ -6,7 +6,6 @@
  * repository it works in as its first argument; none of them holds state.
  */
 
-export * from "./blobs.ts";
 export * from "./config.ts";
 export * from "./diff.ts";
 export * from "./exec.ts";

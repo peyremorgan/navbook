@@ -85,7 +85,7 @@ const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
 const KILL_GRACE_MS = 2_000;
 
 /** The environment every git command runs with: the caller's, made locale-neutral. */
-function gitEnv(extra: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
+export function gitEnv(extra: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
   return { ...process.env, LC_ALL: "C", GIT_PAGER: "cat", ...extra };
 }
 

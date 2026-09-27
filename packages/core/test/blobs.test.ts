@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
-import { blobSizes, catObjects, readBlobsBySha } from "../src/git/blobs.ts";
+import { blobSizes, catObjects, MAX_READ_BYTES, readBlobsBySha } from "../src/git/blobs.ts";
 import { GitError, git, gitRun } from "../src/git/exec.ts";
 import { lsTreeEntries } from "../src/git/refscan.ts";
 
@@ -27,14 +27,16 @@ describe("blobSizes", () => {
       blobs.map((blob) => blob.sha),
     );
     assert.deepEqual(
-      blobs.map((blob) => sizes.get(blob.sha)),
-      texts.map((text) => Buffer.byteLength(text)),
+      sizes,
+      blobs.map((blob, index) => ({ sha: blob.sha, size: Buffer.byteLength(texts[index] ?? "") })),
     );
   });
 
   it("throws on a name that is not a blob in the store", () => {
     assert.throws(() => blobSizes(dir, [tree]), /could not size blob/);
     assert.throws(() => blobSizes(dir, ["2".repeat(40)]), /could not size blob/);
+    // Said in the caller's words, so a failing hook says where to look.
+    assert.throws(() => blobSizes(dir, [tree], { what: "staged" }), /could not size staged blob/);
   });
 });
 
@@ -49,6 +51,44 @@ describe("catObjects", () => {
         [first?.sha, texts[0]],
       ],
     );
+  });
+});
+
+describe("catObjects framing", () => {
+  it("reads past a missing path whose name looks like a header", () => {
+    // Git echoes a missing spec back verbatim: `HEAD:a blob 12 z missing`
+    // must not be read as a 12-byte blob, eating the next answer.
+    const read = catObjects(dir, ["HEAD:a blob 12 z", "HEAD:f1.txt", "HEAD:f2.txt"], 1 << 20);
+    assert.deepEqual(
+      [...read],
+      [
+        ["HEAD:f1.txt", texts[1]],
+        ["HEAD:f2.txt", texts[2]],
+      ],
+    );
+  });
+
+  it("throws on an answer that does not frame as asked, rather than misfiling it", () => {
+    const bin = mkdtempSync(join(tmpdir(), "navbook-shim-"));
+    // Answers every request with the first file's header and body, whatever
+    // was asked: a reply that belongs to another name.
+    const [first, second] = lsTreeEntries(dir, tree);
+    writeFileSync(
+      join(bin, "git"),
+      `#!/bin/sh\ncat >/dev/null\nprintf '${first?.sha} blob 4\\none\\n\\n'\n`,
+      { mode: 0o755 },
+    );
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    try {
+      assert.throws(
+        () => catObjects(dir, [second?.sha ?? ""], 1 << 20),
+        /answered '[0-9a-f]+' with an unexpected header/,
+      );
+    } finally {
+      process.env.PATH = path;
+      rmSync(bin, { recursive: true, force: true });
+    }
   });
 });
 
@@ -85,10 +125,29 @@ describe("readBlobsBySha", () => {
     // A budget smaller than any one blob: one batch each.
     let read = new Map<string, string>();
     const count = batches(() => {
-      read = readBlobsBySha(dir, blobs, 1);
+      read = readBlobsBySha(dir, blobs, { batchBytes: 1 });
     });
     assert.equal(read.size, 3);
     assert.equal(count, 3);
+  });
+
+  it("refuses a blob larger than it will hold, before reading anything", () => {
+    const [first] = blobs;
+    let thrown: unknown;
+    const count = batches(() => {
+      try {
+        readBlobsBySha(dir, [{ sha: first?.sha ?? "", size: MAX_READ_BYTES + 1 }], {
+          what: "branch",
+        });
+      } catch (error) {
+        thrown = error;
+      }
+    });
+    assert.match(
+      String(thrown),
+      /branch blob [0-9a-f]+ is \d+ bytes, more than the \d+ Navbook reads/,
+    );
+    assert.equal(count, 0);
   });
 
   it("throws on an object the store does not have", () => {
