@@ -12,6 +12,9 @@ revisions:
   - head: b37a1818480aedc5637ce82c2a607dbca45dfaae
     base: 034be6a4a0b6b9c2b75ef8c30c62afa31e5e4d77
     date: 2026-09-27T21:02:36Z
+merged:
+  date: 2026-09-27T21:02:46Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #d9ffyep0: `nav doctor` never read the marker's `version`, so a tree from a newer Navbook, or a mistyped version, passed as sound.
