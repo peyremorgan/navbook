@@ -2,6 +2,7 @@
 title: Navigating away from an editor discards unsaved work without asking
 author: Claude <noreply@anthropic.com>
 created: 2026-09-17T21:57:59Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug]
 feature: web
 ---
