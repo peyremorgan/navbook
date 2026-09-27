@@ -89,6 +89,14 @@ test("stays signed out after signing out", async ({ signedIn }) => {
   // landing on one would bounce straight there.
   await expect(signedIn.getByTestId("signed-out")).toBeVisible();
   expect(signedIn.url()).not.toContain("/authorize");
+  // Nothing is left of the round trip: no `state` in the address bar, and no
+  // request record in storage for a later visit to trip over.
+  await signedIn.waitForURL((url) => url.pathname === "/signed-out" && url.search === "");
+  expect(
+    await signedIn.evaluate(() =>
+      Object.keys(window.localStorage).filter((key) => key.startsWith("oidc.")),
+    ),
+  ).toEqual([]);
 
   // And the token really is gone: a guarded route now needs the provider.
   await signedIn.getByTestId("sign-in-again").click();
