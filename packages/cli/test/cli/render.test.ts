@@ -10,23 +10,20 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import stringWidth from "string-width";
 import { makeColors } from "../../src/render/colors.ts";
-import { type Column, renderTable, truncate } from "../../src/render/table.ts";
+import { type Column, pad, renderTable, truncate } from "../../src/render/table.ts";
 
 const EMOJI = "😀😀😀😀";
 const FAMILY = "👨‍👩‍👧 team";
 const JAPANESE = "認証が失敗する";
-
-/** A string that survives a UTF-8 round trip holds no lone surrogate. */
-function wellFormed(text: string): boolean {
-  return Buffer.from(text, "utf8").toString("utf8") === text;
-}
+/** "éclair" with the accent as a combining mark after a plain e. */
+const DECOMPOSED = `e${String.fromCharCode(0x301)}clair`;
 
 describe("truncate", () => {
   it("never cuts a character in half", () => {
-    for (const text of [EMOJI, FAMILY, JAPANESE, "éclair", "éclair"]) {
+    for (const text of [EMOJI, FAMILY, JAPANESE, "éclair", DECOMPOSED]) {
       for (let width = 1; width <= 12; width++) {
         const cut = truncate(text, width);
-        assert.ok(wellFormed(cut), `${JSON.stringify(text)} @ ${width}: ${JSON.stringify(cut)}`);
+        assert.ok(cut.isWellFormed(), `${JSON.stringify(text)} @ ${width}: ${JSON.stringify(cut)}`);
       }
     }
   });
@@ -57,7 +54,7 @@ describe("truncate", () => {
   });
 
   it("keeps a combining mark with its base", () => {
-    assert.equal(truncate("éclair", 3), "éc~");
+    assert.equal(truncate(DECOMPOSED, 3), `${DECOMPOSED.slice(0, 3)}~`);
   });
 
   it("leaves text that fits alone, and ASCII as it was", () => {
@@ -93,7 +90,7 @@ describe("renderTable", () => {
   for (const width of [undefined, 40, 30, 24]) {
     it(`aligns every column with wide text${width ? ` in ${width} columns` : ""}`, () => {
       const table = renderTable(columns, rows, { colors, width });
-      assert.ok(wellFormed(table), table);
+      assert.ok(table.isWellFormed(), table);
       const starts = labelColumns(table);
       assert.equal(new Set(starts).size, 1, `labels start at ${starts.join(", ")}\n${table}`);
       if (width !== undefined) {
@@ -103,4 +100,48 @@ describe("renderTable", () => {
       }
     });
   }
+});
+
+describe("control characters in a cell", () => {
+  const colors = makeColors({ isTTY: false }, {});
+  const columns: Column[] = [
+    { header: "title", flexible: true, minWidth: 4 },
+    { header: "labels" },
+  ];
+
+  it("shows a tab as a space and an escape as a replacement character", () => {
+    const table = renderTable(
+      columns,
+      [
+        ["a\tb", "x"],
+        ["\u001b[31mred\u001b[0m", "y"],
+      ],
+      {
+        colors,
+      },
+    );
+    assert.ok(!table.includes("\t") && !table.includes("\u001b"), JSON.stringify(table));
+    assert.match(table, /a b/);
+    assert.match(table, /\uFFFD\[31mred\uFFFD\[0m/);
+  });
+
+  it("cuts a cell that held an escape sequence by what it shows", () => {
+    const table = renderTable(columns, [["\u001b[31mredredred\u001b[0m", "x"]], {
+      colors,
+      width: 10,
+    });
+    // The title column shrinks to its minimum of 4. The escape counts as the
+    // one column its replacement takes, not as nothing, and no colour code is
+    // left open to bleed into the columns after it.
+    const row = table.split("\n")[1] as string;
+    assert.equal(row, "\uFFFD[3~  x");
+  });
+});
+
+describe("pad", () => {
+  it("pads by terminal column", () => {
+    assert.equal(pad("認証.md", 10), "認証.md   ");
+    assert.equal(pad("auth.md", 10), "auth.md   ");
+    assert.equal(stringWidth(pad(JAPANESE, 20)), 20);
+  });
 });

@@ -35,7 +35,7 @@ import {
 import type { Ctx } from "../context.ts";
 import { openInEditor } from "../editor.ts";
 import { fail } from "../errors.ts";
-import { type Column, renderTable } from "../render/table.ts";
+import { type Column, pad, renderTable } from "../render/table.ts";
 import { composeFile } from "./compose.ts";
 import type { GlobalFlags } from "./entity.ts";
 
@@ -163,7 +163,7 @@ export function cmdFeatureShow(ctx: Ctx, slug: string, opts: FeatureShowOptions)
   lines.push("", c.dim(`specs (${feature.specs.length}):`));
   if (feature.specs.length === 0) lines.push(c.dim("  none"));
   for (const spec of feature.specs) {
-    lines.push(`  ${spec.fileName.padEnd(28)}${spec.title}`);
+    lines.push(`  ${pad(spec.fileName, 28)}${spec.title}`);
   }
 
   const entities = [...attached.issues, ...attached.prs];
