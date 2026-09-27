@@ -363,7 +363,14 @@ export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void 
  */
 function hintOtherRefs(ctx: Ctx, opts: PrListOptions): void {
   if (opts.json) return;
-  const count = countOpenPrsOnOtherRefs(ctx);
+  let count: number;
+  try {
+    count = countOpenPrsOnOtherRefs(ctx);
+  } catch {
+    // The listing this follows has already been printed and is right; a branch
+    // git cannot read is `--all-refs`'s to report, not a reason to fail this.
+    return;
+  }
   if (count === 0) return;
   ctx.stderr.write(
     `${ctx.colors.dim(

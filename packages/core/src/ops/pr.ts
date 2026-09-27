@@ -63,9 +63,10 @@ import {
   batchResolve,
   catBlobs,
   listBranchRefs,
+  lsTreeEntries,
   lsTreeNamesOfTree,
-  lsTreeRecursiveOfTree,
   type Ref,
+  readBlobsBySha,
 } from "../git/refscan.ts";
 import {
   checkoutBranch,
@@ -384,48 +385,70 @@ export function scanRefsForOpenPrs(ws: WsCtx): FoundPr[] {
   const dir = `${ws.navDir}/${PR_OPEN_DIR}`;
 
   // Each ref's `prs/open` resolved to its tree in one `--batch-check`, as
-  // {@link countOpenPrsOnOtherRefs} does, so the refs that share one — a
-  // branch and its `origin/` copy, most often — are listed and read once.
+  // {@link countOpenPrsOnOtherRefs} does, and each distinct tree listed once:
+  // a branch and its `origin/` copy, most often, share one.
   const treeOf = batchResolve(
     cwd,
     refs.map((ref) => `${ref.full}:${dir}`),
   );
-  const listings = new Map<string, { paths: string[]; wanted: string[] }>();
-  for (const tree of new Set(treeOf.values())) {
-    const paths = lsTreeRecursiveOfTree(cwd, tree).map((path) => `${PR_OPEN_DIR}/${path}`);
-    listings.set(tree, { paths, wanted: parsedPaths(paths, { ext: ws.ext }) });
+
+  // A pull request's directory is the unit, not the whole `prs/open`: every
+  // branch that opened its own has a `prs/open` of its own, and still shares
+  // the directories it inherited. Keyed by name and subtree, so each version
+  // of a directory is parsed once, and its blobs, by SHA, read once.
+  interface PrDir {
+    files: Map<string, { sha: string; size: number }>;
   }
-  // Then one batch for every tree, holding only what `parseTree` will read: an
-  // entity's extension namespace (§2.12) is listed, which is what fills
-  // `extraFiles`, and never read — so however large it is, it costs nothing.
-  const relative = (path: string): string => path.slice(PR_OPEN_DIR.length + 1);
-  const blobs = catBlobs(
+  const prDirs = new Map<string, PrDir>();
+  const dirsOfTree = new Map<string, string[]>();
+  for (const tree of new Set(treeOf.values())) {
+    const entries = lsTreeEntries(cwd, tree);
+    const keyOf = new Map<string, string>();
+    for (const entry of entries) {
+      if (entry.type !== "tree" || entry.path.includes("/")) continue;
+      const key = `${entry.path}\0${entry.sha}`;
+      keyOf.set(entry.path, key);
+      if (!prDirs.has(key)) prDirs.set(key, { files: new Map() });
+    }
+    for (const entry of entries) {
+      const slash = entry.path.indexOf("/");
+      if (entry.type !== "blob" || slash === -1) continue;
+      const key = keyOf.get(entry.path.slice(0, slash));
+      if (key !== undefined) prDirs.get(key)?.files.set(`${PR_OPEN_DIR}/${entry.path}`, entry);
+    }
+    dirsOfTree.set(tree, [...keyOf.values()]);
+  }
+
+  // Only what `parseTree` will read is fetched: an entity's extension
+  // namespace (§2.12) is listed, which is what fills `extraFiles`, and never
+  // read — so however large it is, it costs nothing.
+  const blobs = readBlobsBySha(
     cwd,
-    [...listings].flatMap(([tree, { wanted }]) =>
-      wanted.map((path) => ({ ref: tree, path: relative(path) })),
+    [...prDirs.values()].flatMap(({ files }) =>
+      parsedPaths(files.keys(), { ext: ws.ext }).flatMap((path) => files.get(path) ?? []),
     ),
   );
 
   const parsed = new Map<string, EntityRecord[]>();
-  for (const [tree, { paths, wanted }] of listings) {
-    const asked = new Set(wanted);
-    const blobAt = (path: string): string | undefined => blobs.get(`${tree}:${relative(path)}`);
-    const files: NavTree = {
-      // A blob asked for that did not come back is missing from the object
-      // store — a partial clone — and reads as a file the tree does not hold.
-      keys: () => paths.filter((path) => !asked.has(path) || blobAt(path) !== undefined),
-      get: blobAt,
+  for (const [key, { files }] of prDirs) {
+    const tree: NavTree = {
+      keys: () => files.keys(),
+      get: (path) => {
+        const blob = files.get(path);
+        return blob === undefined ? undefined : blobs.get(blob.sha);
+      },
     };
     // A pull request read out of another branch is parsed with this
     // checkout's extensions, as it is counted by this checkout's policy: the
     // alternative is asking what that branch declared, which is a second
     // answer to a question that has one (spec 02 §2.10).
-    parsed.set(tree, parseTree(files, { ext: ws.ext }).prs);
+    parsed.set(key, parseTree(tree, { ext: ws.ext }).prs);
   }
 
   for (const ref of refs) {
     const tree = treeOf.get(`${ref.full}:${dir}`);
-    for (const entity of tree === undefined ? [] : (parsed.get(tree) ?? [])) {
+    const keys = tree === undefined ? [] : (dirsOfTree.get(tree) ?? []);
+    for (const entity of keys.flatMap((key) => parsed.get(key) ?? [])) {
       const existing = byId.get(entity.id);
       if (!existing) {
         byId.set(entity.id, { entity, refs: [ref] });

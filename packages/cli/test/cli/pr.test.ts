@@ -14,7 +14,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import {
   deterministicEnv,
@@ -762,6 +762,25 @@ describe("nav pr list points at --all-refs", () => {
       assert.equal(listed.stdout.includes("dk3mp2x9"), false);
       assert.match(listed.stderr, /1 open pull request on other branches/);
       assert.match(listed.stderr, /--all-refs/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("still lists, without the hint, when the other branches cannot be read", () => {
+    const { repo } = withOpenPr();
+    try {
+      // A git that fails every `cat-file`: the checked-out tree is read from
+      // disk, so only the count behind the hint depends on it.
+      const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+      const shim = repo.script(
+        "git",
+        `case "$1" in cat-file) echo "fatal: simulated" >&2; exit 128 ;; esac\nexec '${real}' "$@"\n`,
+      );
+      const listed = repo.nav(["pr", "list"], { PATH: `${dirname(shim)}:${process.env.PATH}` });
+      assert.equal(listed.code, 0, listed.stderr);
+      assert.match(listed.stdout, /No pull requests match/);
+      assert.equal(listed.stderr, "");
     } finally {
       repo.cleanup();
     }

@@ -756,27 +756,60 @@ describe("ops: updating and merging a pull request", () => {
       git(["commit", "-qm", "reports"], { cwd: dir });
       git(["branch", "copy"], { cwd: dir });
       git(["update-ref", "refs/remotes/origin/feature", "feature"], { cwd: dir });
+      // A branch that opened a pull request of its own has a `prs/open` tree of
+      // its own, and still carries this one's directory unchanged.
+      git(["checkout", "-qb", "other"], { cwd: dir });
+      const otherDir = join(dir, ".navbook/prs/open/qqq11111-other");
+      mkdirSync(otherDir);
+      const prText = readFileSync(join(dir, prDir, "pr.md"), "utf8");
+      writeFileSync(join(otherDir, "pr.md"), `${prText}Another.\n`);
+      git(["add", "-A"], { cwd: dir });
+      git(["commit", "-qm", "another"], { cwd: dir });
       git(["checkout", "-q", "main"], { cwd: dir });
+      const sha = (path: string): string =>
+        git(["rev-parse", `feature:${path}`], { cwd: dir }).trim();
 
       withCatFileShim(null, (asked) => {
         const found = listPrsAcrossRefs(ws, parseListQuery(ws, [], "pr"));
         assert.deepEqual(
           found.map((entry) => [entry.entity.id, entry.refs.map((ref) => ref.short).sort()]),
-          [["ppp11111", ["copy", "feature", "origin/feature"]]],
+          [
+            ["ppp11111", ["copy", "feature", "origin/feature", "other"]],
+            ["qqq11111", ["other"]],
+          ],
         );
         // Listed, so a front end can say it is there (§2.12)...
         assert.deepEqual(found[0]?.entity.extraFiles, [
           `${prDir.slice(".navbook/".length)}/reports.json`,
         ]);
-        // ...and never read, on any of the three refs that carry it (#u0a6u6ev).
-        assert.deepEqual(
-          asked().filter((spec) => spec.endsWith("/reports.json")),
-          [],
-        );
-        // The three refs share one `prs/open` tree, so it is read once for all of them.
-        assert.equal(asked().filter((spec) => spec.endsWith("/pr.md")).length, 1);
+        // ...and never read, on any of the four refs that carry it (#u0a6u6ev).
+        assert.equal(asked().includes(sha(`${prDir}/reports.json`)), false);
+        // Two `prs/open` trees hold the same directory, which is read once.
+        assert.equal(asked().filter((spec) => spec === sha(`${prDir}/pr.md`)).length, 1);
       });
     });
+  });
+
+  /** Delete the loose object behind `<rev>:<path>`, as a partial clone lacks it. */
+  function dropObject(dir: string, rev: string, path: string): void {
+    const sha = git(["rev-parse", `${rev}:${path}`], { cwd: dir }).trim();
+    rmSync(join(dir, ".git", "objects", sha.slice(0, 2), sha.slice(2)));
+  }
+
+  it("reports an object it cannot read, rather than dropping the pull request", () => {
+    // The entity file, then the directory holding it: git has just listed
+    // each, so its absence is a broken object store, not a missing file.
+    for (const path of ["pr.md", ""]) {
+      inPrWorkspace((ws, dir) => {
+        const prDir = openPrDir(dir);
+        git(["checkout", "-q", "main"], { cwd: dir });
+        dropObject(dir, "feature", path === "" ? prDir : `${prDir}/${path}`);
+        assert.throws(
+          () => listPrsAcrossRefs(ws, parseListQuery(ws, [], "pr")),
+          path === "" ? GitError : /object store is incomplete/,
+        );
+      });
+    }
   });
 
   it("reports a batch it could not read, rather than finding no pull request", () => {

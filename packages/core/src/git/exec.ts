@@ -89,24 +89,50 @@ function gitEnv(extra: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
   return { ...process.env, LC_ALL: "C", GIT_PAGER: "cat", ...extra };
 }
 
-/** What a failure to spawn git at all means to the person running it. */
-export function spawnFailure(error: NodeJS.ErrnoException): Error {
+/**
+ * What a failed spawn means to the person running it: git missing from PATH,
+ * or — for a synchronous run, which buffers everything — git saying more than
+ * `maxBuffer` allows, in the words the asynchronous runner already uses.
+ */
+export function spawnFailure(
+  error: NodeJS.ErrnoException,
+  args: readonly string[],
+  maxBuffer: number,
+): Error {
   if (error.code === "ENOENT") {
     return new Error("git was not found on PATH; Navbook requires a working git installation");
+  }
+  if (error.code === "ENOBUFS") {
+    return new Error(`git ${args.join(" ")} produced more than ${maxBuffer} bytes of output`);
   }
   return error;
 }
 
+/**
+ * Whether a spawn error is only git having exited before reading all of its
+ * input — a `cat-file --batch` refusing a broken repository, say. Writing the
+ * rest then fails with `EPIPE`, but git did run and did say why, so it is its
+ * exit status and stderr that answer, not the pipe.
+ */
+export function exitedEarly(result: { error?: Error; status: number | null }): boolean {
+  return (
+    (result.error as NodeJS.ErrnoException | undefined)?.code === "EPIPE" && result.status !== null
+  );
+}
+
 /** Run git and return its result without throwing. */
 export function gitRun(args: string[], opts: GitOptions = {}): GitResult {
+  const maxBuffer = opts.maxBuffer ?? DEFAULT_MAX_BUFFER;
   const result = spawnSync("git", args, {
     cwd: opts.cwd,
     input: opts.input,
     encoding: "utf8",
-    maxBuffer: opts.maxBuffer ?? DEFAULT_MAX_BUFFER,
+    maxBuffer,
     env: gitEnv(opts.env),
   });
-  if (result.error) throw spawnFailure(result.error as NodeJS.ErrnoException);
+  if (result.error && !exitedEarly(result)) {
+    throw spawnFailure(result.error as NodeJS.ErrnoException, args, maxBuffer);
+  }
   return { code: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 }
 
@@ -184,7 +210,7 @@ export function gitRunAsync(args: string[], opts: GitAsyncOptions = {}): Promise
     child.stdin.on("error", () => undefined);
     child.stdin.end(opts.input ?? "");
 
-    child.on("error", (error) => settle(() => reject(spawnFailure(error))));
+    child.on("error", (error) => settle(() => reject(spawnFailure(error, args, maxBuffer))));
     child.on("exit", () => {
       // The process is gone, so the clock stops; only its output is still
       // draining. A stopped command's output is not wanted, and waiting for it
