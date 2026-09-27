@@ -20,6 +20,17 @@
  * own body — composing files, validating them, committing — stays synchronous:
  * it is local disk work measured in milliseconds, and the boundary belongs
  * where the network is.
+ *
+ * Reads go further and keep off the network altogether, once {@link
+ * RepoSync.start} is called: a background pull fetches every
+ * `pullIntervalMs`, outside the lock, and takes the lock only to merge what
+ * arrived. A read that holds the clone while a fetch crosses the network makes
+ * everyone queued behind it wait for the remote, which on a deployment whose
+ * fetch takes seconds was most of the time an issue page took (#esqpmn7i).
+ * When the background pull is not keeping up — before its first success, or
+ * after it failed or met a conflict — reads pull for themselves as they
+ * otherwise would, so the freshness `pullIntervalMs` promises, and the errors a
+ * read reports, are the same either way.
  */
 
 import {
@@ -94,6 +105,13 @@ export interface SyncOptions {
   now?: () => number;
   /** Where to say what happened to a call that was stopped: the log, in a server. */
   report?: (line: string) => void;
+  /**
+   * Told as a mutation's body starts, and again if it throws: whatever it
+   * leaves in the working tree, anything remembered about the tree is stale.
+   * Once at the start, so the body's own reads see the files as it leaves them;
+   * again on failure, because a body that throws may have written first.
+   */
+  onWrite?: () => void;
 }
 
 /** What a mutation's write did, and whether the commit reached the remote. */
@@ -183,13 +201,32 @@ export function syncTimedOut(error: GitTimeoutError, keptLocalCommit: boolean): 
   );
 }
 
+/** The background pull's state while it runs. */
+interface Background {
+  timer: NodeJS.Timeout | null;
+  inFlight: Promise<void> | null;
+  stopped: boolean;
+}
+
 export class RepoSync {
   private readonly lock = new Mutex();
+  /**
+   * One network call at a time.
+   *
+   * The background fetch runs outside {@link lock}, so it could otherwise meet
+   * a mutation's fetch or push on the way out, and two git processes updating
+   * the same remote-tracking ref make one of them fail on the ref's lock file.
+   * Nothing holding this ever waits for {@link lock}, so the two cannot deadlock.
+   */
+  private readonly net = new Mutex();
   private readonly opts: SyncOptions;
   private readonly git: SyncGit;
   private readonly now: () => number;
   private readonly report: (line: string) => void;
   private lastFetch = Number.NEGATIVE_INFINITY;
+  private background: Background | null = null;
+  /** How the background pull's latest attempt went; null before its first. */
+  private lastRefresh: "ok" | "failed" | null = null;
 
   constructor(opts: SyncOptions) {
     this.opts = opts;
@@ -206,9 +243,83 @@ export class RepoSync {
   /** Run a read, having brought the clone up to date first. */
   read<T>(body: () => T): Promise<T> {
     return this.lock.run(async () => {
-      await this.pull({ force: false, keptLocalCommit: false });
+      // While the background pull keeps up, the clone is already as fresh as
+      // a read may ask for, and fetching again would only make it wait.
+      if (this.lastRefresh !== "ok") await this.pull({ force: false, keptLocalCommit: false });
       return body();
     });
+  }
+
+  /**
+   * Start pulling in the background, every `pullIntervalMs`, beginning now.
+   *
+   * Nothing to do without a remote, or with an interval of 0: that asks for
+   * every read to fetch first, which only the read itself can do.
+   */
+  start(): void {
+    if (this.opts.remote === null || this.opts.pullIntervalMs <= 0 || this.background) return;
+    this.background = { timer: null, inFlight: null, stopped: false };
+    this.schedule(0);
+  }
+
+  /** Stop the background pull, waiting for one in flight to finish. */
+  async stop(): Promise<void> {
+    const background = this.background;
+    if (!background) return;
+    background.stopped = true;
+    if (background.timer) clearTimeout(background.timer);
+    await background.inFlight;
+    this.background = null;
+    this.lastRefresh = null;
+  }
+
+  private schedule(delayMs: number): void {
+    const background = this.background;
+    if (!background || background.stopped) return;
+    background.timer = setTimeout(() => {
+      background.timer = null;
+      background.inFlight = this.refresh().finally(() => {
+        background.inFlight = null;
+        // From the end of one pull to the start of the next, so a fetch
+        // slower than the interval never has a second one queued behind it.
+        this.schedule(this.opts.pullIntervalMs);
+      });
+    }, delayMs);
+    // A pending pull is no reason to keep the process alive.
+    background.timer.unref();
+  }
+
+  /**
+   * One background pull: fetch without holding the clone, then merge under it.
+   *
+   * Never throws. What went wrong is the operator's to read in the log, once
+   * when it starts going wrong and once when it recovers; meanwhile reads pull
+   * for themselves and tell their own callers.
+   */
+  async refresh(): Promise<void> {
+    const remote = this.opts.remote;
+    if (remote === null) return;
+    // What the clone is then as fresh as: the remote as it stood when asked.
+    const asked = this.now();
+    try {
+      await this.net.run(() => this.git.fetchRemote(this.opts.repoRoot, remote, this.network()));
+      await this.lock.run(() => this.merge(remote));
+    } catch (error) {
+      if (this.lastRefresh !== "failed") {
+        const why =
+          error instanceof MergeConflict
+            ? `the clone conflicts with the remote in ${error.paths.join(", ")}`
+            : error instanceof Error
+              ? error.message
+              : String(error);
+        this.report(`nav-server: background pull failed, reads will pull for themselves: ${why}`);
+      }
+      this.lastRefresh = "failed";
+      return;
+    }
+    if (this.lastRefresh === "failed") this.report("nav-server: background pull recovered");
+    this.lastFetch = asked;
+    this.lastRefresh = "ok";
   }
 
   /**
@@ -233,7 +344,14 @@ export class RepoSync {
   write<T>(body: () => T, committed: (result: T) => boolean): Promise<WriteResult<T>> {
     return this.lock.run(async () => {
       await this.pull({ force: true, keptLocalCommit: false });
-      const result = body();
+      this.opts.onWrite?.();
+      let result: T;
+      try {
+        result = body();
+      } catch (error) {
+        this.opts.onWrite?.();
+        throw error;
+      }
       const pushed = committed(result) ? await this.pushWithRetry() : false;
       return { result, pushed };
     });
@@ -273,7 +391,7 @@ export class RepoSync {
     if (!opts.force && this.now() - this.lastFetch < this.opts.pullIntervalMs) return;
 
     try {
-      await this.git.fetchRemote(this.opts.repoRoot, remote, this.network());
+      await this.net.run(() => this.git.fetchRemote(this.opts.repoRoot, remote, this.network()));
     } catch (error) {
       throw this.stopped(error, opts.keptLocalCommit);
     }
@@ -325,7 +443,7 @@ export class RepoSync {
   /** One push, with a stopped one reported as the commit it leaves behind. */
   private async push(root: string, remote: string, branch: string): Promise<PushOutcome> {
     try {
-      return await this.git.pushBranch(root, remote, branch, this.network());
+      return await this.net.run(() => this.git.pushBranch(root, remote, branch, this.network()));
     } catch (error) {
       throw this.stopped(error, true);
     }

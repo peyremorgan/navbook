@@ -1,17 +1,20 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import {
   allIds,
   type CommentScope,
+  type EntityRecord,
   type NavTree,
   parseTree,
   statusDir,
   treePeople,
 } from "../src/core/tree.ts";
-import { readNavTree } from "../src/workspace/workspace.ts";
+import { git } from "../src/git/exec.ts";
+import { makeWsCtx } from "../src/workspace/ctx.ts";
+import { loadRepo, readNavTree, withComments } from "../src/workspace/workspace.ts";
 
 const SHA_A = "4f2c9d1e8a7b3c5d9e0f1a2b3c4d5e6f7a8b9c0d";
 const SHA_B = "91d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0";
@@ -301,6 +304,80 @@ describe("readNavTree comment scope", () => {
     // What a pull-request listing needs to derive a review state, without
     // paying for the issue comments beside it (spec 05 §5.2's budget).
     assert.deepEqual(paths("prs"), ["prs/open/dk3mp2x9-y/comments/2026-08-03T141207Z-q8zm3vp1.md"]);
+  });
+});
+
+describe("whether a record's comments were read", () => {
+  const files = tree({
+    "issues/open/bqlybac0-x/issue.md": issue(),
+    "prs/open/dk3mp2x9-y/pr.md": pr(),
+    "archive/2026/prs/merged/q8zm3vp1-z/pr.md": pr(),
+  });
+  const flags = (scope: CommentScope): Record<string, boolean> =>
+    Object.fromEntries(
+      [...parseTree(files, { commentsLoaded: scope }).byId.values()].map((e) => [
+        e.id,
+        e.commentsLoaded,
+      ]),
+    );
+
+  it("is said of every record, and matches what the scope opened", () => {
+    assert.deepEqual(flags("all"), { bqlybac0: true, dk3mp2x9: true, q8zm3vp1: true });
+    assert.deepEqual(flags("none"), { bqlybac0: false, dk3mp2x9: false, q8zm3vp1: false });
+    // An archived pull request is under `archive/`, which `prs` does not open.
+    assert.deepEqual(flags("prs"), { bqlybac0: false, dk3mp2x9: true, q8zm3vp1: false });
+  });
+});
+
+describe("withComments", () => {
+  const dir = mkdtempSync(join(tmpdir(), "navbook-with-comments-"));
+  git(["init", "--quiet", "-b", "main"], { cwd: dir });
+  const write = (rel: string, text: string): void => {
+    const abs = join(dir, ".navbook", ...rel.split("/"));
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, text, "utf8");
+  };
+  write("navbook.json", '{"version": 1}\n');
+  write("issues/open/bqlybac0-x/issue.md", issue());
+  write("issues/open/bqlybac0-x/comments/2026-08-03T141207Z-t5kr1gq6.md", comment());
+  write(
+    "issues/open/bqlybac0-x/comments/2026-08-03T151207Z-w9yvd2ga.md",
+    "---\nauthor: carol@example.com\nreply-to: t5kr1gq6\n---\n\nSame here.\n",
+  );
+  write("issues/open/e9v8jyz3-y/issue.md", issue("Nobody has commented"));
+  const ws = makeWsCtx({ cwd: dir, env: {} });
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const shape = (entity: EntityRecord) =>
+    entity.comments.map((c) => ({
+      id: c.id,
+      path: c.path,
+      author: c.author,
+      replyTo: c.replyTo,
+      body: c.body,
+    }));
+
+  it("reads what a load without comments left out, as a full load reads it", () => {
+    const full = loadRepo(ws).byId.get("bqlybac0") as EntityRecord;
+    const bare = loadRepo(ws, { comments: "none" }).byId.get("bqlybac0") as EntityRecord;
+    assert.deepEqual(bare.comments, []);
+
+    const read = withComments(ws, bare);
+    assert.equal(read.commentsLoaded, true);
+    assert.equal(read.comments.length, 2);
+    assert.deepEqual(shape(read), shape(full));
+  });
+
+  it("hands back a record whose comments were already read as it is", () => {
+    const full = loadRepo(ws).byId.get("bqlybac0") as EntityRecord;
+    assert.equal(withComments(ws, full), full);
+  });
+
+  it("finds none where nobody has commented", () => {
+    const bare = loadRepo(ws, { comments: "none" }).byId.get("e9v8jyz3") as EntityRecord;
+    const read = withComments(ws, bare);
+    assert.deepEqual(read.comments, []);
+    assert.equal(read.commentsLoaded, true);
   });
 });
 

@@ -8,19 +8,22 @@
 
 import {
   calendarDateOf,
-  findEntity,
-  findFeature,
+  commentScopeFor,
+  type EntityKind,
+  type EntityRecord,
   formatPerson,
+  type Query as ListQuery,
   listEntities,
-  listFeatures,
   listPrsAcrossRefs,
-  loadRepo,
   mergePeople,
   readPr,
   readReviewPolicy,
+  resolveEntity,
+  resolveFeature,
   resolveSha,
   runDoctor,
   treePeople,
+  withComments,
 } from "@navbook/core";
 import type { GraphQLCtx } from "../context.ts";
 import { invalidInput, run } from "../errors.ts";
@@ -40,12 +43,30 @@ function today(ctx: GraphQLCtx): string {
   return calendarDateOf(ctx.ws.now());
 }
 
+/**
+ * A listing of the working tree, filtered from the request's parse of it.
+ *
+ * `listEntities` would parse the tree itself; handing it the records instead
+ * lets the listing share a parse with the rest of the request, and with every
+ * other request since the tree last changed.
+ */
+function listed(ctx: GraphQLCtx, kind: EntityKind, query: ListQuery): EntityRecord[] {
+  const repo = ctx.loadRepo(commentScopeFor(query, kind));
+  return listEntities(ctx.ws, kind, query, { entities: kind === "issue" ? repo.issues : repo.prs });
+}
+
 export const Query: QueryResolvers = {
   issues: (_parent, args, ctx) =>
-    run(() => ctx.sync.read(() => listEntities(ctx.ws, "issue", toQuery(args.filter, today(ctx))))),
+    run(() => ctx.sync.read(() => listed(ctx, "issue", toQuery(args.filter, today(ctx))))),
 
   issue: (_parent, args, ctx) =>
-    run(() => ctx.sync.read(() => findEntity(ctx.ws, "issue", args.ref))),
+    run(() =>
+      ctx.sync.read(() =>
+        // Every other entity's comments are most of a parse and none of the
+        // answer; this one's are read inside the same transaction.
+        withComments(ctx.ws, resolveEntity(ctx.loadRepo("none"), args.ref, "issue")),
+      ),
+    ),
 
   prs: (_parent, args, ctx) =>
     run(() =>
@@ -65,7 +86,7 @@ export const Query: QueryResolvers = {
             refs: found.refs.map((ref) => ref.short),
           }));
         }
-        return listEntities(ctx.ws, "pr", query).map((entity) => ({ entity, refs: [] }));
+        return listed(ctx, "pr", query).map((entity) => ({ entity, refs: [] }));
       }),
     ),
 
@@ -79,9 +100,12 @@ export const Query: QueryResolvers = {
       }),
     ),
 
-  features: (_parent, _args, ctx) => run(() => ctx.sync.read(() => listFeatures(ctx.ws))),
+  // Through `ctx.loadRepo` rather than `listFeatures`, so that a feature's
+  // `issues` and `prs` fields read the same parse.
+  features: (_parent, _args, ctx) => run(() => ctx.sync.read(() => ctx.loadRepo("none").features)),
 
-  feature: (_parent, args, ctx) => run(() => ctx.sync.read(() => findFeature(ctx.ws, args.slug))),
+  feature: (_parent, args, ctx) =>
+    run(() => ctx.sync.read(() => resolveFeature(ctx.loadRepo("none"), args.slug))),
 
   doctor: (_parent, _args, ctx) =>
     run(() => ctx.sync.read(() => ({ diagnostics: runDoctor(ctx.ws).diagnostics }))),
@@ -122,7 +146,7 @@ export const Query: QueryResolvers = {
     run(() =>
       ctx.sync.read(() => {
         const authored = ctx.authors.at(resolveSha(ctx.ws.repoRoot, "HEAD"));
-        const named = treePeople(loadRepo(ctx.ws));
+        const named = treePeople(ctx.loadRepo("all"));
         return mergePeople(authored, named, [ctx.viewer]).map(formatPerson);
       }),
     ),
