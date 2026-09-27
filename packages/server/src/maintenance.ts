@@ -143,21 +143,23 @@ export class Maintenance {
         this.failing = false;
         return;
       }
-      if (!this.failing) {
-        this.report(
-          `nav-server: git maintenance failed (exit ${result.code}): ${result.stderr.trim()}`,
-        );
-      }
-      this.failing = true;
+      this.failed(`git maintenance failed (exit ${result.code}): ${result.stderr.trim()}`);
     } catch (error) {
+      // Stopped for a shutdown: said already, and nothing more to do.
       if (error instanceof GitStoppedError) return;
       if (error instanceof GitTimeoutError) {
-        this.report(`nav-server: git maintenance ran past ${limit} ms and was stopped`);
+        this.failed(`git maintenance ran past ${limit} ms and was stopped`);
         await this.tidy(started);
         return;
       }
-      this.report(`nav-server: git maintenance could not run: ${message(error)}`);
+      this.failed(`git maintenance could not run: ${message(error)}`);
     }
+  }
+
+  /** Say a failure, once for however many runs in a row fail. */
+  private failed(what: string): void {
+    if (!this.failing) this.report(`nav-server: ${what}`);
+    this.failing = true;
   }
 
   private run(opts: { signal: AbortSignal; timeoutMs: number }): Promise<GitResult> {

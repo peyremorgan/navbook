@@ -160,19 +160,30 @@ describe("Maintenance reporting", () => {
     ]);
   });
 
-  it("says a run that could not start, and carries on", async () => {
-    const { maintenance, runs, reported, advance } = harness();
-    maintenance.request();
-    runs[0]?.fail(new Error("git was not found on PATH"));
-    await settle();
+  it("says a failing streak once, whatever each run failed of", async () => {
+    const { maintenance, runs, reported, tidied, advance } = harness();
+    const failures: ((run: PendingRun) => void)[] = [
+      (run) => run.fail(new Error("git was not found on PATH")),
+      (run) => run.fail(new Error("git was not found on PATH")),
+      (run) => run.fail(new GitTimeoutError(["maintenance"], 30 * 60_000)),
+      (run) => run.finish({ code: 128, stdout: "", stderr: "fatal: bad object\n" }),
+      (run) => run.finish(),
+      (run) => run.fail(new GitTimeoutError(["maintenance"], 30 * 60_000)),
+    ];
+    for (const fail of failures) {
+      maintenance.request();
+      fail(runs.at(-1) as PendingRun);
+      await settle();
+      advance(60_000);
+    }
+    assert.equal(runs.length, failures.length, "a failure never stops the next run");
     assert.deepEqual(reported, [
       "nav-server: git maintenance could not run: git was not found on PATH",
+      "nav-server: git maintenance recovered",
+      "nav-server: git maintenance ran past 1800000 ms and was stopped",
     ]);
-    advance(60_000);
-    maintenance.request();
-    assert.equal(runs.length, 2);
-    runs[1]?.finish();
-    await settle();
+    // Every run that ran out of time is cleared up after, said or not.
+    assert.equal(tidied.length, 2);
   });
 
   it("clears up after a run that ran out of time, from when it started", async () => {

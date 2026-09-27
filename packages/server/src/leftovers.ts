@@ -11,12 +11,14 @@
  * So this finds exactly those files, and nothing else. The locks are the ones
  * maintenance and ref packing take; a lock on the index, on HEAD or on a ref
  * means a commit or a ref update was cut short, and that is a person's to look
- * at, as the entrypoint keeps a dirty tree for one. The temporary files are
+ * at, as the entrypoint keeps a dirty tree for one: those are named in the log
+ * and left. Nor is anything removed while a git is running in the clone, since
+ * the lock may be its. The temporary files are
  * the ones git names as such (`tmp_…`, `.tmp-…`), in the directories packs,
  * commit graphs and the multi-pack index are written to.
  */
 
-import { lstatSync, readdirSync, rmSync } from "node:fs";
+import { type Dirent, lstatSync, readdirSync, readFileSync, readlinkSync, rmSync } from "node:fs";
 import { join, relative } from "node:path";
 import { gitMaybe } from "@navbook/core";
 
@@ -118,32 +120,110 @@ export function removeLeftovers(
   }
 }
 
+/** What a clear-up is told: when, and what may be removed. */
+export interface ClearOptions {
+  /** Only what was last modified before this, in epoch milliseconds. */
+  before?: number;
+  /** Only what was last modified at or after this, in epoch milliseconds. */
+  since?: number;
+  /**
+   * Whether this server owns the clone's housekeeping. When it does not,
+   * whatever does may be running beside it right now, holding one of these
+   * very locks — so they are named as warnings and left.
+   */
+  remove: boolean;
+  report: (line: string) => void;
+  /** The gits running in the clone; looked up in /proc unless given. */
+  running?: readonly number[];
+}
+
 /**
- * At startup: clear what was left before `before`, or only say so.
+ * Clear what an interrupted housekeeping run left, or say why not.
  *
- * `remove` is whether this server owns the clone's housekeeping. When it does
- * not, whatever does may be running beside it at this very moment, and one of
- * these locks may be its — so a lock is named as a warning and left, and a
- * temporary file, which breaks nothing by being there, is not mentioned.
+ * Age alone cannot tell a stale lock from one a running git holds: an
+ * operator's `git gc`, a run a crashed server left orphaned, maintenance a
+ * cron job started. So a git found running in the clone turns removing into
+ * warning too. A temporary file breaks nothing by being there, so when
+ * nothing is removed it is not mentioned either.
  */
-export function clearLeftoversAtStart(
-  dirs: GitDirs,
-  repoRoot: string,
-  opts: { before: number; remove: boolean; report: (line: string) => void },
-): void {
-  const found = findLeftovers(dirs, { modifiedBefore: opts.before });
-  if (opts.remove) {
+export function clearLeftovers(dirs: GitDirs, repoRoot: string, opts: ClearOptions): void {
+  const found = findLeftovers(dirs, age(opts));
+  if (found.length === 0) return;
+  const running = opts.running ?? gitsRunningIn(repoRoot);
+  if (opts.remove && running.length === 0) {
     removeLeftovers(found, repoRoot, opts.report);
     return;
   }
+  const why = opts.remove
+    ? `a git is running in the clone (pid ${running.join(", ")})`
+    : "--maintenance-interval-ms 0 leaves housekeeping to something else";
   for (const leftover of found) {
     if (leftover.kind !== "lock") continue;
     opts.report(
       `warning: ${describe(leftover, relative(repoRoot, leftover.path))} is left in place, ` +
-        "since --maintenance-interval-ms 0 leaves housekeeping to something else; " +
-        "remove it if nothing is running",
+        `since ${why}; remove it if nothing is running`,
     );
   }
+}
+
+/**
+ * At startup: clear what was left before `before`, and name what is not ours to.
+ *
+ * A lock on the index, HEAD, a ref or its log means a commit or an update
+ * was cut short. It is never removed — a person should look at what it was
+ * doing — but it is named, because until it goes git refuses to update what
+ * it locks, and that would otherwise surface as a failed request much later.
+ */
+export function clearLeftoversAtStart(
+  dirs: GitDirs,
+  repoRoot: string,
+  opts: Omit<ClearOptions, "before" | "since"> & { before: number },
+): void {
+  clearLeftovers(dirs, repoRoot, opts);
+  for (const leftover of findCutShort(dirs, { modifiedBefore: opts.before })) {
+    opts.report(
+      `warning: ${relative(repoRoot, leftover.path)} (a lock a cut-short commit or ref ` +
+        "update left behind) is left in place for a person to look at; " +
+        "git refuses to update what it locks until it is removed",
+    );
+  }
+}
+
+/** Locks that mean a commit or a ref update was cut short: named, never removed. */
+export function findCutShort(dirs: GitDirs, age: LeftoverAge = {}): Leftover[] {
+  const found: Leftover[] = [];
+  const consider = (path: string): void => {
+    const bytes = sizeIfWithin(path, age);
+    if (bytes !== null) found.push({ path, kind: "lock", bytes });
+  };
+  consider(join(dirs.common, "index.lock"));
+  consider(join(dirs.common, "HEAD.lock"));
+  for (const dir of ["refs", "logs"]) {
+    for (const path of locksUnder(join(dirs.common, dir))) consider(path);
+  }
+  return found;
+}
+
+/**
+ * The pids of the gits whose working directory is in the clone.
+ *
+ * Read from /proc, so only on Linux — where the server's image runs — and
+ * only the processes this one may look at; elsewhere it finds none, which
+ * leaves the age of a file as the only guard, as it was.
+ */
+export function gitsRunningIn(repoRoot: string): number[] {
+  const found: number[] = [];
+  for (const entry of listing("/proc")) {
+    if (!/^\d+$/.test(entry) || Number(entry) === process.pid) continue;
+    try {
+      if (!readFileSync(`/proc/${entry}/comm`, "utf8").startsWith("git")) continue;
+      const cwd = readlinkSync(`/proc/${entry}/cwd`);
+      if (cwd === repoRoot || cwd.startsWith(`${repoRoot}/`)) found.push(Number(entry));
+    } catch {
+      // Gone since the listing, or not ours to look at.
+    }
+  }
+  return found;
 }
 
 /** How a leftover is named in the log. */
@@ -164,6 +244,31 @@ function sizeIfWithin(path: string, age: LeftoverAge): number | null {
   if (age.modifiedBefore !== undefined && !(stat.mtimeMs < age.modifiedBefore)) return null;
   if (age.modifiedSince !== undefined && !(stat.mtimeMs >= age.modifiedSince)) return null;
   return stat.size;
+}
+
+/** Every `*.lock` file under a directory, however deep. */
+function locksUnder(dir: string): string[] {
+  const found: string[] = [];
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return found;
+  }
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...locksUnder(path));
+    else if (entry.name.endsWith(".lock")) found.push(path);
+  }
+  return found;
+}
+
+/** The age filter a clear-up asks for. */
+function age(opts: ClearOptions): LeftoverAge {
+  return {
+    ...(opts.before === undefined ? {} : { modifiedBefore: opts.before }),
+    ...(opts.since === undefined ? {} : { modifiedSince: opts.since }),
+  };
 }
 
 /** A directory's entries, or none when it does not exist. */

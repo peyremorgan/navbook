@@ -13,7 +13,7 @@
  */
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
@@ -138,10 +138,47 @@ describe("an interrupted maintenance run's leftovers", () => {
         h.stderr(),
         /warning: \.git\/packed-refs\.lock \(a lock an interrupted git left behind\) is left in place/,
       );
+      assert.match(
+        h.stderr(),
+        /warning: --maintenance-interval-ms is 0; the server runs no git maintenance on the clone/,
+      );
       // Which is exactly the failure the warning is about.
       spawnSync("git", ["-C", h.fixture.origin, "branch", "-D", "fix/b"], { env: h.fixture.env });
       assert.equal(errorCode(await h.gql(LIST)), "GIT_ERROR");
     } finally {
+      await h.stop();
+    }
+  });
+});
+
+describe("an interrupted maintenance run's leftovers, while a git runs in the clone", () => {
+  it("are only warned about, since the lock may be that git's", {
+    skip: process.platform !== "linux" && "the running git is found through /proc",
+  }, async () => {
+    let napping: ReturnType<typeof spawn> | undefined;
+    const h = await startHarness({
+      pullIntervalMs: 0,
+      prepare: (fixture) => {
+        plantStaleLock({ fixture });
+        // Somebody's git at work in the clone as the server starts: an
+        // operator's, or a run a crashed server left orphaned.
+        napping = spawn("git", ["-c", "alias.nap=!sleep 30", "nap"], {
+          cwd: fixture.server.dir,
+          env: fixture.env,
+        });
+      },
+    });
+    try {
+      assert.ok(existsSync(join(h.fixture.server.dir, ".git", "packed-refs.lock")));
+      assert.match(
+        h.stderr(),
+        new RegExp(
+          "warning: \\.git/packed-refs\\.lock \\(a lock an interrupted git left behind\\) is left " +
+            `in place, since a git is running in the clone \\(pid [0-9, ]*${napping?.pid}`,
+        ),
+      );
+    } finally {
+      napping?.kill("SIGKILL");
       await h.stop();
     }
   });

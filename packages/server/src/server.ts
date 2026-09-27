@@ -20,7 +20,7 @@ import { type Authenticator, makeAuthenticator } from "./auth.ts";
 import { RevisionCache } from "./changes.ts";
 import type { Config } from "./config.ts";
 import { makeGraphQLCtx } from "./context.ts";
-import { clearLeftoversAtStart, findLeftovers, gitDirs, removeLeftovers } from "./leftovers.ts";
+import { clearLeftovers, clearLeftoversAtStart, gitDirs } from "./leftovers.ts";
 import { Maintenance } from "./maintenance.ts";
 import { AuthorCache } from "./people.ts";
 import { type LoadedPlugins, loadServerPlugins } from "./plugins/load.ts";
@@ -92,6 +92,15 @@ function checkRepo(
   };
 }
 
+/**
+ * Start a server on the clone `config` names.
+ *
+ * It runs git's housekeeping on the clone itself (`maintenance.ts`), and
+ * expects git not to start its own: `main.ts` sets `maintenance.auto=false`
+ * for every git the process runs, before calling this. A process that embeds
+ * the server does the same (`disableAutoMaintenance`), or gets both — and a
+ * detached run of git's may be cut off when the process ends.
+ */
 export async function startServer(opts: StartOptions): Promise<ServerHandle> {
   const { config } = opts;
   const env = opts.env ?? process.env;
@@ -111,6 +120,13 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
   });
   if (remote === null) {
     report(`warning: no '${config.remote}' remote; running local-only, nothing will be pushed`);
+  }
+  // A choice worth seeing made: nothing packs the clone unless something else does.
+  if (config.maintenanceIntervalMs === 0) {
+    report(
+      "warning: --maintenance-interval-ms is 0; the server runs no git maintenance on the clone, " +
+        "so run `git maintenance run --auto` there from somewhere else",
+    );
   }
 
   // An open deployment is a choice worth seeing made: with a shared provider
@@ -141,9 +157,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     // fetch writes the same kind of temporary file: clear up only when no git
     // of the server's can be writing one.
     tidy: (since) =>
-      sync.exclusive(() =>
-        removeLeftovers(findLeftovers(dirs, { modifiedSince: since }), repoRoot, report),
-      ),
+      sync.exclusive(() => clearLeftovers(dirs, repoRoot, { since, remove: true, report })),
   });
   const sync = new RepoSync({
     repoRoot,

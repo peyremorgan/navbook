@@ -682,7 +682,7 @@ describe("RepoSync after git has written", () => {
     return { ...made, told };
   }
 
-  it("says so after a background pull, and not after one that failed", async () => {
+  it("says so after a background pull, and not after one whose fetch failed", async () => {
     const script: Scripted = {};
     const { sync, told } = counted(script);
     await sync.refresh();
@@ -692,13 +692,31 @@ describe("RepoSync after git has written", () => {
     assert.equal(told.count, 1);
   });
 
-  it("says so after a write that committed, pushed or not", async () => {
+  it("says so after a fetch whose merge then conflicted: the objects came all the same", async () => {
+    const { sync, told } = counted({ behind: [true], merges: ["conflict"] });
+    await sync.refresh();
+    assert.equal(told.count, 1);
+  });
+
+  it("says so after a read that pulled for itself, and not after one that did not", async () => {
+    // Before the background pull has succeeded, a read fetches — and with the
+    // background pull off, or failing, that is the only fetch there is.
+    const { sync, told } = counted();
+    await sync.read(() => undefined);
+    assert.equal(told.count, 1);
+    await sync.refresh();
+    assert.equal(told.count, 2);
+    await sync.read(() => undefined);
+    assert.equal(told.count, 2, "a read the background pull kept fresh fetched nothing");
+  });
+
+  it("says so after a write's pull, and again once it committed, pushed or not", async () => {
     const { sync, told } = counted();
     await sync.write(
       () => undefined,
       () => true,
     );
-    assert.equal(told.count, 1);
+    assert.equal(told.count, 2);
 
     // The push was stopped, but the commit is in the clone all the same.
     const stopped = counted({ pushThrows: stoppedPush });
@@ -708,9 +726,9 @@ describe("RepoSync after git has written", () => {
         () => true,
       ),
     );
-    assert.equal(stopped.told.count, 1);
+    assert.equal(stopped.told.count, 2);
 
-    // Nothing to push without a remote, and still a commit.
+    // Nothing to fetch or push without a remote, and still a commit.
     const offline = counted({}, { remote: null });
     await offline.sync.write(
       () => undefined,
@@ -719,13 +737,13 @@ describe("RepoSync after git has written", () => {
     assert.equal(offline.told.count, 1);
   });
 
-  it("says nothing after a read, a write that committed nothing, or one that threw", async () => {
+  it("says nothing more for a write that committed nothing, or one that threw", async () => {
     const { sync, told } = counted();
-    await sync.read(() => undefined);
     await sync.write(
       () => undefined,
       () => false,
     );
+    assert.equal(told.count, 1, "its pull, and nothing else");
     await assert.rejects(
       sync.write(
         () => {
@@ -734,7 +752,7 @@ describe("RepoSync after git has written", () => {
         () => true,
       ),
     );
-    assert.equal(told.count, 0);
+    assert.equal(told.count, 2, "its pull, and nothing else");
   });
 });
 

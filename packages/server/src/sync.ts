@@ -113,10 +113,11 @@ export interface SyncOptions {
    */
   onWrite?: () => void;
   /**
-   * Told once git has written to the clone: after a background pull that
-   * succeeded, and after a mutation that committed, whether or not its push
-   * landed. Either may have left new objects for housekeeping to pack. Called
-   * synchronously, so it must return at once and must not throw.
+   * Told once git has written objects to the clone: after any fetch that
+   * succeeded — a background pull's, a read's own, a mutation's — whatever
+   * the merge after it made of them, and after a mutation that committed,
+   * whether or not its push landed. Called synchronously, so it must return
+   * at once and must not throw.
    */
   afterSync?: () => void;
 }
@@ -310,6 +311,7 @@ export class RepoSync {
     const asked = this.now();
     try {
       await this.net.run(() => this.git.fetchRemote(this.opts.repoRoot, remote, this.network()));
+      this.opts.afterSync?.();
       await this.lock.run(() => this.merge(remote));
     } catch (error) {
       if (this.lastRefresh !== "failed") {
@@ -327,7 +329,6 @@ export class RepoSync {
     if (this.lastRefresh === "failed") this.report("nav-server: background pull recovered");
     this.lastFetch = asked;
     this.lastRefresh = "ok";
-    this.opts.afterSync?.();
   }
 
   /**
@@ -420,6 +421,7 @@ export class RepoSync {
       throw this.stopped(error, opts.keptLocalCommit);
     }
     this.lastFetch = this.now();
+    this.opts.afterSync?.();
     try {
       await this.merge(remote);
     } catch (error) {

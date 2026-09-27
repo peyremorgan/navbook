@@ -8,7 +8,7 @@
  */
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -23,10 +23,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import {
+  clearLeftovers,
   clearLeftoversAtStart,
+  findCutShort,
   findLeftovers,
   type GitDirs,
   gitDirs,
+  gitsRunningIn,
   removeLeftovers,
 } from "../../src/leftovers.ts";
 
@@ -225,40 +228,174 @@ describe("removeLeftovers", () => {
   });
 });
 
-describe("clearLeftoversAtStart", () => {
-  it("clears what was there before the start, and not what came after", () => {
-    const start = Date.now();
-    plant([".git/packed-refs.lock", ".git/objects/pack/tmp_pack_BhOOJi"], start / 1000 - 60);
-    plant([".git/objects/maintenance.lock"], start / 1000 + 60);
+/** A repository of its own, with files planted relative to it. */
+function freshRepo(): {
+  root: string;
+  dirs: GitDirs;
+  plant: (paths: readonly string[], mtimeSeconds?: number) => void;
+} {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "navbook-leftovers-")));
+  after(() => rmSync(dir, { recursive: true, force: true }));
+  spawnSync("git", ["init", "--quiet", "-b", "main", dir]);
+  return {
+    root: dir,
+    dirs: gitDirs(dir),
+    plant: (paths, mtimeSeconds) => {
+      for (const path of paths) {
+        const full = join(dir, path);
+        mkdirSync(dirname(full), { recursive: true });
+        writeFileSync(full, "x");
+        if (mtimeSeconds !== undefined) utimesSync(full, mtimeSeconds, mtimeSeconds);
+      }
+    },
+  };
+}
+
+const CUT_SHORT = [
+  ".git/index.lock",
+  ".git/HEAD.lock",
+  ".git/refs/heads/main.lock",
+  ".git/refs/remotes/origin/fix/b.lock",
+  ".git/logs/refs/heads/main.lock",
+];
+
+describe("findCutShort", () => {
+  it("finds the locks of a commit or ref update cut short, however deep", () => {
+    const repo = freshRepo();
+    repo.plant(CUT_SHORT);
+    repo.plant([".git/refs/heads/main", ".git/logs/HEAD", ".git/packed-refs.lock"]);
+    const found = findCutShort(repo.dirs).map((leftover) =>
+      leftover.path.slice(repo.root.length + 1),
+    );
+    assert.deepEqual(found.sort(), [...CUT_SHORT].sort());
+  });
+});
+
+describe("clearLeftovers", () => {
+  it("removes nothing while a git runs in the clone, and says which", () => {
+    const repo = freshRepo();
+    repo.plant([".git/packed-refs.lock", ".git/objects/pack/tmp_pack_x"]);
     const lines: string[] = [];
-    clearLeftoversAtStart(dirs, root, {
-      before: start,
+    clearLeftovers(repo.dirs, repo.root, {
       remove: true,
+      running: [4242, 4243],
       report: (line) => lines.push(line),
     });
-    assert.deepEqual(relativeFound(), [".git/objects/maintenance.lock"]);
+    assert.ok(existsSync(join(repo.root, ".git/packed-refs.lock")));
+    assert.ok(existsSync(join(repo.root, ".git/objects/pack/tmp_pack_x")));
+    assert.deepEqual(lines, [
+      "warning: .git/packed-refs.lock (a lock an interrupted git left behind) is left in place, " +
+        "since a git is running in the clone (pid 4242, 4243); remove it if nothing is running",
+    ]);
+  });
+
+  it("keeps to what changed since a moment, for a run that ran out of time", () => {
+    const repo = freshRepo();
+    const start = Date.now();
+    repo.plant([".git/objects/pack/tmp_pack_old"], start / 1000 - 60);
+    repo.plant(
+      [".git/objects/pack/tmp_pack_new", ".git/objects/maintenance.lock"],
+      start / 1000 + 1,
+    );
+    const lines: string[] = [];
+    clearLeftovers(repo.dirs, repo.root, {
+      since: start,
+      remove: true,
+      running: [],
+      report: (line) => lines.push(line),
+    });
+    assert.ok(existsSync(join(repo.root, ".git/objects/pack/tmp_pack_old")));
+    assert.equal(existsSync(join(repo.root, ".git/objects/pack/tmp_pack_new")), false);
+    assert.equal(existsSync(join(repo.root, ".git/objects/maintenance.lock")), false);
     assert.equal(lines.length, 2);
-    rmSync(join(root, ".git/objects/maintenance.lock"));
+  });
+
+  it("says nothing, and looks for no git, when there is nothing to clear", () => {
+    const repo = freshRepo();
+    const lines: string[] = [];
+    clearLeftovers(repo.dirs, repo.root, { remove: true, report: (line) => lines.push(line) });
+    assert.deepEqual(lines, []);
+  });
+});
+
+describe("clearLeftoversAtStart", () => {
+  it("clears what was there before the start, and not what came after", () => {
+    const repo = freshRepo();
+    const start = Date.now();
+    repo.plant([".git/packed-refs.lock", ".git/objects/pack/tmp_pack_BhOOJi"], start / 1000 - 60);
+    repo.plant([".git/objects/maintenance.lock"], start / 1000 + 60);
+    const lines: string[] = [];
+    clearLeftoversAtStart(repo.dirs, repo.root, {
+      before: start,
+      remove: true,
+      running: [],
+      report: (line) => lines.push(line),
+    });
+    const left = findLeftovers(repo.dirs).map((leftover) =>
+      leftover.path.slice(repo.root.length + 1),
+    );
+    assert.deepEqual(left, [".git/objects/maintenance.lock"]);
+    assert.equal(lines.length, 2);
   });
 
   it("only warns about the locks when housekeeping is somebody else's", () => {
+    const repo = freshRepo();
     const start = Date.now();
-    plant([".git/packed-refs.lock", ".git/objects/pack/tmp_pack_BhOOJi"], start / 1000 - 60);
+    repo.plant([".git/packed-refs.lock", ".git/objects/pack/tmp_pack_BhOOJi"], start / 1000 - 60);
     const lines: string[] = [];
-    clearLeftoversAtStart(dirs, root, {
+    clearLeftoversAtStart(repo.dirs, repo.root, {
       before: start,
       remove: false,
       report: (line) => lines.push(line),
     });
-    assert.deepEqual(relativeFound(), [
-      ".git/objects/pack/tmp_pack_BhOOJi",
-      ".git/packed-refs.lock",
-    ]);
+    assert.equal(findLeftovers(repo.dirs).length, 2, "nothing was removed");
     assert.deepEqual(lines, [
       "warning: .git/packed-refs.lock (a lock an interrupted git left behind) is left in place, " +
         "since --maintenance-interval-ms 0 leaves housekeeping to something else; " +
         "remove it if nothing is running",
     ]);
-    removeLeftovers(findLeftovers(dirs), root, () => undefined);
+  });
+
+  it("names a commit or ref update cut short, and leaves it for a person", () => {
+    const repo = freshRepo();
+    const start = Date.now();
+    repo.plant([".git/refs/heads/main.lock", ".git/index.lock"], start / 1000 - 60);
+    repo.plant([".git/HEAD.lock"], start / 1000 + 60);
+    const lines: string[] = [];
+    for (const remove of [true, false]) {
+      clearLeftoversAtStart(repo.dirs, repo.root, {
+        before: start,
+        remove,
+        running: [],
+        report: (line) => lines.push(line),
+      });
+    }
+    for (const path of [".git/refs/heads/main.lock", ".git/index.lock", ".git/HEAD.lock"]) {
+      assert.ok(existsSync(join(repo.root, path)), `${path} was removed`);
+    }
+    const once = [
+      "warning: .git/index.lock (a lock a cut-short commit or ref update left behind) is left in " +
+        "place for a person to look at; git refuses to update what it locks until it is removed",
+      "warning: .git/refs/heads/main.lock (a lock a cut-short commit or ref update left behind) " +
+        "is left in place for a person to look at; git refuses to update what it locks until it " +
+        "is removed",
+    ];
+    // Whether or not the server owns housekeeping, and nothing newer than the start.
+    assert.deepEqual(lines, [...once, ...once]);
+  });
+});
+
+describe("gitsRunningIn", { skip: process.platform !== "linux" && "reads /proc" }, () => {
+  it("finds a git whose working directory is in the clone, and only there", async () => {
+    const repo = freshRepo();
+    const other = freshRepo();
+    const child = spawn("git", ["-c", "alias.nap=!sleep 30", "nap"], { cwd: join(repo.root) });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.ok(gitsRunningIn(repo.root).includes(child.pid as number));
+      assert.deepEqual(gitsRunningIn(other.root), []);
+    } finally {
+      child.kill("SIGKILL");
+    }
   });
 });
