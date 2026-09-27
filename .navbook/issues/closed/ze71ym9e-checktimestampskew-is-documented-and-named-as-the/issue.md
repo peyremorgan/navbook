@@ -5,6 +5,7 @@ created: 2026-09-20T12:40:33Z
 labels: [enhancement, doctor]
 feature: [doctor, conformance]
 assignee: Claude <noreply@anthropic.com>
+resolution: fixed
 ---
 
 ```ts
