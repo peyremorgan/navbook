@@ -12,6 +12,9 @@ revisions:
   - head: fb554362225a6bd03256cbc12663270ef8a4c12b
     base: 8e250bb0676e102bd49e80cea0d49316510d7e1b
     date: 2026-09-27T02:37:28Z
+  - head: 5a79d9f46b784b2bd67c76d8508f120d862e10f8
+    base: 06627058b2477b40c8a50cfc7c2efa40f5e97e59
+    date: 2026-09-27T03:19:16Z
 ---
 
 Fixes #f2dnig9s. `nav doctor` on `dev` gave two D10 warnings, for #x1nqfqsq and #z3j95v3e. Both `created:` values are correct. The check was dating each file from the wrong commit.
