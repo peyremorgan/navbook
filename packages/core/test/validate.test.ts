@@ -690,6 +690,46 @@ describe("D15 the marker", () => {
     );
   });
 
+  it("passes a well-formed plugin declaration", () => {
+    assert.deepEqual(codes(marker({ version: 1, plugins: { "@navbook/plugin-kb": {} } })), []);
+  });
+
+  it("flags a `plugins` that is not an object", () => {
+    for (const value of [["@navbook/plugin-kb"], null, "kb"]) {
+      const diagnostics = validateTree(tree(marker({ version: 1, plugins: value })));
+      assert.deepEqual(
+        diagnostics.map((d) => [d.check, d.level, d.message]),
+        [["D15", "error", "'plugins' must be an object"]],
+        `for ${JSON.stringify(value)}`,
+      );
+    }
+  });
+
+  it("flags each plugin entry that is not an object on its own", () => {
+    const diagnostics = validateTree(
+      tree(marker({ plugins: { "@navbook/plugin-kb": true, ok: {}, other: 1 } })),
+    );
+    assert.deepEqual(
+      diagnostics.map((d) => d.check),
+      ["D15", "D15"],
+    );
+    assert.match(String(diagnostics[0]?.message), /'plugins\."@navbook\/plugin-kb"' must be/);
+  });
+
+  it("flags a fault in the plugins beside one in a policy, naming both", () => {
+    const diagnostics = validateTree(
+      tree(marker({ plugins: ["@navbook/plugin-kb"], review: { minApprovals: "two" } })),
+    );
+    assert.deepEqual(
+      diagnostics.map((d) => d.check),
+      ["D15", "D15"],
+    );
+    assert.deepEqual(diagnostics.map((d) => d.message).sort(), [
+      "'plugins' must be an object",
+      "'review.minApprovals' must be a whole number of at least 1",
+    ]);
+  });
+
   it("says text that is not JSON once, though every policy reports it", () => {
     // Both readings conclude the same thing about the same file; D15 collapses
     // identical messages so the report says it once.

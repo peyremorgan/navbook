@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "review": {
+    "minApprovals": "two"
+  },
+  "plugins": {
+    "@navbook/plugin-kb": {},
+    "kb": true
+  }
+}

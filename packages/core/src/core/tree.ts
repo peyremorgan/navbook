@@ -12,7 +12,9 @@ import { blobSha } from "./hash.ts";
 import { dedupePeople, type Person, parsePerson } from "./person.ts";
 import {
   type MergePolicyReading,
+  type PluginReading,
   parseMergePolicy,
+  parsePluginDeclaration,
   parseReviewPolicy,
   type ReviewPolicyReading,
 } from "./policy.ts";
@@ -200,6 +202,8 @@ export interface Repo {
   reviewPolicy: ReviewPolicyReading;
   /** The merge policy the marker declares, and what was wrong with it (§2.10). */
   mergePolicy: MergePolicyReading;
+  /** The extensions the marker declares, and what was wrong with them (§2.12). */
+  plugins: PluginReading;
 }
 
 interface FeatureDraft {
@@ -269,6 +273,7 @@ export function parseTree(files: NavTree, opts: { commentsLoaded?: CommentScope 
     reserved,
     reviewPolicy: parseReviewPolicy(markerText),
     mergePolicy: parseMergePolicy(markerText),
+    plugins: parsePluginDeclaration(markerText),
   };
 }
 

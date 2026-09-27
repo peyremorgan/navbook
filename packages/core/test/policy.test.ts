@@ -15,7 +15,9 @@ import {
   describeMergeMethod,
   describeReviewPolicy,
   MERGE_METHODS,
+  NO_PLUGINS,
   parseMergePolicy,
+  parsePluginDeclaration,
   parseReviewPolicy,
   rewritesSource,
 } from "../src/core/policy.ts";
@@ -288,5 +290,103 @@ describe("describeMergeMethod", () => {
       assert.equal(typeof describeMergeMethod(method), "string");
       assert.notEqual(describeMergeMethod(method), "");
     }
+  });
+});
+
+describe("parsePluginDeclaration", () => {
+  it("declares nothing for a repository with no marker at all", () => {
+    assert.deepEqual(parsePluginDeclaration(undefined), NO_PLUGINS);
+    assert.deepEqual(NO_PLUGINS, { declaration: { plugins: {} }, declared: false, problems: [] });
+  });
+
+  it("declares nothing for the marker `nav init` writes", () => {
+    assert.deepEqual(parsePluginDeclaration(marker({ version: 1 })), NO_PLUGINS);
+  });
+
+  it("reads each extension and the settings it carries", () => {
+    const reading = parsePluginDeclaration(
+      marker({
+        version: 1,
+        plugins: { "@navbook/plugin-kb": {}, "acme-reports": { dir: "reports", depth: 2 } },
+      }),
+    );
+    assert.deepEqual(reading, {
+      declaration: {
+        plugins: { "@navbook/plugin-kb": {}, "acme-reports": { dir: "reports", depth: 2 } },
+      },
+      declared: true,
+      problems: [],
+    });
+  });
+
+  it("counts an empty declaration as declared, since somebody wrote it down", () => {
+    const reading = parsePluginDeclaration(marker({ version: 1, plugins: {} }));
+    assert.deepEqual(reading, { declaration: { plugins: {} }, declared: true, problems: [] });
+  });
+
+  it("takes any key as a name, since §2.12 leaves naming to the extension", () => {
+    // Not the short-name grammar of a namespace: the spec's own example is an
+    // npm package name, which that grammar would refuse.
+    for (const name of ["@navbook/plugin-kb", "Kb", "kb.v2", "", "__proto__"]) {
+      const reading = parsePluginDeclaration(`{"plugins": {${JSON.stringify(name)}: {"a": 1}}}`);
+      assert.deepEqual(reading.problems, [], `for ${JSON.stringify(name)}`);
+      assert.deepEqual(Object.keys(reading.declaration.plugins), [name]);
+      assert.deepEqual(Object.getPrototypeOf(reading.declaration.plugins), Object.prototype);
+    }
+  });
+
+  it("refuses a `plugins` that is not an object, and declares nothing", () => {
+    for (const value of [["@navbook/plugin-kb"], [], null, "@navbook/plugin-kb", 1, true]) {
+      const reading = parsePluginDeclaration(marker({ version: 1, plugins: value }));
+      assert.deepEqual(
+        reading,
+        { ...NO_PLUGINS, problems: ["'plugins' must be an object"] },
+        `for ${JSON.stringify(value)}`,
+      );
+    }
+  });
+
+  it("refuses an entry that is not an object, and keeps the ones that are", () => {
+    const reading = parsePluginDeclaration(
+      marker({
+        version: 1,
+        plugins: { "@navbook/plugin-kb": true, good: { x: 1 }, listed: [], gone: null },
+      }),
+    );
+    assert.deepEqual(reading.declaration, { plugins: { good: { x: 1 } } });
+    assert.equal(reading.declared, true);
+    assert.deepEqual(reading.problems, [
+      `'plugins."@navbook/plugin-kb"' must be an object`,
+      `'plugins."listed"' must be an object`,
+      `'plugins."gone"' must be an object`,
+    ]);
+  });
+
+  it("does not look inside the settings, which are the extension's business", () => {
+    const reading = parsePluginDeclaration(
+      marker({ plugins: { kb: { token: 42, nested: [null, { deep: true }] } } }),
+    );
+    assert.deepEqual(reading.problems, []);
+  });
+
+  it("reports text that is not JSON the same way the policies do", () => {
+    assert.deepEqual(parsePluginDeclaration("{ oops").problems, ["is not valid JSON"]);
+    assert.deepEqual(parsePluginDeclaration("[]").problems, ["is not a JSON object"]);
+    assert.deepEqual(parsePluginDeclaration("{ oops").declaration, { plugins: {} });
+  });
+
+  it("reads its own key and leaves the policies alone", () => {
+    const text = marker({
+      version: 1,
+      review: { minApprovals: 0 },
+      merge: { method: "rebase" },
+      plugins: { kb: {} },
+    });
+    assert.deepEqual(parsePluginDeclaration(text).problems, []);
+    assert.deepEqual(Object.keys(parsePluginDeclaration(text).declaration.plugins), ["kb"]);
+    assert.equal(parseReviewPolicy(text).problems.length, 1);
+    const broken = marker({ version: 1, review: { minApprovals: 2 }, plugins: ["kb"] });
+    assert.deepEqual(parseReviewPolicy(broken).problems, []);
+    assert.equal(parsePluginDeclaration(broken).problems.length, 1);
   });
 });

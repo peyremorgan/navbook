@@ -145,6 +145,26 @@ describe("parseTree", () => {
       assert.equal(repo.reviewPolicy.declared, false);
     });
 
+    it("reads the plugin declaration out of it too", () => {
+      const repo = parseTree(
+        tree({ "navbook.json": '{"version": 1, "plugins": {"@navbook/plugin-kb": {}}}' }),
+      );
+      assert.deepEqual(repo.plugins, {
+        declaration: { plugins: { "@navbook/plugin-kb": {} } },
+        declared: true,
+        problems: [],
+      });
+    });
+
+    it("declares no plugins for a tree that has no marker", () => {
+      const repo = parseTree(tree({ "issues/open/bqlybac0-x/issue.md": issue() }));
+      assert.deepEqual(repo.plugins, {
+        declaration: { plugins: {} },
+        declared: false,
+        problems: [],
+      });
+    });
+
     it("declares no merge policy for a tree that has none", () => {
       const repo = parseTree(tree({ "issues/open/bqlybac0-x/issue.md": issue() }));
       assert.deepEqual(repo.mergePolicy, {

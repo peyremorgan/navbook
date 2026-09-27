@@ -1,8 +1,9 @@
 /**
- * The policies a marker declares — spec 02 §2.10.
+ * The policies a marker declares — spec 02 §2.10 — and the extensions it
+ * names (§2.12).
  *
- * These are the two things in `navbook.json` a tool reads rather than merely
- * finds. The review policy says how the reviews of §2.7 are counted: whether a
+ * The two policies are the things in `navbook.json` a tool reads rather than
+ * merely finds. The review policy says how the reviews of §2.7 are counted: whether a
  * pull request's own author is among its reviewers, and how many approvals a
  * decision of `approved` takes. The merge policy says what shape a merge
  * leaves in the target branch's history.
@@ -219,3 +220,75 @@ const MERGE_METHOD_SUMMARIES: Record<MergeMethod, string> = {
   "rebase-no-ff": "rebase, then a merge commit",
   squash: "squash into a single commit",
 };
+
+/* ------------------------------------------------------ plugin declaration */
+
+/**
+ * What a repository says its tree contains — spec 02 §2.12.
+ *
+ * Data about the tree, never instruction to a tool: a name here is read to
+ * report what is missing, and is never permission to fetch or execute
+ * anything. That rule lives in the tool; what lives here is the shape.
+ */
+export interface PluginDeclaration {
+  /** Each extension's name for itself, and the settings it carries. */
+  plugins: Record<string, Record<string, unknown>>;
+}
+
+/** A marker read for its plugin declaration: what it names, and what was wrong with it. */
+export interface PluginReading {
+  /** The declared extensions, with any entry that is not an object left out. */
+  declaration: PluginDeclaration;
+  /** True when the marker carries a usable `plugins` object. */
+  declared: boolean;
+  /** One message per fault, in key order; empty when there is nothing wrong. */
+  problems: string[];
+}
+
+/** The reading of a repository that declares no extensions. */
+export const NO_PLUGINS: PluginReading = {
+  declaration: { plugins: {} },
+  declared: false,
+  problems: [],
+};
+
+/**
+ * Read the plugin declaration out of a marker's text.
+ *
+ * The third of the marker's readings, and the mirror image of the other two:
+ * same fallbacks, same refusal to throw, same faults returned to be reported
+ * under D15. Falling back means declaring nothing, per entry as well as
+ * overall, so one mistyped entry costs that entry and no other.
+ *
+ * Only the shape is checked. The key is the extension's own name for itself —
+ * an npm package name here — and §2.12 leaves its grammar to whoever names
+ * extensions, so it is not held to the short-name grammar of a namespace. What
+ * the settings hold is the extension's business, checked under its own
+ * `X-<short>-<n>` codes (spec 04 §4.3) if at all.
+ */
+export function parsePluginDeclaration(markerText: string | undefined): PluginReading {
+  if (markerText === undefined) return NO_PLUGINS;
+
+  let marker: unknown;
+  try {
+    marker = JSON.parse(markerText);
+  } catch {
+    return { ...NO_PLUGINS, problems: ["is not valid JSON"] };
+  }
+  if (!isPlainObject(marker)) return { ...NO_PLUGINS, problems: ["is not a JSON object"] };
+
+  const declared = marker.plugins;
+  if (declared === undefined) return NO_PLUGINS;
+  if (!isPlainObject(declared)) return { ...NO_PLUGINS, problems: ["'plugins' must be an object"] };
+
+  const problems: string[] = [];
+  const entries: [string, Record<string, unknown>][] = [];
+  for (const [name, settings] of Object.entries(declared)) {
+    if (isPlainObject(settings)) entries.push([name, settings]);
+    // Quoted, since a package name carries the `/` and `.` a path would.
+    else problems.push(`'plugins.${JSON.stringify(name)}' must be an object`);
+  }
+  // `fromEntries` defines each key, so a plugin named `__proto__` is an entry
+  // like any other rather than a prototype.
+  return { declaration: { plugins: Object.fromEntries(entries) }, declared: true, problems };
+}

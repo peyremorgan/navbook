@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "plugins": {
+    "@navbook/plugin-kb": true,
+    "acme-reports": {},
+    "acme-chat": null
+  }
+}

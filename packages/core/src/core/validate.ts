@@ -705,23 +705,28 @@ function checkFeatureRefs(repo: Repo): Diagnostic[] {
 /* --------------------------------------------------- D15 : the marker */
 
 /**
- * D15: everything wrong with the marker, whichever policy it is wrong in.
+ * D15: everything wrong with the marker, whichever declaration it is wrong in —
+ * the review policy, the merge policy or the plugins (§2.10, §2.12).
  *
  * An error, because a policy nobody can read is a policy nobody is following,
  * and the file is small enough that whoever wrote it can see what is wrong —
  * but nothing stops for it: every reader has already fallen back to the
  * defaults by the time this reports what it found.
  *
- * The two readings are taken independently and can report the same fault —
- * text that is not JSON is neither a review policy nor a merge policy — so
- * identical messages are collapsed. One diagnostic per distinct fault is what
- * §2.10 asks for, and saying "is not valid JSON" twice about one file says
- * nothing twice.
+ * The three readings are taken independently and can report the same fault —
+ * text that is not JSON is neither a review policy nor a merge policy nor a
+ * plugin declaration — so identical messages are collapsed. One diagnostic per
+ * distinct fault is what §2.10 asks for, and saying "is not valid JSON" three
+ * times about one file says nothing three times.
  */
 function checkMarker(repo: Repo): Diagnostic[] {
   const seen = new Set<string>();
   const out: Diagnostic[] = [];
-  for (const problem of [...repo.reviewPolicy.problems, ...repo.mergePolicy.problems]) {
+  for (const problem of [
+    ...repo.reviewPolicy.problems,
+    ...repo.mergePolicy.problems,
+    ...repo.plugins.problems,
+  ]) {
     if (seen.has(problem)) continue;
     seen.add(problem);
     out.push({ check: "D15", level: "error", path: NAV_MARKER, message: problem });

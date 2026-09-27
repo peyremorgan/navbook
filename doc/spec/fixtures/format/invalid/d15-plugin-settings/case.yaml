@@ -1,0 +1,9 @@
+spec-version: 1
+description: D15 reports each plugin whose settings are not an object, once each, and not the one whose are
+init: {from: tree, date: 2026-09-02T12:00:00Z}
+run: {command: [doctor, --json]}
+expect:
+  exit: 2
+  diagnostics:
+    - {check: D15, level: error, path: .navbook/navbook.json}
+    - {check: D15, level: error, path: .navbook/navbook.json}

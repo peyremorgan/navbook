@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "plugins": {
+    "@navbook/plugin-kb": {},
+    "acme-reports": {
+      "dir": "reports",
+      "retain": 30
+    }
+  },
+  "x-unknown": true
+}

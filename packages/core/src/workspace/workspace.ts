@@ -22,7 +22,9 @@ import { parseCommentFileName } from "../core/comments.ts";
 import type { FileOp } from "../core/ops.ts";
 import {
   type MergePolicyReading,
+  type PluginReading,
   parseMergePolicy,
+  parsePluginDeclaration,
   parseReviewPolicy,
   type ReviewPolicyReading,
 } from "../core/policy.ts";
@@ -195,6 +197,16 @@ export function readReviewPolicy(ws: WsCtx): ReviewPolicyReading {
  */
 export function readMergePolicy(ws: WsCtx): MergePolicyReading {
   return parseMergePolicy(readMarker(ws));
+}
+
+/**
+ * Read the extensions the marker declares (spec 02 §2.12).
+ *
+ * From the working tree, like the two policies: what a clone says it
+ * contains is what its own marker says, whichever branch is checked out.
+ */
+export function readPluginDeclaration(ws: WsCtx): PluginReading {
+  return parsePluginDeclaration(readMarker(ws));
 }
 
 /** The marker's text, or undefined when there is none to read. */
