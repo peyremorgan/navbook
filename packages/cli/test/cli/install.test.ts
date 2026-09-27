@@ -150,24 +150,32 @@ describe("the pre-commit hook", () => {
     }
   });
 
-  it("blocks a commit that would stage a format violation", () => {
-    const repo = makeNavRepo();
-    try {
-      repo.nav(["install", "--hooks", "-y"]);
-      repo.write(".navbook/issues/open/Bad_Name/issue.md", "---\ntitle: t\n---\n\nbody\n");
-      repo.git(["add", "-A"]);
+  // Most hand-written hooks begin with `set -e`, and the block is appended to
+  // them, so it runs under whatever options the hook before it chose. `null` is
+  // no hook at all, which is the one `nav install` writes on its own.
+  const STRICT_HOOK = "#!/bin/sh\nset -eu\necho mine\n";
 
-      const result = repo.git(["commit", "-m", "should be blocked"], { PATH: pathWithNav(repo) });
-      assert.equal(
-        result.code,
-        1,
-        `commit should have been blocked:\n${result.stdout}${result.stderr}`,
-      );
-      assert.match(result.stdout + result.stderr, /D1/);
-    } finally {
-      repo.cleanup();
-    }
-  });
+  for (const host of [null, STRICT_HOOK]) {
+    const under = host === null ? "" : ", under set -e";
+
+    it(`blocks a commit that would stage a format violation${under}`, () => {
+      const repo = makeNavRepo();
+      try {
+        if (host !== null) writeFileSync(join(repo.dir, HOOK), host, { mode: 0o755 });
+        repo.nav(["install", "--hooks", "-y"]);
+        repo.write(".navbook/issues/open/Bad_Name/issue.md", "---\ntitle: t\n---\n\nbody\n");
+        repo.git(["add", "-A"]);
+
+        const result = repo.git(["commit", "-m", "should be blocked"], { PATH: pathWithNav(repo) });
+        const output = result.stdout + result.stderr;
+        assert.equal(result.code, 1, `commit should have been blocked:\n${output}`);
+        assert.match(output, /D1/);
+        if (host !== null) assert.match(output, /mine/, "the existing hook ran before the block");
+      } finally {
+        repo.cleanup();
+      }
+    });
+  }
 
   it("lets a clean commit through, and warnings never block", () => {
     const repo = makeNavRepo();
@@ -186,49 +194,44 @@ describe("the pre-commit hook", () => {
     }
   });
 
-  // Most hand-written hooks begin with `set -e`, and the block is appended to
-  // them, so it runs under whatever options the hook before it chose.
-  const STRICT_HOOK = "#!/bin/sh\nset -eu\necho mine\n";
+  // `nav doctor --staged` exits 1 when it finds no tree to check, which is not a
+  // bad tree, so neither way of getting there may refuse the commit.
+  const noTree: [string, (repo: TempRepo) => Record<string, string>][] = [
+    [
+      "the tree is gone",
+      (repo) => {
+        repo.git(["rm", "-r", "-q", "--cached", ".navbook"]);
+        rmSync(join(repo.dir, ".navbook"), { recursive: true, force: true });
+        return {};
+      },
+    ],
+    ["NAV_ROOT names a directory that does not exist", () => ({ NAV_ROOT: "does-not-exist" })],
+  ];
 
-  it("lets a commit through when doctor fails without a format violation, under set -e", () => {
-    const repo = makeNavRepo();
-    try {
-      writeFileSync(join(repo.dir, HOOK), STRICT_HOOK, { mode: 0o755 });
-      repo.nav(["install", "--hooks", "-y"]);
-      // Without its directory, `nav doctor --staged` exits 1: no tree, not a bad one.
-      repo.git(["rm", "-r", "-q", "--cached", ".navbook"]);
-      rmSync(join(repo.dir, ".navbook"), { recursive: true, force: true });
-      repo.write("app.txt", "x\n");
-      repo.git(["add", "app.txt"]);
+  for (const [why, breakTree] of noTree) {
+    it(`lets a commit through when ${why}, under set -e`, () => {
+      const repo = makeNavRepo();
+      try {
+        writeFileSync(join(repo.dir, HOOK), STRICT_HOOK, { mode: 0o755 });
+        repo.nav(["install", "--hooks", "-y"]);
+        const env = breakTree(repo);
+        repo.write("app.txt", "x\n");
+        repo.git(["add", "app.txt"]);
 
-      const result = repo.git(["commit", "-m", "feat: work"], { PATH: pathWithNav(repo) });
-      assert.equal(result.code, 0, `exit 1 must not block:\n${result.stdout}${result.stderr}`);
-      assert.match(result.stdout + result.stderr, /not a Navbook repository/, "doctor did run");
-      assert.equal(repo.git(["log", "-1", "--format=%s"]).stdout.trim(), "feat: work");
-    } finally {
-      repo.cleanup();
-    }
-  });
-
-  it("still blocks a commit that would stage a format violation, under set -e", () => {
-    const repo = makeNavRepo();
-    try {
-      writeFileSync(join(repo.dir, HOOK), STRICT_HOOK, { mode: 0o755 });
-      repo.nav(["install", "--hooks", "-y"]);
-      repo.write(".navbook/issues/open/Bad_Name/issue.md", "---\ntitle: t\n---\n\nbody\n");
-      repo.git(["add", "-A"]);
-
-      const result = repo.git(["commit", "-m", "should be blocked"], { PATH: pathWithNav(repo) });
-      assert.equal(
-        result.code,
-        1,
-        `commit should have been blocked:\n${result.stdout}${result.stderr}`,
-      );
-      assert.match(result.stdout + result.stderr, /D1/);
-    } finally {
-      repo.cleanup();
-    }
-  });
+        const result = repo.git(["commit", "-m", "feat: work"], {
+          ...env,
+          PATH: pathWithNav(repo),
+        });
+        const output = result.stdout + result.stderr;
+        assert.equal(result.code, 0, `exit 1 must not block:\n${output}`);
+        assert.match(output, /mine/, "the existing hook ran before the block");
+        assert.match(output, /not a Navbook repository/, "doctor ran, and exited 1");
+        assert.equal(repo.git(["log", "-1", "--format=%s"]).stdout.trim(), "feat: work");
+      } finally {
+        repo.cleanup();
+      }
+    });
+  }
 
   it("does not break commits in a clone where nav is not installed", () => {
     const repo = makeNavRepo();
