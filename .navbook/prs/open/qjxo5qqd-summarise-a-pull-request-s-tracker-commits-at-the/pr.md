@@ -48,7 +48,7 @@ There is no model involved: the same commit always reads the same.
 - Web vitest: 382 pass (7 new in `activity.test.ts`). `nuxi typecheck`, the root and package `tsc`, and `biome check` are clean.
 - E2E:
   - The fixture's unserved PR `bbbb0002` gains a comment on `aaaa0001` inside its revision. That branch isn't served, so no other spec sees it.
-  - Two new tests. First, the summary stays "2 files changed" with no `.navbook/` diff, and the header says "1 commit on the tracker" with `aria-expanded="false"` and no timeline. Expanded, it reads "Commented on issue #aaaa0001" with the issue's title, and "Show diff" renders the comment file. The "Conversation tab" link lands on `/prs/bbbb0002` with the Conversation tab current. Second, `bbbb0001`, whose revision has no tracker commit, shows no section.
+  - Two new tests. First, the summary stays "2 files changed" with no `.navbook/` diff, and the header says "1 commit on the tracker" with `aria-expanded="false"` and no timeline. Expanded, it reads `Commented on issue #aaaa0001` with the issue's title, and "Show diff" renders the comment file. The "Conversation tab" link lands on `/prs/bbbb0002` with the Conversation tab current. Second, `bbbb0001`, whose revision has no tracker commit, shows no section.
   - The full suite passes (155), as do the PR spec (28), the CLI (376), conformance (119) and deploy (63).
 - By hand, the summariser over this repository's `63a0de2..6b844be` gives the expected sentences for every commit: close, open, edit (including a title change), update, review, comment and merge.
 
