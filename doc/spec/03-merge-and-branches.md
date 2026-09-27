@@ -99,9 +99,13 @@ concurrent pair in the whole system.
 
 The setting has no effect where rename detection itself is off: git ignores
 `merge.directoryRenames` and treats it as `false` when `merge.renames` is
-`false`. The merge then completes cleanly and leaves the racing comment under
-the old status directory — the unrepairable case below, reached silently and
-for *every* comment racing a close, not only the first.
+`false`, and `merge.renames` falls back to `diff.renames`, so either key set to
+`false` — or a merge run with `-X no-renames` — turns it off. The merge then
+completes with no conflict and leaves the racing comment under the old status
+directory: the outcome of the first-comment race below, which `doctor` reports
+and `--fix` moves, but now for *every* comment racing a close. The
+close-and-edit pair of 3.3.2 degrades too, into a modify/delete conflict at the
+old path.
 
 **The first-comment race is not repairable by git.** When the racing comment is
 the entity's *first*, `comments/` exists only on the commenting side, so no
