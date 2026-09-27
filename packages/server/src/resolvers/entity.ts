@@ -81,7 +81,8 @@ function sharedFields<P>(record: (parent: P) => EntityRecord) {
     milestone: (parent: P) => text(record(parent).fm, "milestone"),
     features: (parent: P) => readFeatures(record(parent).fm),
     body: (parent: P) => record(parent).body.trim(),
-    comments: (parent: P) => record(parent).comments,
+    comments: async (parent: P, _args: unknown, ctx: GraphQLCtx) =>
+      (await ctx.commented(record(parent))).comments,
     // Of the text the record was parsed from, not of the file as it is now:
     // a field resolver runs after its parent's transaction has let go, and a
     // hash taken then could name a version the rest of the payload does not.
@@ -171,7 +172,8 @@ const STATUS: Record<ChangedFileParent["status"], ChangeStatus> = {
 
 /** A pull request's review state, counted by the request's policy. */
 async function summaryOf(pr: PrParent, ctx: GraphQLCtx): Promise<ReviewSummary> {
-  return reviewSummary(pr.entity, (await ctx.reviewPolicy()).policy);
+  // The verdicts are comments, so a pull request read without them has none.
+  return reviewSummary(await ctx.commented(pr.entity), (await ctx.reviewPolicy()).policy);
 }
 
 export const Entity: EntityResolvers = {

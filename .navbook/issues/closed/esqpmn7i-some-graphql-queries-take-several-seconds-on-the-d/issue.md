@@ -4,6 +4,7 @@ author: Claude <noreply@anthropic.com>
 created: 2026-09-17T21:40:14Z
 labels: [bug, performance]
 feature: server
+resolution: fixed
 ---
 
 Some GraphQL queries against the deployed tracker (https://tracker.infra.brickcode.tech) take several seconds to answer. Reported by Morgan on 2026-09-17.
