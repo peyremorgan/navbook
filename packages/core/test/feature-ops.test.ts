@@ -260,9 +260,11 @@ describe("adding and editing documents", () => {
 });
 
 describe("refusing a write that would overwrite somebody else's", () => {
-  const specHash = (ws: WsCtx): string =>
-    (findFeature(ws, "auth").specs.find((spec) => spec.fileName === "login-flow.md")?.blobSha ??
-      "") as string;
+  const specHash = (ws: WsCtx): string => {
+    const spec = findFeature(ws, "auth").specs.find((s) => s.fileName === "login-flow.md");
+    assert.ok(spec, "login-flow.md is one of auth's documents");
+    return spec.blobSha;
+  };
 
   it("takes the hash the editor started from and refuses a later one", () => {
     inWorkspace((ws, dir) => {

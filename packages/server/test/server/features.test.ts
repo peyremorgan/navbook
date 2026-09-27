@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { blobSha } from "@navbook/core";
@@ -582,6 +582,7 @@ describe("baseSha under a clean filter", () => {
     // guaranteed not to have. Scoped to these tests' own files.
     const clone = h.fixture.server;
     clone.git(["config", "filter.pad.clean", "cat; echo"]);
+    mkdirSync(join(clone.dir, ".git/info"), { recursive: true });
     appendFileSync(join(clone.dir, ".git/info/attributes"), "**/*filtered*/*.md filter=pad\n");
   });
   after(async () => {
@@ -628,5 +629,26 @@ describe("baseSha under a clean filter", () => {
     ).updateIssue.issue;
     assert.equal(retitled.title, "Filtered issue, retitled");
     assert.equal(retitled.baseSha, blobSha(fileOf(issueFile)));
+  });
+
+  it("guards a document the same way, and still refuses a stale token", async () => {
+    const spec = ok<Payload>(
+      await h.gql(ADD_SPEC, {
+        input: { feature: "filtered", title: "Filtered flow", body: "First." },
+      }),
+    ).addSpec.spec;
+    assert.equal(spec.baseSha, blobSha(fileOf(spec.path)));
+
+    const edit = (body: string, baseSha: string) =>
+      h.gql(UPDATE_SPEC, {
+        input: { feature: "filtered", fileName: spec.fileName, body, baseSha },
+      });
+
+    const theirs = ok<Payload>(await edit("Theirs.", spec.baseSha)).updateSpec.spec;
+    assert.equal(theirs.body, "Theirs.");
+    assert.equal(theirs.baseSha, blobSha(fileOf(spec.path)));
+
+    assert.equal(errorCode(await edit("Mine.", spec.baseSha)), "STALE_CONTENT");
+    assert.match(fileOf(spec.path), /Theirs\./);
   });
 });

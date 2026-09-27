@@ -228,7 +228,9 @@ export function addSpec(
 
 export interface EditOptions extends CommitOptions {
   /**
-   * The blob hash the editor started from.
+   * The `baseSha` the editor started from: `blobSha` of the text it read, as
+   * the record carries it — not `git hash-object`, which differs in a
+   * repository with filters, end-of-line conversion or SHA-256 objects.
    *
    * Given, a write that would overwrite somebody else's is refused instead
    * (spec 06 §6.3: conflicts surface, they are not resolved). Absent, the write
