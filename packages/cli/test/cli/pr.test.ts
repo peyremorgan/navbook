@@ -2590,12 +2590,13 @@ describe("the review policy", () => {
         const doctor = repo.nav(["doctor"]);
         assert.equal(doctor.code, 0, doctor.stdout);
         assert.match(doctor.stdout, /D16 +\.navbook\/navbook\.json: 'version' is 2 .*update nav/);
+        assert.doesNotMatch(doctor.stderr, /newer Navbook/, "said once, as the diagnostic");
       } finally {
         repo.cleanup();
       }
     });
 
-    it("is said before the pull request verbs answer", () => {
+    it("is said before any verb that reads the tree answers", () => {
       const { repo } = withOpenPr();
       try {
         repo.write(".navbook/navbook.json", '{"version": 2}');
@@ -2604,12 +2605,17 @@ describe("the review policy", () => {
         for (const args of [
           ["pr", "list", "--all-refs"],
           ["pr", "show", "dk3m"],
+          ["issue", "list", "status:closed"],
         ]) {
           const run = repo.nav(args);
           assert.equal(run.code, 0, run.stderr);
-          assert.match(run.stdout, /dk3mp2x9/);
           assert.match(run.stderr, /written by a newer Navbook; update nav/, args.join(" "));
         }
+
+        // Before the failure too, since a newer format is the likely reason.
+        const missing = repo.nav(["pr", "show", "zzzz"]);
+        assert.notEqual(missing.code, 0);
+        assert.match(missing.stderr, /newer Navbook.*\n.*no (open )?pull request matches/);
       } finally {
         repo.cleanup();
       }

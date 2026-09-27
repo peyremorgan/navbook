@@ -176,9 +176,11 @@ describe("parseReviewPolicy", () => {
       // §2.10 says version MUST be 1, and that is `parseMarkerVersion`'s to
       // report; a policy reader that conflated the two would refuse to count
       // approvals over a typo in a key it does not read.
-      const reading = parseReviewPolicy(marker({ version: 7, review: { minApprovals: 2 } }));
-      assert.deepEqual(reading.problems, []);
-      assert.equal(reading.policy.minApprovals, 2);
+      for (const version of ["1", 7]) {
+        const reading = parseReviewPolicy(marker({ version, review: { minApprovals: 2 } }));
+        assert.deepEqual(reading.problems, []);
+        assert.equal(reading.policy.minApprovals, 2);
+      }
     });
   });
 });
@@ -304,6 +306,10 @@ describe("parseMarkerVersion", () => {
 
   it("calls a larger whole number newer, not malformed", () => {
     assert.equal(parseMarkerVersion(marker({ version: 2 }))?.kind, "newer");
+    // Past what a double holds exactly, and still a later revision rather
+    // than a malformed marker.
+    assert.equal(parseMarkerVersion('{ "version": 1e20 }')?.kind, "newer");
+    assert.equal(parseMarkerVersion('{ "version": 1e400 }')?.kind, "malformed");
   });
 
   it("calls anything else malformed", () => {

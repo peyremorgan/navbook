@@ -27,6 +27,7 @@ import {
 import { isId } from "./id.ts";
 import type { LinkEdit, LinkRepair } from "./links.ts";
 import { parsePerson } from "./person.ts";
+import { FORMAT_VERSION } from "./policy.ts";
 import { dirName as makeDirName, slugify } from "./slug.ts";
 import { type EntityKind, type EntityRecord, NAV_MARKER, type Status, statusDir } from "./tree.ts";
 
@@ -112,7 +113,7 @@ export function planInit(): Plan {
       {
         op: "write" as const,
         path: NAV_MARKER,
-        content: `${JSON.stringify({ version: 1 }, null, 2)}\n`,
+        content: `${JSON.stringify({ version: FORMAT_VERSION }, null, 2)}\n`,
       },
       ...dirs.map((dir) => ({ op: "write" as const, path: `${dir}/.gitkeep`, content: "" })),
     ],

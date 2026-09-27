@@ -424,7 +424,7 @@ ask, and one that does is still not asking.
 `navbook.json`, at the top of the root directory, is the **marker**: its
 presence is what identifies the directory that contains it as a Navbook root
 (§2.1). It MUST be a JSON object. This revision defines four keys, `version`,
-whose value MUST be the integer `1`, `review`, the review policy below,
+whose value MUST be an integer and is `1` for this revision, `review`, the review policy below,
 `merge`, the merge policy below it, and `plugins`, the declaration of §2.12;
 tools MUST ignore keys they do not recognize, and MUST NOT reject a marker for
 carrying them.

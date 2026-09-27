@@ -15,6 +15,7 @@ import {
   type QueryKeySpec,
   queryTermsFor,
   REVIEW_DECISIONS,
+  readMarkerVersion,
 } from "@navbook/core";
 import { Command, Option } from "commander";
 import { finiteNumber, wholeNumber } from "./args.ts";
@@ -40,6 +41,7 @@ import {
   cmdPluginRemove,
   cmdPluginUpdate,
 } from "./commands/plugin.ts";
+import { warnNewerFormat } from "./commands/policy.ts";
 import {
   cmdPrClose,
   cmdPrList,
@@ -200,6 +202,28 @@ export const BUILTIN_NOUNS = [
   "uninstall",
 ] as const;
 
+/**
+ * The top-level commands that do not warn about a newer tree: `doctor` reports
+ * it as D16 itself, and the rest set the repository up or print something
+ * that does not depend on the format.
+ */
+const FORMAT_INDEPENDENT = new Set([
+  "init",
+  "id",
+  "doctor",
+  "install",
+  "uninstall",
+  "plugin",
+  "__complete",
+]);
+
+/** Whether a command, by its top-level name, answers from the tree. */
+function readsTheTree(action: Command): boolean {
+  let top = action;
+  while (top.parent?.parent) top = top.parent;
+  return !FORMAT_INDEPENDENT.has(top.name());
+}
+
 export function buildProgram(getCtx: () => Ctx, plugins?: PluginRuntime): Command {
   const program = withoutHelpVerb(new Command());
   program
@@ -208,6 +232,20 @@ export function buildProgram(getCtx: () => Ctx, plugins?: PluginRuntime): Comman
     .version(VERSION, "-V, --version")
     .showHelpAfterError()
     .enablePositionalOptions();
+
+  // Before any command that reads or writes the tree, and before it can fail:
+  // an answer from a tool older than the tree is a guess, and the person
+  // reading it should know that first (spec 04 §4.3, D16).
+  program.hook("preAction", (_program, action) => {
+    if (!readsTheTree(action)) return;
+    let ctx: Ctx;
+    try {
+      ctx = getCtx();
+    } catch {
+      return; // the action will report what is wrong with the context
+    }
+    if (ctx.hasNavbook) warnNewerFormat(ctx, readMarkerVersion(ctx));
+  });
 
   program
     .command("init")

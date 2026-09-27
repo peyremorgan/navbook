@@ -2,7 +2,8 @@
  * The policies a marker declares — spec 02 §2.10.
  *
  * These are the two things in `navbook.json` a tool reads rather than merely
- * finds, beside the format `version` the marker claims to be written to. The review policy says how the reviews of §2.7 are counted: whether a
+ * finds, and below them the format `version` the marker claims to be written
+ * to. The review policy says how the reviews of §2.7 are counted: whether a
  * pull request's own author is among its reviewers, and how many approvals a
  * decision of `approved` takes. The merge policy says what shape a merge
  * leaves in the target branch's history.
@@ -146,7 +147,9 @@ export function parseMarkerVersion(markerText: string | undefined): MarkerVersio
 
   const value = marker.version;
   if (value === FORMAT_VERSION) return null;
-  if (typeof value === "number" && Number.isSafeInteger(value) && value > FORMAT_VERSION) {
+  // Any whole number above this one, however large: §2.10 calls every one of
+  // them a later revision. Infinity, which `1e400` parses to, is not one.
+  if (typeof value === "number" && Number.isInteger(value) && value > FORMAT_VERSION) {
     return {
       kind: "newer",
       message: `'version' is ${value} and this tool reads ${FORMAT_VERSION}: the tree was written by a newer Navbook; update nav`,

@@ -34,7 +34,6 @@ import {
   planPrMerge,
   preparePrOpen,
   type ReviewSummary,
-  readMarkerVersion,
   readReviewers,
   readReviewPolicy,
   requestReview,
@@ -64,7 +63,6 @@ import {
   describeShortfall,
   mergeAction,
   warnMergePolicyProblems,
-  warnNewerFormat,
   warnPolicyProblems,
 } from "./policy.ts";
 import { type PrWriteOptions, withPrWriteSite } from "./pr-elsewhere.ts";
@@ -275,7 +273,6 @@ export interface PrListOptions extends ListOptions {
 
 export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void {
   const reading = readReviewPolicy(ctx);
-  warnNewerFormat(ctx, readMarkerVersion(ctx));
   warnPolicyProblems(ctx, reading);
 
   // Read once per entity: the decision decides both whether the column appears
@@ -401,7 +398,6 @@ export function cmdPrMerge(ctx: Ctx, prefix: string | undefined, opts: MergeOpti
     const result = continuePrMerge(ctx, prefix, { syncSource });
     // A merge already under way: the moment to have asked has passed, so an
     // unmet policy is reported and nothing is put to the user.
-    warnNewerFormat(ctx, readMarkerVersion(ctx));
     warnPolicyProblems(ctx, result.review.reading);
     const shortfall = declaredShortfall(result.review);
     if (shortfall) {
@@ -415,7 +411,6 @@ export function cmdPrMerge(ctx: Ctx, prefix: string | undefined, opts: MergeOpti
   if (!prefix) fail("nav pr merge needs the ID of the pull request to merge");
 
   const plan = planPrMerge(ctx, prefix, { method: readMethod(opts.method), syncSource });
-  warnNewerFormat(ctx, readMarkerVersion(ctx));
   warnPolicyProblems(ctx, plan.review.reading);
   warnMergePolicyProblems(ctx, plan.mergePolicy);
   confirmAgainstPolicy(ctx, plan.entity.id, plan.review, opts.yes === true);

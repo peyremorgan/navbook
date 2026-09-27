@@ -53,7 +53,7 @@ import { renderDetail } from "../render/detail.ts";
 import { type Column, renderTable, terminalWidth } from "../render/table.ts";
 import { parseSortOrder, sortListing } from "../sort.ts";
 import { composeFile } from "./compose.ts";
-import { warnNewerFormat, warnPolicyProblems } from "./policy.ts";
+import { warnPolicyProblems } from "./policy.ts";
 import { type PrWriteOptions, withPrWriteSite } from "./pr-elsewhere.ts";
 
 export interface GlobalFlags {
@@ -189,10 +189,7 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
       ? readPr(ctx, prefix, repo)
       : { entity: resolveEntity(repo, prefix, kind), ref: null };
   const reading = repo.reviewPolicy;
-  if (kind === "pr") {
-    warnNewerFormat(ctx, repo.versionFault);
-    warnPolicyProblems(ctx, reading);
-  }
+  if (kind === "pr") warnPolicyProblems(ctx, reading);
   if (opts.json) {
     // `parent` and `subtasks` are frontmatter, so they are already in the
     // object; resolving them would be a second, differently-shaped answer.
