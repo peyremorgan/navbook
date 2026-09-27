@@ -29,12 +29,19 @@ The structural option from the implementation plan:
 
 ## Breaking change
 
-API clients that name `EntityFilter` in an operation will break. `@navbook/web` is the only known client and ships in lockstep with the server. Worth a line in the release notes.
+The API changes in four ways. `@navbook/web` is the only known client and ships in lockstep with the server, but the release notes should list all four:
+
+- Operations that name `EntityFilter` break. They must use `IssueFilter` or `PrFilter`.
+- `IssueFilter.status` takes the new `IssueStatus` enum (`OPEN`, `CLOSED`). `issues(filter: { status: [MERGED] })` was accepted and matched nothing. It is now refused, as the CLI refuses `status:merged` on issues.
+- `prs(filter: { deadline: … })` used to fail with `INVALID_INPUT` and the CLI's wording. It now fails with `GRAPHQL_VALIDATION_FAILED` (HTTP 400) and a message naming the field. The review terms on `issues` fail the same way.
+- An **empty** key of the other noun (`deadline: []` on `prs`, `reviews: []` on `issues`) used to be accepted as "no narrowing". It is now refused as well, because validation checks that a key exists, not what it holds. A client that sends every key, using empty arrays for the unset ones, has to send only its own noun's keys.
+
+The self-review also found two things this change leaves as they are. `?reviewer=` on the issue list stays in the address (it has no effect), as `?deadline=` already does on the PR list. And a listing's keys are declared in three places: its `FilterKeys`, its projection and `EntityFilterBar`'s props. Merging those is a refactor for another change.
 
 ## Verification
 
-- New HTTP tests in `read.test.ts` cover `reviewers` / `reviews` / `awaiting` on `issues`, and `deadline` on `prs`. Both **fail on the old code** (`INVALID_INPUT` / no error) and pass on the new.
+- New HTTP tests in `read.test.ts` cover `reviewers` / `reviews` / `awaiting` on `issues`, `deadline` on `prs`, and `status: [MERGED]` on `issues`. All **fail on the old code** (`INVALID_INPUT` / no error) and pass on the new.
 - Unit tests for `toIssueQuery` / `toPrQuery`, including that each ignores the other noun's keys. Web unit tests cover the `?reviewer=` gate and the split projections.
-- server 381 ✔, core 835 ✔, web vitest 377 ✔, conformance 124 ✔, deploy 63 ✔, web e2e (Playwright, built bundle) 153 ✔
+- server 382 ✔, core 835 ✔, web vitest 377 ✔, conformance 124 ✔, deploy 63 ✔, web e2e (Playwright, built bundle) 153 ✔
 - `biome check`, root `tsc`, server `tsc`, `nuxi typecheck`, web tools `tsc`: clean
 - `nav doctor`: 0 errors, same warning count as before
