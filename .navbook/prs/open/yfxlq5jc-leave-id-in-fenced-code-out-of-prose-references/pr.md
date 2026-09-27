@@ -17,34 +17,52 @@ revisions:
     date: 2026-09-27T02:59:19Z
 ---
 
-Fixes #t1kpljkt. Five of the D8 warnings `nav doctor` gives on `dev` point at IDs inside code: pasted terminal output in two comments and one PR description, and `` `nav pr show '#id'` `` in two merged PR descriptions. Spec 02 §2.9 defines references in prose, and the web client doesn't link any of these IDs. D8 still counted them.
+Fixes #t1kpljkt. Five of the D8 warnings `nav doctor` gave on `dev` point at IDs inside code: pasted terminal output in two comments and one PR description, and `` `nav pr show '#id'` `` in two merged PR descriptions. Spec 02 §2.9 defines references in prose, and the web client doesn't link any of these IDs. D8 still counted them.
 
 ## Change
 
-**`packages/core/src/core/refs.ts`.** `extractProseRefs` now blanks code before matching.
+**`packages/core/src/core/refs.ts`.** `extractProseRefs` now blanks code before matching. It follows the part of CommonMark that decides where code is, and no more.
 
-- **Fenced blocks** (CommonMark §4.5):
+- **Line endings.** CRLF is normalised first.
+- **Fenced blocks** (§4.5):
   - Backtick and tilde fences both count, with or without an info string.
-  - A fence inside a list item or a `>` quote counts too.
-  - A fence closes on a run of its own character at least as long as the one that opened it, with nothing after it. A fence nobody closed runs to the end of the document.
-  - A backtick run whose "info string" contains a backtick is inline code, not a fence.
-- **Code spans** (§6.1): a run of backticks closed by a run exactly as long, within one paragraph. The old guard skipped a reference only when a backtick came right before its `#`, so `'#id'` inside a span still counted. An unmatched run stays literal text, which is how markdown-it reads it.
+  - A fence may open after indentation, `>` markers or a list marker on its own line.
+  - It closes on a run of its own character at least as long as the opener, with nothing after it. It also closes when the quote or list item it sits in ends. Otherwise it runs to the end of the document.
+  - A backtick "info string" that contains a backtick is inline code, not a fence.
+  - A run indented four or more columns past where a fence could open only continues the paragraph above it.
+- **Code spans** (§6.1): a run of backticks closed by a run of exactly the same length, within one paragraph. A heading is a one-line paragraph, and a line that starts a block ends the paragraph. An unmatched run is literal text.
+- **Backslash escapes** (§2.4): an escaped backtick opens no span. An escaped `#` is not a reference, which is how the web client already read `\#id`.
 
-`feature.ts` reads commit messages with the same function, so a feature's history now also ignores IDs in code in a commit body.
+`feature.ts` reads commit messages with the same function, so a feature's history now also ignores IDs in code.
 
 **Tests.**
 
-- `packages/core/test/refs.test.ts` has eight new cases for fences and code spans. Six of them fail on `dev`.
-- `packages/web/test/nuxt/markdown.test.ts` renders a document made mostly of fences and code spans, including a stray backtick, and asserts that the `/ref/` links markdown-it produces are exactly `extractProseRefs` of the same source. `test/node/references.test.ts` already held the two grammars together line by line. This extends that to the block level, where fences and spans live. It fails on `dev`.
+- `packages/core/test/refs.test.ts` has eight new cases.
+- `packages/web/test/nuxt/markdown.test.ts` has a table of 18 constructs, each run through markdown-it and `extractProseRefs`. Both must give the same set: the ID in code or behind an escape is never linked, and the one in the prose after it always is. `test/node/references.test.ts` already held the two grammars together line by line; this does the same at the block level, where code lives.
 
 ## Verification
 
-- `nav doctor` from this branch on this tree: the five warnings are gone, and nothing new appears.
-- Three D8 warnings remain:
-  - `#sf9fu6z4` in #t4mwvm2j and `#kl6ebnrs` on #z3j95v3e are real prose references to IDs that exist in no branch here. They are fixed separately on `dev`.
+- `nav doctor` from this branch on current `dev`: all five warnings are gone, and nothing new appears.
+- What's left:
   - `#na3o4794` in #tvxw30h3 names an open PR on its own branch, and clears when that PR merges.
-- The two D10 warnings are #feu6fmzu's to fix. This PR names #feu6fmzu, so merge that one first.
+  - This PR names #feu6fmzu, so merge #feu6fmzu first.
 - `biome check .`, `tsc --noEmit` (root and core), and `nuxi typecheck` are clean.
-- Suites: core 802, cli 363, server 375, conformance 119, web vitest 374, all passing.
+- Suites: core 804, cli 363, server 375, conformance 119, web vitest 375, all passing.
+
+## Review
+
+`/code-review high` on revision 2 found six inputs where D8 and markdown-it disagreed:
+- a fence on a list-marker line
+- a fence whose container ended
+- an indented ``` continuing a paragraph
+- spans crossing list items or headings
+- escaped backticks
+- CRLF
+
+All six are fixed in revision 3 and are in the table.
+
+Its seventh point was to share one parser by tokenising with markdown-it in core. I didn't take it. Spec 05 keeps the core to one dependency, with each addition justified for the Rust rewrite and against the import budget, and a whole Markdown parser to decide where code is would be hard to justify. The table is what keeps the two readers in agreement instead. Two rare differences remain, and the comment in `refs.ts` names them:
+- A fence indented two or three spaces inside a list item's continuation is closed by the item's end.
+- A code span does not continue onto the next `>` line of a quote.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
