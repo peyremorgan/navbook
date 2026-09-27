@@ -57,20 +57,38 @@ export interface ReadTreeOptions {
   comments?: CommentScope;
 }
 
-/** Read the Navbook directory into a flat path→content map. */
+/**
+ * The Navbook directory's paths, with each file read when it is asked for.
+ *
+ * Walking is eager and reading is not: `parseTree` asks for what it parses, so
+ * an extension namespace (§2.12) or a feature's image (§2.11) is listed — which
+ * is what `Repo.reserved` and `extraFiles` are made of — and never opened. A
+ * read is remembered, since an entity file is asked for twice (to parse it and
+ * to hash it). A file that cannot be read answers `undefined`.
+ */
 export function readNavTree(navRoot: string, opts: ReadTreeOptions = {}): NavTree {
-  const files = new Map<string, string>();
-  if (!existsSync(navRoot)) return files;
-  walk(navRoot, "", files, opts.comments ?? "all");
-  return files;
+  const paths = new Set<string>();
+  if (existsSync(navRoot)) walk(navRoot, "", paths, opts.comments ?? "all");
+  const contents = new Map<string, string>();
+  return {
+    keys: () => paths,
+    get(path) {
+      if (!paths.has(path)) return undefined;
+      let text = contents.get(path);
+      if (text === undefined) {
+        try {
+          text = readFileSync(join(navRoot, ...path.split("/")), "utf8");
+        } catch {
+          return undefined;
+        }
+        contents.set(path, text);
+      }
+      return text;
+    },
+  };
 }
 
-function walk(
-  absolute: string,
-  rel: string,
-  files: Map<string, string>,
-  comments: CommentScope,
-): void {
+function walk(absolute: string, rel: string, paths: Set<string>, comments: CommentScope): void {
   let entries: Dirent<string>[];
   try {
     entries = readdirSync(absolute, { withFileTypes: true, encoding: "utf8" });
@@ -79,12 +97,11 @@ function walk(
   }
   for (const entry of entries) {
     const childRel = rel === "" ? entry.name : `${rel}/${entry.name}`;
-    const childAbs = join(absolute, entry.name);
     if (entry.isDirectory()) {
       if (entry.name === "comments" && !commentsInScope(comments, rel)) continue;
-      walk(childAbs, childRel, files, comments);
+      walk(join(absolute, entry.name), childRel, paths, comments);
     } else if (entry.isFile()) {
-      files.set(childRel, readFileSync(childAbs, "utf8"));
+      paths.add(childRel);
     }
   }
 }

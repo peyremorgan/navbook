@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, describe, it } from "node:test";
@@ -304,6 +304,54 @@ describe("readNavTree comment scope", () => {
     // What a pull-request listing needs to derive a review state, without
     // paying for the issue comments beside it (spec 05 §5.2's budget).
     assert.deepEqual(paths("prs"), ["prs/open/dk3mp2x9-y/comments/2026-08-03T141207Z-q8zm3vp1.md"]);
+  });
+});
+
+describe("readNavTree reads only what parseTree parses", () => {
+  const root = mkdtempSync(join(tmpdir(), "navbook-lazy-"));
+  after(() => rmSync(root, { recursive: true, force: true }));
+  const write = (rel: string, content: string | Uint8Array): string => {
+    const abs = join(root, ...rel.split("/"));
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, content);
+    return abs;
+  };
+  write("issues/open/bqlybac0-x/issue.md", issue());
+  write("specs/auth/feature.md", "---\ntitle: Auth\n---\n\nSigning in.\n");
+  // One per namespace nothing interprets: a top-level extension (§2.12), an
+  // entity's own (§2.12), and a feature's image (§2.11). Made unreadable, so
+  // opening any of them throws, which is what reading them used to do.
+  const unread = [
+    write("reports/coverage.json", "{}"),
+    write("issues/open/bqlybac0-x/reports.json", "{}"),
+    write("specs/auth/diagram.png", Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe)),
+  ];
+  for (const path of unread) chmodSync(path, 0o000);
+  // Permissions do not stop root, so there the test would prove nothing.
+  const asRoot = process.getuid?.() === 0;
+
+  it("lists them without opening them", { skip: asRoot }, () => {
+    const repo = parseTree(readNavTree(root));
+    assert.deepEqual(repo.problems, []);
+    assert.deepEqual(repo.reserved, ["reports/coverage.json"]);
+    assert.deepEqual(repo.issues[0]?.extraFiles, ["issues/open/bqlybac0-x/reports.json"]);
+    assert.deepEqual(repo.features[0]?.extraFiles, ["specs/auth/diagram.png"]);
+  });
+
+  it("reports a file it must parse and cannot read, without throwing", { skip: asRoot }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "navbook-unreadable-"));
+    try {
+      const abs = join(dir, "issues", "open", "bqlybac0-x", "issue.md");
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, issue());
+      chmodSync(abs, 0o000);
+      const repo = parseTree(readNavTree(dir));
+      assert.deepEqual(repo.problems, [
+        { path: "issues/open/bqlybac0-x/issue.md", message: "file could not be read" },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

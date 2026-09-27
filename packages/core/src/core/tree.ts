@@ -18,7 +18,21 @@ import {
 } from "./policy.ts";
 import { parseDirName, SLUG_PATTERN } from "./slug.ts";
 
-export type NavTree = ReadonlyMap<string, string>;
+/**
+ * A Navbook directory as a set of paths whose contents can be asked for.
+ *
+ * Two operations rather than a `Map` because a reader may not want to have read
+ * everything: `parseTree` asks for the content of the files it parses and of no
+ * others, so a lazy implementation never opens an extension namespace (§2.12)
+ * or a feature's images (§2.11), whose bytes nothing here interprets. A
+ * `Map<string, string>` satisfies it, which is what keeps the eager readers —
+ * the index, the blobs of another branch — as they are. `get` answers
+ * `undefined` for a listed path whose content could not be read.
+ */
+export interface NavTree {
+  keys(): Iterable<string>;
+  get(path: string): string | undefined;
+}
 
 export type EntityKind = "issue" | "pr";
 export type Status = "open" | "closed" | "merged";
@@ -209,7 +223,7 @@ interface EntityDraft {
   extraFiles: string[];
 }
 
-/** Build a {@link Repo} from a flat path→content map. */
+/** Build a {@link Repo} from a tree, reading only the files it parses. */
 export function parseTree(files: NavTree, opts: { commentsLoaded?: CommentScope } = {}): Repo {
   const problems: StructuralProblem[] = [];
   const featureProblems: StructuralProblem[] = [];
@@ -471,8 +485,13 @@ function parseOrReport(
   path: string,
   problems: StructuralProblem[],
 ): ParsedFile | null {
+  const text = files.get(path);
+  if (text === undefined) {
+    problems.push({ path, message: "file could not be read" });
+    return null;
+  }
   try {
-    return parseFile(files.get(path) ?? "");
+    return parseFile(text);
   } catch (error) {
     problems.push({ path, message: error instanceof Error ? error.message : String(error) });
     return null;
