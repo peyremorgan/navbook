@@ -16,31 +16,50 @@ Fixes #j35o7oe4. `nav doctor --staged`, which the pre-commit hook runs, read eac
 
 ## What changes
 
-`stagedRepo` now builds its tree through `stagedTree` (`packages/core/src/git/index-ops.ts`):
+`stagedRepo` now builds its tree through `stagedTree(cwd, dir)` in `packages/core/src/git/index-ops.ts`:
 
-- One `git cat-file --batch-check` over `:<path>` gives each staged blob's size. A path with no blob at stage 0 (a staged deletion, a conflicted path) answers `missing` and is left out, exactly as a failing `git show` left it out.
-- One `git cat-file --batch`, through the existing `catBlobs` with an empty ref, reads every blob up to 1 MiB.
-- A larger blob is read only when `parseTree` asks for it. That is part 2 of the issue: extension data under §2.12, or an image, is listed in `reserved` and never read.
-- `catBlobs` answers a failed batch with an empty map, which would let the hook pass a tree with files missing. So every blob the check found must come back from the batch, or `stagedTree` throws.
-- A path with a newline in it (legal in git) cannot go through the line-based batch, so it is read with `git show` on its own.
+- `git ls-files --stage -z -- <dir>` lists the stage-0 entries with their SHAs.
+  - A staged deletion, a conflicted path (no stage 0) and a submodule are left out, as a failing `git show` left them out.
+  - This replaces `allIndexedNavPaths` and its `stagedPaths` fallback. That fallback only ever listed paths the index no longer held, so it always produced an empty tree.
+- One `git cat-file --batch-check`, given SHAs, sizes every blob.
+- `git cat-file --batch`, given SHAs, reads every blob up to 1 MiB. The reads are split into chunks of at most 64 MiB, each with a buffer sized from the known lengths, so a large index costs a few more processes instead of overflowing.
+- A larger blob is read with `git cat-file blob <sha>` only when `parseTree` asks for it. So a big report under §2.12, or an image, is listed in `reserved` and never read. A small one rides along in the batch, where it costs bytes rather than a process.
+- Objects are asked for by name, never by path, so no answer from git carries a path, and every header is checked against the SHA asked for. A blob that does not come back throws, rather than letting the hook pass a tree with files missing.
 
-`refscan.ts` is deliberately untouched: #u0a6u6ev is changing `catBlobs` to throw on failure. The completeness check here stays correct either way.
+`refscan.ts` and `catBlobs` are untouched, because #u0a6u6ev (PR #krc96gzg) is changing them. `catBlobs` keys its answers by `<ref>:<path>`, so it could not take SHAs anyway.
+
+## Self-review (commit `fix(core): read the staged tree by object name…`)
+
+The first revision asked `cat-file` for `:<path>` specs, which caused three problems:
+- A `missing` line echoes the spec, so a deleted path named `x blob 5` parsed as a present blob and failed the hook.
+- Paths containing a newline needed a separate `git show`.
+- A single `catBlobs` batch capped at 256 MB answered an overflow with `{}`.
+
+Its "never read" test also could not see batched reads, because GIT_TRACE does not log stdin. All four are fixed above.
+
+Two review points are deliberately kept:
+- A large blob that cannot be fetched on demand throws, as `readNavTree` does.
+- The small lazy-tree duplication with `readNavTree` stays.
 
 ## Measured on this repository
 
 | | before | after |
 |---|---|---|
-| git processes | 314 (312 × `show`) | 4 (`rev-parse`, `ls-files`, `cat-file --batch-check`, `cat-file --batch`) |
-| `doctor --staged` | 3.1–3.7 s | 0.5–0.8 s (the upper end measured under load from parallel test runs) |
-| `doctor --staged --json` output | | byte-identical |
+| git processes | 314 (312 × `show`) | 4 (`rev-parse`, `ls-files --stage`, `cat-file --batch-check`, `cat-file --batch`) |
+| `doctor --staged` | 3.1–3.7 s | 0.56 s |
+| `doctor --staged --json` output | | byte-identical to `dev` |
 
 ## Tests
 
 - `packages/cli/test/cli/doctor.test.ts`:
-  - **fixed number of git processes:** 40 staged comments, counted through `GIT_TRACE`, with no `git show` at all. Fails on the old code.
-  - **large files:** a 2 MiB `reports/run.json` is never read, by name or by object name, and a 2 MiB broken `issue.md` is still read and judged (exit 2). Fails on the old code.
-  - **deletions and odd names:** a staged deletion and a path containing a newline leave a clean tree.
-- `packages/core/test/staged-tree.test.ts`: staged content rather than the working tree, the prefix is stripped, missing paths are left out, and a git that cannot read the index throws.
-- Full suites in the worktree: core 845, CLI 396, conformance 126, plugin-kb 138. All pass, with biome and tsc clean.
+  - **Fixed number of git processes:** 40 staged comments, and no `git show` at all. Fails on the old code.
+  - **Large files:** a 2 MiB `reports/run.json` is never read. This is checked in the batch input, recorded by a `git` wrapper on PATH, and in GIT_TRACE. A 2 MiB broken `issue.md` is still read and judged (exit 2). Fails on the old code, and fails if the prefetch limit is raised to take the report in.
+  - **Deletions and odd names:** a staged deletion and a path containing a newline leave a clean tree.
+- `packages/core/test/staged-tree.test.ts`:
+  - staged content rather than the working tree, keyed below the directory;
+  - a deleted `gone blob 5` and a newline path are both handled;
+  - with limits shrunk, 30 bytes of small blobs take two batches and a large blob is read once, on demand;
+  - a git that cannot read the index throws.
+- Full suites in the worktree after the self-review fix: core 849, CLI 396, conformance 126, plugin-kb 138. All pass, with biome and tsc clean.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
