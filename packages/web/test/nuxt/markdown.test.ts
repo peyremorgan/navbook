@@ -11,6 +11,13 @@ import { extractProseRefs } from "@navbook/core";
 import { describe, it } from "vitest";
 import { renderMarkdown, renderMarkdownInline } from "../../app/utils/markdown";
 
+/** The ids a rendered body links, in the order it links them. */
+function linked(source: string): string[] {
+  return [...renderMarkdown(source).matchAll(/href="\/ref\/([a-z0-9]{8})"/g)].map(
+    (match) => match[1] as string,
+  );
+}
+
 describe("renderMarkdown", () => {
   it("renders the Markdown an issue body is written in", () => {
     const html = renderMarkdown("# Title\n\nSome **bold** and `code`.\n\n- one\n- two");
@@ -136,11 +143,37 @@ describe("renderMarkdown", () => {
       "",
       "Run `nav pr show '#ozzaoa36'`, or ``a ` #gqu14qtl``; a stray ` leaves #r6l7w4hn.",
     ].join("\n");
-    const linked = [...renderMarkdown(source).matchAll(/href="\/ref\/([a-z0-9]{8})"/g)].map(
-      (match) => match[1],
-    );
-    assert.deepEqual(linked.sort(), extractProseRefs(source).sort());
-    assert.deepEqual(linked, ["icroff4l", "kw143sq9", "r6l7w4hn", "t4mwvm2j"]);
+    assert.deepEqual(linked(source).sort(), extractProseRefs(source).sort());
+    assert.deepEqual(linked(source).sort(), ["icroff4l", "kw143sq9", "r6l7w4hn", "t4mwvm2j"]);
+  });
+
+  it("agrees with nav doctor where code begins and ends", () => {
+    // Each of these once parted D8 from the renderer. `#bqlybac0` sits in code
+    // or behind an escape, and `#mz4kq1rv` in the prose after it.
+    for (const source of [
+      "- ```\n  #bqlybac0\n  ```\n\nlater #mz4kq1rv",
+      "1. ```js\n   #bqlybac0\n   ```\n2. #mz4kq1rv",
+      "- a\n    ```\n    #bqlybac0\n    ```\n\n#mz4kq1rv",
+      "> ```\n> #bqlybac0\n\nafter #mz4kq1rv",
+      "- item\n\n  ```\n  #bqlybac0\n\nafter #mz4kq1rv",
+      "para\n    ```\nafter #mz4kq1rv",
+      "see #mz4kq1rv\n```\n#bqlybac0\n",
+      "````\n```\n~~~~\n```` x\n#bqlybac0\n````\nafter #mz4kq1rv",
+      "```\r\n#bqlybac0\r\n```\r\nafter #mz4kq1rv",
+      "~~~\r\n#bqlybac0\r\n~~~\r\nafter #mz4kq1rv",
+      "- a `\n- b #mz4kq1rv `",
+      "# a `\nb #mz4kq1rv `",
+      "a `x\ny #bqlybac0` b #mz4kq1rv",
+      "a ` x\r\n\r\n#mz4kq1rv and ` y",
+      "use \\` then #mz4kq1rv and `x`",
+      "a literal \\#bqlybac0 and #mz4kq1rv",
+      "run `nav pr show '#bqlybac0'` now #mz4kq1rv",
+      "``a ` #bqlybac0`` and `x`#mz4kq1rv",
+    ]) {
+      assert.deepEqual(linked(source).sort(), extractProseRefs(source).sort(), source);
+      assert.ok(linked(source).includes("mz4kq1rv"), source);
+      assert.ok(!linked(source).includes("bqlybac0"), source);
+    }
   });
 
   it("leaves an escaped reference to the author who escaped it", () => {

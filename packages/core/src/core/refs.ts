@@ -14,25 +14,10 @@ const PROSE_REF = /(^|[^\w#/`])#([a-z][a-z0-9]{7})\b/g;
  */
 const TRAILER_LINE = /^(Refs|Closes|Deletes):[ \t]*(.+?)[ \t]*$/gim;
 
-/**
- * A line that opens or closes a fenced code block (CommonMark §4.5): a run of
- * three or more backticks or tildes, then the info string. The indent and any
- * `>` before it are allowed so that a fence inside a list item or a quote
- * counts; one indented further is an indented code block, code either way.
- */
-const FENCE_LINE = /^[ \t>]*(`{3,}|~{3,})(.*)$/;
-
-/**
- * A code span (CommonMark §6.1): a run of backticks, then anything up to a run
- * of exactly as many, within one paragraph. Lookarounds make each run whole, so
- * a run with no partner is literal text rather than the start of a shorter one.
- */
-const CODE_SPAN = /(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g;
-
 /** Extract `#id` references from Markdown prose, ignoring English words. */
 export function extractProseRefs(markdown: string): string[] {
   const out = new Set<string>();
-  const prose = withoutFences(markdown).replace(CODE_SPAN, " ");
+  const prose = withoutCodeSpans(withoutFences(markdown.replace(/\r\n?/g, "\n")));
   for (const match of prose.matchAll(PROSE_REF)) {
     const id = match[2] as string;
     if (isId(id)) out.add(id);
@@ -40,35 +25,192 @@ export function extractProseRefs(markdown: string): string[] {
   return [...out];
 }
 
+/*
+ * Code is not prose. Pasted terminal output names whatever IDs the terminal
+ * printed, and the web client, which renders with markdown-it, links none of
+ * them, so neither does this. What follows is the part of CommonMark that
+ * decides where code is, and no more: spec 05 keeps the core to one dependency,
+ * and `packages/web/test/nuxt/markdown.test.ts` holds this to markdown-it.
+ *
+ * Known to differ, both rare: a fence indented two or three spaces at the top
+ * level of a list item's continuation is closed by the item's end rather than
+ * its own, and a code span does not continue onto the next `>` line of a quote.
+ */
+
+/**
+ * A line that opens or closes a fenced code block (CommonMark §4.5): what may
+ * stand before the run on the same line — indentation, `>` markers, a list
+ * marker — then a run of three or more backticks or tildes, then the info
+ * string.
+ */
+const FENCE_LINE = /^((?:[ \t]|>|[-*+][ \t]|\d{1,9}[.)][ \t])*)(`{3,}|~{3,})(.*)$/;
+
+/** A line that opens a list item; group 1 runs to where its content starts. */
+const LIST_ITEM = /^((?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+)\S/;
+
+/** An ATX heading, which is a block of one line. */
+const HEADING = /^(?:[ \t]*>)*[ \t]*#{1,6}(?:[ \t]|$)/;
+
+/** A line that begins a block of its own, so no paragraph runs onto it. */
+const BLOCK_START = /^[ \t]*(?:$|>|#{1,6}(?:[ \t]|$)|[-*+][ \t]|\d{1,9}[.)][ \t]|`{3,}|~{3,})/;
+
+/** What opens a line before its content: `>` markers and the space around them. */
+const QUOTES = /^(?:[ \t]*>)*/;
+
+/** How many `>` markers open a line. */
+function quoteDepth(line: string): number {
+  return (QUOTES.exec(line)?.[0].match(/>/g) ?? []).length;
+}
+
+/** The indentation of a line once its `>` markers are set aside. */
+function indentAfterQuotes(line: string): number {
+  const rest = line.slice(QUOTES.exec(line)?.[0].length ?? 0);
+  return rest.length - rest.trimStart().length;
+}
+
 /**
  * `markdown` with every fenced code block blanked, fences included.
  *
- * A fence is code, not prose: pasted terminal output names whatever IDs the
- * terminal printed, and the web client, which parses Markdown properly, links
- * none of them. A fence closes on a run of its own character at least as long
- * as the one that opened it, with nothing after; one never closed runs to the
- * end of the document. A backtick fence's info string cannot hold a backtick,
- * which is what tells ```` ```x``` ```` on one line apart from a fence.
+ * A fence closes on a run of its own character at least as long as the one
+ * that opened it with nothing after, or when the quote or list item it sits
+ * in ends; one never closed runs to the end of the document. A backtick
+ * fence's info string cannot hold a backtick, which is what tells ```` ```x```
+ * ```` on one line apart from a fence. A run indented four or more past where
+ * a fence could open only continues the paragraph above it.
  */
 function withoutFences(markdown: string): string {
-  let open: string | null = null;
-  return markdown
-    .split("\n")
-    .map((line) => {
-      const fence = FENCE_LINE.exec(line);
-      const run = fence?.[1] ?? "";
-      const rest = fence?.[2] ?? "";
-      if (open === null) {
-        if (!fence || (run.startsWith("`") && rest.includes("`"))) return line;
-        open = run;
-        return "";
+  // The fence being blanked: its run, and the quote and list item it is in.
+  let open: { run: string; quotes: number; column: number } | null = null;
+  // Where the content of the list item the text is in starts, past its `>`
+  // markers, and how many of those it has; null outside a list.
+  let list: { column: number; quotes: number } | null = null;
+  let previousBlank = true;
+  const out: string[] = [];
+
+  for (const line of markdown.split("\n")) {
+    const blank = line.trim() === "";
+    if (open !== null) {
+      const left =
+        quoteDepth(line) < open.quotes ||
+        (!blank && open.column > 0 && indentAfterQuotes(line) < open.column);
+      if (!left) {
+        const fence = FENCE_LINE.exec(line);
+        const run = fence?.[2] ?? "";
+        const closes =
+          fence !== null &&
+          run[0] === open.run[0] &&
+          run.length >= open.run.length &&
+          (fence[3] ?? "").trim() === "";
+        if (closes) open = null;
+        out.push("");
+        previousBlank = true;
+        continue;
       }
-      if (fence && run[0] === open[0] && run.length >= open.length && rest.trim() === "") {
-        open = null;
-      }
-      return "";
-    })
-    .join("\n");
+      // The quote or list item ended, and the fence with it.
+      open = null;
+    }
+
+    const item = LIST_ITEM.exec(line);
+    const quotes = quoteDepth(line);
+    if (item) {
+      const markers = QUOTES.exec(line)?.[0].length ?? 0;
+      list = { column: (item[1] ?? "").length - markers, quotes };
+    } else if (
+      !blank &&
+      list !== null &&
+      (quotes !== list.quotes || indentAfterQuotes(line) < list.column)
+    ) {
+      list = null;
+    }
+
+    const fence = FENCE_LINE.exec(line);
+    const run = fence?.[2] ?? "";
+    const column = indentAfterQuotes(line);
+    const infoHoldsBacktick = run.startsWith("`") && (fence?.[3] ?? "").includes("`");
+    const continuesParagraph = !item && !previousBlank && column >= (list?.column ?? 0) + 4;
+    if (!fence || infoHoldsBacktick || continuesParagraph) {
+      out.push(line);
+      previousBlank = blank;
+      continue;
+    }
+    open = { run, quotes, column: list?.column ?? 0 };
+    out.push("");
+    previousBlank = true;
+  }
+  return out.join("\n");
+}
+
+/** ASCII punctuation, which a backslash escapes (CommonMark §2.4). */
+const ESCAPABLE = /[!-/:-@[-`{-~]/;
+
+/**
+ * `text` with every code span blanked (CommonMark §6.1), and every character
+ * a backslash escapes: an escaped `` ` `` opens no span, and an escaped `#`
+ * is no reference, as the web client already has it.
+ *
+ * A span is a run of backticks, then anything up to a run of exactly as many,
+ * within the one paragraph: it goes on to the next line only when that line
+ * starts no block of its own. A run with no partner is literal text.
+ */
+function withoutCodeSpans(text: string): string {
+  const out = text.split("");
+  let i = 0;
+  while (i < text.length) {
+    const char = text[i] as string;
+    if (char === "\\" && ESCAPABLE.test(text[i + 1] ?? "")) {
+      out[i + 1] = " ";
+      i += 2;
+      continue;
+    }
+    if (char !== "`") {
+      i++;
+      continue;
+    }
+    let length = 1;
+    while (text[i + length] === "`") length++;
+    const close = closingRun(text, i + length, length, paragraphEnd(text, i));
+    if (close === -1) {
+      i += length;
+      continue;
+    }
+    for (let k = i; k < close + length; k++) if (out[k] !== "\n") out[k] = " ";
+    i = close + length;
+  }
+  return out.join("");
+}
+
+/**
+ * Where the paragraph holding `from` ends: before the next line that starts a
+ * block, or with its own line when that is a heading, which is one line long.
+ */
+function paragraphEnd(text: string, from: number): number {
+  let end = text.indexOf("\n", from);
+  const start = text.lastIndexOf("\n", from - 1) + 1;
+  if (HEADING.test(text.slice(start, end === -1 ? undefined : end))) {
+    return end === -1 ? text.length : end;
+  }
+  while (end !== -1) {
+    const next = text.indexOf("\n", end + 1);
+    if (BLOCK_START.test(text.slice(end + 1, next === -1 ? undefined : next))) return end;
+    end = next;
+  }
+  return text.length;
+}
+
+/** The start of the first run of exactly `length` backticks in `[from, end)`, or -1. */
+function closingRun(text: string, from: number, length: number, end: number): number {
+  let i = from;
+  while (i < end) {
+    if (text[i] !== "`") {
+      i++;
+      continue;
+    }
+    let run = 1;
+    while (text[i + run] === "`") run++;
+    if (run === length && i + run <= end) return i;
+    i += run;
+  }
+  return -1;
 }
 
 /**
