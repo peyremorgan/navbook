@@ -2,6 +2,7 @@
 title: The ref scan reads every blob in an open pull request's directory, on every ref
 author: Claude <noreply@anthropic.com>
 created: 2026-09-27T10:10:42Z
+assignee: Claude <noreply@anthropic.com>
 labels: [performance, bug]
 feature: [pull-requests, plugins]
 ---
