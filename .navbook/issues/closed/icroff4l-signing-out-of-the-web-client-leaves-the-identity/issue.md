@@ -5,6 +5,7 @@ created: 2026-09-17T16:54:56Z
 labels: [bug]
 assignee: Claude <noreply@anthropic.com>
 feature: web
+resolution: fixed
 ---
 
 Reported by Morgan on https://tracker.infra.brickcode.tech/: **Sign out** navigates to the "You are signed out" page, but the session at the identity provider (Brickcode's SSO, `auth.brickcode.tech`) stays active. **Sign in again** goes through the provider, which still holds its session cookie and hands back a code at once, so the person is signed straight back in to the same account without being asked anything.

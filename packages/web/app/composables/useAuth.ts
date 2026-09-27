@@ -51,7 +51,10 @@ export function useAuth(): Auth {
 
   // One renewal at a time, per app instance. The refresh token is rotated on
   // use, so two renewals racing would leave one of them holding a spent one.
-  const state = nuxtApp as unknown as { _navRenewal?: Promise<User | null> | null };
+  const state = nuxtApp as unknown as {
+    _navRenewal?: Promise<User | null> | null;
+    _navSigningOut?: boolean;
+  };
 
   const renew = async (): Promise<User | null> => {
     state._navRenewal ??= manager
@@ -76,6 +79,12 @@ export function useAuth(): Auth {
     signedIn: computed(() => usable(user.value)),
 
     async login(returnTo?: string) {
+      // Not while signing out. An operation that starts after the token is
+      // forgotten goes out without one, comes back UNAUTHENTICATED, and the
+      // error link asks to sign in; that redirect would overtake the one to
+      // the provider's end-session endpoint, whose session would then sign
+      // the person straight back in.
+      if (state._navSigningOut) return;
       // Read from the browser rather than `useRoute()`: this is called from the
       // Apollo error link as well as from a component, and outside a setup
       // context there is no route to inject.
@@ -86,15 +95,32 @@ export function useAuth(): Auth {
     },
 
     async logout() {
-      // `removeUser` rather than `signoutRedirect`: ending the session at the
-      // provider is the provider's business, and one without an end-session
-      // endpoint would refuse anyway.
-      await manager.removeUser();
-      // Somewhere the route guard will not immediately bounce back out of.
-      // Every other page needs a token, so navigating to one of those would
-      // send the person straight back to the provider — which, against a
-      // provider holding a session cookie, signs them back in at once.
-      await navigateTo(SIGNED_OUT);
+      // Forgetting the token is not enough on its own: the provider still
+      // holds a session cookie, and the next sign-in would come straight back
+      // as the same person without asking. So the provider is asked to end
+      // its session too, whenever it says it can; it forgets the token first
+      // and sends the browser back to `SIGNED_OUT` afterwards.
+      state._navSigningOut = true;
+      try {
+        if (await manager.endsSessions()) {
+          try {
+            // Settles only if the page comes back without having left: Back
+            // from the provider, restored from the back-forward cache. Then,
+            // like a failure, it lands where a provider without the endpoint
+            // would; the token is already gone either way.
+            await manager.signoutRedirect();
+          } catch {
+            // As above.
+          }
+        }
+        await manager.removeUser();
+        // Somewhere the route guard will not immediately bounce back out of.
+        // Every other page needs a token, so navigating to one of those would
+        // send the person straight back to the provider.
+        await navigateTo(SIGNED_OUT);
+      } finally {
+        state._navSigningOut = false;
+      }
     },
 
     async refused() {

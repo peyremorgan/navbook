@@ -144,4 +144,19 @@ describe("the Dockerfiles", () => {
   it("gives the API image the git it shells out to for every read and write", () => {
     assert.match(read(DOCKERFILES.api), /apk add --no-cache .*\bgit\b/);
   });
+
+  it("starts the API under an init that reaps what git leaves behind", () => {
+    // Why, in the Dockerfile's comment above the ENTRYPOINT and in #rcsql1v9.
+    assert.match(read(DOCKERFILES.api), /apk add --no-cache .*\btini\b/);
+
+    const entrypoint =
+      instructions(DOCKERFILES.api)
+        .findLast((line) => /^ENTRYPOINT\s/i.test(line))
+        ?.replace(/^ENTRYPOINT\s+/i, "") ?? "";
+    assert.ok(entrypoint.startsWith("["), "the API ENTRYPOINT is not in exec form");
+    const argv = JSON.parse(entrypoint) as string[];
+    assert.equal(argv[0], "/sbin/tini", "the API image does not start through tini");
+    assert.ok(argv.includes("-s"), "tini is not a subreaper, so it reaps nothing when not PID 1");
+    assert.equal(argv.at(-1), "/entrypoint.sh", "tini does not hand over to the entrypoint");
+  });
 });

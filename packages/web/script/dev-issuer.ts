@@ -5,7 +5,8 @@
  * read or write, needs a token whose `email` claim becomes `author:`. That is
  * the right default for a deployment and an obstacle for `nuxi dev`, so this
  * serves the smallest provider the browser flow will accept: discovery, a key,
- * an authorize page that asks who you are, and a token endpoint.
+ * an authorize page that asks who you are, a token endpoint, and an end-session
+ * endpoint for signing out through.
  *
  * It is grown from the server suite's stub issuer, which mints tokens in
  * process and needs no browser. The shape is deliberately the same, so both
@@ -173,6 +174,9 @@ export async function startDevIssuer(options: DevIssuerOptions = {}): Promise<De
       case "POST /token":
         await token(await body(request), response);
         return;
+      case "GET /end-session":
+        endSession(url, response);
+        return;
       default:
         json(response, 404, { error: "not_found" });
     }
@@ -226,6 +230,45 @@ export async function startDevIssuer(options: DevIssuerOptions = {}): Promise<De
     const target = new URL(redirectUri);
     target.searchParams.set("code", code);
     const state = form.get("state");
+    if (state) target.searchParams.set("state", state);
+    response.writeHead(302, { location: target.toString() }).end();
+  }
+
+  /**
+   * RP-initiated logout. There is no browser session here to end, since every
+   * sign-in asks, so what is left is what a real provider would refuse: a
+   * request that does not say which client it is from, or says another one.
+   * The client is named by `client_id`, by the audience of the id token sent
+   * as `id_token_hint`, or by both — which is what the web client sends — and
+   * then they have to agree. Like `/authorize`, any well-formed redirect is
+   * taken as registered.
+   */
+  function endSession(url: URL, response: ServerResponse): void {
+    const parameters = url.searchParams;
+    const refuse = (description: string): void =>
+      json(response, 400, { error: "invalid_request", error_description: description });
+    const hint = parameters.get("id_token_hint");
+    const audiences = hint === null ? null : audiencesOf(hint);
+    const named = parameters.get("client_id");
+    if (hint !== null && !audiences?.includes(named ?? clientId)) {
+      refuse(`the id token hint was not issued to ${named ?? clientId}`);
+      return;
+    }
+    if ((named ?? (audiences === null ? null : clientId)) !== clientId) {
+      refuse(`the logout names no known client (expected ${clientId})`);
+      return;
+    }
+    const redirect = parameters.get("post_logout_redirect_uri");
+    if (redirect === null) {
+      response.writeHead(200, HTML_HEADERS).end(signedOutPage());
+      return;
+    }
+    if (!URL.canParse(redirect)) {
+      refuse("post_logout_redirect_uri is not an absolute URL");
+      return;
+    }
+    const target = new URL(redirect);
+    const state = parameters.get("state");
     if (state) target.searchParams.set("state", state);
     response.writeHead(302, { location: target.toString() }).end();
   }
@@ -329,6 +372,24 @@ function requested(form: URLSearchParams, session: Session): Session {
   return resource === null || resource === "" ? session : { ...session, audience: resource };
 }
 
+/**
+ * The audiences of an id token, read and not verified: this issuer signed it,
+ * and a logout only needs to know which clients it was for. `aud` may be one
+ * string or a list of them; anything else names nobody.
+ */
+function audiencesOf(token: string): string[] | null {
+  try {
+    const { aud } = JSON.parse(
+      Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"),
+    ) as { aud?: unknown };
+    if (typeof aud === "string") return [aud];
+    if (Array.isArray(aud) && aud.every((entry) => typeof entry === "string")) return aud;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** The S256 challenge for a verifier, as RFC 7636 computes it. */
 export function pkceOf(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
@@ -340,6 +401,7 @@ export function discovery(issuer: string): Record<string, unknown> {
     jwks_uri: `${issuer}/jwks`,
     authorization_endpoint: `${issuer}/authorize`,
     token_endpoint: `${issuer}/token`,
+    end_session_endpoint: `${issuer}/end-session`,
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
@@ -397,6 +459,20 @@ interface LoginFields {
   nonce: string;
   audience: string;
   codeChallenge: string;
+}
+
+function signedOutPage(): string {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Signed out (development)</title>
+  </head>
+  <body>
+    <p>Signed out of the development issuer.</p>
+  </body>
+</html>
+`;
 }
 
 function loginPage(fields: LoginFields): string {

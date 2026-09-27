@@ -2,6 +2,7 @@
  * Signing in, which is not optional: the API answers nothing without a token.
  */
 
+import type { Route } from "@playwright/test";
 import { expect, test } from "./helpers/fixtures.ts";
 
 test("sends an unauthenticated visitor to the provider and brings them back", async ({
@@ -74,16 +75,100 @@ test("keeps the session across a reload rather than signing in again", async ({
 });
 
 test("stays signed out after signing out", async ({ signedIn }) => {
+  // Through the provider's end-session endpoint, with the id token as the hint:
+  // forgetting the token alone leaves the provider's session cookie behind, and
+  // the next sign-in would come straight back as the same person.
+  const endSession = signedIn.waitForRequest((request) =>
+    new URL(request.url()).pathname.endsWith("/end-session"),
+  );
   await signedIn.getByRole("banner").getByRole("button").last().click();
   await signedIn.getByRole("menuitem", { name: "Sign out" }).click();
+  const hint = new URL((await endSession).url()).searchParams.get("id_token_hint");
+  expect(hint).toBeTruthy();
 
-  // Not back at the provider: every other route needs a token, so landing on
-  // one would bounce straight there — and a provider holding a session cookie
-  // would sign the person back in without asking.
+  // Back from the provider, but not at it: every other route needs a token, so
+  // landing on one would bounce straight there.
   await expect(signedIn.getByTestId("signed-out")).toBeVisible();
   expect(signedIn.url()).not.toContain("/authorize");
+  // Nothing is left of the round trip: no `state` in the address bar, and no
+  // request record in storage for a later visit to trip over.
+  await signedIn.waitForURL((url) => url.pathname === "/signed-out" && url.search === "");
+  expect(
+    await signedIn.evaluate(() =>
+      Object.keys(window.localStorage).filter((key) => key.startsWith("oidc.")),
+    ),
+  ).toEqual([]);
 
   // And the token really is gone: a guarded route now needs the provider.
   await signedIn.getByTestId("sign-in-again").click();
   await signedIn.waitForURL(/\/authorize\?/);
+});
+
+test("is not signed back in by a refusal that lands while signing out", async ({
+  signedIn,
+  stack,
+}) => {
+  await signedIn.goto(`${stack.appUrl}/issues`);
+  await expect(signedIn.getByTestId("issue-list")).toBeVisible();
+
+  const authorizing: string[] = [];
+  signedIn.on("request", (request) => {
+    if (new URL(request.url()).pathname.endsWith("/authorize")) authorizing.push(request.url());
+  });
+
+  // An operation still out when Sign out is clicked, answered only once the
+  // browser is on its way to the provider, and answered UNAUTHENTICATED: its
+  // token was forgotten on the way. Asking to sign in then would overtake the
+  // end-session redirect, and the provider's session would never end.
+  let releaseQuery!: () => void;
+  const queryHeld = new Promise<void>((resolve) => {
+    releaseQuery = resolve;
+  });
+  let refused!: () => void;
+  const refusalSent = new Promise<void>((resolve) => {
+    refused = resolve;
+  });
+  const refuse = async (route: Route) => {
+    await queryHeld;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: null,
+        errors: [{ message: "not signed in", extensions: { code: "UNAUTHENTICATED" } }],
+      }),
+    });
+    refused();
+  };
+  await signedIn.route(stack.apiUrl, refuse);
+
+  let releaseLogout!: () => void;
+  const logoutHeld = new Promise<void>((resolve) => {
+    releaseLogout = resolve;
+  });
+  const holdLogout = async (route: Route) => {
+    await logoutHeld;
+    await route.continue();
+  };
+  await signedIn.route(/\/end-session\?/, holdLogout);
+
+  await signedIn.getByTestId("issue-list").getByRole("link").first().click();
+  await signedIn.getByRole("banner").getByRole("button").last().click();
+  const leaving = signedIn.waitForRequest((request) =>
+    new URL(request.url()).pathname.endsWith("/end-session"),
+  );
+  await signedIn.getByRole("menuitem", { name: "Sign out" }).click();
+  await leaving;
+
+  releaseQuery();
+  await refusalSent;
+  // The error link forgets the token and asks to sign in on a microtask or
+  // two; give it the chance to do the wrong thing before letting go.
+  await signedIn.waitForTimeout(500);
+  releaseLogout();
+
+  await expect(signedIn.getByTestId("signed-out")).toBeVisible();
+  expect(authorizing).toEqual([]);
+  await signedIn.unroute(stack.apiUrl, refuse);
+  await signedIn.unroute(/\/end-session\?/, holdLogout);
 });

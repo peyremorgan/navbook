@@ -9,14 +9,15 @@
  */
 
 import type { ApolloClient, NormalizedCacheObject } from "@apollo/client/core";
-import type { User, UserManager } from "oidc-client-ts";
+import type { User } from "oidc-client-ts";
 import type { Ref } from "vue";
 import type { WebConfig } from "../utils/config";
+import type { ApiUserManager } from "../utils/oidc";
 
 declare module "#app" {
   interface NuxtApp {
     $navConfig: WebConfig;
-    $oidc: UserManager;
+    $oidc: ApiUserManager;
     $oidcUser: Ref<User | null>;
     $apollo: ApolloClient<NormalizedCacheObject>;
   }
@@ -25,7 +26,7 @@ declare module "#app" {
 declare module "vue" {
   interface ComponentCustomProperties {
     $navConfig: WebConfig;
-    $oidc: UserManager;
+    $oidc: ApiUserManager;
     $oidcUser: Ref<User | null>;
     $apollo: ApolloClient<NormalizedCacheObject>;
   }

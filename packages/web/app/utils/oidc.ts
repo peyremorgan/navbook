@@ -15,10 +15,12 @@
 
 import {
   type SigninSilentArgs,
+  type SignoutRedirectArgs,
   type User,
   UserManager,
   type UserManagerSettings,
 } from "oidc-client-ts";
+import { SIGNED_OUT } from "~/utils/navigation";
 
 /**
  * A `UserManager` that names the API on every refresh.
@@ -40,6 +42,44 @@ export class ApiUserManager extends UserManager {
   override signinSilent(args: SigninSilentArgs = {}): Promise<User | null> {
     return super.signinSilent({ resource: this.audience, ...args });
   }
+
+  /**
+   * Whether the provider can end its own session, which is what signing out
+   * has to do: a provider still holding its session cookie signs the next
+   * sign-in straight back in, as the same person, without asking. A provider
+   * that advertises no `end_session_endpoint` — or whose document cannot be
+   * read just now — leaves the client nothing to ask, and signing out can only
+   * forget the token.
+   */
+  async endsSessions(): Promise<boolean> {
+    try {
+      return (await this.metadataService.getEndSessionEndpoint()) !== undefined;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Sign out at the provider, without naming the API.
+   *
+   * `extraQueryParams` is a default oidc-client-ts puts on the end-session URL
+   * as well as the authorization one, and `audience` means nothing there. The
+   * stored id token goes as `id_token_hint` on its own, which is what lets a
+   * provider (Better Auth, for one) end the session without asking first.
+   *
+   * `client_id` goes too. oidc-client-ts adds it only when there is no hint,
+   * but a provider that cannot verify the hint (a rotated key, a token with no
+   * session id) falls back to asking, and Better Auth then keeps the way back
+   * only for a request that names its client. So it is added here exactly when
+   * the library would leave it out, and never twice.
+   */
+  override async signoutRedirect(args: SignoutRedirectArgs = {}): Promise<void> {
+    const hinted = (args.id_token_hint ?? (await this.getUser())?.id_token) !== undefined;
+    return await super.signoutRedirect({
+      extraQueryParams: hinted ? { client_id: this.settings.client_id } : {},
+      ...args,
+    });
+  }
 }
 
 export interface OidcOptions {
@@ -47,7 +87,7 @@ export interface OidcOptions {
   discoveryUrl: string;
   clientId: string;
   audience: string;
-  /** The app's own origin, which both redirects come back to. */
+  /** The app's own origin, which every redirect comes back to. */
   origin: string;
 }
 
@@ -63,7 +103,10 @@ export function oidcSettings(options: OidcOptions): UserManagerSettings {
     metadataUrl: discoveryUrl,
     client_id: clientId,
     redirect_uri: `${origin}/auth/callback`,
-    post_logout_redirect_uri: origin,
+    // The page that asks before signing in again, since every other route
+    // would send the browser straight back to the provider. Like the redirect
+    // URI, it has to be registered with the provider exactly.
+    post_logout_redirect_uri: `${origin}${SIGNED_OUT}`,
     response_type: "code",
     scope: "openid profile email offline_access",
     // `audience` for providers in Auth0's mould, `resource` for RFC 8707 ones:

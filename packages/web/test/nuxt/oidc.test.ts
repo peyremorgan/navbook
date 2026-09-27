@@ -1,6 +1,7 @@
 /**
  * The API is named on every request for a token, or a provider that
- * implements resource indicators hands out one the server cannot verify.
+ * implements resource indicators hands out one the server cannot verify. And
+ * signing out ends the provider's session, or the next sign-in is automatic.
  *
  * What matters is what reaches the provider, so these drive oidc-client-ts
  * against a stub token endpoint and read the requests it received, rather than
@@ -15,6 +16,7 @@ import { afterAll, afterEach, beforeAll, describe, it } from "vitest";
 import { ApiUserManager, oidcSettings } from "../../app/utils/oidc";
 
 const AUDIENCE = "https://api.example.invalid";
+const APP = "http://app.example.invalid";
 
 let server: Server;
 let issuer = "";
@@ -24,13 +26,18 @@ const tokenRequests: URLSearchParams[] = [];
 beforeAll(async () => {
   server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://stub");
-    if (url.pathname === "/.well-known/openid-configuration") {
+    // Two documents: one from a provider that can end its sessions, and one
+    // from a provider that cannot.
+    if (url.pathname.endsWith("/.well-known/openid-configuration")) {
       response.writeHead(200, { "content-type": "application/json" }).end(
         JSON.stringify({
           issuer,
           authorization_endpoint: `${issuer}/authorize`,
           token_endpoint: `${issuer}/token`,
           jwks_uri: `${issuer}/jwks`,
+          ...(url.pathname.startsWith("/no-logout/")
+            ? {}
+            : { end_session_endpoint: `${issuer}/end-session` }),
         }),
       );
       return;
@@ -57,14 +64,14 @@ afterEach(() => {
   tokenRequests.length = 0;
 });
 
-function settings() {
+function settings(discoveryPath = "/.well-known/openid-configuration") {
   const store = new WebStorageStateStore({ store: new InMemoryWebStorage() });
   return {
     ...oidcSettings({
-      discoveryUrl: `${issuer}/.well-known/openid-configuration`,
+      discoveryUrl: `${issuer}${discoveryPath}`,
       clientId: "navbook-web",
       audience: AUDIENCE,
-      origin: "http://app.example.invalid",
+      origin: APP,
     }),
     stateStore: store,
     userStore: store,
@@ -84,9 +91,7 @@ describe("oidc settings", () => {
     const client = new OidcClient(settings());
     const request = await client.createSigninRequest({});
     await assert.rejects(
-      client.processSigninResponse(
-        `http://app.example.invalid/auth/callback?code=c0de&state=${request.state.id}`,
-      ),
+      client.processSigninResponse(`${APP}/auth/callback?code=c0de&state=${request.state.id}`),
     );
     assert.equal(tokenRequests.length, 1);
     assert.equal(tokenRequests[0]?.get("grant_type"), "authorization_code");
@@ -114,5 +119,88 @@ describe("oidc settings", () => {
     assert.equal(tokenRequests[0]?.get("grant_type"), "refresh_token");
     assert.equal(tokenRequests[0]?.get("refresh_token"), "r3fresh");
     assert.equal(tokenRequests[0]?.get("resource"), AUDIENCE);
+  });
+});
+
+describe("signing out", () => {
+  it("knows whether the provider can end its session", async () => {
+    assert.equal(await new ApiUserManager(settings(), AUDIENCE).endsSessions(), true);
+    assert.equal(
+      await new ApiUserManager(
+        settings("/no-logout/.well-known/openid-configuration"),
+        AUDIENCE,
+      ).endsSessions(),
+      false,
+    );
+    // A document that cannot be read says nothing about logout either, and
+    // signing out still has to forget the token.
+    assert.equal(await new ApiUserManager(settings("/missing"), AUDIENCE).endsSessions(), false);
+  });
+
+  it("forgets the token and sends the provider its id token and the way back", async () => {
+    const manager = new ApiUserManager(settings(), AUDIENCE);
+    await manager.storeUser(
+      new User({
+        access_token: "acc3ss",
+        id_token: "id.t0ken.sig",
+        refresh_token: "r3fresh",
+        token_type: "Bearer",
+        scope: "openid profile email offline_access",
+        profile: { sub: "s", iss: issuer, aud: "navbook-web", exp: 0, iat: 0 },
+      }),
+    );
+
+    // A redirect navigates `window.location`, and there is no window here:
+    // the address it would have gone to is the thing under test.
+    const scope = globalThis as { window?: unknown };
+    const navigated = new Promise<string>((resolve) => {
+      scope.window = {
+        self: { location: { assign: resolve } },
+        addEventListener: () => {},
+      };
+    });
+    try {
+      // The promise settles only when the page comes back, which it never does.
+      void manager.signoutRedirect();
+      const url = new URL(await navigated);
+
+      assert.equal(`${url.origin}${url.pathname}`, `${issuer}/end-session`);
+      assert.equal(url.searchParams.get("id_token_hint"), "id.t0ken.sig");
+      assert.equal(url.searchParams.get("post_logout_redirect_uri"), `${APP}/signed-out`);
+      // Named although there is a hint, which oidc-client-ts would leave out:
+      // a provider that cannot verify the hint needs it to send the browser back.
+      assert.deepEqual(url.searchParams.getAll("client_id"), ["navbook-web"]);
+      // `audience` is the authorization request's, and has no business here.
+      assert.equal(url.searchParams.get("audience"), null);
+      assert.equal(await manager.getUser(), null, "the token is forgotten before leaving");
+    } finally {
+      delete scope.window;
+    }
+  });
+
+  it("names the client once when there is no id token to send", async () => {
+    const manager = new ApiUserManager(settings(), AUDIENCE);
+    await manager.storeUser(
+      new User({
+        access_token: "acc3ss",
+        token_type: "Bearer",
+        profile: { sub: "s", iss: issuer, aud: "navbook-web", exp: 0, iat: 0 },
+      }),
+    );
+    const scope = globalThis as { window?: unknown };
+    const navigated = new Promise<string>((resolve) => {
+      scope.window = {
+        self: { location: { assign: resolve } },
+        addEventListener: () => {},
+      };
+    });
+    try {
+      void manager.signoutRedirect();
+      const url = new URL(await navigated);
+      assert.equal(url.searchParams.get("id_token_hint"), null);
+      assert.deepEqual(url.searchParams.getAll("client_id"), ["navbook-web"]);
+    } finally {
+      delete scope.window;
+    }
   });
 });
