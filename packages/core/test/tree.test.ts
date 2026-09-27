@@ -355,6 +355,12 @@ describe("readNavTree comment scope", () => {
       rmSync(join(root, "issues/open/bqlybac0-x/probe"), { recursive: true, force: true });
     }
   });
+
+  it("does not open a comment it left out, even when asked for it", () => {
+    const path = "issues/open/bqlybac0-x/comments/2026-08-03T141207Z-t5kr1gq6.md";
+    assert.equal(readNavTree(root).get(path), "---\n---\n\nc\n");
+    assert.equal(readNavTree(root, { comments: "none" }).get(path), undefined);
+  });
 });
 
 describe("readNavTree reads only what parseTree parses", () => {
@@ -425,25 +431,12 @@ describe("readNavTree reads only what parseTree parses", () => {
     // must see the same bytes even if the file changes in between.
     const files = readNavTree(root);
     const first = files.get("issues/open/bqlybac0-x/issue.md");
+    assert.equal(first, issue());
     write("issues/open/bqlybac0-x/issue.md", issue("Changed underneath"));
     try {
       assert.equal(files.get("issues/open/bqlybac0-x/issue.md"), first);
     } finally {
       write("issues/open/bqlybac0-x/issue.md", issue());
-    }
-  });
-
-  it("answers nothing for a file its walk left out", () => {
-    // A comment outside the read's scope is on disk but was never listed, so
-    // asking for it must not open it after all.
-    const path = "issues/open/bqlybac0-x/comments/2026-08-03T141207Z-t5kr1gq6.md";
-    const abs = write(path, comment());
-    try {
-      const files = readNavTree(root, { comments: "none" });
-      assert.equal([...files.keys()].includes(path), false);
-      assert.equal(files.get(path), undefined);
-    } finally {
-      rmSync(dirname(abs), { recursive: true, force: true });
     }
   });
 
@@ -458,6 +451,22 @@ describe("readNavTree reads only what parseTree parses", () => {
       chmodSync(abs, 0o000);
       assert.throws(() => parseTree(readNavTree(dir)), { code: "EACCES" });
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails on a directory it cannot list, rather than leaving it out", { skip: asRoot }, () => {
+    // The same reason as a file: the issue inside would be missing, and not
+    // even a structural problem would say so.
+    const dir = mkdtempSync(join(tmpdir(), "navbook-unlistable-"));
+    const entity = join(dir, "issues", "open", "bqlybac0-x");
+    try {
+      mkdirSync(entity, { recursive: true });
+      writeFileSync(join(entity, "issue.md"), issue());
+      chmodSync(entity, 0o000);
+      assert.throws(() => readNavTree(dir), { code: "EACCES" });
+    } finally {
+      chmodSync(entity, 0o755);
       rmSync(dir, { recursive: true, force: true });
     }
   });

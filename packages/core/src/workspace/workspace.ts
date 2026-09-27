@@ -96,8 +96,13 @@ function walk(absolute: string, rel: string, paths: Set<string>, comments: Comme
   let entries: Dirent<string>[];
   try {
     entries = readdirSync(absolute, { withFileTypes: true, encoding: "utf8" });
-  } catch {
-    return;
+  } catch (error) {
+    // Only a directory that went away between its parent's listing and its own
+    // is skipped. One that cannot be read throws, as an unreadable file does:
+    // skipping it would drop its entities from the tree without a problem.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return;
+    throw error;
   }
   for (const entry of entries) {
     const childRel = rel === "" ? entry.name : `${rel}/${entry.name}`;
