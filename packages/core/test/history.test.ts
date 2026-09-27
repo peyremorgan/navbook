@@ -238,6 +238,85 @@ describe("fileVersions", () => {
     });
   });
 
+  it("takes the file from the parent that held it, not a lookalike the merge deleted", () => {
+    inRepo((dir, commit) => {
+      // The first parent holds a similar file that the branch deletes, so
+      // diffed against it the merge reads as renaming that one.
+      const old = ".navbook/prs/open/zz98yy76-y/pr.md";
+      commit("Alice", "alice@example.com", "chore: root");
+      write(dir, old, body.replace("title: X", "title: Y"));
+      commit("Bob", "bob@example.com", "docs(pr): open #zz98yy76");
+      git(["checkout", "--quiet", "-b", "feature"], { cwd: dir });
+      git(["rm", "--quiet", old], { cwd: dir });
+      commit("Bob", "bob@example.com", "docs(pr): delete #zz98yy76");
+      write(dir, open, body);
+      commit("Alice", "alice@example.com", "docs(pr): open #ab12cd34");
+      const opened = head(dir);
+
+      git(["checkout", "--quiet", "main"], { cwd: dir });
+      git(["merge", "--quiet", "--no-ff", "--no-commit", "feature"], { cwd: dir });
+      mkdirSync(join(dir, ".navbook/prs/merged"), { recursive: true });
+      git(["mv", ".navbook/prs/open/ab12cd34-x", ".navbook/prs/merged/ab12cd34-x"], { cwd: dir });
+      commit("Alice", "alice@example.com", "Merge #ab12cd34");
+      const merge = head(dir);
+
+      assert.deepEqual(shas(dir, merged), [
+        [opened, open],
+        [merge, merged],
+      ]);
+    });
+  });
+
+  it("follows it back through the merge after a later rename", () => {
+    inRepo((dir, commit) => {
+      const { opened, merge } = openAndMerge(dir, commit);
+      const renamed = ".navbook/prs/merged/ab12cd34-renamed/pr.md";
+      git(["mv", ".navbook/prs/merged/ab12cd34-x", ".navbook/prs/merged/ab12cd34-renamed"], {
+        cwd: dir,
+      });
+      commit("Alice", "alice@example.com", "chore: rename");
+      assert.deepEqual(shas(dir, renamed), [
+        [opened, open],
+        [merge, merged],
+        [head(dir), renamed],
+      ]);
+    });
+  });
+
+  it("follows it through one merge-time move after another", () => {
+    inRepo((dir, commit) => {
+      const { opened, merge } = openAndMerge(dir, commit);
+      const archived = ".navbook/prs/archived/ab12cd34-x/pr.md";
+      git(["checkout", "--quiet", "-b", "archive"], { cwd: dir });
+      commit("Bob", "bob@example.com", "chore: something on the side");
+      git(["checkout", "--quiet", "main"], { cwd: dir });
+      git(["merge", "--quiet", "--no-ff", "--no-commit", "archive"], { cwd: dir });
+      mkdirSync(join(dir, ".navbook/prs/archived"), { recursive: true });
+      git(["mv", ".navbook/prs/merged/ab12cd34-x", ".navbook/prs/archived/ab12cd34-x"], {
+        cwd: dir,
+      });
+      commit("Alice", "alice@example.com", "Merge archive");
+      assert.deepEqual(shas(dir, archived), [
+        [opened, open],
+        [merge, merged],
+        [head(dir), archived],
+      ]);
+    });
+  });
+
+  it("begins a file where git reads it as a copy of a similar one", () => {
+    inRepo((dir, commit) => {
+      const earlier = ".navbook/issues/open/zz98yy76-y/comments/a.md";
+      const later = ".navbook/issues/open/ab12cd34-x/comments/b.md";
+      commit("Alice", "alice@example.com", "chore: root");
+      write(dir, earlier, body);
+      commit("Alice", "alice@example.com", "docs(issue): comment on #zz98yy76");
+      write(dir, later, `${body}One line more.\n`);
+      commit("Bob", "bob@example.com", "docs(issue): comment on #ab12cd34");
+      assert.deepEqual(shas(dir, later), [[head(dir), later]]);
+    });
+  });
+
   it("is empty for a path no commit has held", () => {
     inRepo((dir, commit) => {
       commit("Alice", "alice@example.com");

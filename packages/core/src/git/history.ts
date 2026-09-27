@@ -32,85 +32,132 @@ export function fileVersions(cwd: string, path: string): FileVersion[] {
 /**
  * {@link fileVersions} from `rev` back.
  *
+ * A copy is where a file begins. `--follow` detects copies as well as renames,
+ * so a new comment much like an older one reads as copied from it, and the
+ * history would go on into the other file's; it stops at the copy instead.
+ *
  * `nav pr merge` moves a pull request's files inside the merge commit, and
- * `git log` does not diff a merge, so `--follow` never sees that rename: the
- * history it gives opens on a later edit, or is empty when there was none. Its
- * `-m` is no cure, because diffing a merge against the parent that lacks a file
- * pairs it with whatever similar file that parent holds. So a history that does
- * not open on an add, a rename or a copy is resumed from the merge by hand.
+ * `git log` does not diff a merge, so `--follow` never sees that rename. The
+ * history it gives then opens on whatever came after: an edit, a rename of the
+ * moved file, or nothing at all. `-m` is no cure, because diffing a merge
+ * against the parent that lacks a file pairs it with any similar file that
+ * parent holds. So only a history that opens on an add or a copy is taken as
+ * whole, and any other is resumed by hand from just before its oldest commit.
  */
 function followFrom(cwd: string, rev: string, path: string): FileVersion[] {
+  // `-z` for paths as they are, never C-quoted: one resumed from is read back.
   const output = gitMaybe(
-    ["log", "--follow", "--name-status", "--format=%x01%H%x02%aI", rev, "--", path],
+    ["log", "-z", "--follow", "--name-status", "--format=%x01%H%x02%aI", rev, "--", path],
     { cwd },
   );
   if (output === null) return [];
 
   const versions: FileVersion[] = [];
-  let opening = "";
+  // The oldest record's change: its status, and the path it had before it.
+  let opening = { status: "", from: path };
   for (const record of output.split(RECORD_SEPARATOR)) {
-    if (record.trim() === "") continue;
-    const [header, ...rest] = record.split("\n");
+    // `sha STX date NUL`, a newline, then NUL-terminated fields: `M`, path;
+    // `A`, path; or `R087` or `C054`, old path, new path.
+    const [header, status, ...paths] = record.split("\0");
     const [sha, authored] = (header ?? "").split(FIELD_SEPARATOR);
     if (!sha || !authored) continue;
-    // `M\tpath`, `A\tpath`, or `R087\told\tnew`: the path is the last field.
-    const change = (rest.find((line) => line.trim() !== "") ?? "").split("\t");
     const date = new Date(authored);
     if (Number.isNaN(date.getTime())) continue;
-    versions.push({ sha, path: change.at(-1) || path, authored: date });
-    opening = change[0] ?? "";
+    const named = paths.filter(Boolean);
+    const current = named.at(-1) || path;
+    versions.push({ sha, path: current, authored: date });
+    opening = { status: (status ?? "").trim(), from: named[0] || current };
+    if (opening.status.startsWith("C")) break;
   }
   versions.reverse();
 
-  if (/^[ARC]/.test(opening)) return versions;
+  if (/^[AC]/.test(opening.status)) return versions;
+  // The oldest commit `--follow` lists is never a merge, so `^` is its one
+  // parent, and `from` is the path the file had there.
   const oldest = versions[0];
-  return [...throughMerge(cwd, oldest?.sha ?? rev, oldest?.path ?? path), ...versions];
+  const before = oldest
+    ? throughMerge(cwd, `${oldest.sha}^`, opening.from)
+    : throughMerge(cwd, rev, path);
+  return [...before, ...versions];
 }
 
 /**
- * The history of `path` up to and including the merge that brought it into
- * `rev`'s line, for a history `--follow` cut short there.
+ * The history of `path` as of `rev`, for when `--follow` cannot see it: up to
+ * and including the merge that brought the file into `rev`'s line.
  *
- * Without `--follow`, `git log` does list a merge that no parent shares the
- * path with, so the oldest commit it names is that merge. The merge's diff
- * against each parent says which one held the file, and under what name.
+ * Without `--follow`, `git log` lists a merge that no parent shares the path
+ * with, so the newest commit it names is that merge. Its diff against each
+ * parent says which one held the file and under what name; where two could
+ * have, the likelier rename wins.
  */
 function throughMerge(cwd: string, rev: string, path: string): FileVersion[] {
-  const output = gitMaybe(["log", "--format=%H%x02%aI%x02%P", rev, "--", path], { cwd });
-  const [sha, authored, parents] =
-    splitLines(output ?? "")
-      .at(-1)
-      ?.split(FIELD_SEPARATOR) ?? [];
+  const output = gitMaybe(["log", "-n1", "--format=%H%x02%aI%x02%P", rev, "--", path], { cwd });
+  const [sha, authored, parents] = (output ?? "").split(FIELD_SEPARATOR);
   const parentShas = (parents ?? "").split(" ").filter(Boolean);
+  // A commit other than a merge is one `--follow` would have listed.
   if (!sha || !authored || parentShas.length < 2) return [];
   const date = new Date(authored);
   if (Number.isNaN(date.getTime())) return [];
 
-  const merge: FileVersion = { sha, path, authored: date };
-  for (const parent of parentShas) {
-    const from = renamedFrom(cwd, parent, sha, path);
-    if (from !== null) return [...followFrom(cwd, parent, from), merge];
+  let best: { parent: string; from: string; score: number } | null = null;
+  // Last parent first: the branch merged in is the one likely to hold it.
+  for (const parent of [...parentShas].reverse()) {
+    const source = mergeSources(cwd, parent, sha).get(path);
+    if (source && source.score > (best?.score ?? -1)) best = { parent, ...source };
+    if (best?.score === 100) break;
   }
+  const merge: FileVersion = { sha, path, authored: date };
   // No parent held it under any name: the merge itself created it.
-  return [merge];
+  if (!best) return [merge];
+  return [...followFrom(cwd, best.parent, best.from), merge];
 }
 
-/** The path that became `path` between two commits, or null if none did. */
-function renamedFrom(cwd: string, from: string, to: string, path: string): string | null {
-  const output = gitMaybe(["diff", "--name-status", "-M", "-z", from, to], { cwd });
-  // `-z` puts every field in its own NUL-terminated slot: a rename or a copy is
-  // `R087`, the old path, the new path; anything else is a status and a path.
+/** Where each file a merge changes came from in one parent, by its new path. */
+type Sources = Map<string, { from: string; score: number }>;
+
+/**
+ * The diffs {@link mergeSources} has read, newest last. A merge's diff against
+ * its first parent is the whole branch, and every file the merge moved asks
+ * for it, once per check that reads history.
+ */
+const sourceCache = new Map<string, Sources>();
+const SOURCE_CACHE_SIZE = 32;
+
+/**
+ * For each file `merge` holds that differs from `parent`, the path it had in
+ * `parent` and how sure git is: a modification is the same path at 100, a
+ * rename or copy is the old path at git's similarity score, and an add is not
+ * listed. Commits never change, so neither does the answer.
+ */
+function mergeSources(cwd: string, parent: string, merge: string): Sources {
+  const key = `${cwd}\0${parent}\0${merge}`;
+  const cached = sourceCache.get(key);
+  if (cached) return cached;
+
+  const sources: Sources = new Map();
+  const output = gitMaybe(["diff", "-z", "--name-status", "--find-renames", parent, merge], {
+    cwd,
+  });
+  // NUL-terminated fields: `M`, path; or `R087`, old path, new path.
   const fields = (output ?? "").split("\0");
   for (let i = 0; i < fields.length; ) {
     const status = fields[i] ?? "";
     if (/^[RC]/.test(status)) {
-      if (fields[i + 2] === path) return fields[i + 1] ?? null;
+      const [from, to] = [fields[i + 1] ?? "", fields[i + 2] ?? ""];
+      sources.set(to, { from, score: Number(status.slice(1)) || 0 });
       i += 3;
     } else {
+      const path = fields[i + 1] ?? "";
+      if (/^[MT]/.test(status)) sources.set(path, { from: path, score: 100 });
       i += 2;
     }
   }
-  return null;
+
+  if (sourceCache.size >= SOURCE_CACHE_SIZE) {
+    sourceCache.delete(sourceCache.keys().next().value as string);
+  }
+  sourceCache.set(key, sources);
+  return sources;
 }
 
 /** File contents at a commit, or null when the path did not exist there. */
