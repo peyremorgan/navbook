@@ -20,7 +20,13 @@ import { setContext } from "@apollo/client/link/context";
 import { onError } from "@apollo/client/link/error";
 import { DefaultApolloClient } from "@vue/apollo-composable";
 import type { DocumentNode } from "graphql";
-import { describeApiError, isForbidden, isUnauthenticated, sayFailure } from "~/utils/errors";
+import {
+  type ApiFailure,
+  describeApiError,
+  isForbidden,
+  isUnauthenticated,
+  sayFailure,
+} from "~/utils/errors";
 
 /**
  * Failures a caller has said it will report itself.
@@ -71,16 +77,56 @@ export default defineNuxtPlugin((nuxtApp) => {
   // Whether a refused visit is already on its way to the page that explains
   // it. Every operation a page issues fails the same way at once, and each
   // would otherwise start a navigation that cancels the one before it.
+  //
+  // It stays set when the person chose to stay with unsaved work instead
+  // (`middleware/00.unsaved.global.ts`), and is lowered only by a navigation
+  // that lands: until they move, every further refusal would ask again.
   let sendingAway = false;
+  // The same for a refused token: asked once, and not again until they move.
+  let signingIn = false;
+  nuxtApp.$router.afterEach((_to, _from, failure) => {
+    if (failure) return;
+    sendingAway = false;
+    signingIn = false;
+  });
+
+  /**
+   * Sign in again, once the person has agreed to leave whatever they typed.
+   *
+   * Asked in the app before anything is dropped, as signing out does
+   * (`useAuth().logout`): staying keeps the page, the draft and the token, so
+   * the draft can be copied out before going. Declining says why nothing
+   * was saved, since the refused operation is otherwise never mentioned.
+   */
+  async function signInAgain(failure: ApiFailure): Promise<void> {
+    const unsaved = nuxtApp.$unsaved;
+    if (unsaved.dirty()) {
+      if (!(await unsaved.confirmLeave())) {
+        const said = sayFailure(failure);
+        useToast().add({
+          title: said.heading,
+          description: `${said.message} — copy what you wrote, then sign in again.`,
+          color: "error",
+          icon: "i-lucide-triangle-alert",
+          duration: 8000,
+        });
+        return;
+      }
+      unsaved.agree();
+    }
+    // The token was refused rather than merely missing, so the stored one is
+    // no use to anybody. Dropping it means the next attempt signs in again
+    // instead of retrying with the same rejected credential.
+    await auth.forget();
+    await auth.login();
+  }
 
   const errorLink = onError(({ graphQLErrors, networkError, operation }) => {
     const failure = describeApiError({ graphQLErrors, networkError });
 
-    if (isUnauthenticated(failure)) {
-      // The token was refused rather than merely missing, so the stored one is
-      // no use to anybody. Dropping it means the next attempt signs in again
-      // instead of retrying with the same rejected credential.
-      void auth.forget().then(() => auth.login());
+    if (isUnauthenticated(failure) && !signingIn) {
+      signingIn = true;
+      void signInAgain(failure);
       return;
     }
 
@@ -91,9 +137,7 @@ export default defineNuxtPlugin((nuxtApp) => {
       // person who was admitted a moment ago has just lost what they typed.
       if (!sendingAway) {
         sendingAway = true;
-        void auth.refused().finally(() => {
-          sendingAway = false;
-        });
+        void auth.refused();
       }
     }
 

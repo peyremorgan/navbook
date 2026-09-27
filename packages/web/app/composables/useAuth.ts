@@ -100,7 +100,7 @@ export function useAuth(): Auth {
       const unsaved = nuxtApp.$unsaved;
       if (unsaved.dirty()) {
         if (!(await unsaved.confirmLeave())) return;
-        unsaved.discard();
+        unsaved.agree();
       }
       // Forgetting the token is not enough on its own: the provider still
       // holds a session cookie, and the next sign-in would come straight back

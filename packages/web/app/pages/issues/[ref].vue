@@ -110,6 +110,10 @@ const edits = usePendingEdits<EntityEdit>({
     toast.add({ title: failure.heading, description: failure.message, color: "error" }),
 });
 
+// A refused edit is kept on the page until it is sent again or dropped, and
+// is the only copy of what was typed (`usePendingEdits`, `useStaleEdit`).
+useUnsavedWork(() => edits.refused.value || staleEdits.stale.value !== null);
+
 /** The issue as the page shows it: the file, with every edit in flight over it. */
 const shown = computed(() => edits.overlay(current.value));
 

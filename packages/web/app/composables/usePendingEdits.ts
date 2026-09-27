@@ -279,5 +279,11 @@ export function usePendingEdits<E extends object>(opts: PendingEditsOptions<E>) 
     saving: computed(() => [...states.value.values()].some((state) => state.saving)),
     /** True while any edit is kept: out, or refused and not yet answered. */
     pending: computed(() => changes.value.size > 0),
+    /**
+     * True while a refused edit is kept and not yet answered: the one kind
+     * of kept edit that leaving the page would lose. One still out is said
+     * by `lost` if it is refused after the page has gone.
+     */
+    refused: computed(() => [...states.value.values()].some((state) => state.failure !== null)),
   };
 }

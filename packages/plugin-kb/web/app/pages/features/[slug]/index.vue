@@ -62,6 +62,10 @@ const edits = usePendingEdits<CardEdit>({
   lost: (failure) =>
     toast.add({ title: failure.heading, description: failure.message, color: "error" }),
 });
+
+// A refused edit is kept on the page until it is sent again or dropped, and
+// is the only copy of what was typed (`usePendingEdits`, `useStaleEdit`).
+useUnsavedWork(() => edits.refused.value || staleEdits.stale.value !== null);
 const current = computed<CardEdit>(() => ({
   title: feature.value?.title ?? "",
   summary: feature.value?.summary ?? null,
@@ -82,6 +86,10 @@ async function saveCard(change: Partial<CardEdit>): Promise<void> {
 const adding = ref(false);
 const specTitle = ref("");
 const specBody = ref("");
+// Held while the dialog is open: a document is the longest thing typed here.
+useUnsavedWork(
+  () => adding.value && (specTitle.value.trim() !== "" || specBody.value.trim() !== ""),
+);
 
 function openAdd(): void {
   specTitle.value = "";

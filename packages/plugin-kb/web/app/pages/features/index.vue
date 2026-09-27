@@ -23,6 +23,10 @@ const creating = ref(false);
 const title = ref("");
 const slug = ref("");
 const summary = ref("");
+// Held while the dialog is open, as the page's other drafts are.
+useUnsavedWork(
+  () => creating.value && [title, slug, summary].some((field) => field.value.trim() !== ""),
+);
 
 /** What the server would derive, shown so the directory name is no surprise. */
 const derived = computed(() =>

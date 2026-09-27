@@ -248,6 +248,10 @@ const edits = usePendingEdits<EntityEdit>({
   lost: (failure) =>
     toast.add({ title: failure.heading, description: failure.message, color: "error" }),
 });
+
+// A refused edit is kept on the page until it is sent again or dropped, and
+// is the only copy of what was typed (`usePendingEdits`, `useStaleEdit`).
+useUnsavedWork(() => edits.refused.value || staleEdits.stale.value !== null);
 // Asking somebody new to review is how they become somebody the repository
 // knows of, and the answer that listed everybody was fetched before they were.
 const refreshListings = useListingRefresh();

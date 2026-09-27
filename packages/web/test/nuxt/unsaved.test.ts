@@ -54,12 +54,14 @@ describe("createUnsavedWork", () => {
     await expect(newer).resolves.toBe(true);
   });
 
-  it("holds nothing once discarded, and holds again what comes after", () => {
+  it("lets one way out through once agreed, and keeps the drafts held", () => {
     const work = createUnsavedWork();
     work.hold(() => true);
-    work.discard();
-    expect(work.dirty()).toBe(false);
-    work.hold(() => true);
+    expect(work.takeAgreement()).toBe(false);
+    work.agree();
+    expect(work.takeAgreement()).toBe(true);
+    // Spent: a way out that never happened does not leave the next unguarded.
+    expect(work.takeAgreement()).toBe(false);
     expect(work.dirty()).toBe(true);
   });
 

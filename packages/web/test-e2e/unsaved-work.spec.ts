@@ -3,11 +3,13 @@
  *
  * Every way out is covered by one of two guards, and these prove both from
  * the outside: a navigation inside the app — a sidebar link, a reference in a
- * preview, Back — asks in the app's own dialog, and one that leaves the
- * document — a reload, a closed tab, the redirect to the identity provider —
- * gets the browser's `beforeunload` prompt. What is never asked about is a
- * page with nothing unsaved on it, and the app's own navigation once a save
- * has landed.
+ * preview, Back — asks in the app's own dialog, and so do the app's own ways
+ * out of the document (signing out, and the redirect to the identity provider
+ * when the API refuses the token). One the browser starts — a reload, a
+ * closed tab — gets the browser's `beforeunload` prompt. What is never
+ * asked about is a page with nothing unsaved on it, and the app's own
+ * navigation once a save has landed. A refusal asks once, and not again
+ * until the person has moved.
  *
  * Nothing here saves an edit to the shared fixtures except the one filed
  * issue, which is new and named so that no other spec reads it.
@@ -172,30 +174,98 @@ test("has the browser ask before a reload loses a new issue", async ({ signedIn,
   await expect(signedIn.getByTestId("new-title")).toHaveValue("Something worth filing");
 });
 
-test("has the browser ask before a refused session redirects away a draft", async ({
-  signedIn,
-  stack,
-}) => {
-  await signedIn.goto(`${stack.appUrl}/issues/aaaa0001`);
-  await signedIn.getByTestId("comment-body").fill("Written while the session died.");
-
-  await signedIn.route(stack.apiUrl, async (route) => {
+/** Answer one named operation with a GraphQL error, and let every other one through. */
+async function refuse(page: Page, apiUrl: string, operation: string, code: string): Promise<void> {
+  await page.route(apiUrl, async (route) => {
     const body = route.request().postData() ?? "";
-    if (!body.includes("addComment(")) return route.continue();
+    if (!body.includes(`${operation}(`)) return route.continue();
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         data: null,
-        errors: [{ message: "sign in again", extensions: { code: "UNAUTHENTICATED" } }],
+        errors: [{ message: "refused by the test", path: [operation], extensions: { code } }],
       }),
     });
   });
+}
+
+test("asks before a refused session sends a draft to the provider, and only once", async ({
+  signedIn,
+  stack,
+}) => {
+  await signedIn.goto(`${stack.appUrl}/issues/aaaa0001`);
+  await signedIn.getByTestId("comment-body").fill("Written while the session died.");
+  await refuse(signedIn, stack.apiUrl, "addComment", "UNAUTHENTICATED");
+  const seen = dialogs(signedIn, "dismiss");
+
+  // Asked in the app, before the token is dropped or the page left.
+  await signedIn.getByTestId("comment-submit").click();
+  await expect(signedIn.getByTestId("leave-dialog")).toBeVisible();
+  await signedIn.getByTestId("leave-stay").click();
+  await expect(
+    signedIn.locator("[data-slot=description]", {
+      hasText: "copy what you wrote, then sign in again",
+    }),
+  ).toBeVisible();
+  await expect(signedIn.getByTestId("comment-body")).toHaveValue("Written while the session died.");
+
+  // Declined once, not asked again on the next refusal: said, and kept.
+  await signedIn.getByTestId("comment-submit").click();
+  await signedIn.waitForTimeout(500);
+  await expect(signedIn.getByTestId("leave-dialog")).toHaveCount(0);
+  await expect(signedIn).toHaveURL(/\/issues\/aaaa0001$/);
+  expect(seen).toHaveLength(0);
+});
+
+test("asks before a refused account leaves a draft, and only once", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/issues/aaaa0001`);
+  await signedIn.getByTestId("comment-body").fill("Written by somebody just refused.");
+  await refuse(signedIn, stack.apiUrl, "addComment", "FORBIDDEN");
+
+  await signedIn.getByTestId("comment-submit").click();
+  await expect(signedIn.getByTestId("leave-dialog")).toBeVisible();
+  await signedIn.getByTestId("leave-stay").click();
+  await expect(signedIn).toHaveURL(/\/issues\/aaaa0001$/);
+
+  await signedIn.getByTestId("comment-submit").click();
+  await signedIn.waitForTimeout(500);
+  await expect(signedIn.getByTestId("leave-dialog")).toHaveCount(0);
+  await expect(signedIn.getByTestId("comment-body")).toHaveValue(
+    "Written by somebody just refused.",
+  );
+});
+
+test("asks before leaving a refused edit that is kept on the page", async ({ signedIn, stack }) => {
+  await signedIn.goto(`${stack.appUrl}/issues/aaaa0001`);
+  await refuse(signedIn, stack.apiUrl, "updateIssue", "SYNC_PUSH_REJECTED");
+
+  await signedIn.getByTestId("edit-title").click();
+  await signedIn.getByTestId("input-title").fill("A title the remote refused");
+  await signedIn.getByTestId("save-title").click();
+  await expect(signedIn.getByTestId("save-failed-title")).toBeVisible();
+
+  // The editor has closed; the refused edit is still the only copy.
+  await signedIn.getByTestId("nav-issues").click();
+  await expect(signedIn.getByTestId("leave-dialog")).toBeVisible();
+  await signedIn.getByTestId("leave-stay").click();
+  await expect(signedIn.getByTestId("save-failed-title")).toBeVisible();
+});
+
+test("has the browser ask before a reload loses a document being added", async ({
+  signedIn,
+  stack,
+}) => {
+  await signedIn.goto(`${stack.appUrl}/features/billing`);
+  await signedIn.getByTestId("add-spec").click();
+  await signedIn.getByTestId("new-spec-body").fill("A document nobody has saved.");
 
   const seen = dialogs(signedIn, "dismiss");
-  await signedIn.getByTestId("comment-submit").click();
-  await expect.poll(() => seen.map((dialog) => dialog.type())).toEqual(["beforeunload"]);
-  await expect(signedIn.getByTestId("comment-body")).toHaveValue("Written while the session died.");
+  await signedIn.reload({ timeout: 3_000 }).catch(() => {
+    // Cancelled by the dismissed prompt, as above.
+  });
+  expect(seen.map((dialog) => dialog.type())).toEqual(["beforeunload"]);
+  await expect(signedIn.getByTestId("new-spec-body")).toHaveValue("A document nobody has saved.");
 });
 
 test("files an issue and lands on it without being asked", async ({ signedIn, stack }) => {
