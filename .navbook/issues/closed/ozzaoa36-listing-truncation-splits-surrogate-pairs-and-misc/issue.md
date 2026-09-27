@@ -5,6 +5,7 @@ created: 2026-09-20T12:38:00Z
 assignee: Claude <noreply@anthropic.com>
 labels: [bug, cli]
 feature: cli
+resolution: fixed
 ---
 
 Two measures of "width" are mixed in one function:
