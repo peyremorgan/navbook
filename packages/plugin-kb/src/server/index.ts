@@ -217,7 +217,7 @@ export function activate(host: ServerPluginHost): void {
             slug: string;
             title?: string | null;
             summary?: string | null;
-            baseSha?: string | null;
+            baseSha: string;
           };
         },
         ctx: GraphQLCtx,
@@ -243,7 +243,9 @@ export function activate(host: ServerPluginHost): void {
               // them — all run before any file is touched.
               const edited = editFeature(core, ctx.ws, feature.slug, patched, {
                 commit: true,
-                ...(input.baseSha ? { baseSha: input.baseSha } : {}),
+                // As given, empty included: the schema requires it, and a
+                // token naming no version is stale rather than a pass.
+                baseSha: input.baseSha,
               });
               return { run: edited.run, feature: featureAfter(ctx, feature.slug) };
             },

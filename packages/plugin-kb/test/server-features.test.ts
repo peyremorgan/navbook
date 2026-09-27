@@ -308,6 +308,17 @@ describe("features", () => {
     );
   });
 
+  it("refuses an empty baseSha as naming no version, rather than skipping the check", async () => {
+    const before = ok<Payload>(await h.gql(`{ feature(slug: "auth") { summary } }`)).feature;
+    assert.equal(
+      errorCode(
+        await h.gql(UPDATE_FEATURE, { input: { slug: "auth", summary: "X.", baseSha: "" } }),
+      ),
+      "STALE_CONTENT",
+    );
+    const after = ok<Payload>(await h.gql(`{ feature(slug: "auth") { summary } }`)).feature;
+    assert.equal(after.summary, before.summary);
+  });
 
   it("lists features in slug order, and reports one that is not there", async () => {
     const listed = ok<Payload>(await h.gql(FEATURES)).features;
