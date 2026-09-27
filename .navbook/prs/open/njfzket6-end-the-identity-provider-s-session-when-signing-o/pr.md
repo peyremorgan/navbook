@@ -11,6 +11,9 @@ revisions:
   - head: 4550707e52bd0fdd1c0b34b4d890857525557185
     base: b01f9b0d9d244a4804a1074c9c0ffe94dc9fae34
     date: 2026-09-17T17:01:14Z
+  - head: 082fbc5741f3543197f2ecdbc0b437bf82338e83
+    base: 7e18cf64b1d246d2fceace05d209c007a94bcc5e
+    date: 2026-09-27T13:03:52Z
 ---
 
 Fixes #icroff4l: **Sign out** on the web client only removed the stored token, so the identity provider's session cookie stayed. **Sign in again** then came straight back as the same account without asking.
