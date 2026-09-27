@@ -62,7 +62,7 @@ is mature and widely installed.
   into a plan half and an execute half rather than calling back into its caller.
   A front end that cannot stop and ask answers the question in its request
   instead: the server takes an explicit flag where the CLI prompts.
-- **Plugins (planned; [04 §4.3](04-cli.md) is reserved):** nothing below is
+- **Plugins (planned; [04 §4.3](04-cli.md) *Plugins* is reserved):** nothing below is
   built yet, and the reference implementation loads no plugins. A plugin will
   be one npm package with a part for each front end
   (`./core`, `./cli`, `./server`, `./web` as `exports` subpaths) and a

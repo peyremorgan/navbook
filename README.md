@@ -305,13 +305,14 @@ boot — are in [`packages/server`](packages/server/README.md#deploying-it) and
 
 Navbook's core is issues, pull requests and the format they live in. Anything a
 project might not want — test reports on a pull request, a bridge to a chat
-platform, the knowledge base above — is a plugin: an npm package the repository
-names in `navbook.json` and each machine installs.
+platform, the knowledge base above — is meant to be a plugin: an npm package
+the repository names in `navbook.json` and each machine installs.
 
 The format reserves where a plugin's data may live and how a repository
 declares one ([spec 02 §2.12](doc/spec/02-data-model.md)), and every Navbook
 already preserves data it finds there. The `nav plugin` commands that install
-them are specified ([spec 04 §4.3](doc/spec/04-cli.md)) and not yet built.
+them are specified ([spec 04 §4.3](doc/spec/04-cli.md), *Plugins*) and not
+yet built.
 
 A repository naming a plugin never causes anything to be fetched or run:
 declaring is one act, installing is another, and they are made by different
