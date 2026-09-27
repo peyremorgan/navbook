@@ -18,6 +18,9 @@ import { MAINTENANCE_ARGS, Maintenance, type MaintenanceOptions } from "../../sr
 
 const OK: GitResult = { code: 0, stdout: "", stderr: "" };
 
+/** Where the wall clock stands against the monotonic one: anywhere else. */
+const WALL_OFFSET = 1_700_000_000_000;
+
 /** A run that finishes when the test says, or when it is stopped. */
 interface PendingRun {
   signal: AbortSignal;
@@ -35,6 +38,7 @@ function harness(opts: Partial<MaintenanceOptions> = {}) {
     repoRoot: "/clone",
     intervalMs: 60_000,
     now: () => clock,
+    wallClock: () => clock + WALL_OFFSET,
     report: (line) => reported.push(line),
     run: ({ signal, timeoutMs }) =>
       new Promise<GitResult>((resolve, reject) => {
@@ -112,6 +116,22 @@ describe("Maintenance.request", () => {
     await settle();
   });
 
+  it("keeps to the interval by a clock that only moves forward", async () => {
+    // The wall clock set back an hour between two runs: by it, the second
+    // would be an hour early; by the time that passed, it is due.
+    let wall = WALL_OFFSET;
+    const { maintenance, runs, advance } = harness({ wallClock: () => wall });
+    maintenance.request();
+    runs[0]?.finish();
+    await settle();
+    advance(60_000);
+    wall -= 60 * 60_000;
+    maintenance.request();
+    assert.equal(runs.length, 2);
+    runs[1]?.finish();
+    await settle();
+  });
+
   it("never runs with an interval of 0", () => {
     const { maintenance, runs } = harness({ intervalMs: 0 });
     assert.equal(maintenance.enabled, false);
@@ -157,7 +177,8 @@ describe("Maintenance reporting", () => {
 
   it("clears up after a run that ran out of time, from when it started", async () => {
     const { maintenance, runs, reported, tidied, advance, now } = harness();
-    const started = now();
+    // As file times read it: the wall clock, not the one the interval runs on.
+    const started = now() + WALL_OFFSET;
     maintenance.request();
     advance(30 * 60_000);
     runs[0]?.fail(new GitTimeoutError(["maintenance"], 30 * 60_000));

@@ -48,7 +48,13 @@ export interface MaintenanceOptions {
   /** The least time between the starts of two runs; 0 runs none. */
   intervalMs: number;
   report?: (line: string) => void;
+  /**
+   * A clock that only moves forward, for the interval: a wall clock set back
+   * would otherwise hold maintenance off for as long as it was set back by.
+   */
   now?: () => number;
+  /** The wall clock, for when a run started as file times read it. */
+  wallClock?: () => number;
   /** Run maintenance once; the real one runs git. Rejects as `gitRunAsync` does. */
   run?: (opts: { signal: AbortSignal; timeoutMs: number }) => Promise<GitResult>;
   /**
@@ -66,6 +72,7 @@ export interface MaintenanceOptions {
 export class Maintenance {
   private readonly opts: MaintenanceOptions;
   private readonly now: () => number;
+  private readonly wallClock: () => number;
   private readonly report: (line: string) => void;
   private readonly stopper = new AbortController();
   private running: Promise<void> | null = null;
@@ -76,7 +83,8 @@ export class Maintenance {
 
   constructor(opts: MaintenanceOptions) {
     this.opts = opts;
-    this.now = opts.now ?? Date.now;
+    this.now = opts.now ?? (() => performance.now());
+    this.wallClock = opts.wallClock ?? Date.now;
     this.report = opts.report ?? (() => undefined);
   }
 
@@ -97,7 +105,7 @@ export class Maintenance {
     const now = this.now();
     if (now - this.lastStart < this.opts.intervalMs) return;
     this.lastStart = now;
-    this.running = this.once(now).finally(() => {
+    this.running = this.once(this.wallClock()).finally(() => {
       this.running = null;
     });
   }
