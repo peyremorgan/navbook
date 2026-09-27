@@ -11,6 +11,9 @@ revisions:
   - head: 1398bf05cbd72ef4f6fbb8ec089f959d1321c903
     base: 47b8901f9b5722b952b96dd4818e59be38182cc5
     date: 2026-09-27T10:19:25Z
+  - head: 0262d34297280beb953e3527e9cd00a3ac23fa68
+    base: 60525861c8559de43bb32d849ba13c77f6975e14
+    date: 2026-09-27T10:53:34Z
 ---
 
 Fixes #kw143sq9 by following the implementation plan in that issue: every numeric flag in the CLI now refuses a bad value at parse time.
