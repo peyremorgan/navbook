@@ -316,6 +316,8 @@ describe("contributions to a built-in verb", () => {
           (match) => (match[1] as string).length,
         );
         assert.equal(new Set(columns).size, 1, result.stdout);
+        // The closing sentence names only the built-in terms, and says so.
+        assert.match(result.stdout, /^A plugin's terms combine as their descriptions say\.$/m);
       }
       assert.deepEqual(repo.log(), []);
     } finally {

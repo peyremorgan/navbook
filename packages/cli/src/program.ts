@@ -105,15 +105,18 @@ function helpRow(syntax: string, hint: readonly string[]): string[] {
 }
 
 /**
- * A plugin's declared `help` line as a row of the table above.
+ * A plugin's declared `help` line as rows of the table above.
  *
  * The manifest writes it as the built-in rows read, syntax then a gap then
  * the hint; it is re-aligned here so a plugin need not know the column this
- * help happens to use. A line with no gap is all syntax.
+ * help happens to use. A line with no gap is all syntax, and a syntax too wide
+ * for its column puts the hint on the next line rather than against it.
  */
-function pluginHelpRow(help: string): string[] {
+export function pluginHelpRow(help: string): string[] {
   const [syntax = "", hint = ""] = help.trim().split(/\s{2,}(.*)/s);
-  return hint === "" ? [`  ${syntax}`] : helpRow(syntax, [hint]);
+  if (hint === "") return [`  ${syntax}`];
+  if (syntax.length >= SYNTAX_WIDTH) return [`  ${syntax}`, ...helpRow("", [hint])];
+  return helpRow(syntax, [hint]);
 }
 
 /**
@@ -147,6 +150,9 @@ function queryHelp(kind: EntityKind, pluginKeys: readonly QueryKeySpec[] = []): 
     ]),
     `Same-key terms OR for single-valued fields (${combining("or")})`,
     `and AND for multi-valued ones (${combining("and")}).`,
+    // A manifest says what its term means but not how it combines, so the
+    // sentence above cannot name it; its own description has to.
+    ...(pluginKeys.length > 0 ? ["A plugin's terms combine as their descriptions say."] : []),
     "The default query is status:open.",
   ].join("\n");
 }
