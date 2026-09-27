@@ -2,10 +2,10 @@
  * Index and commit operations.
  */
 
+import { spawnSync } from "node:child_process";
 import type { Trailer } from "../core/ops.ts";
 import type { NavTree } from "../core/tree.ts";
 import { GitError, git, gitRun, splitLines, splitNul } from "./exec.ts";
-import { catBlobs } from "./refscan.ts";
 
 /** Repository-relative paths currently staged in the index. */
 export function stagedPaths(cwd: string): string[] {
@@ -21,78 +21,143 @@ export function stagedContent(cwd: string, path: string): string | null {
   return result.code === 0 ? result.stdout : null;
 }
 
-/**
- * The largest staged file {@link stagedTree} reads up front. A bigger one
- * waits until it is asked for, which for extension data (§2.12) is never.
- */
-const PREFETCH_LIMIT = 1024 * 1024;
+/** Limits on how {@link stagedTree} reads; a parameter so tests can shrink them. */
+export interface StagedReadLimits {
+  /** The largest blob read up front; a bigger one waits until it is asked for. */
+  prefetch: number;
+  /** The most bytes one `cat-file --batch` process is given to read. */
+  batch: number;
+}
+
+const STAGED_READ_LIMITS: StagedReadLimits = { prefetch: 1024 * 1024, batch: 64 * 1024 * 1024 };
 
 /**
- * Staged files as a tree, keyed by their path with `prefix` removed.
+ * The files staged under `dir`, as a tree keyed by their path below it.
  *
- * A path the index holds no blob for — a staged deletion, a conflicted path
- * with no stage 0 — is left out, as it was when each file cost a
- * `git show :<path>` that failed. The rest costs two `git cat-file`
- * processes whatever their number: one for each blob's size, one to read
- * every blob up to {@link PREFETCH_LIMIT}. A larger file is read on its own
- * when asked for, so a report or an image nothing parses is listed and never
- * read.
+ * Only stage-0 blobs are listed: a staged deletion is not in the index at all,
+ * a conflicted path has no stage 0, and a submodule is not a file, which is
+ * what `git show :<path>` failing on each of them used to say.
  *
- * A blob the first process found and the second did not return means the
- * batch failed, and throws: the pre-commit hook would otherwise judge a tree
- * with files missing from it, and pass it.
+ * Whatever the number of files, this costs `ls-files`, one `cat-file
+ * --batch-check` for the sizes and one `cat-file --batch` per
+ * {@link StagedReadLimits.batch} bytes of blobs up to
+ * {@link StagedReadLimits.prefetch}. A larger blob is read on its own when
+ * `parseTree` asks for it, so a big report or image nothing parses is listed
+ * and never read; a small one rides along in the batch, where it costs bytes
+ * rather than a process.
+ *
+ * Objects are asked for by name, never by path, so no line git answers with
+ * can carry a path, and a path may hold any byte git allows. A blob that
+ * cannot be read throws: the pre-commit hook would otherwise judge a tree with
+ * files missing from it, and pass it.
  */
-export function stagedTree(cwd: string, paths: readonly string[], prefix: string): NavTree {
-  if (paths.length === 0) return new Map();
-  // The batch protocol is one spec per line, so a path with a newline in it,
-  // which git allows, is read on its own rather than splitting the batch.
-  const batched = paths.filter((path) => !path.includes("\n"));
-  const args = ["cat-file", "--batch-check"];
-  const check = gitRun(args, { cwd, input: batched.map((path) => `:${path}\n`).join("") });
-  if (check.code !== 0) throw new GitError(args, check);
-
-  // One line per spec, in the order asked: `<sha> <type> <size>`, or
-  // `<spec> missing` when the index has nothing at stage 0 for it.
-  const sizes = new Map<string, number>();
-  for (const [index, line] of splitLines(check.stdout).entries()) {
-    const path = batched[index];
-    const [, type, size] = line.split(" ");
-    if (path !== undefined && type === "blob") sizes.set(path, Number(size));
+export function stagedTree(
+  cwd: string,
+  dir: string,
+  limits: StagedReadLimits = STAGED_READ_LIMITS,
+): NavTree {
+  const prefix = `${dir}/`;
+  // `<mode> <sha> <stage>\t<path>`, NUL-terminated.
+  const shaOf = new Map<string, string>();
+  for (const entry of splitNul(git(["ls-files", "--stage", "-z", "--", dir], { cwd }))) {
+    const tab = entry.indexOf("\t");
+    const [mode, sha, stage] = entry.slice(0, tab).split(" ");
+    const path = entry.slice(tab + 1);
+    if (stage !== "0" || mode === "160000" || sha === undefined) continue;
+    if (path.startsWith(prefix)) shaOf.set(path.slice(prefix.length), sha);
   }
 
-  const small = [...sizes].filter(([, size]) => size <= PREFETCH_LIMIT).map(([path]) => path);
-  const read = catBlobs(
-    cwd,
-    small.map((path) => ({ ref: "", path })),
-  );
+  const shas = [...new Set(shaOf.values())];
+  const sizes = blobSizes(cwd, shas);
   const contents = new Map<string, string>();
-  for (const path of small) {
-    const text = read.get(`:${path}`);
-    if (text === undefined) throw new Error(`git cat-file --batch did not return ':${path}'`);
-    contents.set(path, text);
+  let chunk: string[] = [];
+  let chunkBytes = 0;
+  const flush = () => {
+    for (const [sha, text] of catObjects(cwd, chunk, chunkBytes)) contents.set(sha, text);
+    chunk = [];
+    chunkBytes = 0;
+  };
+  for (const sha of shas) {
+    const size = sizes.get(sha) as number;
+    if (size > limits.prefetch) continue;
+    if (chunk.length > 0 && chunkBytes + size > limits.batch) flush();
+    chunk.push(sha);
+    chunkBytes += size;
   }
-  for (const path of paths) {
-    if (!path.includes("\n")) continue;
-    const text = stagedContent(cwd, path);
-    if (text !== null) contents.set(path, text);
-  }
+  if (chunk.length > 0) flush();
 
-  const listed = [...sizes.keys(), ...contents.keys()];
-  const keys = new Map(listed.map((path) => [path.slice(prefix.length), path]));
   return {
-    keys: () => keys.keys(),
+    keys: () => shaOf.keys(),
     get(key) {
-      const path = keys.get(key);
-      if (path === undefined) return undefined;
-      let text = contents.get(path);
+      const sha = shaOf.get(key);
+      if (sha === undefined) return undefined;
+      let text = contents.get(sha);
       if (text === undefined) {
-        const size = sizes.get(path) ?? 0;
-        text = git(["cat-file", "blob", `:${path}`], { cwd, maxBuffer: size + 1024 });
-        contents.set(path, text);
+        const maxBuffer = (sizes.get(sha) as number) + 1024;
+        text = git(["cat-file", "blob", sha], { cwd, maxBuffer });
+        contents.set(sha, text);
       }
       return text;
     },
   };
+}
+
+/** The size of each blob, from one `cat-file --batch-check`; anything else throws. */
+function blobSizes(cwd: string, shas: readonly string[]): Map<string, number> {
+  const sizes = new Map<string, number>();
+  if (shas.length === 0) return sizes;
+  const args = ["cat-file", "--batch-check"];
+  const result = gitRun(args, { cwd, input: `${shas.join("\n")}\n` });
+  if (result.code !== 0) throw new GitError(args, result);
+  const lines = splitLines(result.stdout);
+  for (const [index, sha] of shas.entries()) {
+    // `<sha> blob <size>` for each name asked, in order; the index only
+    // names blobs, so anything else means the object store let it down.
+    const [name, type, size] = (lines[index] ?? "").split(" ");
+    if (name !== sha || type !== "blob" || !/^\d+$/.test(size ?? "")) {
+      throw new Error(`git cat-file --batch-check could not size staged blob ${sha}`);
+    }
+    sizes.set(sha, Number(size));
+  }
+  return sizes;
+}
+
+/**
+ * The contents of blobs, by name, from one `cat-file --batch` process.
+ *
+ * `bytes` is their total size, known from {@link blobSizes}, so the buffer
+ * is sized to fit rather than capped. Every name asked must come back.
+ */
+function catObjects(cwd: string, shas: readonly string[], bytes: number): Map<string, string> {
+  const args = ["cat-file", "--batch"];
+  // No `encoding` option: stdout must stay a Buffer, because the batch protocol
+  // frames each blob by byte length rather than by any text delimiter.
+  const result = spawnSync("git", args, {
+    cwd,
+    input: `${shas.join("\n")}\n`,
+    maxBuffer: bytes + shas.length * 128 + 1024,
+    env: { ...process.env, LC_ALL: "C" },
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const stderr = result.stderr.toString("utf8");
+    throw new GitError(args, { code: result.status ?? 1, stdout: "", stderr });
+  }
+
+  const out = new Map<string, string>();
+  const stdout = result.stdout;
+  let offset = 0;
+  for (const sha of shas) {
+    const newline = stdout.indexOf(0x0a, offset);
+    const [name, type, size] = stdout.subarray(offset, newline).toString("utf8").split(" ");
+    if (newline === -1 || name !== sha || type !== "blob" || !/^\d+$/.test(size ?? "")) {
+      throw new Error(`git cat-file --batch did not return staged blob ${sha}`);
+    }
+    offset = newline + 1;
+    out.set(sha, stdout.subarray(offset, offset + Number(size)).toString("utf8"));
+    offset += Number(size) + 1; // the body is followed by a newline
+  }
+  return out;
 }
 
 /**

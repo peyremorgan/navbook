@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -15,42 +15,101 @@ function inRepo(use: (dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "navbook-staged-"));
   try {
     git(["init", "--quiet", "-b", "main", dir]);
+    git(["config", "user.name", "Nav Test"], { cwd: dir });
+    git(["config", "user.email", "nav@test.invalid"], { cwd: dir });
+    mkdirSync(join(dir, "nav"));
     use(dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
-describe("stagedTree", () => {
-  it("answers with the staged content, keyed below the prefix", () => {
-    inRepo((dir) => {
-      writeFileSync(join(dir, "a.md"), "staged\n");
-      git(["add", "a.md"], { cwd: dir });
-      writeFileSync(join(dir, "a.md"), "on disk only\n");
+function stage(dir: string, files: Record<string, string>): void {
+  for (const [name, content] of Object.entries(files)) {
+    writeFileSync(join(dir, "nav", name), content);
+  }
+  git(["add", "--", "nav"], { cwd: dir });
+}
 
-      const tree = stagedTree(dir, ["a.md"], "");
+/** The git commands `use` ran, from a `GIT_TRACE` log. */
+function traced(dir: string, use: () => void): string[] {
+  const log = join(dir, "..", `${dir.split("/").pop()}.trace`);
+  process.env.GIT_TRACE = log;
+  try {
+    use();
+  } finally {
+    delete process.env.GIT_TRACE;
+  }
+  const lines = readFileSync(log, "utf8").match(/built-in: git .*/g) ?? [];
+  rmSync(log, { force: true });
+  return lines.map((line) => line.replace(/^built-in: /, ""));
+}
+
+describe("stagedTree", () => {
+  it("answers with the staged content, keyed below the directory", () => {
+    inRepo((dir) => {
+      stage(dir, { "a.md": "staged\n" });
+      writeFileSync(join(dir, "nav", "a.md"), "on disk only\n");
+      writeFileSync(join(dir, "outside.md"), "not under nav/\n");
+      git(["add", "outside.md"], { cwd: dir });
+
+      const tree = stagedTree(dir, "nav");
       assert.deepEqual([...tree.keys()], ["a.md"]);
       assert.equal(tree.get("a.md"), "staged\n");
       assert.equal(tree.get("b.md"), undefined);
     });
   });
 
-  it("leaves out a path the index holds no blob for", () => {
+  it("leaves out a staged deletion, whatever its name", () => {
     inRepo((dir) => {
-      writeFileSync(join(dir, "kept.md"), "kept\n");
-      git(["add", "kept.md"], { cwd: dir });
+      stage(dir, { "kept.md": "kept\n", "gone blob 5": "12345", "line\nbreak.md": "odd\n" });
+      git(["commit", "--quiet", "-m", "fixture"], { cwd: dir });
+      git(["rm", "--quiet", "--cached", "--", "nav/gone blob 5"], { cwd: dir });
 
-      const tree = stagedTree(dir, ["kept.md", "deleted.md"], "");
-      assert.deepEqual([...tree.keys()], ["kept.md"]);
+      const tree = stagedTree(dir, "nav");
+      assert.deepEqual([...tree.keys()].sort(), ["kept.md", "line\nbreak.md"]);
+      assert.equal(tree.get("line\nbreak.md"), "odd\n");
+    });
+  });
+
+  it("reads small blobs in batches of bounded size, and a large one only when asked", () => {
+    inRepo((dir) => {
+      const ten = (c: string) => c.repeat(10);
+      stage(dir, {
+        "a.md": ten("a"),
+        "b.md": ten("b"),
+        "c.md": ten("c"),
+        "big.md": ten("z") + ten("z"),
+      });
+
+      const limits = { prefetch: 15, batch: 25 };
+      let tree = stagedTree(dir, "nav", limits);
+      const loading = traced(dir, () => {
+        tree = stagedTree(dir, "nav", limits);
+      });
+      assert.equal(loading.filter((c) => c.startsWith("git cat-file --batch-check")).length, 1);
+      assert.equal(
+        loading.filter((c) => c === "git cat-file --batch").length,
+        2,
+        "30 bytes, 25 a batch",
+      );
+      assert.equal(loading.filter((c) => c.startsWith("git cat-file blob")).length, 0);
+
+      const reading = traced(dir, () => {
+        assert.equal(tree.get("a.md"), ten("a"));
+        assert.equal(tree.get("c.md"), ten("c"));
+        assert.equal(tree.get("big.md"), ten("z") + ten("z"));
+        assert.equal(tree.get("big.md"), ten("z") + ten("z"));
+      });
+      assert.equal(reading.length, 1, `read once, on demand: ${reading.join("; ")}`);
+      assert.match(reading[0] as string, /^git cat-file blob /);
     });
   });
 
   it("throws when git cannot read the index, rather than answering an empty tree", () => {
     const dir = mkdtempSync(join(tmpdir(), "navbook-staged-"));
     try {
-      // git either refuses the batch or exits before reading it (EPIPE);
-      // either way the answer must not be an empty tree.
-      assert.throws(() => stagedTree(dir, ["a.md"], ""));
+      assert.throws(() => stagedTree(dir, "nav"));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

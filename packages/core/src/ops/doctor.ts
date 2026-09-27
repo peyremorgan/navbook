@@ -10,8 +10,8 @@
 import type { FileOp } from "../core/ops.ts";
 import { parseTree, type Repo } from "../core/tree.ts";
 import { type Diagnostic, sortDiagnostics, validateRepo } from "../core/validate.ts";
-import { git, gitMaybe, splitNul } from "../git/exec.ts";
-import { stagedPaths, stagedTree } from "../git/index-ops.ts";
+import { gitMaybe } from "../git/exec.ts";
+import { stagedTree } from "../git/index-ops.ts";
 import {
   applyOps,
   loadRepo,
@@ -117,23 +117,15 @@ function describeFix(navDir: string, op: FileOp): string {
   }
 }
 
-/** Build the repository model from what is staged rather than the working tree. */
-function stagedRepo(ws: WsCtx): Repo {
-  const prefix = `${ws.navDir}/`;
-  const paths = allIndexedNavPaths(ws).filter((path) => path.startsWith(prefix));
-  return parseTree(stagedTree(ws.repoRoot, paths, prefix), { ext: ws.ext });
-}
-
 /**
- * Every Navbook path in the index. The pre-commit hook needs the whole
- * indexed tree, not only the changed paths: checks like ID uniqueness and
- * reply-to resolution are properties of the tree the commit will create.
+ * Build the repository model from what is staged rather than the working tree.
+ *
+ * The whole indexed tree, not only the changed paths: checks like ID
+ * uniqueness and reply-to resolution are properties of the tree the commit
+ * will create.
  */
-function allIndexedNavPaths(ws: WsCtx): string[] {
-  const listed = splitNul(
-    git(["ls-files", "--cached", "-z", "--", ws.navDir], { cwd: ws.repoRoot }),
-  );
-  return listed.length > 0 ? listed : stagedPaths(ws.repoRoot);
+function stagedRepo(ws: WsCtx): Repo {
+  return parseTree(stagedTree(ws.repoRoot, ws.navDir), { ext: ws.ext });
 }
 
 /**

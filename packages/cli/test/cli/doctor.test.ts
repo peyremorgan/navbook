@@ -4,7 +4,8 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { makeNavRepo, makeTempRepo, type TempRepo } from "../helpers/temprepo.ts";
@@ -105,15 +106,32 @@ describe("nav doctor", () => {
         `---\ntitle: [unclosed\n---\n\n${"b".repeat(2 * 1024 * 1024)}\n`,
       );
       repo.git(["add", "-A"]);
-      const report = repo.git(["rev-parse", ":.navbook/reports/run.json"]).stdout.trim();
+      const sha = (path: string) => repo.git(["rev-parse", `:${path}`]).stdout.trim();
+      const report = sha(".navbook/reports/run.json");
+      const marker = sha(".navbook/navbook.json");
+
+      // A batch is asked for on stdin, which GIT_TRACE does not log: a git on
+      // PATH that records what `cat-file --batch` is given sees it.
+      const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+      const asked = join(repo.home, "batch-input.log");
+      mkdirSync(join(repo.home, "bin"));
+      repo.script(
+        "bin/git",
+        `if [ "$1 $2" = "cat-file --batch" ]; then tee -a '${asked}' | '${real}' "$@"; exit $?; fi\nexec '${real}' "$@"`,
+      );
 
       const trace = join(repo.home, "trace.log");
-      const result = repo.nav(["doctor", "--staged"], { GIT_TRACE: trace });
+      const env = { GIT_TRACE: trace, PATH: `${join(repo.home, "bin")}:${process.env.PATH}` };
+      const result = repo.nav(["doctor", "--staged"], env);
       assert.equal(result.code, 2, "the large issue file is read, and judged");
       assert.match(result.stdout, /big11111-big\/issue\.md/);
+
+      const batched = readFileSync(asked, "utf8");
+      assert.match(batched, new RegExp(marker), "the recording saw the batch");
+      assert.doesNotMatch(batched, new RegExp(report), "the report is not in any batch");
       const log = readFileSync(trace, "utf8");
-      assert.doesNotMatch(log, /reports\/run\.json/, "the report is not read by name");
-      assert.doesNotMatch(log, new RegExp(report), "nor by its object name");
+      assert.doesNotMatch(log, /reports\/run\.json/, "nor read by name");
+      assert.doesNotMatch(log, new RegExp(report), "nor on its own");
     } finally {
       repo.cleanup();
     }
