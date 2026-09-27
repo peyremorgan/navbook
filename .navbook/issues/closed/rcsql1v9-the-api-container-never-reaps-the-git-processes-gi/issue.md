@@ -5,6 +5,7 @@ created: 2026-09-27T01:13:35Z
 assignee: Claude <noreply@anthropic.com>
 labels: [bug]
 feature: [packaging, server]
+resolution: fixed
 ---
 
 The `api` container accumulates zombie `git` processes and never reaps them. On the deployed tracker (`navbook-api-1`, image `navbook-server:2ebc8ce`, started 2026-09-22 11:14 UTC), `ps` inside the container on 2026-09-27 showed 186 zombies out of 192 processes. All had PID 1 as parent, and the newest was 2 hours old:
