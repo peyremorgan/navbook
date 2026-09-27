@@ -5,6 +5,7 @@ created: 2026-09-20T12:39:37Z
 assignee: Claude <noreply@anthropic.com>
 labels: [bug, cli]
 feature: cli
+resolution: fixed
 ---
 
 `QUERY_HELP` is the block appended to both `list` commands' help. It lists nine terms and leaves out `deadline:`, and the closing paragraph leaves it out of both its lists too.
