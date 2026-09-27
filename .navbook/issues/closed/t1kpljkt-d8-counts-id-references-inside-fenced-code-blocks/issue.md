@@ -5,6 +5,7 @@ created: 2026-09-27T02:26:24Z
 assignee: Claude <noreply@anthropic.com>
 labels: [bug, doctor]
 feature: doctor
+resolution: fixed
 ---
 
 D8 counts a `#id` inside a fenced code block as a prose reference, and warns when it names nothing in the tree. On `dev` (at `2b8b0c5`), 3 of `nav doctor`'s 8 D8 warnings come from IDs in pasted terminal output:
