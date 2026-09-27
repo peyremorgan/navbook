@@ -22,9 +22,6 @@ test("names each listing, so a history entry says which one it is", async ({ sig
   await signedIn.goto(`${stack.appUrl}/prs`);
   await expect(signedIn).toHaveTitle("Pull requests · Navbook");
 
-  await signedIn.goto(`${stack.appUrl}/features`);
-  await expect(signedIn).toHaveTitle("Features · Navbook");
-
   await signedIn.goto(`${stack.appUrl}/inbox`);
   await expect(signedIn).toHaveTitle("Inbox · Navbook");
 

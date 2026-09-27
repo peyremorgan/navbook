@@ -26,6 +26,16 @@ test("lists the features the repository holds", async ({ signedIn, stack }) => {
   await expect(signedIn.getByTestId("feature-row-billing")).toContainText("0 documents");
 });
 
+test("names the listing and each feature in the browser's title", async ({ signedIn, stack }) => {
+  // Here rather than in the host's titles suite: a bundle built without this
+  // layer has no `/features` to name.
+  await signedIn.goto(`${stack.appUrl}/features`);
+  await expect(signedIn).toHaveTitle("Features · Navbook");
+
+  await signedIn.goto(`${stack.appUrl}/features/authentication`);
+  await expect(signedIn).toHaveTitle("Authentication · Navbook");
+});
+
 test("shows a feature's documents, its work and its history", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/features/authentication`);
 
