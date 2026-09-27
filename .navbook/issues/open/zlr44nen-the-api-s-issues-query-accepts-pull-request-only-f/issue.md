@@ -2,6 +2,7 @@
 title: The API's issues query accepts pull-request-only filters, so review:pending matches every issue
 author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-20T12:35:22Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug]
 feature: [server, format]
 ---
