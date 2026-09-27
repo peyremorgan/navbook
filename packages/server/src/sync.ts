@@ -105,6 +105,13 @@ export interface SyncOptions {
   now?: () => number;
   /** Where to say what happened to a call that was stopped: the log, in a server. */
   report?: (line: string) => void;
+  /**
+   * Told as a mutation's body starts, and again if it throws: whatever it
+   * leaves in the working tree, anything remembered about the tree is stale.
+   * Once at the start, so the body's own reads see the files as it leaves them;
+   * again on failure, because a body that throws may have written first.
+   */
+  onWrite?: () => void;
 }
 
 /** What a mutation's write did, and whether the commit reached the remote. */
@@ -337,7 +344,14 @@ export class RepoSync {
   write<T>(body: () => T, committed: (result: T) => boolean): Promise<WriteResult<T>> {
     return this.lock.run(async () => {
       await this.pull({ force: true, keptLocalCommit: false });
-      const result = body();
+      this.opts.onWrite?.();
+      let result: T;
+      try {
+        result = body();
+      } catch (error) {
+        this.opts.onWrite?.();
+        throw error;
+      }
       const pushed = committed(result) ? await this.pushWithRetry() : false;
       return { result, pushed };
     });

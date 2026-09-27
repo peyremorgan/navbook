@@ -105,7 +105,12 @@ function recorder(script: Scripted = {}): Recorder {
 
 function makeSync(
   script: Scripted = {},
-  opts: { remote?: string | null; ttl?: number; timeout?: number } = {},
+  opts: {
+    remote?: string | null;
+    ttl?: number;
+    timeout?: number;
+    onWrite?: () => void;
+  } = {},
 ) {
   const rec = recorder(script);
   const reported: string[] = [];
@@ -115,6 +120,7 @@ function makeSync(
     remote: opts.remote === undefined ? "origin" : opts.remote,
     pullIntervalMs: opts.ttl ?? 0,
     ...(opts.timeout === undefined ? {} : { gitTimeoutMs: opts.timeout }),
+    ...(opts.onWrite === undefined ? {} : { onWrite: opts.onWrite }),
     git: rec.git,
     now: () => clock,
     report: (line) => {
@@ -385,6 +391,33 @@ describe("RepoSync background pull", () => {
 
 describe("RepoSync.write", () => {
   const committed = () => true;
+
+  it("says a write is starting before its body runs, so nothing stale is kept", async () => {
+    const order: string[] = [];
+    const { sync } = makeSync({}, { onWrite: () => order.push("write") });
+    await sync.write(() => order.push("body"), committed);
+    assert.deepEqual(order, ["write", "body"]);
+  });
+
+  it("says so again when the body throws, having perhaps written first", async () => {
+    const order: string[] = [];
+    const { sync } = makeSync({}, { onWrite: () => order.push("write") });
+    await assert.rejects(
+      sync.write(() => {
+        order.push("body");
+        throw new Error("half done");
+      }, committed),
+      /half done/,
+    );
+    assert.deepEqual(order, ["write", "body", "write"]);
+  });
+
+  it("says nothing about a read", async () => {
+    const order: string[] = [];
+    const { sync } = makeSync({}, { onWrite: () => order.push("write") });
+    await sync.read(() => order.push("read"));
+    assert.deepEqual(order, ["read"]);
+  });
 
   it("pulls, runs the body, and pushes", async () => {
     const { sync, calls } = makeSync();

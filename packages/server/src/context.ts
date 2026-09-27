@@ -15,7 +15,6 @@ import {
   type CommentScope,
   type EntityRecord,
   type Identity,
-  loadRepo,
   makeWsCtx,
   type Repo,
   type ReviewPolicyReading,
@@ -27,6 +26,7 @@ import type { RevisionCache } from "./changes.ts";
 import type { Config } from "./config.ts";
 import type { AuthorCache } from "./people.ts";
 import type { RepoSync } from "./sync.ts";
+import type { TreeCache } from "./trees.ts";
 
 export interface GraphQLCtx {
   /** Who the presented token says is acting. */
@@ -46,7 +46,7 @@ export interface GraphQLCtx {
    */
   repo(): Promise<Repo>;
   /**
-   * Parse the tree now, and keep it as this request's `repo()`.
+   * The tree as it is now, kept as this request's `repo()`.
    *
    * For a root resolver whose fields go on to ask for the tree: it parses it
    * once, inside its own transaction, and the fields read that same parse
@@ -75,7 +75,10 @@ export interface GraphQLCtx {
    * the policy is still the working tree's.
    */
   reviewPolicy(): Promise<ReviewPolicyReading>;
-  /** Drops the memo after a write, so a payload reads the tree it just made. */
+  /**
+   * Drops the memo after a write, so a payload reads the tree it just made.
+   * The trees remembered across requests go with it, for the same reason.
+   */
   invalidateRepo(): void;
   sync: RepoSync;
   /**
@@ -97,6 +100,8 @@ export interface MakeContextOptions {
   sync: RepoSync;
   authors: AuthorCache;
   revisions: RevisionCache;
+  /** Parsed trees, remembered across requests against the commit they describe. */
+  trees: TreeCache;
   env?: NodeJS.ProcessEnv;
   /**
    * The Navbook directory, already resolved at startup.
@@ -125,9 +130,9 @@ export function makeGraphQLCtx(opts: MakeContextOptions): GraphQLCtx {
   return {
     viewer: opts.viewer,
     ws,
-    repo: () => (memo ??= opts.sync.locked(() => loadRepo(ws, { comments: "none" }))),
+    repo: () => (memo ??= opts.sync.locked(() => opts.trees.at(ws, "none"))),
     loadRepo: (comments) => {
-      const repo = loadRepo(ws, { comments });
+      const repo = opts.trees.at(ws, comments);
       memo = Promise.resolve(repo);
       return repo;
     },
@@ -143,6 +148,7 @@ export function makeGraphQLCtx(opts: MakeContextOptions): GraphQLCtx {
     reviewPolicy: () => (policyMemo ??= opts.sync.locked(() => readReviewPolicy(ws))),
     invalidateRepo: () => {
       memo = null;
+      opts.trees.invalidate();
       // The marker is a file like any other, so a write may have changed it.
       policyMemo = null;
     },

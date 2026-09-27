@@ -126,16 +126,21 @@ export function loadRepo(ws: WsCtx, opts: ReadTreeOptions = {}): Repo {
 }
 
 /**
- * Load the repository for a listing of `kind`, reading the comments it needs.
+ * Whose comments a listing of `kind` matching `query` needs read.
  *
  * A listing only ever examines entities of its own kind, so nothing else's
  * comments can change its answer. A pull-request listing always needs its own,
  * since it reports a derived review state (spec 02 §2.7); an issue listing
  * needs them only to search their text.
  */
+export function commentScopeFor(query: Query, kind: EntityKind): CommentScope {
+  if (kind === "pr") return "prs";
+  return needsComments(query) ? "all" : "none";
+}
+
+/** Load the repository for a listing of `kind`, reading the comments it needs. */
 export function loadRepoForQuery(ws: WsCtx, query: Query, kind: EntityKind): Repo {
-  if (kind === "pr") return loadRepo(ws, { comments: "prs" });
-  return loadRepo(ws, { comments: needsComments(query) ? "all" : "none" });
+  return loadRepo(ws, { comments: commentScopeFor(query, kind) });
 }
 
 /**

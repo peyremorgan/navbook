@@ -13,6 +13,7 @@ import type { EntityRecord, Repo } from "@navbook/core";
 import type { Config } from "../../src/config.ts";
 import { makeGraphQLCtx } from "../../src/context.ts";
 import { RepoSync } from "../../src/sync.ts";
+import { TreeCache } from "../../src/trees.ts";
 import { makeFixture } from "../helpers/temprepo.ts";
 
 const fixture = makeFixture({ noRemote: true });
@@ -45,6 +46,7 @@ function makeCtx() {
     sync,
     authors: {} as never,
     revisions: {} as never,
+    trees: new TreeCache({ repoRoot: fixture.server.dir, navDir: ".navbook", intervalMs: 0 }),
     env: fixture.env,
   });
 }

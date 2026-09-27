@@ -24,6 +24,7 @@ import { AuthorCache } from "./people.ts";
 import { isOpen } from "./policy.ts";
 import { makeSchema } from "./schema.ts";
 import { RepoSync } from "./sync.ts";
+import { TreeCache } from "./trees.ts";
 
 export class StartupError extends Error {}
 
@@ -115,6 +116,9 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
       report,
     }));
 
+  // One per process, beside the clone it describes, for `AuthorCache`'s reason.
+  const trees = new TreeCache({ repoRoot, navDir, intervalMs: config.pullIntervalMs, report });
+  trees.start();
   const sync = new RepoSync({
     repoRoot,
     remote,
@@ -122,6 +126,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     gitTimeoutMs: config.gitTimeoutMs,
     // A stopped fetch or push is the operator's news as much as the client's.
     report,
+    onWrite: () => trees.invalidate(),
   });
   sync.start();
 
@@ -139,7 +144,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     // covered, including ones added later.
     context: async ({ request }) => {
       const viewer = await auth.verify(request.headers.get("authorization"));
-      return makeGraphQLCtx({ viewer, config, sync, authors, revisions, env, navDir });
+      return makeGraphQLCtx({ viewer, config, sync, authors, revisions, trees, env, navDir });
     },
   });
 
@@ -159,6 +164,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
       server.closeIdleConnections();
       await closed;
       await sync.stop();
+      await trees.stop();
       // Never cut an operation in half: a mutation between its commit and its
       // push is the one moment the clone's state depends on finishing.
       await sync.drain();

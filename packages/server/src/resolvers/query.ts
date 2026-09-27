@@ -8,10 +8,13 @@
 
 import {
   calendarDateOf,
+  commentScopeFor,
+  type EntityKind,
+  type EntityRecord,
   formatPerson,
+  type Query as ListQuery,
   listEntities,
   listPrsAcrossRefs,
-  loadRepo,
   mergePeople,
   readPr,
   readReviewPolicy,
@@ -40,9 +43,21 @@ function today(ctx: GraphQLCtx): string {
   return calendarDateOf(ctx.ws.now());
 }
 
+/**
+ * A listing of the working tree, filtered from the request's parse of it.
+ *
+ * `listEntities` would parse the tree itself; handing it the records instead
+ * lets the listing share a parse with the rest of the request, and with every
+ * other request since the tree last changed.
+ */
+function listed(ctx: GraphQLCtx, kind: EntityKind, query: ListQuery): EntityRecord[] {
+  const repo = ctx.loadRepo(commentScopeFor(query, kind));
+  return listEntities(ctx.ws, kind, query, { entities: kind === "issue" ? repo.issues : repo.prs });
+}
+
 export const Query: QueryResolvers = {
   issues: (_parent, args, ctx) =>
-    run(() => ctx.sync.read(() => listEntities(ctx.ws, "issue", toQuery(args.filter, today(ctx))))),
+    run(() => ctx.sync.read(() => listed(ctx, "issue", toQuery(args.filter, today(ctx))))),
 
   issue: (_parent, args, ctx) =>
     run(() =>
@@ -71,7 +86,7 @@ export const Query: QueryResolvers = {
             refs: found.refs.map((ref) => ref.short),
           }));
         }
-        return listEntities(ctx.ws, "pr", query).map((entity) => ({ entity, refs: [] }));
+        return listed(ctx, "pr", query).map((entity) => ({ entity, refs: [] }));
       }),
     ),
 
@@ -131,7 +146,7 @@ export const Query: QueryResolvers = {
     run(() =>
       ctx.sync.read(() => {
         const authored = ctx.authors.at(resolveSha(ctx.ws.repoRoot, "HEAD"));
-        const named = treePeople(loadRepo(ctx.ws));
+        const named = treePeople(ctx.loadRepo("all"));
         return mergePeople(authored, named, [ctx.viewer]).map(formatPerson);
       }),
     ),
