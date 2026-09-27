@@ -2,6 +2,7 @@
 title: nav plugin and @navbook/plugin-kb are documented in five places and do not exist on dev
 author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-20T12:37:00Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug]
 feature: plugins
 ---
