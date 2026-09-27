@@ -54,7 +54,7 @@ So `isTrackedTreeClean` is a new, separate predicate using `--untracked-files=no
 
 ## Never assumed
 
-A run with nobody to ask keeps the exit 1 it has always had. A pipeline that silently began writing into a checkout the user never named would be a worse outcome than a refusal, and every existing scripted caller keeps its behaviour. `-y`/`--yes` accepts the offer in advance, on all five verbs — whichever offer it is, an existing clean worktree or a temporary one. It is the same flag `nav pr merge` and `nav install` use to answer their question in advance, and it is what makes the behaviour testable without a pty. (Revision 1 called it `-y`; revision 4 replaced it.)
+A run with nobody to ask keeps the exit 1 it has always had. A pipeline that silently began writing into a checkout the user never named would be a worse outcome than a refusal, and every existing scripted caller keeps its behaviour. `-y`/`--yes` accepts the offer in advance, on all five verbs — whichever offer it is, an existing clean worktree or a temporary one. It is the same flag `nav pr merge` and `nav install` use to answer their question in advance, and it is what makes the behaviour testable without a pty. (Revisions 1 to 3 had a separate `--in-worktree` flag instead; revision 4 removed it.)
 
 The flag is a pull-request notion, so it is not added to `issue edit` / `issue comment`: an issue lives on whatever branch you are standing on, and there is never another worktree to send its write to.
 
