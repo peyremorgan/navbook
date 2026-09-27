@@ -18,31 +18,34 @@ Fixes #x8otoby0: nothing in the web client asked before a navigation threw away 
 ## What changes
 
 - **One registry of drafts** (`app/utils/unsaved.ts`, `useUnsavedWork`). Each owner holds an "is this dirty?" predicate while mounted, read at the moment of leaving:
-  - `SpecEditor`: editing, and title or body differ from the file
+  - `SpecEditor` (now in `@navbook/plugin-kb`'s layer): editing, and title or body differ from the file
   - `EditableText`: editing, and the draft differs from the value
   - `CommentForm` and `ReviewForm`: a non-empty body
-  - `issues/new.vue`: any field typed. The pre-filled feature and parent count only if changed, and nothing counts once the issue is filed.
-- **Two guards** (`app/plugins/04.unsaved.ts`):
-  - `router.beforeEach` asks in an in-app `LeaveDialog` ("Keep editing" / "Discard and leave") when the **path** changes and something is dirty. Escape and a click on the overlay both mean stay.
-  - `beforeunload` covers reloads, closed tabs, and the redirect to the provider when a save comes back UNAUTHENTICATED.
-- **Sign-out asks first** (`useAuth().logout`), before the token is dropped, so "Keep editing" keeps the session too. It then lets go of the drafts, so the navigation afterwards doesn't ask a second time.
+  - `issues/new.vue`: any field typed. The pre-filled parent, and each plugin field's first value in `extra` (e.g. a `?feature=`), count only if changed. Nothing counts once the issue is filed.
+  - The knowledge base's "Add a document" and "New feature" dialogs, while open and not empty
+  - A refused edit kept on the issue, PR or feature page (`usePendingEdits().refused`, `useStaleEdit().stale`)
+- **In-app navigations** (`app/middleware/00.unsaved.global.ts`): when the **path** changes and something is dirty, an in-app `LeaveDialog` asks "Keep editing" or "Discard and leave". Escape and a click on the overlay both mean stay. It is a middleware named to sort before `auth.global`, so the question comes before any token renewal or provider redirect for that navigation.
+- **Ways out of the document** (`app/plugins/04.unsaved.ts`): `beforeunload` covers reloads and closed tabs.
+- **The app's own ways out ask for themselves**, in the dialog, before anything irreversible, then `agree()` (a one-shot pass for the next guard, so there is no second prompt):
+  - Signing out (`useAuth().logout`) asks before the token is dropped.
+  - An UNAUTHENTICATED response (`plugins/03.apollo.ts`) asks before the token is forgotten and the browser sent to the provider. "Stay" keeps the page, draft and token, and a toast says the write failed and to copy the text out.
+  - A FORBIDDEN response goes to `/not-allowed` through the same guard.
+  - After "stay", neither refusal asks again until a navigation lands.
 
 ## Choices worth a look
 
 - **Global, not per-page `onBeforeRouteLeave`.** `/issues/a` → `/issues/b` is an *update* on the same route record, so leave guards don't run. Yet `NuxtPage` mounts a fresh instance keyed by path, so the draft is lost anyway.
-- **Query-only changes are never asked about.** A PR's `?tab=` and a listing's filters keep the page mounted, and the PR page deliberately keeps tabs alive so drafts survive.
-- **Not covered:** an `EditableText` save that is in flight or refused. The editor closes on save by design, and `usePendingEdits` owns that state and shows the refusal.
-- **Overlap with PR `njfzket6` (#icroff4l).** Both edit `useAuth().logout`. They combine cleanly: the question comes first, then the provider sign-out redirect, which no longer prompts because the drafts have been let go.
+- **Query-only changes are never asked about.** A PR's `?tab=` and a listing's filters keep the page mounted.
+- **An edit that is still being saved is not held.** If it is refused after the page is left, `usePendingEdits`'s `lost` toast already says so.
+- **Interplay with the provider sign-out (#icroff4l, now on dev).** The question comes first, then `agree()`, then the end-session redirect, whose `beforeunload` spends the agreement and does not prompt. While `logout` runs, an UNAUTHENTICATED answer from an operation still in flight is ignored (`useAuth().signingOut()`), as `login` already was, so the dialog cannot pop up mid sign-out.
 
 ## Tests
 
-- **New Playwright spec** `test-e2e/unsaved-work.spec.ts`, 10 cases. Against the unfixed bundle, 7 of them failed (quoted on the issue). They cover:
-  - the sidebar, a reference followed from the preview, and Back between two issues;
-  - a PR's tabs, which stay free;
-  - reload, the UNAUTHENTICATED redirect, and sign-out, both staying and leaving;
-  - nothing is asked for an untouched editor or after filing an issue.
+- **Playwright**, rebased onto the plugin system:
+  - `packages/web/test-e2e/unsaved-work.spec.ts`, 10 cases on host editors;
+  - `packages/plugin-kb/test-e2e/unsaved-work.spec.ts`, 4 cases on the document editor and the add-document dialog, since a host bundle without the layer has no `/features`.
+  - Before the rebase, the first version's 9 cases failed 7 against dev, and the self-review's 4 new cases (UNAUTHENTICATED asked in-app and once, FORBIDDEN once, a refused edit, the add-document dialog) failed 4 against the first version.
 - **Unit tests** `test/nuxt/unsaved.test.ts`, 7 cases, for the registry.
-- **Full web e2e suite:** 163/163. After a last `ReviewForm` tweak, the `unsaved-work`, `pull-requests` and `auth` specs were rerun (42/42).
-- **Web checks:** `vitest` 384/384, `nuxi typecheck` clean, `biome check` clean.
+- **Checks** (with `NAVBOOK_WEB_PLUGINS=@navbook/plugin-kb`, as CI): web `vitest` 410/410, plugin-kb `node --test` 138/138, `nuxi typecheck`, `tsc` and `biome check` clean. Full e2e suite: see the latest review.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
