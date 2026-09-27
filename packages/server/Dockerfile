@@ -21,8 +21,8 @@ RUN npm install -g pnpm@11.18.0
 WORKDIR /src
 
 # The manifests first, so a change to a source file does not re-resolve the
-# whole dependency graph. `cli` and `web` are here for their manifests alone:
-# the lockfile has an importer for each, and --frozen-lockfile checks them.
+# whole dependency graph. `web` is here for its manifest alone: the lockfile
+# has an importer for it, and --frozen-lockfile checks them all.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig.json ./
 COPY packages/cli/package.json packages/cli/
 COPY packages/web/package.json packages/web/
@@ -31,10 +31,19 @@ COPY packages/server/package.json packages/server/
 COPY packages/plugin-kb/package.json packages/plugin-kb/
 
 # The root project is not scenery: `typescript` is a devDependency of the
-# workspace rather than of either package, and `prepack` runs `tsc`.
-RUN pnpm install --frozen-lockfile --filter navbook-workspace --filter "@navbook/server..."
+# workspace rather than of either package, and `prepack` runs `tsc`. Every
+# package packed below is selected here with what it depends on, because its
+# `prepack` compiles against them: plugin-kb depends on the server, not the
+# other way round, so selecting the server alone never installs it (#uniyh2hy).
+RUN pnpm install --frozen-lockfile --filter navbook-workspace \
+      --filter "@navbook/server..." --filter "@navbook/plugin-kb..."
 
+# Sources, for every workspace package a packed one compiles against. plugin-kb
+# imports `@navbook/cli/plugin`, which resolves to cli's TypeScript source in the
+# workspace, so cli is here although it is never packed. web stays a manifest:
+# nothing packed here imports it.
 COPY script script
+COPY packages/cli packages/cli
 COPY packages/core packages/core
 COPY packages/server packages/server
 COPY packages/plugin-kb packages/plugin-kb
@@ -90,6 +99,12 @@ COPY --from=build /out/*.tgz ./
 # `NAVBOOK_PLUGINS` names packages; a workspace one resolves to the tarball
 # beside it and anything else to the registry, which is why the two are
 # installed together rather than in two steps.
+#
+# `--legacy-peer-deps` for the reason `nav plugin install` passes it: npm
+# otherwise resolves a plugin's optional peers, and refuses plugin-kb over its
+# web half's, whose own optional `@vue/composition-api` peer wants a Vue 2
+# (#uniyh2hy). The image provides every peer a server half needs: core is the
+# tarball named here, never a second copy.
 RUN npm init -y > /dev/null \
  && for name in $NAVBOOK_PLUGINS; do \
       case "$name" in \
@@ -97,7 +112,7 @@ RUN npm init -y > /dev/null \
         *) set -- "$@" "$name" ;; \
       esac; \
     done \
- && npm install --omit=dev --ignore-scripts \
+ && npm install --omit=dev --ignore-scripts --legacy-peer-deps \
       ./navbook-core-*.tgz ./navbook-server-*.tgz "$@" \
  && rm -f ./*.tgz \
  && npm cache clean --force

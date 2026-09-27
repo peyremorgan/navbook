@@ -8,7 +8,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { REPO_ROOT } from "../../packages/cli/test/helpers/temprepo.ts";
@@ -70,6 +70,65 @@ function excluded(path: string): string | null {
   return null;
 }
 
+interface Workspace {
+  /** Package name to its directory, as `packages/<dir>`. */
+  dirs: Map<string, string>;
+  /** Package name to the workspace packages it names in any dependency field. */
+  deps: Map<string, string[]>;
+}
+
+function workspace(): Workspace {
+  const dirs = new Map<string, string>();
+  const manifests = new Map<string, Record<string, Record<string, string> | undefined>>();
+  for (const dir of readdirSync(join(REPO_ROOT, "packages"))) {
+    const path = `packages/${dir}/package.json`;
+    if (!existsSync(join(REPO_ROOT, path))) continue;
+    const manifest = JSON.parse(read(path));
+    dirs.set(manifest.name, `packages/${dir}`);
+    manifests.set(manifest.name, manifest);
+  }
+  const deps = new Map<string, string[]>();
+  for (const [name, manifest] of manifests) {
+    const named = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]
+      .flatMap((field) => Object.keys(manifest[field] ?? {}))
+      .filter((dep) => dirs.has(dep));
+    deps.set(name, [...new Set(named)]);
+  }
+  return { dirs, deps };
+}
+
+/** The package and every workspace package it depends on, as pnpm's `name...` selects. */
+function closure(ws: Workspace, name: string): Set<string> {
+  const seen = new Set<string>();
+  const queue = [name];
+  while (queue.length > 0) {
+    const next = queue.pop() as string;
+    if (seen.has(next)) continue;
+    seen.add(next);
+    queue.push(...(ws.deps.get(next) ?? []));
+  }
+  return seen;
+}
+
+/** The API build stage's install, as the packages it selects. */
+function installed(ws: Workspace, dockerfile: string): Set<string> {
+  const install = instructions(dockerfile).find((line) => /^RUN pnpm install\s/.test(line));
+  assert.ok(install, `${dockerfile} has no pnpm install`);
+  const selected = new Set<string>();
+  for (const [, filter = ""] of install.matchAll(/--filter\s+"?([^"\s]+)"?/g)) {
+    const name = filter.replace(/\.\.\.$/, "");
+    for (const pkg of filter.endsWith("...") ? closure(ws, name) : [name]) selected.add(pkg);
+  }
+  return selected;
+}
+
+/** The packages the build stage packs into tarballs. */
+function packed(dockerfile: string): string[] {
+  return [...read(dockerfile).matchAll(/pnpm --filter (\S+) pack\b/g)].map(
+    (match) => match[1] as string,
+  );
+}
+
 describe("the Dockerfiles", () => {
   for (const [image, dockerfile] of Object.entries(DOCKERFILES)) {
     it(`copies only paths this repository has, into the ${image} image`, () => {
@@ -111,6 +170,47 @@ describe("the Dockerfiles", () => {
       assert.equal(pinned, declared, `${dockerfile} pins a different pnpm than package.json`);
     });
   }
+
+  it("installs the dependencies of every package the API image packs", () => {
+    // `pack` runs `prepack`, which compiles against them. plugin-kb depends on
+    // the server rather than the other way round, so selecting the server
+    // with its dependencies never installed it (#uniyh2hy).
+    const ws = workspace();
+    const selected = installed(ws, DOCKERFILES.api);
+    const packs = packed(DOCKERFILES.api);
+    assert.ok(packs.length > 0, "the API image packs nothing");
+
+    const missing = packs.flatMap((name) =>
+      [...closure(ws, name)]
+        .filter((pkg) => !selected.has(pkg))
+        .map((pkg) => `${pkg} (for ${name})`),
+    );
+    assert.deepEqual(
+      missing,
+      [],
+      "the build stage's install leaves out what a pack compiles against",
+    );
+  });
+
+  it("copies the sources of everything a packed package compiles against", () => {
+    // A manifest is enough for the lockfile, not for `tsc`: in the workspace a
+    // package's exports are its TypeScript sources, so plugin-kb's
+    // `@navbook/cli/plugin` needs cli's whole directory (#uniyh2hy).
+    const ws = workspace();
+    const copied = new Set(copiedFromContext(DOCKERFILES.api));
+
+    const missing = new Set(
+      packed(DOCKERFILES.api)
+        .flatMap((name) => [...closure(ws, name)])
+        .map((pkg) => ws.dirs.get(pkg) as string)
+        .filter((dir) => !copied.has(dir)),
+    );
+    assert.deepEqual(
+      [...missing],
+      [],
+      "the build stage copies only the manifest of a package tsc reads",
+    );
+  });
 
   it("copies the very scripts the rest of these tests run", () => {
     const relative = (absolute: string) => absolute.slice(REPO_ROOT.length + 1);
