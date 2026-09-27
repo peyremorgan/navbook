@@ -267,8 +267,9 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
 
   Those five verbs MAY instead perform the write in that worktree, when one has
   the branch and its index and tracked files are clean. It is never assumed:
-  either somebody at a terminal was asked and said yes, or `--in-worktree` said
-  so in advance. Untracked files do not make a worktree unclean for this — the
+  either somebody at a terminal was asked and said yes, or `-y`/`--yes` said so
+  in advance — the same flag, answering whichever of the two offers the verb
+  would make. Untracked files do not make a worktree unclean for this — the
   write stages its own paths and nothing else, and a build directory sitting
   beside them says nothing about whether it is safe. A run with nobody to ask
   and no flag MUST refuse as above, since a command that silently wrote into a

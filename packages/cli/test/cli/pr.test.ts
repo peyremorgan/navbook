@@ -1044,9 +1044,9 @@ describe("a pull request that only another branch holds", () => {
       repo.git(["worktree", "add", "--quiet", tree, "feat/auth"]);
       const { id } = listedAcrossRefs(repo)[0] as { id: string };
 
-      // No terminal here — `--in-worktree` is the answer given in advance, so
+      // No terminal here — `-y` is the answer given in advance, so
       // the same run that refuses without it succeeds with it.
-      const written = repo.nav(["pr", "comment", id, "--in-worktree", "--commit", "-m", "Read."]);
+      const written = repo.nav(["pr", "comment", id, "-y", "--commit", "-m", "Read."]);
       assert.equal(written.code, 0, written.stderr);
       assert.match(written.stdout, /Commented on #dk3mp2x9/);
       assert.match(
@@ -1078,7 +1078,7 @@ describe("a pull request that only another branch holds", () => {
       const moved = repo.git(["rev-parse", "feat/auth"]).stdout.trim();
       assert.notEqual(moved, head);
 
-      const updated = repo.nav(["pr", "update", id0(repo), "--in-worktree", "--commit"]);
+      const updated = repo.nav(["pr", "update", id0(repo), "-y", "--commit"]);
       assert.equal(updated.code, 0, updated.stderr);
       // The head recorded is the branch's, never this checkout's: pinning
       // `main` is the reason the verb refuses from here in the first place.
@@ -1096,7 +1096,7 @@ describe("a pull request that only another branch holds", () => {
       repo.git(["worktree", "add", "--quiet", tree, "feat/auth"]);
       writeFileSync(join(tree, "auth.txt"), "half-finished\n", "utf8");
 
-      const refused = repo.nav(["pr", "comment", id0(repo), "--in-worktree", "-m", "Read."]);
+      const refused = repo.nav(["pr", "comment", id0(repo), "-y", "-m", "Read."]);
       assert.equal(refused.code, 1);
       assert.match(refused.stderr, /which has uncommitted changes/);
       assert.match(refused.stderr, /run the command there/);
@@ -1116,15 +1116,7 @@ describe("a pull request that only another branch holds", () => {
       mkdirSync(join(tree, "node_modules"), { recursive: true });
       writeFileSync(join(tree, "node_modules", "installed.txt"), "junk\n", "utf8");
 
-      const written = repo.nav([
-        "pr",
-        "comment",
-        id0(repo),
-        "--in-worktree",
-        "--commit",
-        "-m",
-        "Read.",
-      ]);
+      const written = repo.nav(["pr", "comment", id0(repo), "-y", "--commit", "-m", "Read."]);
       assert.equal(written.code, 0, written.stderr);
     } finally {
       repo.git(["worktree", "remove", "--force", tree]);
@@ -1143,10 +1135,9 @@ describe("a pull request that only another branch holds", () => {
     const { repo } = withOpenPr();
     try {
       const tmp = privateTmp(repo);
-      const written = repo.nav(
-        ["pr", "comment", id0(repo), "--in-worktree", "--commit", "-m", "Read."],
-        { TMPDIR: tmp },
-      );
+      const written = repo.nav(["pr", "comment", id0(repo), "-y", "--commit", "-m", "Read."], {
+        TMPDIR: tmp,
+      });
       assert.equal(written.code, 0, written.stderr);
       assert.match(written.stdout, /Commented on #dk3mp2x9/);
       assert.match(written.stderr, /temporary worktree on 'feat\/auth', since removed/);
@@ -1168,7 +1159,7 @@ describe("a pull request that only another branch holds", () => {
   it("keeps the temporary worktree when the write is only staged there", () => {
     const { repo } = withOpenPr();
     try {
-      const written = repo.nav(["pr", "comment", id0(repo), "--in-worktree", "-m", "Read."], {
+      const written = repo.nav(["pr", "comment", id0(repo), "-y", "-m", "Read."], {
         TMPDIR: privateTmp(repo),
       });
       assert.equal(written.code, 0, written.stderr);
@@ -1191,7 +1182,7 @@ describe("a pull request that only another branch holds", () => {
     const { repo } = withOpenPr();
     try {
       const tmp = privateTmp(repo);
-      const failed = repo.nav(["pr", "edit", id0(repo), "--in-worktree", "--commit"], {
+      const failed = repo.nav(["pr", "edit", id0(repo), "-y", "--commit"], {
         TMPDIR: tmp,
         EDITOR: "false",
       });
@@ -1213,7 +1204,7 @@ describe("a pull request that only another branch holds", () => {
 
       // Checking it out would create a local branch, which is more than a
       // comment should do: the flag has nothing to say yes to.
-      const refused = repo.nav(["pr", "comment", "dk3m", "--in-worktree", "-m", "Read."], {
+      const refused = repo.nav(["pr", "comment", "dk3m", "-y", "-m", "Read."], {
         TMPDIR: tmp,
       });
       assert.equal(refused.code, 1);

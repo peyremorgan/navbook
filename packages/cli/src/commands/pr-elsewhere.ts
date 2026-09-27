@@ -35,13 +35,17 @@ import { makeContext } from "../context.ts";
 import { fail } from "../errors.ts";
 import { askYesNo, isInteractive } from "../prompt.ts";
 
-/** Help for the flag that answers the question in advance. */
-export const IN_WORKTREE_HELP =
-  "write in a worktree on the source branch — the clean one that has it, or a temporary one — without asking";
+/**
+ * Help for `-y`, which answers the question in advance. The same letter
+ * answers `nav pr merge` and `nav install` in advance, and means the same
+ * thing here: this verb's one question, whichever of the two it would be.
+ */
+export const YES_HELP =
+  "accept the offer to write in a worktree on the source branch — the clean one that has it, or a temporary one";
 
 export interface PrWriteOptions {
-  /** `--in-worktree`: answer yes in advance, and ask nobody. */
-  inWorktree?: boolean;
+  /** `-y`: accept either offer in advance, and ask nobody. */
+  yes?: boolean;
 }
 
 /** Where a write goes when it does not go here. */
@@ -68,9 +72,9 @@ function destination(where: PrElsewhere): Destination | null {
   return where.worktreeClean ? { branch: where.branch, worktree: where.worktree } : null;
 }
 
-/** Ask whether to write there, unless `--in-worktree` already said yes. */
+/** Ask whether to write there, unless `-y` already said yes. */
 function agreed(ctx: Ctx, entity: EntityRecord, to: Destination, opts: PrWriteOptions): boolean {
-  if (opts.inWorktree) return true;
+  if (opts.yes) return true;
   // Only ever asked, never assumed. A run with nothing to answer the question
   // keeps the refusal it has always had: a pipeline that started writing into
   // a checkout nobody mentioned would be a worse surprise than exit 1.
