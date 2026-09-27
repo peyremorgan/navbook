@@ -3,7 +3,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { CLI_ENTRY, makeNavRepo, makeTempRepo, type TempRepo } from "../helpers/temprepo.ts";
@@ -181,6 +181,50 @@ describe("the pre-commit hook", () => {
         PATH: pathWithNav(repo),
       });
       assert.equal(result.code, 0, `warnings must not block:\n${result.stdout}${result.stderr}`);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  // Most hand-written hooks begin with `set -e`, and the block is appended to
+  // them, so it runs under whatever options the hook before it chose.
+  const STRICT_HOOK = "#!/bin/sh\nset -eu\necho mine\n";
+
+  it("lets a commit through when doctor fails without a format violation, under set -e", () => {
+    const repo = makeNavRepo();
+    try {
+      writeFileSync(join(repo.dir, HOOK), STRICT_HOOK, { mode: 0o755 });
+      repo.nav(["install", "--hooks", "-y"]);
+      // Without its directory, `nav doctor --staged` exits 1: no tree, not a bad one.
+      repo.git(["rm", "-r", "-q", "--cached", ".navbook"]);
+      rmSync(join(repo.dir, ".navbook"), { recursive: true, force: true });
+      repo.write("app.txt", "x\n");
+      repo.git(["add", "app.txt"]);
+
+      const result = repo.git(["commit", "-m", "feat: work"], { PATH: pathWithNav(repo) });
+      assert.equal(result.code, 0, `exit 1 must not block:\n${result.stdout}${result.stderr}`);
+      assert.match(result.stdout + result.stderr, /not a Navbook repository/, "doctor did run");
+      assert.equal(repo.git(["log", "-1", "--format=%s"]).stdout.trim(), "feat: work");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("still blocks a commit that would stage a format violation, under set -e", () => {
+    const repo = makeNavRepo();
+    try {
+      writeFileSync(join(repo.dir, HOOK), STRICT_HOOK, { mode: 0o755 });
+      repo.nav(["install", "--hooks", "-y"]);
+      repo.write(".navbook/issues/open/Bad_Name/issue.md", "---\ntitle: t\n---\n\nbody\n");
+      repo.git(["add", "-A"]);
+
+      const result = repo.git(["commit", "-m", "should be blocked"], { PATH: pathWithNav(repo) });
+      assert.equal(
+        result.code,
+        1,
+        `commit should have been blocked:\n${result.stdout}${result.stderr}`,
+      );
+      assert.match(result.stdout + result.stderr, /D1/);
     } finally {
       repo.cleanup();
     }

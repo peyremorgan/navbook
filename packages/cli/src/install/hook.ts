@@ -29,9 +29,15 @@ const BODY = `${MARKER_BEGIN}
 # Validate staged Navbook files. Only a format violation (exit 2) blocks the
 # commit; warnings never do, and a clone without nav installed is unaffected.
 # Commit with --no-verify, or delete this block, to skip the check.
+#
+# The status is captured rather than tested on the next line: this block is
+# appended to whatever hook was already here, and under 'set -e' a bare
+# 'nav doctor --staged' would end the hook on exit 1 (an operational error,
+# not a format violation) before the test below ever ran.
 if command -v nav >/dev/null 2>&1; then
-  nav doctor --staged
-  if [ $? -eq 2 ]; then
+  navbook_status=0
+  nav doctor --staged || navbook_status=$?
+  if [ "$navbook_status" -eq 2 ]; then
     exit 1
   fi
 fi
