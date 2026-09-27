@@ -29,7 +29,18 @@ export interface EntityEdit {
   labels: string[];
   assignees: string[];
   milestone: string | null;
-  features: string[];
+  /**
+   * Values for list-valued fields plugins added to the update inputs, by the
+   * name their SDL gave the field (spec 02 §2.12).
+   *
+   * Kept apart from the named keys rather than mixed in, for the reason
+   * `FilterState.ext` is: every function here stays total over the format's
+   * own fields, and a plugin cannot shadow one by choosing the same name. It
+   * is one object rather than a key each because `usePendingEdits` keys a
+   * save by the field it names, and a plugin's panel should not have to know
+   * that.
+   */
+  ext: Record<string, string[]>;
   reviewers?: string[];
   /** Where it sits in the queue; issues only (spec 02 §2.5). */
   rank?: number | null;
@@ -41,6 +52,33 @@ export interface EntityEdit {
 
 /** An update input without the `ref`, which the caller knows. */
 export type EntityPatch = Omit<UpdateIssueInput, "ref"> & Pick<UpdatePrInput, "reviewers">;
+
+/**
+ * Fields plugin layers added to `UpdateIssueInput` and `UpdatePrInput`.
+ *
+ * A module-level array rather than something read from the slot registry, for
+ * the reason `FILTER_EXTENSIONS` is one: everything in this file is a pure
+ * function over an edit and has to stay unit-testable without mounting an app.
+ * A layer's Nuxt plugin registers into the slots, and the slots push here.
+ *
+ * Only list-valued fields. That is what a frontmatter key a plugin adds is in
+ * every case this format allows (§2.12 gives it `<short>-*`, and §2.4 makes a
+ * scalar and a one-item list the same thing), and it keeps the comparison
+ * below one shape rather than a switch over types nothing yet uses.
+ */
+export const PATCH_EXTENSIONS: { field: string; label: string }[] = [];
+
+/** Register a plugin's editable field. Called by the slot registry. */
+export function registerPatchField(field: string, label: string): void {
+  if (!PATCH_EXTENSIONS.some((entry) => entry.field === field)) {
+    PATCH_EXTENSIONS.push({ field, label });
+  }
+}
+
+/** Forget every registered field. For tests. */
+export function resetPatchFields(): void {
+  PATCH_EXTENSIONS.length = 0;
+}
 
 export class PatchError extends Error {}
 
@@ -143,11 +181,6 @@ export function buildEntityPatch(
     if (milestone !== normalizeOptional(before.milestone)) patch.milestone = milestone;
   }
 
-  if (after.features !== undefined) {
-    const features = normalizeList(after.features);
-    if (!sameList(features, normalizeList(before.features))) patch.features = features;
-  }
-
   if (after.reviewers !== undefined) {
     const reviewers = normalizeList(after.reviewers);
     if (!sameList(reviewers, normalizeList(before.reviewers ?? []))) patch.reviewers = reviewers;
@@ -169,26 +202,45 @@ export function buildEntityPatch(
     if (deadline !== normalizeOptional(before.deadline)) patch.deadline = deadline;
   }
 
+  if (after.ext !== undefined) {
+    // Registered fields only. An `ext` key nothing registered is a field no
+    // loaded plugin has, and sending it would be asking the server to refuse
+    // an input it does not have either.
+    for (const { field } of PATCH_EXTENSIONS) {
+      const edited = after.ext[field];
+      if (edited === undefined) continue;
+      const values = normalizeList(edited);
+      if (sameList(values, normalizeList(before.ext?.[field] ?? []))) continue;
+      // Cast because the field is one a plugin's SDL added: the generated
+      // input type describes the core schema and cannot know about it.
+      (patch as Record<string, unknown>)[field] = values;
+    }
+  }
+
   return Object.keys(patch).length === 0 ? null : patch;
 }
 
 /** What each field of an edit is called on the page. */
-const FIELD_LABELS: Record<keyof EntityEdit, string> = {
+const FIELD_LABELS: Record<Exclude<keyof EntityEdit, "ext">, string> = {
   title: "title",
   body: "description",
   labels: "labels",
   assignees: "assignees",
   milestone: "milestone",
-  features: "features",
   reviewers: "reviewers",
   rank: "rank",
   deadline: "deadline",
   summary: "summary",
 };
 
-/** The page's name for a field, given the mutation's — `body` is the description. */
+/**
+ * The page's name for a field, given the mutation's — `body` is the
+ * description, and a plugin's field is whatever its layer registered.
+ */
 export function fieldLabel(field: string): string {
-  return FIELD_LABELS[field as keyof EntityEdit] ?? field;
+  const built = FIELD_LABELS[field as Exclude<keyof EntityEdit, "ext">];
+  if (built !== undefined) return built;
+  return PATCH_EXTENSIONS.find((entry) => entry.field === field)?.label ?? field;
 }
 
 /**
@@ -202,17 +254,27 @@ export function describeEntityEdit(
   change: Partial<EntityEdit>,
 ): { field: string; value: string }[] {
   const out: { field: string; value: string }[] = [];
-  for (const key of Object.keys(FIELD_LABELS) as (keyof EntityEdit)[]) {
-    const value = change[key];
-    if (value === undefined) continue;
-    const text = Array.isArray(value)
+  const say = (value: unknown): string =>
+    Array.isArray(value)
       ? value.length === 0
         ? "none"
         : value.join(", ")
       : value === null || value === ""
         ? "none"
         : String(value);
-    out.push({ field: FIELD_LABELS[key], value: text });
+
+  for (const key of Object.keys(FIELD_LABELS) as Exclude<keyof EntityEdit, "ext">[]) {
+    const value = change[key];
+    if (value === undefined) continue;
+    out.push({ field: FIELD_LABELS[key], value: say(value) });
+  }
+  // A plugin's fields read like the format's own, under the name its layer
+  // gave them: this is the alert that shows a refused edit, and "ext" would
+  // tell the person nothing about what they had typed.
+  for (const { field, label } of PATCH_EXTENSIONS) {
+    const value = change.ext?.[field];
+    if (value === undefined) continue;
+    out.push({ field: label, value: say(value) });
   }
   return out;
 }

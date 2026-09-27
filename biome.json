@@ -57,11 +57,7 @@
       }
     },
     {
-      "includes": [
-        "packages/web/app/app.vue",
-        "packages/web/app/pages/**/*.vue",
-        "packages/web/app/layouts/**/*.vue"
-      ],
+      "includes": ["packages/web/app/app.vue", "**/app/pages/**/*.vue", "**/app/layouts/**/*.vue"],
       "linter": {
         "rules": {
           "style": {

@@ -1,5 +1,6 @@
 spec-version: 1
 description: the first feature brings specs/ with it; nav init never created one
+plugins: ["@navbook/plugin-kb"]
 init: {from: before}
 run:
   command: [feature, open, "Authentication", --slug, auth, -m, "Everything about signing in.", --commit]

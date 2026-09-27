@@ -23,7 +23,11 @@ const composeText = readFileSync(COMPOSE_FILE, "utf8");
 const compose = parseYaml(composeText) as {
   services: Record<
     string,
-    { environment?: Record<string, string>; labels?: Record<string, string> }
+    {
+      environment?: Record<string, string>;
+      labels?: Record<string, string>;
+      build?: { args?: Record<string, string> };
+    }
   >;
   networks: Record<string, { external?: boolean; name?: string }>;
   volumes: Record<string, unknown>;
@@ -105,6 +109,17 @@ describe("the deployment descriptor", () => {
     const unused = [...documentedKeys().keys()].filter((key) => !referenced.has(key));
 
     assert.deepEqual(unused, [], ".env.example documents keys nothing reads");
+  });
+
+  it("builds both images with the same plugin set", () => {
+    // The two names differ because the two builds read different variables,
+    // but they must come from one value in `.env`: an API carrying a plugin
+    // whose web half is missing from the bundle would answer fields nothing
+    // renders, and the reverse would render fields nothing answers.
+    // Compose's own interpolation, compared as the file writes it.
+    const fromEnv = ["$", "{NAVBOOK_PLUGINS:-}"].join("");
+    assert.equal(compose.services.api?.build?.args?.NAVBOOK_PLUGINS, fromEnv);
+    assert.equal(compose.services.web?.build?.args?.NAVBOOK_WEB_PLUGINS, fromEnv);
   });
 
   it("gives every required key a value, so the example renders as it stands", () => {

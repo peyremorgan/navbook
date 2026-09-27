@@ -7,6 +7,23 @@
 #
 # Timestamps are ISO 8601 strings with second precision, as they are on disk.
 
+"""
+Fields the loaded plugins contribute, keyed by plugin short name.
+
+The one place this schema promises a shape it does not describe, and it exists
+because of what a plugin's web half cannot do. A plugin may add a field to
+`Issue` with `extend type Issue`, but a GraphQL fragment cannot be extended:
+the host's own list-row fragment is written in this repository and cannot name
+a field it has never heard of. So a client that draws a plugin's data on a row
+the host fetched has no way to ask for it.
+
+This is that way. The host selects `ext` once, every loaded plugin fills its
+own key, and a plugin's component reads `entity.ext.<short>`. The typed fields
+stay: `ext.kb.features` and `features` are the same value, and a query written
+by the plugin itself should ask for the latter.
+"""
+scalar JSON
+
 "What issues and pull requests have in common (spec 02 §2.5, §2.7)."
 interface Entity {
   id: ID!
@@ -30,11 +47,11 @@ interface Entity {
   "The `assignee` key, which the format allows to be a scalar or a list."
   assignees: [String!]!
   milestone: String
-  "Slugs of the features this entity belongs to (spec 02 §2.11)."
-  features: [String!]!
   "Markdown body, trimmed."
   body: String!
   comments: [Comment!]!
+  "What the loaded plugins contribute, keyed by plugin short name."
+  ext: JSON!
 }
 
 enum Kind {
@@ -88,9 +105,9 @@ type Issue implements Entity {
   labels: [String!]!
   assignees: [String!]!
   milestone: String
-  features: [String!]!
   body: String!
   comments: [Comment!]!
+  ext: JSON!
   """
   A token for the version of `issue.md` this was read from.
 
@@ -98,7 +115,7 @@ type Issue implements Entity {
   text. It is shaped like a git blob hash and is not one — git applies
   `.gitattributes` filters and end-of-line conversion that this does not, and
   may use SHA-256 — so the two differ in a repository that configures either.
-  `Pr`, `Feature` and `Spec` compute theirs the same way.
+  `Pr` computes its own the same way, and so should a type a plugin adds.
 
   Hand it back as `baseSha` when editing a field from a rendered value, and an
   edit made against an older version of that field is refused rather than
@@ -153,9 +170,9 @@ type Pr implements Entity {
   labels: [String!]!
   assignees: [String!]!
   milestone: String
-  features: [String!]!
   body: String!
   comments: [Comment!]!
+  ext: JSON!
   "A token for the version of `pr.md` this was read from; see `Issue.baseSha`."
   baseSha: String!
 
@@ -204,6 +221,16 @@ type Pr implements Entity {
   cut at a hard limit and marked `truncated` when it is.
   """
   changes(paths: [String!]): Changes!
+}
+
+"A commit, as a history walk reports it."
+type Commit {
+  sha: String!
+  subject: String!
+  "RFC 5322 address of the commit's author: `Name <email>`."
+  author: String!
+  "Author date, ISO 8601."
+  date: String!
 }
 
 "The commits of a revision range, oldest first."
@@ -376,8 +403,6 @@ input EntityFilter {
   assignees: [String!]
   authors: [String!]
   milestones: [String!]
-  "Feature slugs; an entity must name every one of them."
-  features: [String!]
   """
   Asked to review it; a pull request must name every one of them.
 
@@ -401,70 +426,6 @@ input EntityFilter {
   text: [String!]
 }
 
-"""
-A feature: a standing concept work attaches to (spec 02 §2.11).
-
-It has no ID and no status. Its `slug` is the directory that holds it and is
-what an entity's `feature` key names; the work attached to it has the status.
-"""
-type Feature {
-  slug: String!
-  title: String!
-  "RFC 5322 address as stored in frontmatter: `Name <email>`."
-  author: String!
-  created: String!
-  "Markdown summary, trimmed. A feature may have none."
-  summary: String!
-  "Path from the repository root, e.g. `.navbook/specs/auth`."
-  path: String!
-  """
-  A token for the version of `feature.md` this was read from, computed as
-  `Issue.baseSha` is.
-
-  Hand it back as `baseSha` when editing, and an edit made against an older
-  version is refused rather than landed on top of somebody else's.
-  """
-  baseSha: String!
-  "Specification documents, in file-name order."
-  specs: [Spec!]!
-  "Issues naming this feature, newest first, whatever their status."
-  issues: [Issue!]!
-  "Pull requests naming this feature, newest first."
-  prs: [Pr!]!
-  """
-  Commits that touched this feature, newest first.
-
-  A commit counts when it changed the feature's documents, when it changed the
-  directory of an issue or pull request naming the feature, or when its message
-  references one of those by ID — which is how a commit that only touches code
-  joins the story (spec 04 §4.3). Read from the served checkout's history.
-  """
-  commits(limit: Int! = 100): [Commit!]!
-}
-
-"One of a feature's specification documents (spec 02 §2.11)."
-type Spec {
-  "File name inside the feature's directory, e.g. `login-flow.md`."
-  fileName: String!
-  title: String!
-  "Path from the repository root."
-  path: String!
-  "Markdown body, trimmed."
-  body: String!
-  "A token for the version of this file it was read from; see `Feature.baseSha`."
-  baseSha: String!
-}
-
-"A commit, as a feature's history reports it."
-type Commit {
-  sha: String!
-  subject: String!
-  "RFC 5322 address of the commit's author: `Name <email>`."
-  author: String!
-  "Author date, ISO 8601."
-  date: String!
-}
-
 type Query {
   issues(filter: EntityFilter): [Issue!]!
   "`ref` is a full ID or an unambiguous prefix of at least four characters."
@@ -479,10 +440,6 @@ type Query {
   """
   prs(filter: EntityFilter, allRefs: Boolean! = false): [Pr!]!
   pr(ref: ID!): Pr!
-  "Every feature in the working tree, in slug order (spec 02 §2.11)."
-  features: [Feature!]!
-  "`slug` is exact: a feature is named by a word somebody chose, not a prefix."
-  feature(slug: String!): Feature!
   doctor: DoctorReport!
   viewer: Viewer!
   "How this repository counts reviews (spec 02 §2.10)."
@@ -528,8 +485,6 @@ input OpenIssueInput {
   labels: [String!]
   assignees: [String!]
   milestone: String
-  "Slugs of features to attach it to (spec 02 §2.11)."
-  features: [String!]
   "Where it sits in the queue; lower first (spec 02 §2.5)."
   rank: Float
   "When the work is wanted, `YYYY-MM-DD`."
@@ -549,7 +504,7 @@ type OpenIssuePayload {
 Fields to change on an issue.
 
 An omitted field is left alone. An explicit null clears the key, as does an
-empty list for `labels`, `assignees` and `features`; `title` and `body` can be
+empty list for `labels` and `assignees`; `title` and `body` can be
 replaced but not cleared. Frontmatter keys this schema does not name are always
 preserved.
 """
@@ -560,7 +515,6 @@ input UpdateIssueInput {
   labels: [String!]
   assignees: [String!]
   milestone: String
-  features: [String!]
   "Where it sits in the queue; an explicit null unplaces it (spec 02 §2.5)."
   rank: Float
   "When the work is wanted, `YYYY-MM-DD`; an explicit null undates it."
@@ -568,7 +522,7 @@ input UpdateIssueInput {
   """
   The `baseSha` the edit was composed against, when it was composed against one.
 
-  Optional, unlike `UpdateSpecInput.baseSha`: a listing that toggles a label or
+  Optional: a listing that toggles a label or
   a drag that sets a rank has not read the file, and need not. Absent, the
   patch lands on the file as it is. Present, the patch is refused with
   `STALE_CONTENT` when a field it names has changed since — and only then, so
@@ -600,7 +554,6 @@ input UpdatePrInput {
   assignees: [String!]
   reviewers: [String!]
   milestone: String
-  features: [String!]
   "See `UpdateIssueInput.baseSha`."
   baseSha: String
 }
@@ -689,75 +642,6 @@ type UnlinkIssuePayload {
   commit: CommitInfo!
 }
 
-input CreateFeatureInput {
-  title: String!
-  "Directory to file it under; derived from the title when absent."
-  slug: String
-  "Markdown summary; a feature may have none."
-  summary: String
-}
-
-type CreateFeaturePayload {
-  feature: Feature!
-  commit: CommitInfo!
-}
-
-"""
-Fields to change on a feature's identity card.
-
-An omitted field is left alone; `title` can be replaced but not cleared, and an
-explicit null clears the summary. Frontmatter keys this schema does not name
-are always preserved.
-"""
-input UpdateFeatureInput {
-  slug: String!
-  title: String
-  summary: String
-  """
-  The `baseSha` the editor started from.
-
-  A save whose file has moved on since is refused with `STALE_CONTENT` rather
-  than landed on top of the change that moved it (spec 06 §6.3).
-  """
-  baseSha: String!
-}
-
-type UpdateFeaturePayload {
-  feature: Feature!
-  commit: CommitInfo!
-}
-
-input AddSpecInput {
-  "Slug of the feature to add it to."
-  feature: String!
-  title: String!
-  body: String!
-  "File to write it to; derived from the title when absent."
-  fileName: String
-}
-
-type AddSpecPayload {
-  feature: Feature!
-  spec: Spec!
-  commit: CommitInfo!
-}
-
-"Fields to change on a document; `title` and `body` are replaced, never cleared."
-input UpdateSpecInput {
-  feature: String!
-  fileName: String!
-  title: String
-  body: String
-  "See `UpdateFeatureInput.baseSha`."
-  baseSha: String!
-}
-
-type UpdateSpecPayload {
-  feature: Feature!
-  spec: Spec!
-  commit: CommitInfo!
-}
-
 type Mutation {
   openIssue(input: OpenIssueInput!): OpenIssuePayload!
   updateIssue(input: UpdateIssueInput!): UpdateIssuePayload!
@@ -774,8 +658,4 @@ type Mutation {
   addComment(input: AddCommentInput!): AddCommentPayload!
   linkIssue(input: LinkIssueInput!): LinkIssuePayload!
   unlinkIssue(ref: ID!): UnlinkIssuePayload!
-  createFeature(input: CreateFeatureInput!): CreateFeaturePayload!
-  updateFeature(input: UpdateFeatureInput!): UpdateFeaturePayload!
-  addSpec(input: AddSpecInput!): AddSpecPayload!
-  updateSpec(input: UpdateSpecInput!): UpdateSpecPayload!
 }

@@ -76,10 +76,11 @@ complete Navbook clients for reading.
 
 `specs/` holds **features** — the standing concepts work attaches to. A feature
 is a directory named after itself, holding a `feature.md` and however many
-specification documents describe it. Features come from
-[`@navbook/plugin-kb`](doc/plugins.md), a plugin, because not every project
-wants them; the format defines them all the same, so a tree using them is
-readable by any Navbook. An issue joins one by naming it:
+specification documents describe it. They come from
+[`@navbook/plugin-kb`](packages/plugin-kb/README.md), a plugin, because not
+every project wants them; the format defines them all the same, so a tree using
+them is readable by any Navbook and a `nav` without the plugin preserves them
+untouched. An issue joins one by naming it:
 
 ```console
 $ nav feature open "Authentication" --slug auth -m "Signing in, sessions, tokens."
@@ -207,6 +208,7 @@ usually enough. A full directory name works too.
 | `nav issue open <title> --feature <slug>` | File it against a feature. Repeatable; `nav issue list feature:auth` finds them again. |
 | `nav issue open <title> --rank 20 --deadline 2026-10-01` | Say where it sits in the queue and when it is wanted. `nav issue list --sort priority` reads them back; the web client reorders by dragging. |
 | `nav doctor [--fix]` | Check the tree against the specification. |
+| `nav plugin install` | Install the plugins this repository declares and this machine lacks. `nav plugin list/update/remove` manage them. |
 
 `--commit` on any mutating command wraps the change in a well-formed
 Conventional Commits `docs` commit (`docs(issue): close #bqlybac0`,
@@ -283,6 +285,14 @@ to exist first:
   reach the remote as; the person a commit is *for* comes from their own token
   and is recorded as `author:`.
 
+Plugins are the one exception to "edit `.env` and restart". A plugin's server
+half is installed beside `nav-server` and its web half is compiled into the
+bundle, so `NAVBOOK_PLUGINS` is a *build* argument: change it and run
+`docker compose build`. The repository still decides which of them it uses, in
+its own `navbook.json`, and the API refuses to start if it declares one the
+image does not carry — so a mismatch is found at deploy time rather than as a
+quiet absence in somebody's browser.
+
 The API container makes its own clone on the first start and keeps it in a
 volume. That volume is not a database — it can be deleted, and the next start
 fetches the repository again. Changing any value in `.env` is an edit and a
@@ -352,8 +362,9 @@ files, so nothing about the format ships to a browser
 ([spec 05 §5.2](doc/spec/05-implementation.md), [06 §6.3](doc/spec/06-future.md)).
 `packages/plugin-kb`
 ([`@navbook/plugin-kb`](packages/plugin-kb/README.md)) is the knowledge base,
-and the first plugin: it is where features and `specs/` are implemented, and
-what proves the plugin surface is enough to build on.
+and the first plugin: features, `specs/` and the `feature:` key are implemented
+there rather than in the core, and it is what proves the plugin surface is
+enough to build on — it uses every part of it.
 Development needs no build step outside the web client: a library's entry point
 is its TypeScript source, and Node runs it directly.
 

@@ -12,7 +12,7 @@
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
-import { FEATURES_QUERY, ISSUES_QUERY } from "~/graphql/queries";
+import { ISSUES_QUERY } from "~/graphql/queries";
 import { distinctValues } from "~/utils/entities";
 import { DEADLINE_STATES, ISSUE_STATUSES } from "~/utils/filter-params";
 import { isSortOrder, type SortOrder, sortRows } from "~/utils/sort";
@@ -52,22 +52,13 @@ const { result, loading, error, refetch } = useQuery(
 const issues = computed(() => sortRows(result.value?.issues ?? [], sort.value));
 const page = usePagedList(issues);
 
-// The feature registry, for the filter bar's menu. Cached: it changes far
-// less often than a listing does, and every page that shows it wants the same
-// answer.
-const { result: featureList } = useQuery(FEATURES_QUERY, undefined, {
-  fetchPolicy: "cache-first",
-});
-
 const people = usePeople();
 
 const suggestions = computed(() => ({
   labels: distinctValues(issues.value, (issue) => issue.labels),
   milestones: distinctValues(issues.value, (issue) => (issue.milestone ? [issue.milestone] : [])),
-  // Features are real directories and people are read from the repository, so
-  // both are the registry itself rather than whatever the listing on screen
-  // happens to mention.
-  features: (featureList.value?.features ?? []).map((feature) => feature.slug),
+  // People are read from the repository, so that menu is offered the registry
+  // itself rather than whatever the listing on screen happens to mention.
   assignees: people.value,
   authors: people.value,
 }));
@@ -85,6 +76,7 @@ const suggestions = computed(() => ({
 
     <EntityFilterBar
       :filter="filter.filter.value"
+      noun="issue"
       :statuses="ISSUE_STATUSES"
       :deadlines="DEADLINE_STATES"
       :empty="filter.empty.value"

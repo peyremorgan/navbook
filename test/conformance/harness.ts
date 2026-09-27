@@ -25,6 +25,7 @@ import { parse as parseYaml } from "yaml";
 import {
   FIXTURE_DATE,
   makeTempRepo,
+  REPO_ROOT,
   type TempRepo,
 } from "../../packages/cli/test/helpers/temprepo.ts";
 
@@ -47,6 +48,17 @@ export type SetupStep =
 export interface CaseManifest {
   "spec-version"?: number;
   description?: string;
+  /**
+   * Plugins the case needs, by package name (spec 02 §2.12).
+   *
+   * A case exercising an extension's data or verbs names the extension that
+   * defines it. The harness puts those packages on `NAVBOOK_PLUGIN_PATH` and
+   * declares them in the fixture's marker, which is what the same repository
+   * would do. Under `$NAV_BIN` — another implementation, tested by the same
+   * suite — a case naming a plugin is skipped rather than failed: a Rust `nav`
+   * cannot load a JavaScript plugin, and its own extensions are its business.
+   */
+  plugins?: string[];
   init?: { from?: string; message?: string; date?: string };
   history?: HistoryStep[];
   run?: {
@@ -91,6 +103,32 @@ export function readManifest(caseDir: string): CaseManifest {
     throw new Error(`${caseDir}/case.yaml has no run.command or run.git`);
   }
   return manifest;
+}
+
+/** Where a plugin this suite knows about lives, by package name. */
+const PLUGIN_DIRS: Record<string, string> = {
+  "@navbook/plugin-kb": join(REPO_ROOT, "packages", "plugin-kb"),
+};
+
+/**
+ * True when this run tests another implementation through `$NAV_BIN`.
+ *
+ * A case naming a plugin is skipped there: this suite's plugins are
+ * JavaScript, and how another implementation provides the same format is its
+ * own affair. The *format* cases still run, which is the point — a tree with
+ * `specs/` in it is conforming whoever wrote it.
+ */
+export function skipsPlugins(): boolean {
+  const bin = process.env.NAV_BIN;
+  return bin !== undefined && bin.trim() !== "";
+}
+
+/** The environment that puts a case's plugins where `nav` will find them. */
+function pluginEnv(manifest: CaseManifest): Record<string, string> {
+  const dirs = (manifest.plugins ?? [])
+    .map((name) => PLUGIN_DIRS[name])
+    .filter((dir): dir is string => dir !== undefined);
+  return dirs.length === 0 ? {} : { NAVBOOK_PLUGIN_PATH: dirs.join(":") };
 }
 
 /** Every fixture case directory (a directory containing `case.yaml`). */
@@ -139,7 +177,7 @@ function executeCase(caseDir: string): Execution {
       };
     }
   }
-  const env = { ...(manifest.run?.env ?? {}) };
+  const env = { ...pluginEnv(manifest), ...(manifest.run?.env ?? {}) };
   for (const step of manifest.run?.before ?? []) {
     // Setup steps get the same NAV_NOW / NAV_IDS hooks, so a fixture that
     // prepares state with `nav` is as reproducible as the command under test.

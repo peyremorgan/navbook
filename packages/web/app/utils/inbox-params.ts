@@ -7,13 +7,14 @@
  * default is left out of the URL, which keeps the round trip stable and each
  * parameter that does appear one the reader chose.
  *
- * A value the app would never write — a misspelled view, a feature nothing
- * carries — falls back to the default rather than failing. A URL is typed by
+ * A value the app would never write — a misspelled view, a group value
+ * nothing carries — falls back to the default rather than failing. A URL is typed by
  * hand and shared, and the inbox is a better answer than an error.
  */
 
 import { joinTerms, queryValues, type RouteQuery, splitTerms } from "~/utils/filter-params";
 import {
+  INBOX_GROUPINGS,
   INBOX_KIND_CHOICES,
   INBOX_VIEWS,
   type InboxKindChoice,
@@ -44,14 +45,24 @@ export interface InboxParams extends InboxSelection {
   text: string;
 }
 
-/** The keys this page owns; everything else in the URL is left alone. */
-export const INBOX_PARAM_KEYS = ["view", "kind", "feature", "status", "sort", "q"] as const;
+/** The keys this page owns itself; everything else in the URL is left alone. */
+export const INBOX_PARAM_KEYS = ["view", "kind", "status", "sort", "q"] as const;
+
+/**
+ * Every key this page owns, registered groups included.
+ *
+ * A function rather than a constant because a group is registered by a layer
+ * at boot, and a frozen list read at module load would have been read first.
+ */
+export function inboxParamKeys(): string[] {
+  return [...INBOX_PARAM_KEYS, ...INBOX_GROUPINGS.map((group) => group.key)];
+}
 
 export function defaultInboxParams(): InboxParams {
   return {
     view: "everything",
     kind: "any",
-    feature: null,
+    ext: {},
     finished: false,
     sort: "priority",
     text: "",
@@ -74,9 +85,13 @@ export function queryToInboxParams(query: RouteQuery): InboxParams {
   return {
     view: INBOX_VIEWS.includes(view as InboxView) ? (view as InboxView) : "everything",
     kind: INBOX_KIND_CHOICES.includes(kind as InboxKindChoice) ? (kind as InboxKindChoice) : "any",
-    // A slug is somebody's word, not one of ours, so it is carried through as
-    // written and compared with case folded — as core compares it.
-    feature: first(query.feature),
+    // A registered group's value is somebody's word, not one of ours, so it is
+    // carried through as written and left to the group to compare.
+    ext: Object.fromEntries(
+      INBOX_GROUPINGS.map((group) => [group.key, first(query[group.key])]).filter(
+        ([, value]) => value !== null,
+      ),
+    ),
     finished: firstWord(query.status) === "all",
     sort: isSortOrder(firstWord(query.sort)) ? (firstWord(query.sort) as SortOrder) : "priority",
     text: joinTerms(queryValues(query.q).flatMap(splitTerms)),
@@ -88,7 +103,10 @@ export function inboxParamsToQuery(params: InboxParams): Record<string, string> 
   const query: Record<string, string> = {};
   if (params.view !== "everything") query.view = params.view;
   if (params.kind !== "any") query.kind = params.kind;
-  if (params.feature !== null && params.feature !== "") query.feature = params.feature;
+  for (const group of INBOX_GROUPINGS) {
+    const value = params.ext[group.key] ?? null;
+    if (value !== null && value !== "") query[group.key] = value;
+  }
   if (params.finished) query.status = "all";
   if (params.sort !== "priority") query.sort = params.sort;
   const terms = splitTerms(params.text);

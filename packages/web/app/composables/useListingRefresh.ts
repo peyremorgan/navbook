@@ -21,10 +21,13 @@
 import type { ApolloClient, NormalizedCacheObject } from "@apollo/client/core";
 
 /** Root fields whose cached answers a write can invalidate. */
-const LISTINGS = ["issues", "prs", "features", "people"] as const;
+const LISTINGS = ["issues", "prs", "people"] as const;
 
 export function evictListings(client: ApolloClient<NormalizedCacheObject>): void {
-  for (const fieldName of LISTINGS) {
+  // A plugin's listing is evicted with the built-in ones: its data changed when
+  // the entity did, and one that went stale until a reload would be a plugin
+  // behaving worse than the thing it sits beside.
+  for (const fieldName of [...LISTINGS, ...useNavbookSlots().listings()]) {
     client.cache.evict({ id: "ROOT_QUERY", fieldName });
   }
   client.cache.gc();

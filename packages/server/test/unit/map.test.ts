@@ -75,7 +75,6 @@ describe("toQuery", () => {
           assignees: ["a@x.invalid"],
           authors: ["b@x.invalid"],
           milestones: ["v1"],
-          features: ["auth"],
           deadline: ["OVERDUE", "NONE"],
           text: ["crash"],
         },
@@ -87,13 +86,15 @@ describe("toQuery", () => {
         assignees: ["a@x.invalid"],
         authors: ["b@x.invalid"],
         milestones: ["v1"],
-        features: ["auth"],
         reviewers: [],
         reviews: [],
         awaiting: [],
         deadline: ["overdue", "none"],
         today: TODAY,
         text: ["crash"],
+        // No plugin terms: the API's filter is the schema's fields, and a
+        // plugin adds its own rather than smuggling one through these.
+        ext: {},
       },
     );
   });

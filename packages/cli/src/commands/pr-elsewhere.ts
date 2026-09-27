@@ -96,7 +96,9 @@ function agreed(ctx: Ctx, entity: EntityRecord, to: Destination, opts: PrWriteOp
  *
  * The Navbook directory is the one already resolved here rather than found
  * again: the pull request was located under it, and a second discovery from
- * another root is one more chance to land somewhere it is not.
+ * another root is one more chance to land somewhere it is not. The plugin
+ * extensions carry over for the same reason: the other checkout's tree is
+ * the same format, and read without them its registered keys would be raw.
  */
 function contextIn(ctx: Ctx, worktree: string): Ctx {
   return makeContext({
@@ -105,6 +107,7 @@ function contextIn(ctx: Ctx, worktree: string): Ctx {
     stdout: ctx.stdout,
     stderr: ctx.stderr,
     navDir: ctx.navDir,
+    ext: ctx.ext,
   });
 }
 

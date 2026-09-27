@@ -11,6 +11,7 @@
  * number — still round-trips as the forty characters the author typed.
  */
 
+import type { CoreExtensions, FrontmatterKeyDef } from "./extensions.ts";
 import {
   emptyDoc,
   hasKey,
@@ -26,12 +27,13 @@ import {
 } from "./frontmatter.ts";
 import { isId } from "./id.ts";
 import { formatPerson, parsePerson } from "./person.ts";
-import { SLUG_PATTERN, slugify } from "./slug.ts";
 import { isCalendarDate, parseIso } from "./time.ts";
+// Type-only, and therefore erased: `tree.ts` imports this module at runtime,
+// and a value import back would be a cycle.
+import type { EntityKind } from "./tree.ts";
 
 export const SHA_PATTERN = /^[0-9a-f]{40}$/;
 /** The identity card at the top of a feature directory (spec 02 §2.11). */
-export const FEATURE_FILE = "feature.md";
 export const VERDICTS = ["approve", "request-changes", "comment"] as const;
 export type Verdict = (typeof VERDICTS)[number];
 
@@ -92,45 +94,79 @@ const STRING_KEYS = [
   "signature",
 ] as const;
 
-/** Parse any Navbook file; frontmatter faults surface as problems, not throws. */
-export function parseFile(text: string): ParsedFile {
+/**
+ * Parse any Navbook file; frontmatter faults surface as problems, not throws.
+ *
+ * `ext` is the registered frontmatter keys (§2.12), and is optional because
+ * most callers read one built-in key out of one file and could not be affected
+ * by it. It matters where an entity *record* is built, since that `fm` is what
+ * a plugin's query matching and validation read.
+ */
+export function parseFile(text: string, ext?: CoreExtensions): ParsedFile {
   const nav = parseDoc(text);
   const problems: Problem[] = nav.errors.map((message) => ({
     message: `invalid YAML: ${message}`,
   }));
   // One conversion out of the YAML document, shared by both views of it.
   const raw = toPlain(nav);
-  return { nav, fm: normalizeFrontmatter(nav, raw), raw, body: nav.body, problems };
+  return { nav, fm: normalizeFrontmatter(nav, raw, ext), raw, body: nav.body, problems };
 }
 
 /** Coerce spec-typed frontmatter keys; leave unknown keys exactly as parsed. */
 export function normalizeFrontmatter(
   nav: NavDoc,
   parsed?: Record<string, unknown>,
+  ext?: CoreExtensions,
 ): Record<string, unknown> {
   const raw = parsed ?? toPlain(nav);
   const out: Record<string, unknown> = {};
   for (const key of keysInOrder(nav)) {
     if (key === "") continue;
-    out[key] = normalizeKey(nav, key, raw[key]);
+    out[key] = normalizeKey(nav, key, raw[key], ext);
   }
   return out;
 }
 
-function normalizeKey(nav: NavDoc, key: string, rawValue: unknown): unknown {
+function normalizeKey(nav: NavDoc, key: string, rawValue: unknown, ext?: CoreExtensions): unknown {
   if ((STRING_KEYS as readonly string[]).includes(key)) {
     return stringAt(nav, [key]) ?? rawValue;
   }
   if (key === "rank") return normalizeRank(rawValue);
   if (key === "labels" || key === "subtasks") return normalizeStringList(nav, key, rawValue);
-  if (key === "assignee" || key === "feature" || key === "reviewer") {
+  if (key === "assignee" || key === "reviewer") {
     return Array.isArray(rawValue)
       ? normalizeStringList(nav, key, rawValue)
       : (stringAt(nav, [key]) ?? rawValue);
   }
   if (key === "revisions") return normalizeRevisions(nav, rawValue);
   if (key === "merged") return normalizeMerged(nav, rawValue);
+  // A key a plugin owns is coerced to the shape it declared, for the reason
+  // the built-in keys above are: YAML will happily make `2.0` a number and
+  // `no` a boolean, and a plugin comparing it to a string would find neither.
+  const def = ext?.frontmatterKeys.find((candidate) => candidate.key === key);
+  if (def !== undefined) return normalizeDeclared(nav, key, rawValue, def.shape);
   return rawValue;
+}
+
+/** Coerce one plugin-owned key to its declared shape. */
+function normalizeDeclared(
+  nav: NavDoc,
+  key: string,
+  rawValue: unknown,
+  shape: FrontmatterKeyDef["shape"],
+): unknown {
+  switch (shape) {
+    case "string":
+      return stringAt(nav, [key]) ?? rawValue;
+    case "string-list":
+      return normalizeStringList(nav, key, rawValue);
+    case "string-or-list":
+      return Array.isArray(rawValue)
+        ? normalizeStringList(nav, key, rawValue)
+        : (stringAt(nav, [key]) ?? rawValue);
+    default:
+      return rawValue;
+  }
 }
 
 /**
@@ -183,7 +219,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 /* ------------------------------------------------------------------ helpers */
 
-function requireString(parsed: ParsedFile, key: string, problems: Problem[]): string | null {
+export function requireString(parsed: ParsedFile, key: string, problems: Problem[]): string | null {
   const value = parsed.fm[key];
   if (value === undefined || value === null) {
     if (hasKey(parsed.nav, key)) {
@@ -200,7 +236,7 @@ function requireString(parsed: ParsedFile, key: string, problems: Problem[]): st
   return value;
 }
 
-function checkOptionalString(parsed: ParsedFile, key: string, problems: Problem[]): void {
+export function checkOptionalString(parsed: ParsedFile, key: string, problems: Problem[]): void {
   const value = parsed.fm[key];
   if (value === undefined || value === null) return;
   if (typeof value !== "string" || value.trim() === "") {
@@ -208,7 +244,7 @@ function checkOptionalString(parsed: ParsedFile, key: string, problems: Problem[
   }
 }
 
-function checkPerson(parsed: ParsedFile, key: string, problems: Problem[]): void {
+export function checkPerson(parsed: ParsedFile, key: string, problems: Problem[]): void {
   const value = requireString(parsed, key, problems);
   if (value === null) return;
   if (!parsePerson(value)) {
@@ -219,7 +255,7 @@ function checkPerson(parsed: ParsedFile, key: string, problems: Problem[]): void
   }
 }
 
-function checkTimestamp(parsed: ParsedFile, key: string, problems: Problem[]): void {
+export function checkTimestamp(parsed: ParsedFile, key: string, problems: Problem[]): void {
   const value = requireString(parsed, key, problems);
   if (value === null) return;
   if (!parseIso(value)) {
@@ -243,7 +279,7 @@ function checkLabels(parsed: ParsedFile, problems: Problem[]): void {
  * `reviewer` (§2.7), which take the same shape for the same reason: one name
  * is the overwhelmingly common case and reads better as a scalar.
  */
-function checkPersonList(parsed: ParsedFile, key: string, problems: Problem[]): void {
+export function checkPersonList(parsed: ParsedFile, key: string, problems: Problem[]): void {
   const value = parsed.fm[key];
   if (value === undefined || value === null) return;
   const complain = (): void => {
@@ -259,23 +295,6 @@ function checkPersonList(parsed: ParsedFile, key: string, problems: Problem[]): 
       complain();
       return;
     }
-  }
-}
-
-/**
- * `feature` names the feature directories an entity belongs to (§2.11). It is a
- * slug or a list of slugs, and a value that is not a slug can name no directory
- * at all, so it is a schema fault rather than a dangling reference (D14).
- */
-function checkFeature(parsed: ParsedFile, problems: Problem[]): void {
-  const value = parsed.fm.feature;
-  if (value === undefined || value === null) return;
-  const entries = Array.isArray(value) ? value : [value];
-  const bad =
-    entries.length === 0 ||
-    entries.some((entry) => typeof entry !== "string" || !SLUG_PATTERN.test(entry));
-  if (bad) {
-    problems.push({ key: "feature", message: "'feature' must be a slug or list of slugs" });
   }
 }
 
@@ -330,7 +349,7 @@ function checkIdList(parsed: ParsedFile, key: string, problems: Problem[]): void
   }
 }
 
-function checkNoStatusKey(parsed: ParsedFile, problems: Problem[]): void {
+export function checkNoStatusKey(parsed: ParsedFile, problems: Problem[]): void {
   if (hasKey(parsed.nav, "status")) {
     problems.push({
       key: "status",
@@ -417,11 +436,43 @@ export function readReviewers(fm: Record<string, unknown>): string[] {
 }
 
 /** Read `feature` (scalar or list) defensively, keeping only slugs. */
-export function readFeatures(fm: Record<string, unknown>): string[] {
-  const value = fm.feature;
+
+/**
+ * Read a key that may be written as one string or a list of them.
+ *
+ * The shape `assignee`, `reviewer` and `feature` take (§2.5), offered to
+ * plugins so a key declared `string-or-list` need not each reimplement the
+ * "one SHOULD be written as a scalar" rule. Non-strings are dropped rather
+ * than coerced: what to do about them is `validate`'s business, and a reader
+ * that invented a value would hide the fault from it.
+ */
+export function readStringOrList(fm: Record<string, unknown>, key: string): string[] {
+  const value = fm[key];
   if (value === undefined || value === null) return [];
   const entries = Array.isArray(value) ? value : [value];
-  return entries.filter((v): v is string => typeof v === "string" && SLUG_PATTERN.test(v));
+  return entries.filter((entry): entry is string => typeof entry === "string");
+}
+
+/**
+ * Run the validators plugins declared for this entity kind.
+ *
+ * Only for keys that are present: a plugin's key is optional by construction,
+ * since a tree written before the plugin existed has none, and a required one
+ * would make installing a plugin retroactively invalidate the repository.
+ */
+function checkDeclaredKeys(
+  parsed: ParsedFile,
+  kind: EntityKind,
+  ext: CoreExtensions | undefined,
+  problems: Problem[],
+): void {
+  if (ext === undefined) return;
+  for (const def of ext.frontmatterKeys) {
+    if (!def.kinds.includes(kind) || def.validate === undefined) continue;
+    const value = parsed.fm[def.key];
+    if (value === undefined) continue;
+    problems.push(...def.validate(value, parsed));
+  }
 }
 
 /** Read `revisions` defensively, keeping only well-formed entries. */
@@ -450,7 +501,7 @@ export function readMerged(fm: Record<string, unknown>): Record<string, unknown>
 /* --------------------------------------------------------------- validation */
 
 /** Validate an `issue.md` (§2.5). */
-export function validateIssue(parsed: ParsedFile): Problem[] {
+export function validateIssue(parsed: ParsedFile, ext?: CoreExtensions): Problem[] {
   const problems = [...parsed.problems];
   requireString(parsed, "title", problems);
   checkPerson(parsed, "author", problems);
@@ -458,7 +509,6 @@ export function validateIssue(parsed: ParsedFile): Problem[] {
   checkLabels(parsed, problems);
   checkPersonList(parsed, "assignee", problems);
   checkOptionalString(parsed, "milestone", problems);
-  checkFeature(parsed, problems);
   checkRank(parsed, problems);
   checkDeadline(parsed, problems);
   checkOptionalString(parsed, "resolution", problems);
@@ -469,11 +519,12 @@ export function validateIssue(parsed: ParsedFile): Problem[] {
   if (parsed.body.trim() === "") {
     problems.push({ message: "issue description must not be empty (§2.5)" });
   }
+  checkDeclaredKeys(parsed, "issue", ext, problems);
   return problems;
 }
 
 /** Validate a `pr.md` (§2.7). */
-export function validatePr(parsed: ParsedFile): Problem[] {
+export function validatePr(parsed: ParsedFile, ext?: CoreExtensions): Problem[] {
   const problems = [...parsed.problems];
   requireString(parsed, "title", problems);
   checkPerson(parsed, "author", problems);
@@ -484,7 +535,6 @@ export function validatePr(parsed: ParsedFile): Problem[] {
   checkPersonList(parsed, "assignee", problems);
   checkPersonList(parsed, "reviewer", problems);
   checkOptionalString(parsed, "milestone", problems);
-  checkFeature(parsed, problems);
   checkOptionalString(parsed, "resolution", problems);
   checkIdReference(parsed, "superseded-by", problems);
   checkNoIssueOnlyKeys(parsed, problems);
@@ -494,6 +544,7 @@ export function validatePr(parsed: ParsedFile): Problem[] {
   }
   validateRevisions(parsed, problems);
   validateMergedBlock(parsed, problems);
+  checkDeclaredKeys(parsed, "pr", ext, problems);
   return problems;
 }
 
@@ -608,8 +659,15 @@ export interface NewEntityInput {
   labels?: string[];
   assignee?: string[];
   milestone?: string;
-  /** Feature slugs this entity belongs to (§2.11). */
-  features?: string[];
+  /**
+   * Values for frontmatter keys a plugin owns (§2.12).
+   *
+   * Written after the keys this format defines, so a file composed with a
+   * plugin installed differs from one composed without it only by the keys
+   * the plugin added — and an entity opened before the plugin existed keeps
+   * the frontmatter order it had.
+   */
+  ext?: Record<string, string | readonly string[]>;
 }
 
 export interface NewIssueInput extends NewEntityInput {
@@ -671,9 +729,10 @@ function applyOptionalMeta(nav: NavDoc, input: NewEntityInput): void {
   if (input.labels?.length) setFlowList(nav, "labels", input.labels);
   writeScalarOrList(nav, "assignee", input.assignee);
   if (input.milestone) patchDoc(nav, { milestone: input.milestone });
-  // Singular on disk and scalar-or-list like `assignee` (§2.11): one feature is
-  // written as a scalar, which is what nearly every entity carries.
-  writeScalarOrList(nav, "feature", input.features);
+  for (const [key, value] of Object.entries(input.ext ?? {})) {
+    if (typeof value === "string") patchDoc(nav, { [key]: value });
+    else writeScalarOrList(nav, key, value);
+  }
 }
 
 /**
@@ -691,103 +750,13 @@ export function writeScalarOrList(nav: NavDoc, key: string, values?: readonly st
   else setFlowList(nav, key, [...values]);
 }
 
-/**
- * Validate a `feature.md` (§2.11).
- *
- * The body is the feature's summary and may be empty: a title and an author is
- * enough to name a concept, and the specification documents beside it are where
- * the substance belongs.
+/*
+ * The six checks above are exported because they are the format's generic
+ * frontmatter rules rather than any one file type's: a plugin validating a
+ * file it owns needs `title` required and `author` to be a person in exactly
+ * the sense this document defines, and reimplementing them would be a second
+ * opinion about a format that has one.
  */
-export function validateFeature(parsed: ParsedFile): Problem[] {
-  const problems = [...parsed.problems];
-  requireString(parsed, "title", problems);
-  checkPerson(parsed, "author", problems);
-  checkTimestamp(parsed, "created", problems);
-  checkNoStatusKey(parsed, problems);
-  return problems;
-}
-
-/**
- * Validate a specification document (§2.11).
- *
- * Only `title` is required. A spec is a living document rather than a record of
- * something that happened, so who wrote it and when are git's answer to give.
- */
-export function validateSpec(parsed: ParsedFile): Problem[] {
-  const problems = [...parsed.problems];
-  requireString(parsed, "title", problems);
-  if (parsed.fm.author !== undefined && parsed.fm.author !== null) {
-    checkPerson(parsed, "author", problems);
-  }
-  if (parsed.fm.created !== undefined && parsed.fm.created !== null) {
-    checkTimestamp(parsed, "created", problems);
-  }
-  checkNoStatusKey(parsed, problems);
-  return problems;
-}
-
-export interface NewFeatureInput {
-  title: string;
-  author: string;
-  created: string;
-  /** The summary; a feature may have none. */
-  body?: string;
-}
-
-/** Render a new `feature.md`. */
-export function newFeatureFile(input: NewFeatureInput): string {
-  const nav = emptyDoc();
-  patchDoc(nav, { title: input.title, author: input.author, created: input.created });
-  const summary = normalizeBody(input.body ?? "");
-  // A feature with no summary ends at its closing delimiter. The blank line a
-  // body is separated by is part of having one.
-  nav.body = summary === "" ? "" : `\n${summary}`;
-  return serializeDoc(nav);
-}
-
-export interface NewSpecInput {
-  title: string;
-  body: string;
-  author?: string;
-  created?: string;
-}
-
-/** Render a new specification document. */
-export function newSpecFile(input: NewSpecInput): string {
-  const nav = emptyDoc();
-  patchDoc(nav, { title: input.title });
-  if (input.author) patchDoc(nav, { author: input.author });
-  if (input.created) patchDoc(nav, { created: input.created });
-  nav.body = `\n${normalizeBody(input.body)}`;
-  return serializeDoc(nav);
-}
-
-/**
- * The grammar a spec document's name must follow to be *created* by a tool.
- *
- * Reading is deliberately more generous — the tree model takes any `*.md` —
- * because a hand-written `Login Flow.md` is legal and must keep working. What a
- * tool mints for somebody else to live with is held to the slug grammar, and
- * `feature.md` is excluded because that name already means something else.
- */
-export const SPEC_FILE_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*\.md$/;
-
-/** True when a tool may create a spec document under this name. */
-export function isSpecFileName(name: string): boolean {
-  return name !== FEATURE_FILE && SPEC_FILE_PATTERN.test(name);
-}
-
-/**
- * Derive a spec document's file name from its title.
- *
- * A title that slugs to `feature` would collide with the identity card, so it
- * gains a suffix rather than being refused: the author named a document, and
- * which file holds it is the tool's business.
- */
-export function specFileName(title: string): string {
-  const slug = slugify(title);
-  return slug === "feature" ? "feature-spec.md" : `${slug}.md`;
-}
 
 export interface NewCommentInput {
   author: string;

@@ -26,10 +26,16 @@ export interface IssueOpenOptions extends GlobalFlags {
   label?: string[];
   assignee?: string[];
   milestone?: string;
-  feature?: string[];
   rank?: number;
   deadline?: string;
   parent?: string;
+  /**
+   * Frontmatter a plugin contributed, from an option it declared (§2.12).
+   *
+   * Written by the same composer that writes the format's own keys, so a
+   * plugin's value lands in the file exactly as a built-in one would.
+   */
+  ext?: Record<string, string | readonly string[]>;
 }
 
 export function cmdIssueOpen(ctx: Ctx, title: string, opts: IssueOpenOptions): void {
@@ -59,7 +65,7 @@ export function cmdIssueOpen(ctx: Ctx, title: string, opts: IssueOpenOptions): v
         labels: opts.label,
         assignee: opts.assignee,
         milestone: opts.milestone,
-        features: opts.feature,
+        ...(opts.ext ? { ext: opts.ext } : {}),
         rank: opts.rank,
         deadline: opts.deadline,
         parent: parent?.id,

@@ -60,7 +60,14 @@ credential reads it from the environment.
 
 | Plugin | What it adds |
 |---|---|
-| [`@navbook/plugin-kb`](../packages/plugin-kb/README.md) | The knowledge base: features under `specs/`, the documents describing them, and the `feature:` key that attaches work to one |
+| [`@navbook/plugin-kb`](../packages/plugin-kb/README.md) | The knowledge base: features under `specs/`, the documents that describe them, and the `feature:` key that attaches work to one |
+
+`@navbook/plugin-kb` is also the worked example. It uses every seam a plugin
+has — a directory of its own, a frontmatter key, a query term, doctor checks, a
+command tree, options on built-in verbs, GraphQL types and resolvers — and its
+own suite is the same set of questions the built-in feature suite used to ask.
+Reading it beside this document is the fastest way to see what a plugin looks
+like when it is finished.
 
 To have one listed here, open a pull request adding a row. There is no registry
 to submit to and nothing to approve: the list is what somebody thought worth
@@ -196,14 +203,104 @@ value every built-in verb produces — and hands it to `runPlan`. That is not a
 formality: it is how a plugin's changes get `--commit`, the staged-changes
 guard and the commit message conventions without implementing any of them.
 
+### The web half
+
+`./web` is a [Nuxt layer](https://nuxt.com/docs/getting-started/layers): a
+directory whose `nuxt.config.ts` the client `extends`. Its `app/pages` become
+routes, its `app/components` and `app/composables` are auto-imported, and that
+is the whole of what it takes to add a page.
+
+Two things follow from a layer being a *build-time* thing, and both are
+surprising enough to be worth stating:
+
+- Which plugins a client carries is decided when the bundle is built, not when
+  the container starts. `NAVBOOK_WEB_PLUGINS` is that list, and `.env`'s
+  `NAVBOOK_PLUGINS` sets it for both images at once so the API and the client
+  cannot disagree about what exists.
+- Inside a layer, `~/…` resolves against the *consuming* project, not the
+  layer. So `~/utils/patch` is the host's, and a layer's own modules are
+  imported by relative path.
+
+Anything a plugin wants that is not a page of its own goes through the slot
+registry, which a layer fills from one of its own Nuxt plugin files:
+
+```ts
+// web/app/plugins/50.kb.ts
+export default defineNuxtPlugin({
+  name: "navbook-plugin-kb",
+  enforce: "pre",
+  setup() {
+    useNavbookSlots().register({
+      navLinks: [{ label: "Features", to: "/features", icon: "i-lucide-layers" }],
+      panels: [{ noun: "issue", component: KbFeaturePanel }],
+      entityFields: [{ field: "features", label: "features", read: readKbFeatures }],
+      rowBadges: [{ component: KbFeatureChips }],
+      filters: [{ param: "feature", apiField: "features", /* … */ }],
+      inboxGroups: [{ key: "feature", label: "Feature", /* … */ }],
+      cache: { typePolicies: { Feature: { keyFields: ["slug"] } } },
+    });
+  },
+});
+```
+
+**`Entity.ext` is how a plugin draws on somebody else's row.** A plugin's SDL
+extends `Issue`, but nothing extends a *fragment* — and the host's list-row
+fragment is written in `@navbook/web`, which has never heard of your field. So
+the host selects one map, `ext`, and every loaded plugin fills its own key
+under its short name. A row badge reads `entity.ext.<short>`; a query the
+plugin writes itself asks for the typed field as usual. The server side is one
+call:
+
+```ts
+host.entityExt((entity) => ({ features: readFeatures(entity.fm) }));
+```
+
+Read it defensively. `ext` is a `JSON` scalar, so a client built with your
+layer against an API without your plugin gets no key at all — and that has to
+render as "nothing to show" rather than as a page that will not load.
+
+A plugin's own operations are generated against the *composed* schema: its
+`codegen.ts` reads `@navbook/server`'s SDL and its own, and generates into its
+own package. That is what keeps `@navbook/web` buildable with no plugins
+installed, and it is why a fragment cannot be shared across the boundary — a
+document registry does not cross a package, so a selection the host also makes
+is written out again on the plugin's side.
+
+### What loading costs, and when it happens
+
+A plugin's code is imported only when something it declared is actually
+reached. Four things do that, and nothing else:
+
+| What you type | What loads |
+|---|---|
+| `nav --help`, `nav issue list` | nothing |
+| `nav <plugin-noun> …` | that plugin's `./core` and `./cli` |
+| a verb a plugin contributes to | that plugin's `./core` and `./cli` |
+| a query term a plugin declared | that plugin's `./core` |
+| `nav doctor` | every plugin's `./core`, to run its checks |
+
+So a contribution is a bargain you make openly: a column on `issue list` means
+that listing loads the plugin, because the column cannot be drawn without it. A
+plugin that contributes nothing to a command costs that command nothing at all
+— measured, not assumed, by the performance suite.
+
+A command that reads no tree can say so with `"needsCore": false`, and then
+even its own plugin's format half stays unloaded.
+
 ### Developing one
 
 `NAVBOOK_PLUGIN_PATH` is a colon-separated list of directories, each a plugin
-package, loaded ahead of the store. Nothing has to be installed or published:
+package, loaded ahead of the store — so a plugin you are writing shadows an
+installed copy of itself. Nothing has to be installed or published:
 
 ```console
 $ NAVBOOK_PLUGIN_PATH=~/code/navbook-plugin-jira nav jira sync
 ```
+
+`packages/cli/test/fixtures/plugin-probe` in this repository is a complete
+worked example: one noun with two verbs, an option on `issue open`, a column
+and a `--json` key on `issue list`, a section on `issue show`, a query term, a
+tree location and a doctor check, in about a hundred lines.
 
 The web part is a Nuxt layer merged at build time, so the client is built with
 the plugins it is meant to have:

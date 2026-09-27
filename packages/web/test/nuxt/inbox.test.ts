@@ -5,7 +5,7 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, it } from "vitest";
+import { afterEach, beforeEach, describe, it } from "vitest";
 import {
   INBOX_REASONS,
   type InboxItem,
@@ -15,10 +15,40 @@ import {
   mergeInbox,
   narrowInbox,
   railCounts,
-  sameFeature,
+  registerInboxGrouping,
+  resetInboxGroupings,
   sortInbox,
 } from "../../app/utils/inbox";
 import type { IssueListItemFragment, PrListItemFragment } from "../../src/generated/gql/graphql";
+
+/**
+ * A grouping standing in for a plugin's, over `Entity.ext`.
+ *
+ * The inbox knows nothing about features any more (`@navbook/plugin-kb` owns
+ * those): what it knows is how to group by whatever a layer registered. So
+ * what is proved here is the mechanism — the narrowing, the faceted counts and
+ * the value that is chosen but offered by nothing — with one synthetic group,
+ * rather than the knowledge base's reading of it.
+ */
+const TOPICS = {
+  key: "topic",
+  label: "Topic",
+  icon: "i-lucide-tag",
+  values: (items: readonly InboxItem[]) =>
+    [...new Set(items.flatMap((item) => topicsOf(item)))].sort((a, b) => a.localeCompare(b)),
+  matches: (item: InboxItem, value: string) =>
+    topicsOf(item).some((topic) => topic.toLowerCase() === value.toLowerCase()),
+};
+
+function topicsOf(item: InboxItem): string[] {
+  const mine = (item.entity.ext as { probe?: { topics?: string[] } }).probe;
+  return mine?.topics ?? [];
+}
+
+/** One entity's `ext`, as the probe's server half would have filled it. */
+function topics(...values: string[]): Record<string, unknown> {
+  return { probe: { topics: values } };
+}
 
 function issue(id: string, extra: Partial<IssueListItemFragment> = {}): IssueListItemFragment {
   return {
@@ -34,7 +64,7 @@ function issue(id: string, extra: Partial<IssueListItemFragment> = {}): IssueLis
     labels: [],
     assignees: [],
     milestone: null,
-    features: [],
+    ext: {},
     resolution: null,
     rank: null,
     deadline: null,
@@ -56,7 +86,7 @@ function pr(id: string, extra: Partial<PrListItemFragment> = {}): PrListItemFrag
     labels: [],
     assignees: [],
     milestone: null,
-    features: [],
+    ext: {},
     target: "main",
     source: "feat/thing",
     draft: false,
@@ -266,23 +296,28 @@ describe("sortInbox", () => {
 
 /* ------------------------------------------------------------------ narrow */
 
-const everything: InboxSelection = { view: "everything", kind: "any", feature: null };
+const everything: InboxSelection = { view: "everything", kind: "any", ext: {} };
 
 const sample: InboxItem[] = [
   {
     kind: "issue",
     id: "aaaa0001",
     reasons: ["assigned"],
-    entity: issue("aaaa0001", { features: ["authentication"] }),
+    entity: issue("aaaa0001", { ext: topics("authentication") }),
   },
   {
     kind: "pr",
     id: "bbbb0001",
     reasons: ["assigned", "author"],
-    entity: pr("bbbb0001", { features: ["authentication", "billing"] }),
+    entity: pr("bbbb0001", { ext: topics("authentication", "billing") }),
   },
   { kind: "pr", id: "bbbb0002", reasons: ["awaiting"], entity: pr("bbbb0002") },
 ];
+
+// Registered per case rather than once: a registry that leaked between files
+// would make the order they run in part of what is being tested.
+beforeEach(() => registerInboxGrouping(TOPICS));
+afterEach(() => resetInboxGroupings());
 
 describe("narrowInbox", () => {
   it("keeps everything when nothing is chosen", () => {
@@ -308,31 +343,39 @@ describe("narrowInbox", () => {
     );
   });
 
-  it("forgives the case of a slug, as core does when it matches one", () => {
-    assert.ok(sameFeature("Authentication", "authentication"));
-    assert.ok(!sameFeature("authentication", "billing"));
+  it("leaves a registered group's comparison to the group", () => {
+    // This one folds case, as a slug's does. The inbox does not decide that:
+    // it asks, which is what lets a plugin match its values its own way.
     assert.deepEqual(
-      narrowInbox(sample, { ...everything, feature: "AUTHENTICATION" }).map((item) => item.id),
+      narrowInbox(sample, { ...everything, ext: { topic: "AUTHENTICATION" } }).map(
+        (item) => item.id,
+      ),
       ["aaaa0001", "bbbb0001"],
     );
   });
 
-  it("narrows to one feature, and to none at all", () => {
+  it("narrows to one registered value, and to none at all", () => {
     assert.deepEqual(
-      narrowInbox(sample, { ...everything, feature: "billing" }).map((item) => item.id),
+      narrowInbox(sample, { ...everything, ext: { topic: "billing" } }).map((item) => item.id),
       ["bbbb0001"],
     );
-    assert.deepEqual(narrowInbox(sample, { ...everything, feature: "nothing" }), []);
+    assert.deepEqual(narrowInbox(sample, { ...everything, ext: { topic: "nothing" } }), []);
+  });
+
+  it("ignores a group nothing registered", () => {
+    // A key left over in an address from a build that had another plugin in
+    // it. Narrowing on it would empty a listing for a reason nobody can see.
+    assert.equal(narrowInbox(sample, { ...everything, ext: { nosuch: "x" } }).length, 3);
   });
 
   it("ANDs the three groups", () => {
     assert.deepEqual(
-      narrowInbox(sample, { view: "authored", kind: "pr", feature: "authentication" }).map(
+      narrowInbox(sample, { view: "authored", kind: "pr", ext: { topic: "authentication" } }).map(
         (item) => item.id,
       ),
       ["bbbb0001"],
     );
-    assert.deepEqual(narrowInbox(sample, { view: "authored", kind: "issue", feature: null }), []);
+    assert.deepEqual(narrowInbox(sample, { view: "authored", kind: "issue", ext: {} }), []);
   });
 
   it("agrees with matchesSelection", () => {
@@ -383,10 +426,10 @@ describe("railCounts", () => {
     );
   });
 
-  it("offers every feature the inbox mentions, sorted, with Any first", () => {
+  it("offers every value a registered group mentions, sorted, with Any first", () => {
     const counts = railCounts(sample, everything);
     assert.deepEqual(
-      counts.features.map((entry) => [entry.value, entry.count]),
+      counts.ext.topic?.map((entry) => [entry.value, entry.count]),
       [
         [null, 3],
         ["authentication", 2],
@@ -395,22 +438,22 @@ describe("railCounts", () => {
     );
   });
 
-  it("does not offer a slug twice for having been capitalised twice", () => {
-    const counts = railCounts(sample, { ...everything, feature: "AUTHENTICATION" });
+  it("does not offer a value twice for having been capitalised twice", () => {
+    const counts = railCounts(sample, { ...everything, ext: { topic: "AUTHENTICATION" } });
     assert.deepEqual(
-      counts.features.map((entry) => entry.value),
+      counts.ext.topic?.map((entry) => entry.value),
       [null, "authentication", "billing"],
     );
     // And the chosen one is counted as what choosing it shows, not as nothing.
-    assert.equal(counts.features[1]?.count, 2);
+    assert.equal(counts.ext.topic?.[1]?.count, 2);
   });
 
-  it("keeps a chosen feature nothing carries, so it can be taken off", () => {
-    // A filter you cannot see is one you cannot remove, so the slug from the
+  it("keeps a chosen value nothing carries, so it can be taken off", () => {
+    // A filter you cannot see is one you cannot remove, so the value from the
     // URL is offered too — counting what it would show, which is nothing.
-    const counts = railCounts(sample, { ...everything, feature: "nothing" });
+    const counts = railCounts(sample, { ...everything, ext: { topic: "nothing" } });
     assert.deepEqual(
-      counts.features.map((entry) => [entry.value, entry.count]),
+      counts.ext.topic?.map((entry) => [entry.value, entry.count]),
       [
         [null, 3],
         ["authentication", 2],
@@ -420,9 +463,9 @@ describe("railCounts", () => {
     );
   });
 
-  it("offers only Any when nothing names a feature", () => {
+  it("offers only Any when nothing carries a value", () => {
     const counts = railCounts([sample[2] as InboxItem], everything);
-    assert.deepEqual(counts.features, [{ value: null, count: 1 }]);
+    assert.deepEqual(counts.ext.topic, [{ value: null, count: 1 }]);
   });
 
   it("is all zeroes for an empty inbox", () => {
@@ -431,7 +474,7 @@ describe("railCounts", () => {
       counts.views.map((entry) => entry.count),
       [0, 0, 0, 0],
     );
-    assert.deepEqual(counts.features, [{ value: null, count: 0 }]);
+    assert.deepEqual(counts.ext.topic, [{ value: null, count: 0 }]);
   });
 });
 

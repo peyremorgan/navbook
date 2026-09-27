@@ -6,7 +6,7 @@
  * front end. This module adds only what a terminal program needs on top.
  */
 
-import { makeWsCtx, type WsCtx } from "@navbook/core";
+import { type CoreExtensions, makeWsCtx, type WsCtx } from "@navbook/core";
 import { type Colors, makeColors } from "./render/colors.ts";
 
 export interface Ctx extends WsCtx {
@@ -24,6 +24,14 @@ export interface MakeContextOptions {
   requireRepo?: boolean;
   /** The Navbook directory, when the caller already knows it; see `makeWsCtx`. */
   navDir?: string;
+  /**
+   * What the loaded plugins registered (spec 02 §2.12).
+   *
+   * Supplied only for a command whose declaration says it needs the format
+   * extensions, because loading them means importing plugin code and that is
+   * what the budget of spec 05 §5.2 cannot afford on every invocation.
+   */
+  ext?: CoreExtensions;
 }
 
 export function makeContext(opts: MakeContextOptions = {}): Ctx {
@@ -36,6 +44,7 @@ export function makeContext(opts: MakeContextOptions = {}): Ctx {
     env,
     ...(opts.requireRepo !== undefined ? { requireRepo: opts.requireRepo } : {}),
     ...(opts.navDir !== undefined ? { navDir: opts.navDir } : {}),
+    ...(opts.ext !== undefined ? { ext: opts.ext } : {}),
   });
 
   return { ...ws, colors: makeColors(stdout, env), stdout, stderr };

@@ -10,7 +10,14 @@
 
 import { graphql } from "~~/src/generated/gql";
 
-/** Everything issues and pull requests share; enough to render a list row. */
+/**
+ * Everything issues and pull requests share; enough to render a list row.
+ *
+ * `ext` is what the loaded plugins have to say about the entity, keyed by
+ * plugin short name (spec 06 §6.3). A row badge a layer registered draws from
+ * it, and it is selected here rather than named field by field because a
+ * fragment written in this package cannot name a field a plugin added.
+ */
 export const ENTITY_CORE = graphql(`
   fragment EntityCore on Entity {
     id
@@ -25,7 +32,7 @@ export const ENTITY_CORE = graphql(`
     labels
     assignees
     milestone
-    features
+    ext
   }
 `);
 
@@ -166,79 +173,6 @@ export const PR_DETAIL = graphql(`
     }
     comments {
       ...CommentFields
-    }
-  }
-`);
-
-/**
- * A feature as its listing row shows it, members included for the counts.
- *
- * `path` is selected on each document although the row never draws it: it is
- * the cache key for a `Spec`, and a normalised object Apollo cannot key is an
- * error rather than a quietly denormalised copy.
- */
-export const FEATURE_LIST_ITEM = graphql(`
-  fragment FeatureListItem on Feature {
-    slug
-    title
-    author
-    created
-    summary
-    specs {
-      path
-      fileName
-      title
-    }
-    issues {
-      id
-      status
-    }
-    prs {
-      id
-      status
-    }
-  }
-`);
-
-/** One of a feature's documents, whole. */
-export const SPEC_DETAIL = graphql(`
-  fragment SpecDetail on Spec {
-    fileName
-    title
-    path
-    body
-    baseSha
-  }
-`);
-
-/**
- * A feature's page: the card, its documents, and the work and history that
- * make up its timeline. The entities come back as list rows because that is
- * what the timeline renders them as.
- */
-export const FEATURE_DETAIL = graphql(`
-  fragment FeatureDetail on Feature {
-    slug
-    title
-    author
-    created
-    summary
-    path
-    baseSha
-    specs {
-      ...SpecDetail
-    }
-    issues {
-      ...IssueListItem
-    }
-    prs {
-      ...PrListItem
-    }
-    commits {
-      sha
-      subject
-      author
-      date
     }
   }
 `);

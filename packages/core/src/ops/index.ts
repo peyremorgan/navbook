@@ -10,7 +10,6 @@
 
 export * from "./doctor.ts";
 export * from "./entity.ts";
-export * from "./feature.ts";
 export * from "./init.ts";
 export * from "./issue.ts";
 export * from "./pr.ts";

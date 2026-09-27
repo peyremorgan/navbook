@@ -22,7 +22,6 @@ import {
   patchDoc,
   readAssignees,
   readDeadline,
-  readFeatures,
   readLabels,
   readRank,
   readReviewers,
@@ -31,12 +30,7 @@ import {
   writeScalarOrList,
 } from "@navbook/core";
 import { apiError, invalidInput } from "./errors.ts";
-import type {
-  UpdateFeatureInput,
-  UpdateIssueInput,
-  UpdatePrInput,
-  UpdateSpecInput,
-} from "./generated/resolver-types.ts";
+import type { UpdateIssueInput, UpdatePrInput } from "./generated/resolver-types.ts";
 
 /** What both kinds' patches carry; a pull request adds `reviewers` (§2.7). */
 type EntityPatch = UpdateIssueInput & { reviewers?: readonly string[] | null };
@@ -82,7 +76,13 @@ function applyScalarOrList(
  * issue and a pull request is what else the file holds, and this rewrites only
  * the keys it was given.
  */
-export function applyEntityPatch(content: string, input: EntityPatch, path: string): string {
+export function applyEntityPatch(
+  content: string,
+  input: EntityPatch,
+  path: string,
+  /** Keys a plugin's own input fields map onto (spec 02 §2.12). */
+  ext: Record<string, unknown> = {},
+): string {
   const nav = parseDoc(content);
 
   if (input.title !== undefined && input.title !== null) {
@@ -90,10 +90,19 @@ export function applyEntityPatch(content: string, input: EntityPatch, path: stri
     patchDoc(nav, { title: input.title });
   }
 
+  // A plugin's keys first, so one that names a key this format defines cannot
+  // quietly replace the format's own handling of it below.
+  for (const [key, value] of Object.entries(ext)) {
+    if (Array.isArray(value) || value === null) {
+      applyScalarOrList(nav, key, value as string[] | null);
+    } else if (value !== undefined) {
+      patchDoc(nav, { [key]: value });
+    }
+  }
+
   applyList(nav, "labels", input.labels);
   applyScalarOrList(nav, "assignee", input.assignees);
   applyScalarOrList(nav, "reviewer", input.reviewers);
-  applyScalarOrList(nav, "feature", input.features);
 
   if (input.milestone !== undefined) {
     patchDoc(nav, { milestone: input.milestone === null ? undefined : input.milestone });
@@ -151,7 +160,6 @@ const FIELD_READINGS: Record<
   labels: (fm) => readLabels(fm),
   assignees: (fm) => readAssignees(fm),
   reviewers: (fm) => readReviewers(fm),
-  features: (fm) => readFeatures(fm),
   milestone: (fm) =>
     typeof fm.milestone === "string" && fm.milestone !== "" ? fm.milestone : null,
   rank: (fm) => readRank(fm),
@@ -205,76 +213,8 @@ export function isEmptyPatch(input: UpdateIssueInput | UpdatePrInput): boolean {
     input.labels === undefined &&
     input.assignees === undefined &&
     input.milestone === undefined &&
-    input.features === undefined &&
     ("rank" in input ? input.rank === undefined : true) &&
     ("deadline" in input ? input.deadline === undefined : true) &&
     ("reviewers" in input ? input.reviewers === undefined : true)
   );
-}
-
-/**
- * Apply a patch to a specification document, returning the new text.
- *
- * Through the YAML document for the same reason an issue's patch is: a
- * document may carry keys this schema does not name — `author`, `created`, or
- * something a future revision defines — and rebuilding the file from the two
- * fields the client sent would quietly drop them (spec 02 §2.4).
- */
-export function applySpecPatch(content: string, input: UpdateSpecInput, path: string): string {
-  const nav = parseDoc(content);
-
-  if (input.title !== undefined && input.title !== null) {
-    if (input.title.trim() === "") throw invalidInput("title must not be empty");
-    patchDoc(nav, { title: input.title });
-  }
-  if (input.body !== undefined && input.body !== null) {
-    if (input.body.trim() === "") throw invalidInput("body must not be empty");
-    nav.body = `\n${normalizeBody(input.body)}`;
-  }
-
-  try {
-    return serializeDoc(nav);
-  } catch (error) {
-    if (!(error instanceof FrontmatterError)) throw error;
-    throw apiError(`${path}: ${error.message}`, "FRONTMATTER", {
-      details: ["fix the file by hand, or run 'nav doctor' to see what is wrong"],
-    });
-  }
-}
-
-/**
- * Apply a patch to a feature's identity card, returning the new text.
- *
- * An explicit null clears the summary, which is a thing a feature may go
- * without; `title` can be replaced but not emptied, since it is the name.
- */
-export function applyFeaturePatch(
-  content: string,
-  input: UpdateFeatureInput,
-  path: string,
-): string {
-  const nav = parseDoc(content);
-
-  if (input.title !== undefined && input.title !== null) {
-    if (input.title.trim() === "") throw invalidInput("title must not be empty");
-    patchDoc(nav, { title: input.title });
-  }
-  if (input.summary !== undefined) {
-    const summary = input.summary === null ? "" : normalizeBody(input.summary);
-    nav.body = summary === "" ? "" : `\n${summary}`;
-  }
-
-  try {
-    return serializeDoc(nav);
-  } catch (error) {
-    if (!(error instanceof FrontmatterError)) throw error;
-    throw apiError(`${path}: ${error.message}`, "FRONTMATTER", {
-      details: ["fix the file by hand, or run 'nav doctor' to see what is wrong"],
-    });
-  }
-}
-
-/** True when a document patch names nothing to change. */
-export function isEmptySpecPatch(input: UpdateSpecInput): boolean {
-  return input.title === undefined && input.body === undefined;
 }

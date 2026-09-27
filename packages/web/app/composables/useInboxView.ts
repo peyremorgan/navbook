@@ -10,8 +10,8 @@
 import type { LocationQueryRaw } from "vue-router";
 import type { RouteQuery } from "~/utils/filter-params";
 import {
-  INBOX_PARAM_KEYS,
   type InboxParams,
+  inboxParamKeys,
   inboxParamsToQuery,
   queryToInboxParams,
 } from "~/utils/inbox-params";
@@ -33,7 +33,7 @@ export function useInboxView(): InboxViewHandle {
 
   const set = (next: InboxParams): void => {
     const kept: LocationQueryRaw = { ...route.query };
-    for (const key of INBOX_PARAM_KEYS) delete kept[key];
+    for (const key of inboxParamKeys()) delete kept[key];
     void router.replace({ query: { ...kept, ...inboxParamsToQuery(next) } });
   };
 

@@ -24,6 +24,27 @@ fixtures/
 Each case directory contains a `case.yaml` manifest plus the directories it
 refers to.
 
+## Cases that need a plugin
+
+A case exercising data or verbs an extension defines ([02 §2.12](../02-data-model.md))
+names the extension in its manifest:
+
+```yaml
+plugins: ["@navbook/plugin-kb"]
+```
+
+The harness makes that package available to the command under test, and the
+case's own `navbook.json` declares it as a real repository would. Under
+`$NAV_BIN` — another implementation, validated by this same suite — such a case
+is skipped rather than failed: this suite's plugins are JavaScript, and how
+another implementation provides the same format is its own business. The
+*format* cases still run, which is the point, because a tree with `specs/` in it
+is conforming whoever wrote it.
+
+Features are the only such extension today, and their checks are still D13 and
+D14 — grandfathered along with their names, so one suite validates an
+implementation with features built in and one with them in a plugin.
+
 ## The manifest
 
 ```yaml

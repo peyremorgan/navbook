@@ -17,11 +17,14 @@ import { type ChildProcessByStdio, spawn } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { extname, join, normalize, resolve, sep } from "node:path";
+import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { type DevIssuer, startDevIssuer } from "../../script/dev-issuer.ts";
 import { createFixtureRepo, type FixtureRepo } from "../../script/fixture-repo.ts";
+
+/** `@navbook/plugin-kb`, which this suite's tree needs to be readable. */
+const KB_PLUGIN = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "plugin-kb");
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 export const PACKAGE_ROOT = resolve(HERE, "..", "..");
@@ -90,7 +93,17 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       "0",
       "--no-graphiql",
     ],
-    { env: { ...repo.env, PATH: process.env.PATH }, stdio: ["ignore", "pipe", "pipe"] },
+    {
+      env: {
+        ...repo.env,
+        PATH: process.env.PATH,
+        // The fixture repository has features in it, so the server this suite
+        // talks to needs the plugin that defines them — exactly as the
+        // deployment it stands in for does.
+        NAVBOOK_PLUGIN_PATH: KB_PLUGIN,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
   );
 
   let errors = "";
@@ -111,6 +124,15 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     },
   });
 
+  // A last resort, for the worker that goes without its teardown running: an
+  // interrupted run, a teardown that overran its time. `exit` handlers are
+  // synchronous, so this is a signal and not a wait — but a server that is
+  // told to go is not one left polling a deleted clone for a day.
+  const killOnExit = (): void => {
+    if (server.exitCode === null) server.kill("SIGKILL");
+  };
+  process.once("exit", killOnExit);
+
   return {
     appUrl,
     apiUrl,
@@ -118,6 +140,7 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     repo,
     serverErrors: () => errors,
     async stop() {
+      process.off("exit", killOnExit);
       await closeStatic();
       if (server.exitCode === null) {
         const exited = new Promise<void>((done) => server.once("exit", () => done()));

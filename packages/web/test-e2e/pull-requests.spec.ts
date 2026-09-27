@@ -244,7 +244,7 @@ test("refuses to change the reviewers of a branch it does not serve", async ({
   // refused the same way, and typing into one is worse than not being asked.
   // Every field goes, not just the one that was refused — the refusal is about
   // the branch, which is the same answer for all of them.
-  for (const field of ["reviewers", "labels", "assignees", "features", "milestone", "title"]) {
+  for (const field of ["reviewers", "labels", "assignees", "milestone", "title"]) {
     await expect(signedIn.getByTestId(`edit-${field}`)).toHaveCount(0);
   }
 });

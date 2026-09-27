@@ -15,7 +15,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import {
   absPath,
-  addSpec,
   applyComment,
   applyEntityEdit,
   bindReviewRevision,
@@ -23,24 +22,18 @@ import {
   blobSha,
   type CommentRecord,
   closeEntity,
-  createFeature,
   currentAuthor,
   type EntityKind,
   type EntityRecord,
-  editFeature,
-  editSpec,
   executeIssueLink,
-  type FeatureRecord,
   FrontmatterError,
   findEntity,
-  findFeature,
   findParentIssue,
   locatePr,
   type NewCommentInput,
   newCommentFile,
-  newFeatureFile,
   newIssueFile,
-  newSpecFile,
+  nowIso,
   openIssue,
   planIssueLink,
   prepareOpen,
@@ -50,15 +43,10 @@ import {
   repoPath,
   resolveComment,
   resolveEntity,
-  resolveFeature,
-  resolveSpec,
-  specFileName,
   unlinkIssue,
   validateComment,
-  validateFeature,
   validateIssue,
   validatePr,
-  validateSpec,
   WorkspaceError,
 } from "@navbook/core";
 import type { GraphQLError } from "graphql";
@@ -72,23 +60,31 @@ import type {
   UpdateIssueInput,
   UpdatePrInput,
 } from "../generated/resolver-types.ts";
-import type { FeatureParent, SpecParent } from "../mappers.ts";
-import {
-  applyEntityPatch,
-  applyFeaturePatch,
-  applySpecPatch,
-  isEmptyPatch,
-  isEmptySpecPatch,
-  movedFields,
-  namedFields,
-} from "../patch.ts";
+import { applyEntityPatch, isEmptyPatch, movedFields, namedFields } from "../patch.ts";
 import { toCoreKind, toCoreVerdict } from "./map.ts";
 
 /** Mutations always commit: a change nobody committed is not a change made. */
 const COMMIT = { commit: true } as const;
 
-/** What the client is told about the commit and the push behind it. */
-function commitInfo(result: RunPlanResult, pushed: boolean): CommitInfo {
+/**
+ * What the client is told about the commit and the push behind it — and, in
+ * the same breath, what the plugins are told.
+ *
+ * Every mutation ends here, which is why the event is emitted here: one place
+ * to keep correct, and a mutation added later gets it without anybody
+ * remembering to. It runs after the write transaction has released, so a
+ * listener sees a settled tree and cannot deadlock reading it, and after the
+ * push has been attempted, so `pushed` is the truth rather than a hope.
+ */
+export function commitInfo(ctx: GraphQLCtx, result: RunPlanResult, pushed: boolean): CommitInfo {
+  ctx.plugins.emit({
+    subject: result.subject,
+    message: result.message,
+    committed: result.committed,
+    pushed,
+    viewer: ctx.viewer,
+    at: nowIso(ctx.ws),
+  });
   return { committed: result.committed, subject: result.subject, pushed };
 }
 
@@ -147,12 +143,14 @@ export const Mutation: MutationResolvers = {
             ...(input.labels ? { labels: [...input.labels] } : {}),
             ...(input.assignees ? { assignee: [...input.assignees] } : {}),
             ...(input.milestone ? { milestone: input.milestone } : {}),
-            ...(input.features ? { features: [...input.features] } : {}),
             // Absence rather than falsehood, because a rank of zero is a
             // position like any other. `Float` has already refused NaN and the
             // infinities at coercion, and `checkComposed` refuses a deadline
             // that is not a day before anything is written.
             ...(input.rank === undefined || input.rank === null ? {} : { rank: input.rank }),
+            // Fields a plugin's own SDL added to this input, bridged onto the
+            // frontmatter by whichever plugin declared them.
+            ext: ctx.plugins.openFields(input as Record<string, unknown>),
             ...(input.deadline ? { deadline: input.deadline } : {}),
             ...(parent ? { parent: parent.id } : {}),
           });
@@ -172,21 +170,24 @@ export const Mutation: MutationResolvers = {
       return {
         issue: result.issue,
         parent: result.parent,
-        commit: commitInfo(result.run, pushed),
+        commit: commitInfo(ctx, result.run, pushed),
       };
     }),
 
   updateIssue: (_parent, { input }, ctx) =>
     run(async () => {
       const { result, pushed } = await patchEntity(ctx, "issue", input);
-      return { issue: result.entity, commit: commitInfo(result.run, pushed) };
+      return { issue: result.entity, commit: commitInfo(ctx, result.run, pushed) };
     }),
 
   updatePr: (_parent, { input }, ctx) =>
     run(async () => {
       const { result, pushed } = await patchEntity(ctx, "pr", input);
       // A working-tree read, so it was found on no ref in particular.
-      return { pr: { entity: result.entity, refs: [] }, commit: commitInfo(result.run, pushed) };
+      return {
+        pr: { entity: result.entity, refs: [] },
+        commit: commitInfo(ctx, result.run, pushed),
+      };
     }),
 
   closeIssue: (_parent, { input }, ctx) =>
@@ -215,7 +216,7 @@ export const Mutation: MutationResolvers = {
       return {
         issue: result.issue,
         destination: result.destination,
-        commit: commitInfo(result.run, pushed),
+        commit: commitInfo(ctx, result.run, pushed),
       };
     }),
 
@@ -236,7 +237,7 @@ export const Mutation: MutationResolvers = {
       return {
         issue: result.issue,
         destination: result.destination,
-        commit: commitInfo(result.run, pushed),
+        commit: commitInfo(ctx, result.run, pushed),
       };
     }),
 
@@ -286,7 +287,7 @@ export const Mutation: MutationResolvers = {
         comment: result.comment,
         entity:
           result.entity.kind === "issue" ? result.entity : { entity: result.entity, refs: [] },
-        commit: commitInfo(result.run, pushed),
+        commit: commitInfo(ctx, result.run, pushed),
       };
     }),
 
@@ -327,7 +328,7 @@ export const Mutation: MutationResolvers = {
         child: result.child,
         parent: result.parent,
         previousParentId: result.previousParentId,
-        commit: commitInfo(result.run, pushed),
+        commit: commitInfo(ctx, result.run, pushed),
       };
     }),
 
@@ -348,147 +349,10 @@ export const Mutation: MutationResolvers = {
       return {
         child: result.child,
         previousParentId: result.previousParentId,
-        commit: commitInfo(result.run, pushed),
-      };
-    }),
-
-  createFeature: (_parent, { input }, ctx) =>
-    run(async () => {
-      requireText(input.title, "title");
-
-      const { result, pushed } = await ctx.sync.write(
-        () => {
-          const { created } = prepareOpen(ctx.ws);
-          const content = newFeatureFile({
-            title: input.title,
-            author: currentAuthor(ctx.ws),
-            created,
-            // A feature may have no summary, so an absent one is absent rather
-            // than refused the way an issue with no description is.
-            ...(input.summary ? { body: input.summary } : {}),
-          });
-          checkComposed(content, validateFeature, "feature");
-
-          const opened = createFeature(
-            ctx.ws,
-            {
-              content,
-              ...(input.slug ? { slug: input.slug } : {}),
-              fallbackTitle: input.title,
-            },
-            COMMIT,
-          );
-          return { run: opened.run, feature: featureAfter(ctx, opened.slug) };
-        },
-        (opened) => opened.run.committed,
-      );
-
-      return { feature: result.feature, commit: commitInfo(result.run, pushed) };
-    }),
-
-  updateFeature: (_parent, { input }, ctx) =>
-    run(async () => {
-      if (input.title === undefined && input.summary === undefined) {
-        throw invalidInput("the patch names no field to change");
-      }
-
-      const { result, pushed } = await ctx.sync.write(
-        () => {
-          const feature = findFeature(ctx.ws, input.slug);
-          const before = readFileSync(absPath(ctx.ws, feature.filePath), "utf8");
-          const patched = applyFeaturePatch(
-            before,
-            input,
-            repoPath(ctx.ws.navDir, feature.filePath),
-          );
-          checkComposed(patched, validateFeature, "feature");
-
-          // Unlike `updateIssue`, nothing is written before the operation runs:
-          // `editSpec`/`editFeature` take the finished text, so core's guards —
-          // the stale check among them — all run before any file is touched.
-          const edited = editFeature(ctx.ws, feature.slug, patched, {
-            commit: true,
-            baseSha: input.baseSha,
-          });
-          return { run: edited.run, feature: featureAfter(ctx, feature.slug) };
-        },
-        (edited) => edited.run.committed,
-      );
-
-      return { feature: result.feature, commit: commitInfo(result.run, pushed) };
-    }),
-
-  addSpec: (_parent, { input }, ctx) =>
-    run(async () => {
-      requireText(input.title, "title");
-      requireText(input.body, "body");
-
-      const { result, pushed } = await ctx.sync.write(
-        () => {
-          const content = newSpecFile({ title: input.title, body: input.body });
-          checkComposed(content, validateSpec, "specification document");
-
-          const added = addSpec(
-            ctx.ws,
-            input.feature,
-            { content, fileName: input.fileName ?? specFileName(input.title) },
-            COMMIT,
-          );
-          return { run: added.run, ...specAfter(ctx, added.feature.slug, added.fileName) };
-        },
-        (added) => added.run.committed,
-      );
-
-      return {
-        feature: result.feature,
-        spec: result.spec,
-        commit: commitInfo(result.run, pushed),
-      };
-    }),
-
-  updateSpec: (_parent, { input }, ctx) =>
-    run(async () => {
-      if (isEmptySpecPatch(input)) throw invalidInput("the patch names no field to change");
-
-      const { result, pushed } = await ctx.sync.write(
-        () => {
-          const feature = findFeature(ctx.ws, input.feature);
-          const spec = resolveSpec(feature, input.fileName);
-          const before = readFileSync(absPath(ctx.ws, spec.path), "utf8");
-          const patched = applySpecPatch(before, input, repoPath(ctx.ws.navDir, spec.path));
-          checkComposed(patched, validateSpec, "specification document");
-
-          const edited = editSpec(ctx.ws, feature.slug, spec.fileName, patched, {
-            commit: true,
-            baseSha: input.baseSha,
-          });
-          return { run: edited.run, ...specAfter(ctx, feature.slug, spec.fileName) };
-        },
-        (edited) => edited.run.committed,
-      );
-
-      return {
-        feature: result.feature,
-        spec: result.spec,
-        commit: commitInfo(result.run, pushed),
+        commit: commitInfo(ctx, result.run, pushed),
       };
     }),
 };
-
-/** The feature as the write has just left it, read back inside the transaction. */
-function featureAfter(ctx: GraphQLCtx, slug: string): FeatureParent {
-  return resolveFeature(afterWrite(ctx), slug);
-}
-
-/** The feature and one of its documents, likewise. */
-function specAfter(
-  ctx: GraphQLCtx,
-  slug: string,
-  fileName: string,
-): { feature: FeatureRecord; spec: SpecParent } {
-  const feature = featureAfter(ctx, slug);
-  return { feature, spec: { feature, spec: resolveSpec(feature, fileName) } };
-}
 
 /**
  * The entity a write is to be made to, in the branch the server serves.
@@ -535,7 +399,12 @@ async function patchEntity(
   kind: EntityKind,
   input: UpdateIssueInput | UpdatePrInput,
 ): Promise<{ result: { entity: EntityRecord; run: RunPlanResult }; pushed: boolean }> {
-  if (isEmptyPatch(input)) throw invalidInput("the patch names no field to change");
+  // A plugin's own field counts as something to change: `updateIssue` naming
+  // only `features` is a patch, not an empty one.
+  const extFields = ctx.plugins.patchFields(input as Record<string, unknown>);
+  if (isEmptyPatch(input) && Object.keys(extFields).length === 0) {
+    throw invalidInput("the patch names no field to change");
+  }
 
   return ctx.sync.write(
     () => {
@@ -547,7 +416,12 @@ async function patchEntity(
       if (input.baseSha !== undefined && input.baseSha !== null) {
         assertFieldsUnmoved(ctx, entity, before, input, input.baseSha);
       }
-      const patched = applyEntityPatch(before, input, repoPath(ctx.ws.navDir, entity.filePath));
+      const patched = applyEntityPatch(
+        before,
+        input,
+        repoPath(ctx.ws.navDir, entity.filePath),
+        extFields,
+      );
       // Validated before the file is touched, so a rejected patch leaves the
       // tree exactly as it was.
       checkComposed(patched, kind === "issue" ? validateIssue : validatePr, kind);

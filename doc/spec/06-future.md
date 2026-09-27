@@ -129,6 +129,30 @@ beside a `pr.md` that is not there would produce the stranded comment of
 either — so the server refuses and names the branch that would have to be
 served instead.
 
+**A plugin's web half is compiled in, and reads its own data off `ext`.** An
+extension ([02 §2.12](02-data-model.md)) that has something to show in a browser
+contributes a *layer*: pages, components and queries that are built into the
+client's bundle. That makes it the one part of a deployment chosen when the
+images are built rather than when the containers start, because a browser
+bundle is decided when it is built, and the server that answers it is
+configured with the same list so the two cannot disagree.
+
+A layer adds its own pages freely, and it composes its API half the same way:
+`extend type Issue { … }` adds a field, and a query the plugin itself writes
+asks for it. What it cannot do is add a field to a selection the *host* wrote —
+GraphQL extends types, not fragments, and the client's list-row fragment lives
+in this repository and can never name a field it has not heard of. So an
+extension that wants to draw something beside an issue in a listing would have
+nothing to draw it from.
+
+`Entity.ext` is the answer: one map, selected once by the host, into which every
+loaded extension puts what it has to say about that entity under its short
+name. It is the only field in the API whose shape is not described by the
+schema, and it is deliberately not a general escape hatch — a plugin's own
+queries use its own typed fields, and `ext` exists for the rows somebody else
+fetched. An extension that is not loaded simply has no key, so a client built
+without one renders exactly as it did before there were any.
+
 ## 6.4 Cryptographic attestation
 
 Git commit signatures already attest Navbook actions (an approval is a commit

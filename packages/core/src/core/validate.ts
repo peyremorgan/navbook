@@ -7,16 +7,14 @@
  */
 
 import { parseCommentFileName } from "./comments.ts";
+import type { CoreExtensions } from "./extensions.ts";
 import {
   type Revision,
-  readFeatures,
   readRevisions,
   readSubtasks,
   validateComment,
-  validateFeature,
   validateIssue,
   validatePr,
-  validateSpec,
 } from "./files.ts";
 import { isId } from "./id.ts";
 import {
@@ -40,7 +38,6 @@ import {
   type NavTree,
   parseTree,
   type Repo,
-  SPECS_DIR,
   statusDir,
 } from "./tree.ts";
 
@@ -57,6 +54,11 @@ export const CHECKS = [
   "D10",
   "D11",
   "D12",
+  // Defined by spec 02 §2.11 and listed here, but implemented by whatever
+  // provides features — `@navbook/plugin-kb` in this implementation. They stay
+  // in this list because the format still defines them: it is what orders them
+  // among the other checks, and what lets one conformance suite validate an
+  // implementation with features built in and one with them in a plugin.
   "D13",
   "D14",
   "D15",
@@ -65,8 +67,18 @@ export type Check = (typeof CHECKS)[number];
 
 export type Level = "error" | "warning";
 
+/**
+ * A check's identifier: one this specification defines, or a plugin's.
+ *
+ * Plugin ids are `X-<short>-<n>` (spec 04 §4.3) and are typed as any `X-`
+ * string rather than a union, because the set is whatever is installed. D13
+ * and D14 are not among them: they keep their numbers, because this format
+ * still defines features and the conformance fixtures assert those codes.
+ */
+export type CheckId = Check | `X-${string}`;
+
 export interface Diagnostic {
-  check: Check;
+  check: CheckId;
   level: Level;
   /** Path relative to the Navbook directory, or "" for repository-wide findings. */
   path: string;
@@ -112,18 +124,20 @@ export interface ValidateOptions {
    * them should not pay.
    */
   linkRepairs?: LinkRepairOptions;
+  /** The registered extensions, whose checks run after this document's. */
+  ext?: CoreExtensions;
 }
 
 /** Run every tree-decidable check. */
 export function validateTree(files: NavTree, opts: ValidateOptions = {}): Diagnostic[] {
-  return validateRepo(parseTree(files), opts);
+  return validateRepo(parseTree(files, { ext: opts.ext }), opts);
 }
 
 /** Run every tree-decidable check against an already-parsed repository. */
 export function validateRepo(repo: Repo, opts: ValidateOptions = {}): Diagnostic[] {
   const out: Diagnostic[] = [];
   out.push(...checkNames(repo));
-  out.push(...checkFrontmatter(repo));
+  out.push(...checkFrontmatter(repo, opts.ext));
   const { duplicates, uniqueIds } = collectIds(repo);
   out.push(...duplicates);
   out.push(...checkStatusUniqueness(repo));
@@ -132,16 +146,29 @@ export function validateRepo(repo: Repo, opts: ValidateOptions = {}): Diagnostic
   out.push(...checkDanglingRefs(repo, uniqueIds, opts.commitMessages ?? []));
   out.push(...checkLinks(repo, opts));
   out.push(...checkLinkLoops(repo));
-  out.push(...checkFeatures(repo));
-  out.push(...checkFeatureRefs(repo));
   out.push(...checkMarker(repo));
+  out.push(...checkExtensions(repo, opts.ext));
   return sortDiagnostics(out);
 }
 
-/** Stable ordering: by check, then path, then message. */
+/**
+ * Stable ordering: by check, then path, then message.
+ *
+ * A plugin's check sorts after every `D`, and after that by id, so a report
+ * reads down this document's checks before anything else's and two runs with
+ * the same plugins always agree. `CHECKS.indexOf` answers -1 for an id it does
+ * not know, which would sort plugin checks *first* and interleave them by
+ * accident, so the rank is computed rather than taken.
+ */
 export function sortDiagnostics(diagnostics: Diagnostic[]): Diagnostic[] {
+  const rank = (check: CheckId): number => {
+    const index = CHECKS.indexOf(check as Check);
+    return index === -1 ? CHECKS.length : index;
+  };
   return [...diagnostics].sort((a, b) => {
-    if (a.check !== b.check) return CHECKS.indexOf(a.check) - CHECKS.indexOf(b.check);
+    const [left, right] = [rank(a.check), rank(b.check)];
+    if (left !== right) return left - right;
+    if (a.check !== b.check) return a.check < b.check ? -1 : 1;
     if (a.path !== b.path) return a.path < b.path ? -1 : 1;
     return a.message < b.message ? -1 : a.message > b.message ? 1 : 0;
   });
@@ -189,11 +216,11 @@ function checkNames(repo: Repo): Diagnostic[] {
 
 /* --------------------------------------------------------- D2 : frontmatter */
 
-function checkFrontmatter(repo: Repo): Diagnostic[] {
+function checkFrontmatter(repo: Repo, ext?: CoreExtensions): Diagnostic[] {
   const out: Diagnostic[] = [];
   for (const entity of allEntities(repo)) {
     const problems =
-      entity.kind === "issue" ? validateIssue(entity.parsed) : validatePr(entity.parsed);
+      entity.kind === "issue" ? validateIssue(entity.parsed, ext) : validatePr(entity.parsed, ext);
     for (const problem of problems) {
       out.push({ check: "D2", level: "error", path: entity.filePath, message: problem.message });
     }
@@ -645,86 +672,67 @@ export function isValidCommentFileName(name: string): boolean {
   return parseCommentFileName(name) !== null;
 }
 
-/* ------------------------------------------- D13 : features and their specs */
-
-/**
- * The `specs/` tree: layout, then schema (§2.11).
- *
- * D1's business is entity names and D2's is entity frontmatter; a feature is
- * neither, and folding it into either would make a diagnostic's meaning depend
- * on where in the tree it was found. So the layout faults `parseTree` collected
- * under `specs/` and the schema faults its files carry are one check, reported
- * as one code somebody can look up.
- */
-function checkFeatures(repo: Repo): Diagnostic[] {
-  const out: Diagnostic[] = repo.featureProblems.map((problem) => ({
-    check: "D13" as const,
-    level: "error" as const,
-    path: problem.path,
-    message: problem.message,
-  }));
-
-  for (const feature of repo.features) {
-    for (const problem of validateFeature(feature.parsed)) {
-      out.push({ check: "D13", level: "error", path: feature.filePath, message: problem.message });
-    }
-    for (const spec of feature.specs) {
-      for (const problem of validateSpec(spec.parsed)) {
-        out.push({ check: "D13", level: "error", path: spec.path, message: problem.message });
-      }
-    }
-  }
-  return out;
-}
-
-/* ------------------------------------------------- D14 : dangling features */
-
-/**
- * An entity naming a feature this tree does not hold.
- *
- * A warning rather than an error, for D8's reason: the feature may have been
- * created on a branch nobody here has fetched, and refusing the commit would
- * make the order in which two branches land a correctness question.
- */
-function checkFeatureRefs(repo: Repo): Diagnostic[] {
-  const out: Diagnostic[] = [];
-  for (const entity of allEntities(repo)) {
-    for (const slug of readFeatures(entity.fm)) {
-      if (repo.featureBySlug.has(slug)) continue;
-      out.push({
-        check: "D14",
-        level: "warning",
-        path: entity.filePath,
-        message: `feature '${slug}' has no ${SPECS_DIR}/${slug}/ directory in this tree`,
-      });
-    }
-  }
-  return out;
-}
-
 /* --------------------------------------------------- D15 : the marker */
 
 /**
- * D15: everything wrong with the marker, whichever policy it is wrong in.
+ * D15: everything wrong with the marker, whichever key it is wrong in.
  *
  * An error, because a policy nobody can read is a policy nobody is following,
  * and the file is small enough that whoever wrote it can see what is wrong —
  * but nothing stops for it: every reader has already fallen back to the
  * defaults by the time this reports what it found.
  *
- * The two readings are taken independently and can report the same fault —
- * text that is not JSON is neither a review policy nor a merge policy — so
- * identical messages are collapsed. One diagnostic per distinct fault is what
- * §2.10 asks for, and saying "is not valid JSON" twice about one file says
- * nothing twice.
+ * The three readings are taken independently and can report the same fault —
+ * text that is not JSON is neither a policy nor a declaration — so identical
+ * messages are collapsed. One diagnostic per distinct fault is what §2.10 asks
+ * for, and saying "is not valid JSON" three times about one file says nothing
+ * twice over.
  */
 function checkMarker(repo: Repo): Diagnostic[] {
   const seen = new Set<string>();
   const out: Diagnostic[] = [];
-  for (const problem of [...repo.reviewPolicy.problems, ...repo.mergePolicy.problems]) {
+  for (const problem of [
+    ...repo.reviewPolicy.problems,
+    ...repo.mergePolicy.problems,
+    ...repo.plugins.problems,
+  ]) {
     if (seen.has(problem)) continue;
     seen.add(problem);
     out.push({ check: "D15", level: "error", path: NAV_MARKER, message: problem });
+  }
+  return out;
+}
+
+/**
+ * The checks plugins registered (spec 04 §4.3).
+ *
+ * A check that throws is reported as a fault in the plugin rather than
+ * allowed to take the run down: `doctor` is what somebody runs when they
+ * already suspect something is wrong, and it failing to produce a report is
+ * the least useful thing it could do. The diagnostic carries the plugin's own
+ * check id, which is what names the plugin to whoever has to fix it.
+ */
+function checkExtensions(repo: Repo, ext?: CoreExtensions): Diagnostic[] {
+  if (ext === undefined) return [];
+  const out: Diagnostic[] = [];
+  for (const def of ext.doctorChecks) {
+    try {
+      for (const found of def.run(repo)) {
+        out.push({
+          check: found.check as CheckId,
+          level: found.level,
+          path: found.path,
+          message: found.message,
+        });
+      }
+    } catch (error) {
+      out.push({
+        check: def.id as CheckId,
+        level: "error",
+        path: "",
+        message: `check ${def.id} failed: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
   }
   return out;
 }

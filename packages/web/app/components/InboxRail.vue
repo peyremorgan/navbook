@@ -18,17 +18,18 @@
   buttons, and each carries an icon that says which group it belongs to.
 -->
 <script setup lang="ts">
-import {
-  type InboxKindChoice,
-  type InboxSelection,
-  type InboxView,
-  type RailCounts,
-  type RailEntry,
-  sameFeature,
+import type {
+  InboxKindChoice,
+  InboxSelection,
+  InboxView,
+  RailCounts,
+  RailEntry,
 } from "~/utils/inbox";
 
 const props = defineProps<{ counts: RailCounts; selection: InboxSelection }>();
 const emit = defineEmits<{ select: [Partial<InboxSelection>] }>();
+
+const slots = useNavbookSlots();
 
 const VIEW_LOOK: Record<InboxView, { label: string; icon: string }> = {
   everything: { label: "Everything", icon: "i-lucide-inbox" },
@@ -57,17 +58,30 @@ interface Group {
   choices: Choice[];
 }
 
-const featureChoice = (entry: RailEntry<string | null>): Choice => ({
-  testid: `inbox-feature-${entry.value ?? "any"}`,
-  label: entry.value ?? "Any feature",
-  icon: "i-lucide-layers",
-  count: entry.count,
-  active:
-    entry.value === null
-      ? props.selection.feature === null
-      : props.selection.feature !== null && sameFeature(props.selection.feature, entry.value),
-  patch: { feature: entry.value },
-});
+/**
+ * One choice in a group a plugin layer registered.
+ *
+ * Values are compared with case folded, as the format compares a slug: what
+ * the rail offers comes from the tree, what is chosen comes from an address
+ * somebody may have typed, and the two need not agree on case.
+ */
+function groupChoice(
+  group: { key: string; label: string; icon: string },
+  entry: RailEntry<string | null>,
+): Choice {
+  const chosen = props.selection.ext[group.key] ?? null;
+  return {
+    testid: `inbox-${group.key}-${entry.value ?? "any"}`,
+    label: entry.value ?? `Any ${group.label.toLowerCase()}`,
+    icon: group.icon,
+    count: entry.count,
+    active:
+      entry.value === null
+        ? chosen === null
+        : chosen !== null && chosen.toLowerCase() === entry.value.toLowerCase(),
+    patch: { ext: { ...props.selection.ext, [group.key]: entry.value } },
+  };
+}
 
 const groups = computed<Group[]>(() => [
   {
@@ -90,10 +104,18 @@ const groups = computed<Group[]>(() => [
       patch: { kind: entry.value },
     })),
   },
-  // Nothing to choose between when the inbox names no feature at all.
-  ...(props.counts.features.length > 1
-    ? [{ heading: "Feature", choices: props.counts.features.map(featureChoice) }]
-    : []),
+  // One group per registered grouping, and only where there is something to
+  // choose between: a group holding nothing but "Any" narrows nothing.
+  ...slots.inboxGroups().flatMap((group) => {
+    const entries = props.counts.ext[group.key] ?? [];
+    if (entries.length <= 1) return [];
+    return [
+      {
+        heading: group.label,
+        choices: entries.map((entry) => groupChoice(group, entry)),
+      },
+    ];
+  }),
 ]);
 </script>
 

@@ -15,7 +15,6 @@
  * appears once, carrying every reason it has.
  */
 
-import { distinctValues } from "~/utils/entities";
 import { splitTerms } from "~/utils/filter-params";
 import { compareBy, type Sortable, type SortOrder } from "~/utils/sort";
 import type {
@@ -136,13 +135,44 @@ const VIEW_REASON: Record<Exclude<InboxView, "everything">, InboxReason> = {
 export interface InboxSelection {
   view: InboxView;
   kind: InboxKindChoice;
-  /** A feature slug, or null for every feature. */
-  feature: string | null;
+  /**
+   * What is chosen in each group a plugin layer added, by group key.
+   *
+   * Null, or an absent key, is that group's "any" — so an inbox with no
+   * plugins loaded is `{}` and every function here ignores the whole idea.
+   */
+  ext: Record<string, string | null>;
 }
 
-/** Slugs are lowercase by grammar; folding only forgives a tree that is not. */
-export function sameFeature(a: string, b: string): boolean {
-  return a.toLowerCase() === b.toLowerCase();
+/**
+ * A way of grouping the inbox that a plugin layer registered.
+ *
+ * A module-level array rather than something read from the slot registry, for
+ * the reason `FILTER_EXTENSIONS` is one: everything in this file is a pure
+ * function over a list of items and has to stay unit-testable without mounting
+ * an app. A layer's Nuxt plugin registers into the slots, and the slots push
+ * here.
+ */
+export interface InboxGrouping {
+  /** The key it is chosen under, in the selection and in the URL. */
+  key: string;
+  /** Its heading in the rail. */
+  label: string;
+  /** The values present among these items, in the order to offer them. */
+  values: (items: readonly InboxItem[]) => string[];
+  matches: (item: InboxItem, value: string) => boolean;
+}
+
+export const INBOX_GROUPINGS: InboxGrouping[] = [];
+
+/** Register a plugin's grouping. Called by the slot registry. */
+export function registerInboxGrouping(group: InboxGrouping): void {
+  if (!INBOX_GROUPINGS.some((entry) => entry.key === group.key)) INBOX_GROUPINGS.push(group);
+}
+
+/** Forget every registered grouping. For tests. */
+export function resetInboxGroupings(): void {
+  INBOX_GROUPINGS.length = 0;
 }
 
 export function matchesSelection(item: InboxItem, selection: InboxSelection): boolean {
@@ -150,9 +180,9 @@ export function matchesSelection(item: InboxItem, selection: InboxSelection): bo
     return false;
   }
   if (selection.kind !== "any" && item.kind !== selection.kind) return false;
-  const wanted = selection.feature;
-  if (wanted !== null && !item.entity.features.some((slug) => sameFeature(slug, wanted))) {
-    return false;
+  for (const group of INBOX_GROUPINGS) {
+    const wanted = selection.ext[group.key] ?? null;
+    if (wanted !== null && !group.matches(item, wanted)) return false;
   }
   return true;
 }
@@ -171,8 +201,11 @@ export interface RailEntry<T> {
 export interface RailCounts {
   views: RailEntry<InboxView>[];
   kinds: RailEntry<InboxKindChoice>[];
-  /** "Any" first, as a null slug, then one entry per feature in slug order. */
-  features: RailEntry<string | null>[];
+  /**
+   * One list per registered group, by key. "Any" first, as a null value, then
+   * one entry per value the group offers.
+   */
+  ext: Record<string, RailEntry<string | null>[]>;
 }
 
 /**
@@ -183,11 +216,11 @@ export interface RailCounts {
  * promise the moment another group is narrowing. It costs nothing — the whole
  * set is already here — and it says which clicks would empty the list.
  *
- * The features offered are every feature the inbox mentions, narrowed by
- * nothing, plus whichever one is currently chosen. So the rail does not
- * reshuffle under the pointer as other groups are used, and a feature chosen
- * from a URL that matches nothing is still there to be taken off — a filter
- * you cannot see is one you cannot remove.
+ * The values a registered group offers are every value the inbox mentions,
+ * narrowed by nothing, plus whichever one is currently chosen. So the rail does
+ * not reshuffle under the pointer as other groups are used, and a value chosen
+ * from a URL that matches nothing is still there to be taken off — a filter you
+ * cannot see is one you cannot remove.
  */
 export function railCounts(items: readonly InboxItem[], selection: InboxSelection): RailCounts {
   const countWith = (part: Partial<InboxSelection>): number =>
@@ -196,22 +229,35 @@ export function railCounts(items: readonly InboxItem[], selection: InboxSelectio
       0,
     );
 
-  const slugs = distinctValues(items, (item) => item.entity.features);
-  const chosen = selection.feature;
-  if (chosen !== null && !slugs.some((slug) => sameFeature(slug, chosen))) {
-    slugs.push(chosen);
-    slugs.sort((a, b) => a.localeCompare(b));
+  const ext: Record<string, RailEntry<string | null>[]> = {};
+  for (const group of INBOX_GROUPINGS) {
+    const values = group.values(items);
+    const chosen = selection.ext[group.key] ?? null;
+    // Chosen but carried by nothing here: kept, or the only way to undo it
+    // would be to edit the address bar. Whether anything carries it is the
+    // group's own question — it may match values the way the format matches a
+    // slug, with case folded, and adding `AUTHENTICATION` beside
+    // `authentication` would offer one value twice.
+    if (chosen !== null && !items.some((item) => group.matches(item, chosen))) {
+      values.push(chosen);
+      values.sort((a, b) => a.localeCompare(b));
+    }
+    const entries: RailEntry<string | null>[] = [
+      { value: null, count: countWith({ ext: { ...selection.ext, [group.key]: null } }) },
+    ];
+    for (const value of values) {
+      entries.push({
+        value,
+        count: countWith({ ext: { ...selection.ext, [group.key]: value } }),
+      });
+    }
+    ext[group.key] = entries;
   }
-
-  const features: RailEntry<string | null>[] = [
-    { value: null, count: countWith({ feature: null }) },
-  ];
-  for (const slug of slugs) features.push({ value: slug, count: countWith({ feature: slug }) });
 
   return {
     views: INBOX_VIEWS.map((view) => ({ value: view, count: countWith({ view }) })),
     kinds: INBOX_KIND_CHOICES.map((kind) => ({ value: kind, count: countWith({ kind }) })),
-    features,
+    ext,
   };
 }
 

@@ -17,8 +17,8 @@
 
 import { chooseOrCreate, expect, test } from "./helpers/fixtures.ts";
 
-/** The five menus, which are the controls that fold away on a narrow screen. */
-const MENUS = ["labels", "assignees", "authors", "milestones", "features"] as const;
+/** The menus the format has of its own; a plugin layer may add more. */
+const MENUS = ["labels", "assignees", "authors", "milestones"] as const;
 
 test("lists issues of every status, newest first", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/issues`);

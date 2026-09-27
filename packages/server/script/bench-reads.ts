@@ -6,7 +6,9 @@
  *
  * Opening an issue sends five queries at once — Viewer, Issue, Issues,
  * Features and People. The documents sent here are the web client's own,
- * imported from its generated module, so what is timed is what a browser asks.
+ * imported from its generated modules, so what is timed is what a browser
+ * asks. Features comes from the knowledge-base plugin, which both the servers
+ * and the tree loads below run with, as the deployed tracker does.
  *
  * The repository is this checkout's `.navbook/` copied K times (default 16)
  * with fresh ids, committed to a fixture with a bare origin. K=16 is about the
@@ -36,8 +38,11 @@ import { spawnSync } from "node:child_process";
 import { cpSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { Session } from "node:inspector/promises";
 import { join } from "node:path";
-import { loadRepo, makeWsCtx } from "@navbook/core";
+import * as core from "@navbook/core";
+import { type ExtensionParts, loadRepo, makeWsCtx, mergeExtensions } from "@navbook/core";
 import { print } from "graphql";
+import { activate as activateKb } from "../../plugin-kb/src/core/index.ts";
+import * as kbDocuments from "../../plugin-kb/web/src/generated/gql/graphql.ts";
 import * as documents from "../../web/src/generated/gql/graphql.ts";
 import { type ServerHandle, startServer } from "../src/server.ts";
 import { makeFixture } from "../test/helpers/temprepo.ts";
@@ -49,6 +54,8 @@ const RUNS = Number(process.env.RUNS ?? 5);
 const VERBOSE = Boolean(process.env.VERBOSE);
 const PROFILE = Boolean(process.env.PROFILE);
 const SOURCE = join(import.meta.dirname, "..", "..", "..", ".navbook");
+/** The knowledge base, loaded from source as `NAVBOOK_PLUGIN_PATH` names it. */
+const KB = join(import.meta.dirname, "..", "..", "plugin-kb");
 
 // --- the fixture ------------------------------------------------------------
 
@@ -139,7 +146,7 @@ const PAGE = {
   Viewer: [documents.ViewerDocument, {}],
   Issue: [documents.IssueDocument, { ref: target }],
   Issues: [documents.IssuesDocument, { filter: {} }],
-  Features: [documents.FeaturesDocument, {}],
+  Features: [kbDocuments.FeaturesDocument, {}],
   People: [documents.PeopleDocument, {}],
 } as const;
 type Name = keyof typeof PAGE;
@@ -183,7 +190,7 @@ function start(pullIntervalMs: number): Promise<ServerHandle> {
       gitTimeoutMs: 60_000,
       graphiql: false,
     },
-    env: fixture.env,
+    env: { ...fixture.env, NAVBOOK_PLUGIN_PATH: KB },
     auth: { verify: async () => ({ name: "Bench", email: "bench@example.invalid" }) },
     report: (line) => {
       if (VERBOSE) console.error(`server: ${line}`);
@@ -246,8 +253,20 @@ const record = (row: Row, sample: Record<Name | "page", number>) => {
   for (const name of [...NAMES, "page"] as const) row[name].push(sample[name]);
 };
 
+/** What the knowledge base registers, so a tree load parses `specs/` as a server's does. */
+function kbExtensions(): core.CoreExtensions {
+  const parts: ExtensionParts[] = [];
+  activateKb({
+    core,
+    manifest: { short: "kb" },
+    settings: {},
+    register: (part) => void parts.push(part),
+  });
+  return mergeExtensions(parts);
+}
+
 try {
-  const ws = makeWsCtx({ cwd: dir, env: fixture.env });
+  const ws = makeWsCtx({ cwd: dir, env: fixture.env, ext: kbExtensions() });
   const entities = loadRepo(ws).byId.size;
   let files = 0;
   const count = (d: string) => {

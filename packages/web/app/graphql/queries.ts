@@ -9,11 +9,9 @@
  * come from; the format keeps no registry of either and the server introduces
  * none.
  *
- * Two things are not guessed that way. `FEATURES_QUERY` is a real registry,
- * because a feature exists whether or not any issue names it yet; and
- * `PEOPLE_QUERY` is the repository's own reading of who is around, which no
- * listing could answer — somebody nobody has assigned anything to yet is
- * nowhere in one.
+ * One thing is not guessed that way. `PEOPLE_QUERY` is the repository's own
+ * reading of who is around, which no listing could answer — somebody nobody has
+ * assigned anything to yet is nowhere in one.
  */
 
 import { graphql } from "~~/src/generated/gql";
@@ -89,22 +87,6 @@ export const PR_QUERY = graphql(`
   query Pr($ref: ID!) {
     pr(ref: $ref) {
       ...PrDetail
-    }
-  }
-`);
-
-export const FEATURES_QUERY = graphql(`
-  query Features {
-    features {
-      ...FeatureListItem
-    }
-  }
-`);
-
-export const FEATURE_QUERY = graphql(`
-  query Feature($slug: String!) {
-    feature(slug: $slug) {
-      ...FeatureDetail
     }
   }
 `);

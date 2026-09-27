@@ -30,10 +30,14 @@ is mature and widely installed.
   is not published: it is a static bundle to be served, not a dependency to be
   installed, and it is the one package here that needs a build step. A fifth,
   `@navbook/plugin-kb`, is the first plugin ([04 §4.3](04-cli.md)) and holds
-  the implementation of features and specifications ([02 §2.11](02-data-model.md)):
-  the format keeps their definition, this codebase keeps them out of the core.
-  It is what proves the plugin surface is enough to build with, since it uses
-  every part of it.
+  the *implementation* of features and specifications
+  ([02 §2.11](02-data-model.md)): the format keeps their definition, this
+  codebase keeps them out of the core. It is what proves the plugin surface is
+  enough to build with, since it uses every part of it — a directory of its
+  own, a frontmatter key, a query term, two checks, a command tree, options on
+  built-in verbs, GraphQL types merged into the server's schema, and a Nuxt
+  layer carrying the pages and the slot registrations its half of the browser
+  client needs.
 - **Dependencies:** deliberately minimal. A YAML parser (`yaml`) in the core;
   an argument parser, a colour library and a Unicode width table
   (`string-width`) in the CLI; no framework. The CLI's three are presentation
@@ -70,6 +74,17 @@ is mature and widely installed.
   would mean two class identities for the same error and two parsers on the
   startup path — and declares the plugin API version it was built against, so
   a mismatch is reported rather than discovered as a missing function.
+- **Generated code across the plugin boundary:** each package generates against
+  the schema it is built for, and no generated artefact is shared. The server
+  generates resolver types from its own SDL; `@navbook/web` generates its
+  client from that same SDL and nothing else, so it builds with no plugin
+  installed; a plugin generates its own client from the *composed* SDL, in its
+  own package. The cost is that a fragment cannot cross the boundary — a
+  document registry is per package — so a plugin repeats any selection of the
+  host's that it also needs, and its type check fails if the two drift.
+  `Entity.ext` ([06 §6.3](06-future.md)) is the other side of the same coin:
+  what a plugin needs on a row the *host* selected cannot be a field, because
+  the host's fragment can never name it.
 - **Performance budget:** cold `nav issue list` on a 1 000-issue repo MUST
   complete in under 500 ms on commodity hardware. (Measured floor: ~40 ms
   Node startup + ~110 ms with one heavy import — import cost is the budget's

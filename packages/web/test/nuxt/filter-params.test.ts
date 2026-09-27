@@ -62,7 +62,6 @@ describe("queryToFilter", () => {
         assignee: ["a@example.invalid", "b@example.invalid"],
         author: "c@example.invalid",
         milestone: "1.0",
-        feature: ["auth", "billing"],
         reviewer: "d@example.invalid",
         deadline: ["overdue", "none"],
         q: "timeout",
@@ -75,10 +74,11 @@ describe("queryToFilter", () => {
       assignees: ["a@example.invalid", "b@example.invalid"],
       authors: ["c@example.invalid"],
       milestones: ["1.0"],
-      features: ["auth", "billing"],
       reviewers: ["d@example.invalid"],
       deadline: ["OVERDUE", "NONE"],
       text: "timeout",
+      // No plugin registered a parameter, so there is nothing under `ext`.
+      ext: {},
     });
   });
 
@@ -157,10 +157,10 @@ describe("filterToQuery", () => {
       assignees: ["a@example.invalid"],
       authors: ["b@example.invalid"],
       milestones: ["1.0"],
-      features: ["auth"],
       reviewers: ["c@example.invalid"],
       deadline: ["OVERDUE" as const, "NONE" as const],
       text: 'timeout "slow link"',
+      ext: {},
     };
     const query = filterToQuery({ ...original, status: [...original.status] });
     const back = queryToFilter(query, ISSUES);
@@ -230,10 +230,10 @@ describe("filterQuery", () => {
       assignees: ["a@example.invalid"],
       authors: ["b@example.invalid"],
       milestones: ["1.0"],
-      features: ["auth"],
       reviewers: ["c@example.invalid"],
       deadline: ["OVERDUE"],
       text: "timeout",
+      ext: {},
     });
     assert.deepEqual(Object.keys(written).sort(), [...FILTER_KEYS].sort());
     assert.deepEqual(filterQuery(written), written);
