@@ -5,6 +5,7 @@ created: 2026-09-27T10:10:42Z
 assignee: Claude <noreply@anthropic.com>
 labels: [performance, bug]
 feature: [pull-requests, plugins]
+resolution: fixed
 ---
 
 Follow-up to #egvv9205 (merged in #zhdz48sn), which stopped `readNavTree` from reading files `parseTree` never parses. The same waste is still in the other tree reader: the ref scan behind `nav pr list --all-refs`, `nav pr merge` and `locatePr`.
