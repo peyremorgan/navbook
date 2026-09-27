@@ -39,6 +39,22 @@ export interface GitAsyncOptions extends GitOptions {
    * {@link GitTimeoutError}. Unset or 0 waits as long as git itself does.
    */
   timeoutMs?: number;
+  /**
+   * Stop the command when this aborts, and reject with {@link GitStoppedError}.
+   *
+   * For a caller that decides when to stop rather than how long to wait — a
+   * server shutting down, say. An already aborted signal starts nothing.
+   */
+  signal?: AbortSignal;
+  /**
+   * Run the command in a process group of its own, and stop the whole group.
+   *
+   * Git starts other gits and waits for them — `maintenance` runs `repack`,
+   * which runs `pack-objects` — and a signal sent to the first one only is
+   * never passed on. With this, stopping reaches every one of them, and the
+   * call settles only once all of them are gone.
+   */
+  processGroup?: boolean;
 }
 
 export class GitError extends Error {
@@ -70,6 +86,22 @@ export class GitTimeoutError extends Error {
     this.name = "GitTimeoutError";
     this.args = args;
     this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
+ * A command stopped because its caller asked, through `signal`.
+ *
+ * Neither a {@link GitError} nor a {@link GitTimeoutError}: git said nothing
+ * and the clock did not run out; somebody decided it was time to stop.
+ */
+export class GitStoppedError extends Error {
+  readonly args: string[];
+
+  constructor(args: string[]) {
+    super(`git ${args.join(" ")} was stopped before it finished`);
+    this.name = "GitStoppedError";
+    this.args = args;
   }
 }
 
@@ -154,22 +186,31 @@ export function gitMaybe(args: string[], opts: GitOptions = {}): string | null {
  *
  * The promise-returning twin of {@link gitRun}: same binary, same environment,
  * same result, and the same errors for a git that is missing or that produces
- * more output than allowed. What it adds is `timeoutMs`, which rejects with
- * {@link GitTimeoutError} rather than waiting on a remote that has stopped
- * answering.
+ * more output than allowed. What it adds is a way to stop it: `timeoutMs`,
+ * which rejects with {@link GitTimeoutError} rather than waiting on a remote
+ * that has stopped answering, and `signal`, which rejects with
+ * {@link GitStoppedError} when the caller decides it is time.
  */
 export function gitRunAsync(args: string[], opts: GitAsyncOptions = {}): Promise<GitResult> {
+  if (opts.signal?.aborted) return Promise.reject(new GitStoppedError(args));
   return new Promise((resolve, reject) => {
     const maxBuffer = opts.maxBuffer ?? DEFAULT_MAX_BUFFER;
+    const group = opts.processGroup === true;
     const child = spawn("git", args, {
       cwd: opts.cwd,
       env: gitEnv(opts.env),
       stdio: ["pipe", "pipe", "pipe"],
+      // A session of its own, which makes git the leader of a new group.
+      detached: group,
     });
 
     let settled = false;
     let failure: Error | null = null;
-    let timedOut = false;
+    // Why it was stopped, when it was: the first reason wins.
+    let stopped: "timeout" | "signal" | null = null;
+    let stopping = false;
+    // Set once the exit handler has taken the stopped path, so `close` stands aside.
+    let rejecting = false;
     let timer: NodeJS.Timeout | undefined;
     let killer: NodeJS.Timeout | undefined;
 
@@ -178,18 +219,37 @@ export function gitRunAsync(args: string[], opts: GitAsyncOptions = {}): Promise
       settled = true;
       clearTimeout(timer);
       clearTimeout(killer);
+      opts.signal?.removeEventListener("abort", onAbort);
       outcome();
+    };
+    const send = (signal: NodeJS.Signals): void => {
+      if (!group || child.pid === undefined) {
+        child.kill(signal);
+        return;
+      }
+      try {
+        process.kill(-child.pid, signal);
+      } catch {
+        // Nothing left in the group to tell.
+      }
     };
     // Ask first, insist later: what `spawnSync` does by default, and what lets
     // git remove its lock files on the way out.
     const stop = (): void => {
-      child.kill("SIGTERM");
-      killer ??= setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+      if (stopping) return;
+      stopping = true;
+      send("SIGTERM");
+      killer = setTimeout(() => send("SIGKILL"), KILL_GRACE_MS);
     };
     const fail = (error: Error): void => {
       if (failure === null) failure = error;
       stop();
     };
+    function onAbort(): void {
+      stopped ??= "signal";
+      stop();
+    }
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
 
     const stdout = collect(child.stdout, maxBuffer, () =>
       fail(new Error(`git ${args.join(" ")} produced more than ${maxBuffer} bytes of output`)),
@@ -200,7 +260,7 @@ export function gitRunAsync(args: string[], opts: GitAsyncOptions = {}): Promise
 
     if (opts.timeoutMs) {
       timer = setTimeout(() => {
-        timedOut = true;
+        stopped ??= "timeout";
         stop();
       }, opts.timeoutMs);
     }
@@ -218,13 +278,28 @@ export function gitRunAsync(args: string[], opts: GitAsyncOptions = {}): Promise
       // `receive-pack`, a credential helper — keeps the pipes open until it
       // finishes, which is the wait the timeout exists to avoid.
       clearTimeout(timer);
-      if (!timedOut && failure === null) return;
+      if (!stopping) return;
+      rejecting = true;
       dropOutput(child);
-      settle(() => reject(failure ?? new GitTimeoutError(args, opts.timeoutMs ?? 0)));
+      const error =
+        failure ??
+        (stopped === "timeout"
+          ? new GitTimeoutError(args, opts.timeoutMs ?? 0)
+          : new GitStoppedError(args));
+      // Git gone is not its group gone: what it started may still be on its
+      // way out, and settling now would tell the caller it was over.
+      if (group && child.pid !== undefined) {
+        void groupGone(child.pid).then(() => settle(() => reject(error)));
+      } else {
+        settle(() => reject(error));
+      }
     });
-    child.on("close", (code) =>
-      settle(() => resolve({ code: code ?? 1, stdout: stdout(), stderr: stderr() })),
-    );
+    child.on("close", (code) => {
+      // Stopped when it exited: the exit handler owns the answer, and may
+      // still be waiting for the rest of the group.
+      if (rejecting) return;
+      settle(() => resolve({ code: code ?? 1, stdout: stdout(), stderr: stderr() }));
+    });
   });
 }
 
@@ -241,6 +316,44 @@ function collect(stream: Readable, maxBuffer: number, overflow: () => void): () 
     chunks.push(chunk);
   });
   return () => Buffer.concat(chunks).toString("utf8");
+}
+
+/** How often a stopped process group is looked at again. */
+const GROUP_POLL_MS = 20;
+
+/**
+ * How long past the kill a stopped group is still waited for.
+ *
+ * A killed process stays listed in its group until its parent collects it,
+ * and one whose parent never does — an orphan under a PID 1 that reaps
+ * nothing — would otherwise be waited on forever.
+ */
+const GROUP_REAP_MS = 1_000;
+
+/** Resolve once no process is left in the group, or once waiting cannot help. */
+function groupGone(pgid: number): Promise<void> {
+  const deadline = Date.now() + KILL_GRACE_MS + GROUP_REAP_MS;
+  return new Promise((resolve) => {
+    const look = (): void => {
+      if (!groupAlive(pgid) || Date.now() >= deadline) {
+        resolve();
+        return;
+      }
+      setTimeout(look, GROUP_POLL_MS);
+    };
+    look();
+  });
+}
+
+/** Whether any process is left in the group; signal 0 asks without sending. */
+function groupAlive(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: there is somebody, just not somebody this process may signal.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 /** Stop reading a child's output, so nothing it left running holds us. */
