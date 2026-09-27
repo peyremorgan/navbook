@@ -5,6 +5,7 @@ created: 2026-09-20T12:35:56Z
 assignee: Claude <noreply@anthropic.com>
 labels: [bug, install]
 feature: cli
+resolution: fixed
 ---
 
 `nav install --hooks` appends its block to whatever `pre-commit` hook already exists, which is right and is what spec 04 §4.5 asks for. But the block runs `nav doctor --staged` as a simple command and inspects `$?` on the next line:
