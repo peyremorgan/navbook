@@ -6,8 +6,9 @@
 # with an empty volume has nothing to serve until one exists. This makes it: on
 # the first start it fetches the repository, and on every start it tells git who
 # the commits are by and how to authenticate. Then it steps out of the way —
-# `exec`, so the server is PID 1 and `docker stop` reaches the signal handler
-# that drains a mutation between its commit and its push.
+# `exec`, so the server is the direct child of the image's init (tini, which
+# reaps the processes git leaves behind) and `docker stop` reaches the signal
+# handler that drains a mutation between its commit and its push.
 #
 # Nothing is written into the volume's git config. Identity and credentials are
 # passed through the environment (`GIT_CONFIG_COUNT` and friends), which every

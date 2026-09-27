@@ -144,4 +144,17 @@ describe("the Dockerfiles", () => {
   it("gives the API image the git it shells out to for every read and write", () => {
     assert.match(read(DOCKERFILES.api), /apk add --no-cache .*\bgit\b/);
   });
+
+  it("starts the API under an init that reaps what git leaves behind", () => {
+    // git hands its background gc and maintenance to PID 1 and never waits on
+    // them. Node does not reap children it did not start, so under Node as PID 1
+    // every one stays a zombie until the container restarts (#rcsql1v9). In the
+    // image rather than as Compose's `init: true`, so a pod gets it too.
+    assert.match(read(DOCKERFILES.api), /apk add --no-cache .*\btini\b/);
+
+    const entrypoint = instructions(DOCKERFILES.api).findLast((line) =>
+      /^ENTRYPOINT\s/i.test(line),
+    );
+    assert.equal(entrypoint, 'ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]');
+  });
 });

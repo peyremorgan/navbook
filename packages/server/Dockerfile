@@ -49,7 +49,14 @@ FROM node:24-alpine
 # git is not a convenience here: the clone is the database, and every read and
 # write shells out to it. Prompts are disabled so a credential that is missing
 # fails the request rather than hanging it.
-RUN apk add --no-cache git ca-certificates
+#
+# tini, because git does not wait for everything it starts: an auto gc or
+# maintenance run carries on in the background after the command returns, and
+# is handed to PID 1 when it exits. Node reaps only the children it spawned, so
+# with the server as PID 1 each of those stays a zombie until the container
+# restarts. In the image rather than as Compose's `init: true`, so that a pod
+# gets it too.
+RUN apk add --no-cache git ca-certificates tini
 ENV GIT_TERMINAL_PROMPT=0 \
     NODE_ENV=production \
     PATH=/app/node_modules/.bin:$PATH
@@ -85,4 +92,6 @@ EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD \
   node -e "const p=process.env.NAV_SERVER_PORT||4000;fetch('http://127.0.0.1:'+p+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 
-ENTRYPOINT ["/entrypoint.sh"]
+# tini forwards the signals it receives, so `docker stop` still reaches the
+# server's drain.
+ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]
