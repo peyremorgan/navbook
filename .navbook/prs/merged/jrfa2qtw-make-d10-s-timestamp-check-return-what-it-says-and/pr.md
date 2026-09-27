@@ -14,6 +14,9 @@ revisions:
   - head: 097b87388b1bec422efe4917fe1ba1d1be28848e
     base: b78bafa6cc846b3487ad7b25e568aae9b4345904
     date: 2026-09-27T02:20:20Z
+merged:
+  date: 2026-09-27T02:20:46Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #ze71ym9e, finding 11 of the September audit.
