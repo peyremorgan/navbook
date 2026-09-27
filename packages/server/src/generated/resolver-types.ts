@@ -1,5 +1,5 @@
 import type { GraphQLResolveInfo, GraphQLScalarType, GraphQLScalarTypeConfig } from 'graphql';
-import type { IssueParent, PrParent, EntityParent, CommentParent, LinkNodeParent, DiagnosticParent, CommitParent, CommitRangeParent, ChangesParent, ChangedFileParent } from '../mappers.ts';
+import type { IssueParent, PrParent, EntityParent, CommentParent, LinkNodeParent, DiagnosticParent, CommitParent, CommitRangeParent, ChangesParent, ChangedFileParent, TrackerActivityParent, TrackerCommitParent } from '../mappers.ts';
 import type { GraphQLCtx } from '../context.ts';
 export type Maybe<T> = T | null;
 export type InputMaybe<T> = Maybe<T>;
@@ -93,6 +93,8 @@ export type ChangedFile = {
   /** Path after the change; for a deleted file, the path it had. */
   path: Scalars['String']['output'];
   status: ChangeStatus;
+  /** True for a file in the tracker's own directory, which `Pr.activity` explains. */
+  tracker: Scalars['Boolean']['output'];
   /** True when the patch was cut at the server's hard limit. */
   truncated: Scalars['Boolean']['output'];
 };
@@ -103,7 +105,7 @@ export type Changes = {
   additions: Scalars['Int']['output'];
   base: Scalars['String']['output'];
   deletions: Scalars['Int']['output'];
-  /** By path, except that the tracker's own files come last. */
+  /** By path, except that the tracker's own files (`tracker: true`) come last. */
   files: Array<ChangedFile>;
   head: Scalars['String']['output'];
 };
@@ -464,6 +466,16 @@ export type OpenIssuePayload = {
 
 export type Pr = Entity & {
   __typename?: 'Pr';
+  /**
+   * The commits of the latest revision that touch the tracker, oldest first,
+   * each with what it did to which record.
+   *
+   * Read from each commit's subject, when it follows the grammar `--commit`
+   * writes, and from its own tracker files, whose frontmatter is compared
+   * before and after (spec 02). Derived and stored nowhere; merges are left
+   * out. Refused with `MISSING_COMMIT` when the clone lacks either commit.
+   */
+  activity: TrackerActivity;
   /** How many approvals stand, against how many the policy asks for. */
   approvals: Approvals;
   archived: Scalars['Boolean']['output'];
@@ -524,6 +536,11 @@ export type Pr = Entity & {
   /** Branch the pull request proposes to merge into. */
   target: Scalars['String']['output'];
   title: Scalars['String']['output'];
+};
+
+
+export type PrActivityArgs = {
+  limit?: Scalars['Int']['input'];
 };
 
 
@@ -686,6 +703,54 @@ export type Status =
   | 'CLOSED'
   | 'MERGED'
   | 'OPEN';
+
+/** A revision's tracker commits, oldest first. */
+export type TrackerActivity = {
+  __typename?: 'TrackerActivity';
+  commits: Array<TrackerCommit>;
+  /** How many the range holds, whatever the limit kept. */
+  total: Scalars['Int']['output'];
+};
+
+/** A commit that touched the tracker, and what it did there. */
+export type TrackerCommit = {
+  __typename?: 'TrackerCommit';
+  /** RFC 5322 address of the commit's author: `Name <email>`. */
+  author: Scalars['String']['output'];
+  /** Author date, ISO 8601. */
+  date: Scalars['String']['output'];
+  entity?: Maybe<Scalars['String']['output']>;
+  facts: Array<TrackerFact>;
+  /** What the commit changed in the tracker's directory, with every patch. */
+  files: Array<ChangedFile>;
+  /**
+   * The issue or pull request the commit is about. Null when it touched
+   * neither: only the marker, say, or a plugin's own files.
+   */
+  kind?: Maybe<Kind>;
+  sha: Scalars['String']['output'];
+  subject: Scalars['String']['output'];
+  /** The record's title after the commit, or before it for a deletion. */
+  title?: Maybe<Scalars['String']['output']>;
+  /**
+   * `open`, `close`, `reopen`, `merge`, `edit`, `update`, `comment`, `review`,
+   * `request review`, `delete`, `link` or `unlink`. Null when neither the
+   * subject nor the files say, and the subject is then the best description
+   * there is — as it is for a commit that touched no issue or pull request.
+   */
+  verb?: Maybe<Scalars['String']['output']>;
+};
+
+/** One thing a commit changed about its record. */
+export type TrackerFact = {
+  __typename?: 'TrackerFact';
+  /** Null when it is no longer set. */
+  after?: Maybe<Scalars['String']['output']>;
+  /** Null when it was not set before. */
+  before?: Maybe<Scalars['String']['output']>;
+  /** A frontmatter key, or `status`, `description`, `comments`, `verdict`. */
+  field: Scalars['String']['output'];
+};
 
 export type UnlinkIssuePayload = {
   __typename?: 'UnlinkIssuePayload';
@@ -895,6 +960,9 @@ export type ResolversTypes = {
   Revision: ResolverTypeWrapper<Revision>;
   Status: Status;
   String: ResolverTypeWrapper<Scalars['String']['output']>;
+  TrackerActivity: ResolverTypeWrapper<TrackerActivityParent>;
+  TrackerCommit: ResolverTypeWrapper<TrackerCommitParent>;
+  TrackerFact: ResolverTypeWrapper<TrackerFact>;
   UnlinkIssuePayload: ResolverTypeWrapper<Omit<UnlinkIssuePayload, 'child'> & { child: ResolversTypes['Issue'] }>;
   UpdateIssueInput: UpdateIssueInput;
   UpdateIssuePayload: ResolverTypeWrapper<Omit<UpdateIssuePayload, 'issue'> & { issue: ResolversTypes['Issue'] }>;
@@ -942,6 +1010,9 @@ export type ResolversParentTypes = {
   ReviewerState: ReviewerState;
   Revision: Revision;
   String: Scalars['String']['output'];
+  TrackerActivity: TrackerActivityParent;
+  TrackerCommit: TrackerCommitParent;
+  TrackerFact: TrackerFact;
   UnlinkIssuePayload: Omit<UnlinkIssuePayload, 'child'> & { child: ResolversParentTypes['Issue'] };
   UpdateIssueInput: UpdateIssueInput;
   UpdateIssuePayload: Omit<UpdateIssuePayload, 'issue'> & { issue: ResolversParentTypes['Issue'] };
@@ -970,6 +1041,7 @@ export type ChangedFileResolvers<ContextType = GraphQLCtx, ParentType extends Re
   patch?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
   path?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   status?: Resolver<ResolversTypes['ChangeStatus'], ParentType, ContextType>;
+  tracker?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   truncated?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
 };
 
@@ -1104,6 +1176,7 @@ export type OpenIssuePayloadResolvers<ContextType = GraphQLCtx, ParentType exten
 };
 
 export type PrResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['Pr'] = ResolversParentTypes['Pr']> = {
+  activity?: Resolver<ResolversTypes['TrackerActivity'], ParentType, ContextType, RequireFields<PrActivityArgs, 'limit'>>;
   approvals?: Resolver<ResolversTypes['Approvals'], ParentType, ContextType>;
   archived?: Resolver<ResolversTypes['Boolean'], ParentType, ContextType>;
   assignees?: Resolver<Array<ResolversTypes['String']>, ParentType, ContextType>;
@@ -1172,6 +1245,30 @@ export type RevisionResolvers<ContextType = GraphQLCtx, ParentType extends Resol
   head?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
 };
 
+export type TrackerActivityResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['TrackerActivity'] = ResolversParentTypes['TrackerActivity']> = {
+  commits?: Resolver<Array<ResolversTypes['TrackerCommit']>, ParentType, ContextType>;
+  total?: Resolver<ResolversTypes['Int'], ParentType, ContextType>;
+};
+
+export type TrackerCommitResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['TrackerCommit'] = ResolversParentTypes['TrackerCommit']> = {
+  author?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  date?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  entity?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  facts?: Resolver<Array<ResolversTypes['TrackerFact']>, ParentType, ContextType>;
+  files?: Resolver<Array<ResolversTypes['ChangedFile']>, ParentType, ContextType>;
+  kind?: Resolver<Maybe<ResolversTypes['Kind']>, ParentType, ContextType>;
+  sha?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  subject?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  title?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  verb?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+};
+
+export type TrackerFactResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['TrackerFact'] = ResolversParentTypes['TrackerFact']> = {
+  after?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  before?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  field?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+};
+
 export type UnlinkIssuePayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['UnlinkIssuePayload'] = ResolversParentTypes['UnlinkIssuePayload']> = {
   child?: Resolver<ResolversTypes['Issue'], ParentType, ContextType>;
   commit?: Resolver<ResolversTypes['CommitInfo'], ParentType, ContextType>;
@@ -1219,6 +1316,9 @@ export type Resolvers<ContextType = GraphQLCtx> = {
   ReviewPolicy?: ReviewPolicyResolvers<ContextType>;
   ReviewerState?: ReviewerStateResolvers<ContextType>;
   Revision?: RevisionResolvers<ContextType>;
+  TrackerActivity?: TrackerActivityResolvers<ContextType>;
+  TrackerCommit?: TrackerCommitResolvers<ContextType>;
+  TrackerFact?: TrackerFactResolvers<ContextType>;
   UnlinkIssuePayload?: UnlinkIssuePayloadResolvers<ContextType>;
   UpdateIssuePayload?: UpdateIssuePayloadResolvers<ContextType>;
   UpdatePrPayload?: UpdatePrPayloadResolvers<ContextType>;

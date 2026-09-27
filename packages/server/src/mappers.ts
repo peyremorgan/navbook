@@ -15,7 +15,12 @@ import type {
   EntityRecord,
   LinkNode,
 } from "@navbook/core";
-import type { ChangedFileView, ChangesView } from "./changes.ts";
+import type {
+  ChangedFileView,
+  ChangesView,
+  TrackerActivityView,
+  TrackerCommitView,
+} from "./changes.ts";
 
 export type IssueParent = EntityRecord;
 
@@ -38,6 +43,8 @@ export type CommitParent = CommitSummary;
 export type CommitRangeParent = CommitRange;
 export type ChangesParent = ChangesView;
 export type ChangedFileParent = ChangedFileView;
+export type TrackerActivityParent = TrackerActivityView;
+export type TrackerCommitParent = TrackerCommitView;
 
 /** Either kind, as `Entity` and `AddCommentPayload.entity` return it. */
 export type EntityParent = IssueParent | PrParent;

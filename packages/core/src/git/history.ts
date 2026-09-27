@@ -168,6 +168,12 @@ export function blobAt(cwd: string, sha: string, path: string): string | null {
   return result.code === 0 ? result.stdout : null;
 }
 
+/** {@link blobAt}, without blocking. */
+export async function blobAtAsync(cwd: string, sha: string, path: string): Promise<string | null> {
+  const result = await gitRunAsync(["show", `${sha}:${path}`], { cwd });
+  return result.code === 0 ? result.stdout : null;
+}
+
 /**
  * A blob's contents by its own hash, or null when this repository lacks it.
  *

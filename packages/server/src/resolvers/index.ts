@@ -6,7 +6,17 @@
  */
 
 import type { Resolvers } from "../generated/resolver-types.ts";
-import { ChangedFile, Comment, Commit, Diagnostic, Entity, Issue, LinkNode, Pr } from "./entity.ts";
+import {
+  ChangedFile,
+  Comment,
+  Commit,
+  Diagnostic,
+  Entity,
+  Issue,
+  LinkNode,
+  Pr,
+  TrackerCommit,
+} from "./entity.ts";
 import { Mutation } from "./mutation.ts";
 import { Query } from "./query.ts";
 import { JSONScalar } from "./scalars.ts";
@@ -23,4 +33,5 @@ export const resolvers: Resolvers = {
   Diagnostic,
   Commit,
   ChangedFile,
+  TrackerCommit,
 };

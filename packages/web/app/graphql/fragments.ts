@@ -195,5 +195,6 @@ export const CHANGED_FILE_FIELDS = graphql(`
     lines
     patch
     truncated
+    tracker
   }
 `);

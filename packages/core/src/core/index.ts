@@ -5,6 +5,7 @@
  * rewrite must reproduce function for function (spec 05 §5.2).
  */
 
+export * from "./activity.ts";
 export * from "./comments.ts";
 export * from "./extensions.ts";
 export * from "./files.ts";

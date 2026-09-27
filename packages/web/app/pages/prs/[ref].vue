@@ -121,7 +121,8 @@ watch(
 /** What each tab's button says beside its name, once the tab has been read. */
 const tabCount = (key: Tab): number | null => {
   if (key === "commits") return commits.value?.total ?? null;
-  if (key === "changes") return changes.value?.files.length ?? null;
+  // The code files, as the tab's summary counts them: the tracker's are below it.
+  if (key === "changes") return changes.value?.files.filter((file) => !file.tracker).length ?? null;
   return null;
 };
 
@@ -480,6 +481,7 @@ const branchHint = computed(() => refusedOn.value);
         >
           <DiffView v-if="changes" :pr-ref="pr.id" :changes="changes" />
         </QueryState>
+        <TrackerActivity :pr-ref="pr.id" :branch="pr.merged ? pr.target : (pr.source || pr.target)" />
       </div>
 
       <div v-show="tab === 'conversation'" class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">

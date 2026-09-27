@@ -212,3 +212,133 @@ describe("a pull request's commits and changes", () => {
     assert.equal(errorCode(response), "INVALID_INPUT");
   });
 });
+
+interface Activity {
+  total: number;
+  commits: {
+    sha: string;
+    subject: string;
+    date: string;
+    verb: string | null;
+    kind: string | null;
+    entity: string | null;
+    title: string | null;
+    facts: { field: string; before: string | null; after: string | null }[];
+    files: { path: string; status: string; tracker: boolean; patch: string | null }[];
+  }[];
+}
+
+describe("a pull request's tracker commits", () => {
+  let h: Harness;
+  let issueDir = "";
+
+  before(async () => {
+    h = await startHarness({ pullIntervalMs: 0 });
+    const { peer } = h.fixture;
+    peer.fileIssue("Login is broken", "It times out.", "is111111");
+    peer.git(["push", "--quiet", "origin", "main:main"]);
+    // The fix and the close travel together, as the README has it; then a
+    // note written by hand, whose subject follows no grammar; then the pull
+    // request, re-pinned so its own opening commit is in the revision.
+    peer.git(["checkout", "--quiet", "-b", "work"]);
+    peer.write("src/login.ts", "export const TIMEOUT = 30;\n");
+    peer.commitAll("fix: wait thirty seconds");
+    peer.close("issue", "is111111", "fixed");
+    const listed = peer.git(["ls-files", ".navbook/issues/closed"]).stdout.split("\n");
+    issueDir = (listed.find((path) => path.endsWith("/issue.md")) ?? "").replace(
+      /\/issue\.md$/,
+      "",
+    );
+    peer.write(
+      `${issueDir}/comments/2026-08-01T100000Z-cm111111.md`,
+      "---\nauthor: Someone <someone@example.invalid>\n---\n\nConfirmed on 3G.\n",
+    );
+    peer.commitAll("Add a note by hand");
+    peer.filePr("Fix the login timeout", "Closes #is111111.", "pr444444", "fix-timeout");
+    peer.git(["checkout", "--quiet", "fix-timeout"]);
+    updatePr(makeWsCtx({ cwd: peer.dir, env: h.fixture.env }), "pr444444", { commit: true });
+    peer.git(["checkout", "--quiet", "main"]);
+    const pushed = peer.git(["push", "--quiet", "origin", "fix-timeout:fix-timeout"]);
+    assert.equal(pushed.code, 0, pushed.stderr);
+  });
+
+  after(async () => {
+    await h.stop();
+  });
+
+  const query = `query Q($ref: ID!, $limit: Int!) { pr(ref: $ref) { activity(limit: $limit) {
+    total commits { sha subject date verb kind entity title
+      facts { field before after } files { path status tracker patch } }
+  } } }`;
+
+  it("says what each tracker commit of the revision did, oldest first", async () => {
+    const data = ok<{ pr: { activity: Activity } }>(
+      await h.gql(query, { ref: "pr444444", limit: 100 }),
+    );
+    const { total, commits } = data.pr.activity;
+    assert.equal(total, 3);
+    assert.deepEqual(
+      commits.map((c) => [c.subject, c.verb, c.kind, c.entity, c.title]),
+      [
+        ["docs(issue): close #is111111", "close", "ISSUE", "is111111", "Login is broken"],
+        // No grammar in the subject: the added comment file says what it was.
+        ["Add a note by hand", "comment", "ISSUE", "is111111", "Login is broken"],
+        ["docs(pr): open #pr444444", "open", "PR", "pr444444", "Fix the login timeout"],
+      ],
+    );
+    assert.deepEqual(commits[0]?.facts, [
+      { field: "status", before: "open", after: "closed" },
+      { field: "resolution", before: null, after: "fixed" },
+    ]);
+    assert.deepEqual(
+      commits[2]?.facts.find((f) => f.field === "target"),
+      { field: "target", before: null, after: "main" },
+    );
+    assert.match(commits[0]?.date ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  });
+
+  it("sends each commit's own tracker files, with their patches", async () => {
+    const data = ok<{ pr: { activity: Activity } }>(
+      await h.gql(query, { ref: "pr444444", limit: 100 }),
+    );
+    const close = data.pr.activity.commits[0];
+    assert.deepEqual(
+      close?.files.map((f) => [f.path, f.status, f.tracker]),
+      [[`${issueDir}/issue.md`, "RENAMED", true]],
+    );
+    assert.match(close?.files[0]?.patch ?? "", /\+resolution: fixed/);
+    const note = data.pr.activity.commits[1];
+    assert.match(note?.files[0]?.patch ?? "", /\+Confirmed on 3G\./);
+  });
+
+  it("keeps the oldest when limited, and says how many there are", async () => {
+    const data = ok<{ pr: { activity: Activity } }>(
+      await h.gql(query, { ref: "pr444444", limit: 1 }),
+    );
+    assert.equal(data.pr.activity.total, 3);
+    assert.deepEqual(
+      data.pr.activity.commits.map((c) => c.verb),
+      ["close"],
+    );
+  });
+
+  it("marks the tracker's files in the revision's diff", async () => {
+    const data = ok<{ pr: { changes: { files: { path: string; tracker: boolean }[] } } }>(
+      await h.gql(`query Q($ref: ID!) { pr(ref: $ref) { changes { files { path tracker } } } }`, {
+        ref: "pr444444",
+      }),
+    );
+    const files = data.pr.changes.files;
+    assert.deepEqual(
+      files.filter((f) => !f.tracker).map((f) => f.path),
+      ["fix-timeout.txt", "src/login.ts"],
+    );
+    assert.ok(files.filter((f) => f.tracker).every((f) => f.path.startsWith(".navbook/")));
+    assert.ok(files.some((f) => f.tracker));
+  });
+
+  it("rejects a limit that is not a count", async () => {
+    const response = await h.gql(query, { ref: "pr444444", limit: -1 });
+    assert.equal(errorCode(response), "INVALID_INPUT");
+  });
+});

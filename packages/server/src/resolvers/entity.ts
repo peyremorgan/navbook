@@ -36,6 +36,7 @@ import type {
   IssueResolvers,
   LinkNodeResolvers,
   PrResolvers,
+  TrackerCommitResolvers,
 } from "../generated/resolver-types.ts";
 import {
   type ChangedFileParent,
@@ -150,6 +151,14 @@ export const Pr: PrResolvers = {
     if (latest === null) return Promise.resolve({ total: 0, commits: [] });
     return run(() => ctx.revisions.commitsOf(latest.base, latest.head, args.limit));
   },
+  activity: (pr, args, ctx) => {
+    if (!Number.isInteger(args.limit) || args.limit < 0) {
+      throw invalidInput("limit takes a whole number of commits");
+    }
+    const latest = latestRevision(pr);
+    if (latest === null) return Promise.resolve({ total: 0, commits: [] });
+    return run(() => ctx.revisions.activityOf(latest.base, latest.head, args.limit));
+  },
   changes: (pr, args, ctx) => {
     const latest = latestRevision(pr);
     if (latest === null) return { base: "", head: "", files: [], additions: 0, deletions: 0 };
@@ -164,6 +173,15 @@ function latestRevision(pr: PrParent): Revision | null {
 
 export const ChangedFile: ChangedFileResolvers = {
   status: (file) => STATUS[file.status],
+};
+
+export const TrackerCommit: TrackerCommitResolvers = {
+  date: (commit) => toIsoSeconds(commit.date),
+  verb: (commit) => commit.summary?.verb ?? null,
+  kind: (commit) => (commit.summary ? toGqlKind(commit.summary.kind) : null),
+  entity: (commit) => commit.summary?.entity ?? null,
+  title: (commit) => commit.summary?.title ?? null,
+  facts: (commit) => commit.summary?.facts ?? [],
 };
 
 const STATUS: Record<ChangedFileParent["status"], ChangeStatus> = {

@@ -184,6 +184,40 @@ export const PR_CHANGES_QUERY = graphql(`
   }
 `);
 
+/**
+ * The revision's tracker commits, each with what it did: the Changes tab's
+ * Navbook activity, asked for beside the diff rather than inside it so the
+ * code shows while these are read.
+ */
+export const PR_ACTIVITY_QUERY = graphql(`
+  query PrActivity($ref: ID!, $limit: Int!) {
+    pr(ref: $ref) {
+      id
+      activity(limit: $limit) {
+        total
+        commits {
+          sha
+          subject
+          author
+          date
+          verb
+          kind
+          entity
+          title
+          facts {
+            field
+            before
+            after
+          }
+          files {
+            ...ChangedFileFields
+          }
+        }
+      }
+    }
+  }
+`);
+
 /** The patches the listing withheld, for the files somebody asked to see. */
 export const PR_FILE_CHANGES_QUERY = graphql(`
   query PrFileChanges($ref: ID!, $paths: [String!]!) {

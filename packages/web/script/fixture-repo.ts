@@ -627,8 +627,18 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     );
   };
 
-  /** The same, on a branch of its own with a commit for it to propose. */
-  const openPrOn = (date: string, id: string, branch: string, input: PrInput): void => {
+  /**
+   * The same, on a branch of its own with a commit for it to propose, and
+   * whatever `alongside` commits after it: tracker work that rides on the
+   * branch and is pinned into its revision.
+   */
+  const openPrOn = (
+    date: string,
+    id: string,
+    branch: string,
+    input: PrInput,
+    alongside?: () => void,
+  ): void => {
     git(dir, ["checkout", "--quiet", "-b", branch]);
     const name = branch.replaceAll("/", "-");
     write(`${name}.txt`, `work on ${branch}\n`);
@@ -643,6 +653,7 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
       GIT_AUTHOR_DATE: date,
       GIT_COMMITTER_DATE: date,
     });
+    alongside?.();
     openPrHere(date, id, input);
     git(dir, ["checkout", "--quiet", "main"]);
   };
@@ -661,12 +672,24 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
   // Asked of the person the suite signs in as, and on the branch nothing can
   // write to — so what this request looks like from the outside stays put
   // however much the rest of the suite reviews the other pull request.
-  openPrOn("2026-08-05T10:00:00Z", IDS.unservedPr, UNSERVED_BRANCH, {
-    title: "A pull request this server does not serve",
-    body: "Its files live on a branch the clone does not have checked out.",
-    draft: true,
-    reviewers: ["person@example.invalid"],
-  });
+  // A comment on an issue rides on this branch too, so the Changes tab has a
+  // tracker commit to summarise. On the branch nothing serves, so the issue
+  // as every other spec reads it is untouched.
+  openPrOn(
+    "2026-08-05T10:00:00Z",
+    IDS.unservedPr,
+    UNSERVED_BRANCH,
+    {
+      title: "A pull request this server does not serve",
+      body: "Its files live on a branch the clone does not have checked out.",
+      draft: true,
+      reviewers: ["person@example.invalid"],
+    },
+    () =>
+      comment("2026-08-05T10:30:00Z", "cccc0005", "issue", IDS.parent, {
+        body: "Reproduced on the branch that fixes it.",
+      }),
+  );
 
   // A comment and a review on the served pull request, written on its branch
   // because that is where its directory is.

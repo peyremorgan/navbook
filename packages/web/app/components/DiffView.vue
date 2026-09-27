@@ -9,6 +9,9 @@
 
   The file list at the top is what makes a diff of hundreds of files
   navigable: an anchor per file, and the counts beside each.
+
+  The tracker's own files are left out, and so are their lines from the
+  counts: what the branch did to the tracker is `TrackerActivity`'s, below.
 -->
 <script setup lang="ts">
 import { useApolloClient } from "@vue/apollo-composable";
@@ -32,7 +35,12 @@ const loaded = reactive(new Map<string, ChangedFileFieldsFragment>());
 const loading = reactive(new Set<string>());
 const failed = ref<string | null>(null);
 
-const files = computed(() => props.changes.files.map((file) => loaded.get(file.path) ?? file));
+const files = computed(() =>
+  props.changes.files.filter((file) => !file.tracker).map((file) => loaded.get(file.path) ?? file),
+);
+
+const additions = computed(() => files.value.reduce((sum, file) => sum + file.additions, 0));
+const deletions = computed(() => files.value.reduce((sum, file) => sum + file.deletions, 0));
 
 const withheld = computed(
   () => files.value.filter((file) => file.patch === null && file.lines > 0 && !file.binary).length,
@@ -103,8 +111,8 @@ onMounted(() => schedule(renderMore));
     <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
       <span data-testid="changes-summary">
         <strong>{{ files.length }}</strong> file{{ files.length === 1 ? "" : "s" }} changed,
-        <span class="font-mono text-success">+{{ changes.additions }}</span>
-        <span class="font-mono text-error"> −{{ changes.deletions }}</span>
+        <span class="font-mono text-success">+{{ additions }}</span>
+        <span class="font-mono text-error"> −{{ deletions }}</span>
       </span>
       <span v-if="withheld > 0" class="text-muted">
         · {{ withheld }} large {{ withheld === 1 ? "file is" : "files are" }} not shown by default
@@ -139,7 +147,8 @@ onMounted(() => schedule(renderMore));
     />
 
     <p v-if="files.length === 0" class="text-sm text-muted">
-      No changes: this pull request has no revision recorded, or its revision changes nothing.
+      <template v-if="changes.files.length > 0">No code changes: this revision changes only the tracker, below.</template>
+      <template v-else>No changes: this pull request has no revision recorded, or its revision changes nothing.</template>
     </p>
 
     <div v-else class="space-y-3">

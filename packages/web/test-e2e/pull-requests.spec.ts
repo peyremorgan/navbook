@@ -343,6 +343,50 @@ test("reads the diff of a pull request on a branch it does not serve", async ({
   );
 });
 
+test("keeps the tracker's commits out of the diff, folded at the bottom", async ({
+  signedIn,
+  stack,
+}) => {
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0002?tab=changes`);
+  // The branch's comment on #aaaa0001 is in the revision, and not in the diff.
+  await expect(signedIn.getByTestId("changes-summary")).toContainText("2 files changed");
+  await expect(signedIn.locator('[data-testid^="diff-file-.navbook/"]')).toHaveCount(0);
+  await expect(signedIn.getByTestId("pr-tab-changes")).toContainText("2");
+
+  const activity = signedIn.getByTestId("tracker-activity");
+  const toggle = signedIn.getByTestId("toggle-tracker-activity");
+  await expect(toggle).toContainText("1 commit on the tracker");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(signedIn.getByTestId("tracker-timeline")).toHaveCount(0);
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  const sentence = activity.getByTestId("tracker-sentence");
+  await expect(sentence).toHaveText(/Commented on issue #aaaa0001/);
+  await expect(activity).toContainText("Sign-in is unreliable on slow connections");
+
+  // Its own files open under it, with the diff's rendering.
+  await activity.locator('[data-testid^="tracker-files-"]').click();
+  await expect(
+    activity.locator('[data-testid^="diff-file-.navbook/issues/open/aaaa0001"]'),
+  ).toContainText("Reproduced on the branch that fixes it.");
+
+  // The last line sends the reader to the rest of the discussion.
+  await expect(activity.getByTestId("tracker-later")).toContainText("feat/unserved");
+  await activity.getByTestId("tracker-conversation-link").click();
+  await expect(signedIn).toHaveURL(/\/prs\/bbbb0002$/);
+  await expect(signedIn.getByTestId("pr-tab-conversation")).toHaveAttribute("aria-current", "page");
+});
+
+test("shows no tracker section for a revision without tracker commits", async ({
+  signedIn,
+  stack,
+}) => {
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0001?tab=changes`);
+  await expect(signedIn.getByTestId("changes-summary")).toContainText("2 files changed");
+  await expect(signedIn.getByTestId("tracker-activity")).toHaveCount(0);
+});
+
 test("keeps a half-written review while the other tabs are visited", async ({
   signedIn,
   stack,

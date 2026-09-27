@@ -24,6 +24,8 @@ const props = defineProps<{
   index: number;
   /** True while the patch this file lacks is on its way. */
   loading?: boolean;
+  /** The element's id, when `file-<index>` would name another list's file. */
+  anchor?: string;
 }>();
 
 const emit = defineEmits<{ load: [path: string] }>();
@@ -97,7 +99,7 @@ const empty = computed<string | null>(() => {
 
 <template>
   <section
-    :id="`file-${index}`"
+    :id="anchor ?? `file-${index}`"
     class="diff-file rounded-md border border-default"
     :style="{ containIntrinsicSize: reserved }"
     :data-testid="`diff-file-${file.path}`"

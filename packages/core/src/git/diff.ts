@@ -116,6 +116,33 @@ export async function commitsBetweenAsync(
   return limitRange(parseCommitLog(result.stdout), limit);
 }
 
+/**
+ * The commits of `base..head` that touch any of `paths`, oldest first.
+ *
+ * Merges are left out: git lists a merge under a pathspec only when history
+ * simplification keeps it, and what one brings is already in the commits it
+ * joins. Throws a `GitError` when git cannot walk the range.
+ */
+export async function commitsTouchingAsync(
+  cwd: string,
+  base: string,
+  head: string,
+  paths: readonly string[],
+): Promise<CommitSummary[]> {
+  const args = [
+    "log",
+    "--reverse",
+    "--no-merges",
+    ...COMMIT_LOG_ARGS,
+    `${base}..${head}`,
+    "--",
+    ...paths.map((path) => `:(literal)${path}`),
+  ];
+  const result = await gitRunAsync(args, { cwd });
+  if (result.code !== 0) throw new GitError(args, result);
+  return parseCommitLog(result.stdout);
+}
+
 function commitsArgs(base: string, head: string): string[] {
   return ["log", "--reverse", ...COMMIT_LOG_ARGS, `${base}..${head}`];
 }

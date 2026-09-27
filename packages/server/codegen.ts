@@ -37,6 +37,8 @@ const config: CodegenConfig = {
           CommitRange: "../mappers.ts#CommitRangeParent",
           Changes: "../mappers.ts#ChangesParent",
           ChangedFile: "../mappers.ts#ChangedFileParent",
+          TrackerActivity: "../mappers.ts#TrackerActivityParent",
+          TrackerCommit: "../mappers.ts#TrackerCommitParent",
         },
       },
     },

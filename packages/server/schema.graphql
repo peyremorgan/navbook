@@ -232,6 +232,61 @@ type Pr implements Entity {
   cut at a hard limit and marked `truncated` when it is.
   """
   changes(paths: [String!]): Changes!
+  """
+  The commits of the latest revision that touch the tracker, oldest first,
+  each with what it did to which record.
+
+  Read from each commit's subject, when it follows the grammar `--commit`
+  writes, and from its own tracker files, whose frontmatter is compared
+  before and after (spec 02). Derived and stored nowhere; merges are left
+  out. Refused with `MISSING_COMMIT` when the clone lacks either commit.
+  """
+  activity(limit: Int! = 100): TrackerActivity!
+}
+
+"A revision's tracker commits, oldest first."
+type TrackerActivity {
+  "How many the range holds, whatever the limit kept."
+  total: Int!
+  commits: [TrackerCommit!]!
+}
+
+"A commit that touched the tracker, and what it did there."
+type TrackerCommit {
+  sha: String!
+  subject: String!
+  "RFC 5322 address of the commit's author: `Name <email>`."
+  author: String!
+  "Author date, ISO 8601."
+  date: String!
+  """
+  `open`, `close`, `reopen`, `merge`, `edit`, `update`, `comment`, `review`,
+  `request review`, `delete`, `link` or `unlink`. Null when neither the
+  subject nor the files say, and the subject is then the best description
+  there is — as it is for a commit that touched no issue or pull request.
+  """
+  verb: String
+  """
+  The issue or pull request the commit is about. Null when it touched
+  neither: only the marker, say, or a plugin's own files.
+  """
+  kind: Kind
+  entity: String
+  "The record's title after the commit, or before it for a deletion."
+  title: String
+  facts: [TrackerFact!]!
+  "What the commit changed in the tracker's directory, with every patch."
+  files: [ChangedFile!]!
+}
+
+"One thing a commit changed about its record."
+type TrackerFact {
+  "A frontmatter key, or `status`, `description`, `comments`, `verdict`."
+  field: String!
+  "Null when it was not set before."
+  before: String
+  "Null when it is no longer set."
+  after: String
 }
 
 "A commit, as a history walk reports it."
@@ -263,7 +318,7 @@ enum ChangeStatus {
 type Changes {
   base: String!
   head: String!
-  "By path, except that the tracker's own files come last."
+  "By path, except that the tracker's own files (`tracker: true`) come last."
   files: [ChangedFile!]!
   additions: Int!
   deletions: Int!
@@ -288,6 +343,8 @@ type ChangedFile {
   patch: String
   "True when the patch was cut at the server's hard limit."
   truncated: Boolean!
+  "True for a file in the tracker's own directory, which `Pr.activity` explains."
+  tracker: Boolean!
 }
 
 "Approvals counted against the number the review policy asks for."

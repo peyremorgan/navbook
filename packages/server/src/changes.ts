@@ -28,13 +28,19 @@
  */
 
 import {
+  blobAtAsync,
   type ChangedFile,
   type CommitRange,
+  type CommitSummary,
   commitsBetweenAsync,
+  commitsTouchingAsync,
   type Diff,
   diffBetweenAsync,
   GitError,
   objectExistsAsync,
+  summariseTrackerCommit,
+  type TrackerSummary,
+  trackerReads,
 } from "@navbook/core";
 import { apiError, invalidInput } from "./errors.ts";
 
@@ -87,7 +93,33 @@ export interface ChangedFileView extends Omit<ChangedFile, "patch"> {
   patch: string | null;
   /** True when `patch` was cut at {@link HARD_FILE_LINES}. */
   truncated: boolean;
+  /** True for a file under the tracker's directory. */
+  tracker: boolean;
 }
+
+/** A file as projected, before it is told apart as the tracker's or not. */
+type ProjectedFile = Omit<ChangedFileView, "tracker">;
+
+/** A commit that touched the tracker, what it did, and its tracker files. */
+export interface TrackerCommitView extends CommitSummary {
+  /** Null when it touched no record: only the marker, say. */
+  summary: TrackerSummary | null;
+  files: ChangedFileView[];
+}
+
+export interface TrackerActivityView {
+  total: number;
+  commits: TrackerCommitView[];
+}
+
+/**
+ * How many of a range's tracker commits are summarised. Each costs a diff and
+ * a few blob reads; a branch with more than this is not one pull request.
+ */
+export const ACTIVITY_LIMIT = 250;
+
+/** How many of those summaries are worked out at once. */
+const ACTIVITY_CONCURRENCY = 8;
 
 export interface ChangesView {
   base: string;
@@ -125,6 +157,7 @@ export class RevisionCache {
   private readonly diffs = new Map<string, Entry>();
   private readonly inflight = new Map<string, Promise<Entry>>();
   private readonly commits = new Map<string, Promise<CommitRange>>();
+  private readonly activity = new Map<string, Promise<TrackerCommitView[]>>();
   private chars = 0;
   private readonly opts: RevisionCacheOptions;
   private readonly readDiff: typeof diffBetweenAsync;
@@ -164,6 +197,73 @@ export class RevisionCache {
   }
 
   /**
+   * The commits of `base..head` that touch the tracker, oldest first, each
+   * summarised (`core/activity.ts`). Remembered per pair as `commitsOf` is,
+   * and for the same reason: the range is immutable.
+   */
+  async activityOf(base: string, head: string, limit: number): Promise<TrackerActivityView> {
+    const navDir = this.opts.navDir;
+    if (navDir === undefined) return { total: 0, commits: [] };
+    const key = pairKey(base, head);
+    let pending = this.activity.get(key);
+    if (pending === undefined) {
+      pending = this.require(base, head).then(() => this.readActivity(base, head, navDir));
+      // Tracker patches are short; a hundred ranges of them is little.
+      if (this.activity.size >= 100) {
+        this.activity.delete(this.activity.keys().next().value as string);
+      }
+      this.activity.set(key, pending);
+      pending.catch(() => this.activity.delete(key));
+    }
+    const commits = await pending;
+    return { total: commits.length, commits: commits.slice(0, limit) };
+  }
+
+  private async readActivity(
+    base: string,
+    head: string,
+    navDir: string,
+  ): Promise<TrackerCommitView[]> {
+    const cwd = this.opts.repoRoot;
+    const touching = (await commitsTouchingAsync(cwd, base, head, [navDir])).slice(
+      0,
+      ACTIVITY_LIMIT,
+    );
+    const out: TrackerCommitView[] = [];
+    for (let i = 0; i < touching.length; i += ACTIVITY_CONCURRENCY) {
+      const batch = touching.slice(i, i + ACTIVITY_CONCURRENCY);
+      out.push(...(await Promise.all(batch.map((commit) => this.summarise(commit, navDir)))));
+    }
+    return out;
+  }
+
+  /** One commit: its own tracker diff, the files the summary reads, the summary. */
+  private async summarise(commit: CommitSummary, navDir: string): Promise<TrackerCommitView> {
+    const cwd = this.opts.repoRoot;
+    const parent = `${commit.sha}^`;
+    const diff = await this.readDiff(cwd, parent, commit.sha, {
+      paths: [navDir],
+      timeoutMs: DIFF_TIMEOUT_MS,
+    });
+    const texts = new Map<string, string | null>();
+    for (const read of trackerReads(commit.subject, diff.files, navDir)) {
+      const rev = read.side === "before" ? parent : commit.sha;
+      texts.set(`${read.side}\0${read.path}`, await blobAtAsync(cwd, rev, read.path));
+    }
+    const summary = summariseTrackerCommit(
+      commit.subject,
+      diff.files,
+      navDir,
+      (side, path) => texts.get(`${side}\0${path}`) ?? null,
+    );
+    return {
+      ...commit,
+      summary,
+      files: diff.files.map((file) => ({ ...cut(file), tracker: true })),
+    };
+  }
+
+  /**
    * The diff of a pair, projected for the wire.
    *
    * Without `paths`: every file, with patches inline up to the budgets.
@@ -171,6 +271,18 @@ export class RevisionCache {
    * the hard limit — the follow-up a client makes for a withheld file.
    */
   async changesOf(base: string, head: string, paths?: readonly string[]): Promise<ChangesView> {
+    const view = await this.project(base, head, paths);
+    return {
+      ...view,
+      files: view.files.map((file) => ({ ...file, tracker: this.isTracker(file.path) })),
+    };
+  }
+
+  private async project(
+    base: string,
+    head: string,
+    paths?: readonly string[],
+  ): Promise<Omit<ChangesView, "files"> & { files: ProjectedFile[] }> {
     if (paths !== undefined && paths.length > MAX_PATHS_PER_REQUEST) {
       throw invalidInput(`paths names at most ${MAX_PATHS_PER_REQUEST} files at a time`);
     }
@@ -241,11 +353,14 @@ export class RevisionCache {
     }
   }
 
+  private isTracker(path: string): boolean {
+    return this.opts.navDir !== undefined && path.startsWith(`${this.opts.navDir}/`);
+  }
+
   /** Git's order, except that the tracker's own files come last. */
   private ordered(diff: Diff): Diff {
-    const prefix = this.opts.navDir === undefined ? null : `${this.opts.navDir}/`;
-    if (prefix === null) return diff;
-    const tracker = (file: ChangedFile): boolean => file.path.startsWith(prefix);
+    if (this.opts.navDir === undefined) return diff;
+    const tracker = (file: ChangedFile): boolean => this.isTracker(file.path);
     return {
       ...diff,
       files: [...diff.files.filter((f) => !tracker(f)), ...diff.files.filter(tracker)],
@@ -306,7 +421,7 @@ function listingOf(diff: Diff): Diff {
 }
 
 /** A file with its patch cut at the hard limit, for an answer by path. */
-function cut(file: ChangedFile): ChangedFileView {
+function cut(file: ChangedFile): ProjectedFile {
   if (file.patch === "") return { ...file, patch: null, truncated: false };
   if (file.lines <= HARD_FILE_LINES) return { ...file, truncated: false };
   const kept = file.patch.split("\n", HARD_FILE_LINES).join("\n");
@@ -320,9 +435,9 @@ function cut(file: ChangedFile): ChangedFileView {
  * is skipped rather than ending the run, so the small files after a
  * generated one still arrive with their hunks.
  */
-function inline(diff: Diff): ChangesView {
+function inline(diff: Diff): Omit<ChangesView, "files"> & { files: ProjectedFile[] } {
   let spent = 0;
-  const files = diff.files.map((file): ChangedFileView => {
+  const files = diff.files.map((file): ProjectedFile => {
     if (file.patch === "") return { ...file, patch: null, truncated: false };
     if (file.lines > INLINE_FILE_LINES || spent + file.lines > INLINE_LINE_BUDGET) {
       return { ...file, patch: null, truncated: false };
