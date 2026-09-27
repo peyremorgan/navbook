@@ -13,9 +13,11 @@
  */
 
 import {
+  type CoreExtensions,
   FrontmatterError,
   isCalendarDate,
   type NavDoc,
+  NO_EXTENSIONS,
   normalizeBody,
   parseDoc,
   parseFile,
@@ -25,6 +27,7 @@ import {
   readLabels,
   readRank,
   readReviewers,
+  readStringOrList,
   serializeDoc,
   setFlowList,
   writeScalarOrList,
@@ -167,6 +170,36 @@ const FIELD_READINGS: Record<
 };
 
 /**
+ * A field of the patch that a plugin's bridge reads, and the frontmatter keys
+ * its `patchFields` writes for it (spec 02 §2.12).
+ */
+export interface PluginField {
+  /** As the input spells it, which is how a refusal names it. */
+  field: string;
+  keys: readonly string[];
+}
+
+/** The plugin fields a patch names, and how to read their keys. */
+export interface PluginFields {
+  fields: readonly PluginField[];
+  /** The registered keys, whose shapes say how two spellings compare. */
+  ext: CoreExtensions;
+}
+
+const NO_PLUGIN_FIELDS: PluginFields = { fields: [], ext: NO_EXTENSIONS };
+
+/**
+ * A key a plugin writes, read so that two spellings of one value compare
+ * equal — as `FIELD_READINGS` reads `assignee` — by the shape its plugin
+ * registered for it. A key it did not register is compared as parsed.
+ */
+function readPluginKey(fm: Record<string, unknown>, key: string, ext: CoreExtensions): unknown {
+  const shape = ext.frontmatterKeys.find((def) => def.key === key)?.shape;
+  if (shape === "string-or-list" || shape === "string-list") return readStringOrList(fm, key);
+  return fm[key] ?? null;
+}
+
+/**
  * Whether a patch would write a field — the same reading `applyEntityPatch`
  * makes of it. A null title or body is left alone rather than cleared, so it
  * is not a field the patch names, and must not be one it is refused over.
@@ -187,7 +220,12 @@ function names(input: EntityPatch, field: string): boolean {
  * value and both changes survive — and refusing it would only teach clients to
  * stop sending the hash. Names come back as the input spells them.
  */
-export function movedFields(base: string, current: string, input: EntityPatch): string[] {
+export function movedFields(
+  base: string,
+  current: string,
+  input: EntityPatch,
+  plugin: PluginFields = NO_PLUGIN_FIELDS,
+): string[] {
   const before = parseFile(base);
   const after = parseFile(current);
   const moved: string[] = [];
@@ -197,12 +235,22 @@ export function movedFields(base: string, current: string, input: EntityPatch): 
     const is = JSON.stringify(read(after.fm, after.body));
     if (was !== is) moved.push(field);
   }
+  // A plugin's fields after the format's own, guarded the same way: a field
+  // the patch writes, compared on the keys it writes and nothing else.
+  for (const { field, keys } of plugin.fields) {
+    const reading = (fm: Record<string, unknown>) =>
+      JSON.stringify(keys.map((key) => readPluginKey(fm, key, plugin.ext)));
+    if (reading(before.fm) !== reading(after.fm)) moved.push(field);
+  }
   return moved;
 }
 
 /** The fields a patch names, in the same order and spelling. */
-export function namedFields(input: EntityPatch): string[] {
-  return Object.keys(FIELD_READINGS).filter((field) => names(input, field));
+export function namedFields(input: EntityPatch, plugin: readonly PluginField[] = []): string[] {
+  return [
+    ...Object.keys(FIELD_READINGS).filter((field) => names(input, field)),
+    ...plugin.map(({ field }) => field),
+  ];
 }
 
 /** True when a patch names nothing to change. */

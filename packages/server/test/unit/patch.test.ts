@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseFile } from "@navbook/core";
+import { mergeExtensions, parseFile } from "@navbook/core";
 import { applyEntityPatch, isEmptyPatch, movedFields, namedFields } from "../../src/patch.ts";
 
 // Repository-relative: `applyEntityPatch` reports the path it is given rather
@@ -232,6 +232,43 @@ describe("applyEntityPatch — a plugin's keys", () => {
       labels: ["theirs"],
     });
     assert.match(result, /^labels: \[mine\]$/m);
+  });
+});
+
+describe("movedFields — a plugin's fields", () => {
+  // `features` as plugin-kb registers it: an input field its bridge writes to
+  // the `feature` key, which may be spelled as a scalar or a list.
+  const ext = mergeExtensions([
+    { frontmatterKeys: [{ key: "feature", kinds: ["issue", "pr"], shape: "string-or-list" }] },
+  ]);
+  const plugin = { fields: [{ field: "features", keys: ["feature"] }], ext };
+  const withFeature = (value: string) => ORIGINAL.replace("---\n\n", `feature: ${value}\n---\n\n`);
+  const moved = (base: string, current: string, input: Record<string, unknown> = {}) =>
+    movedFields(base, current, { ref: "aa111111", ...input }, plugin);
+
+  it("names the field when the keys it writes have changed", () => {
+    assert.deepEqual(moved(withFeature("auth"), withFeature("[auth, billing]")), ["features"]);
+    assert.deepEqual(moved(ORIGINAL, withFeature("auth")), ["features"]);
+  });
+
+  it("does not mistake a respelling for a change", () => {
+    assert.deepEqual(moved(withFeature("auth"), withFeature("[auth]")), []);
+    assert.deepEqual(moved(ORIGINAL, withFeature("[]")), []);
+  });
+
+  it("lists the format's fields first, then the plugin's", () => {
+    const retitled = withFeature("billing").replace("title: Original", "title: Retitled");
+    assert.deepEqual(moved(withFeature("auth"), retitled, { title: "Mine" }), [
+      "title",
+      "features",
+    ]);
+  });
+
+  it("guards only what the patch names", () => {
+    const none = { fields: [], ext };
+    const changed = movedFields(withFeature("auth"), withFeature("billing"), { ref: "x" }, none);
+    assert.deepEqual(changed, []);
+    assert.deepEqual(namedFields({ ref: "x", title: "T" }, plugin.fields), ["title", "features"]);
   });
 });
 

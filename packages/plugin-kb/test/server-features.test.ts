@@ -308,6 +308,7 @@ describe("features", () => {
     );
   });
 
+
   it("lists features in slug order, and reports one that is not there", async () => {
     const listed = ok<Payload>(await h.gql(FEATURES)).features;
     assert.deepEqual(
@@ -768,5 +769,102 @@ describe("features from the remembered tree", () => {
 
     writeFileSync(file, original);
     await eventually(() => titleOf("by-hand"), "By hand");
+  });
+});
+
+/**
+ * A stale edit to an entity's features — the host's per-field guard, for a
+ * field a plugin owns.
+ *
+ * `updateIssue` refuses a field somebody else changed since the client read
+ * the file, and lands one nobody touched. `features` is this plugin's field,
+ * written through its bridge; it must be guarded exactly as `labels` is, and
+ * named as the input names it.
+ */
+describe("a stale edit to an issue's features", () => {
+  let h: Harness;
+
+  const SHOW = `query Show($ref: ID!) { issue(ref: $ref) { id title features baseSha } }`;
+  const UPDATE = `mutation Update($input: UpdateIssueInput!) {
+    updateIssue(input: $input) { issue { id title features baseSha } }
+  }`;
+
+  const open = async (title: string): Promise<Payload> =>
+    ok<Payload>(
+      await h.gql(
+        `mutation Open($input: OpenIssueInput!) { openIssue(input: $input) { issue { id path } } }`,
+        { input: { title, body: "Body.", features: ["auth"] } },
+      ),
+    ).openIssue.issue;
+  const show = async (ref: string): Promise<Payload> =>
+    ok<Payload>(await h.gql(SHOW, { ref })).issue;
+  const update = async (input: Payload): Promise<Payload> =>
+    ok<Payload>(await h.gql(UPDATE, { input })).updateIssue.issue;
+  const moved = (refused: Payload): unknown => refused.errors[0]?.extensions?.moved;
+
+  before(async () => {
+    h = await startHarness({ env: ENV });
+    for (const slug of ["auth", "billing", "mobile"]) {
+      ok(await h.gql(CREATE, { input: { title: slug, slug } }));
+    }
+  });
+  after(async () => {
+    await h.stop();
+  });
+
+  it("refuses features changed since the page was rendered, naming them", async () => {
+    const issue = await open("Contested");
+    const seenByB = await show(issue.id);
+
+    await update({ ref: issue.id, features: ["auth", "billing"] });
+    const refused = await h.gql(UPDATE, {
+      input: { ref: issue.id, features: ["mobile"], baseSha: seenByB.baseSha },
+    });
+
+    assert.equal(errorCode(refused), "STALE_CONTENT");
+    assert.deepEqual(moved(refused), ["features"]);
+    assert.deepEqual((await show(issue.id)).features, ["auth", "billing"]);
+    assert.equal(h.fixture.server.git(["status", "--porcelain"]).stdout, "");
+  });
+
+  it("lands features nobody else touched, whatever else moved", async () => {
+    const issue = await open("Retitled");
+    const seenByB = await show(issue.id);
+
+    await update({ ref: issue.id, title: "A's title" });
+    const landed = await update({
+      ref: issue.id,
+      features: ["auth", "mobile"],
+      baseSha: seenByB.baseSha,
+    });
+    assert.equal(landed.title, "A's title");
+    assert.deepEqual(landed.features, ["auth", "mobile"]);
+  });
+
+  it("names the plugin's field beside the host's, and only the ones that moved", async () => {
+    const issue = await open("Several");
+    const seen = await show(issue.id);
+
+    await update({ ref: issue.id, title: "Moved", features: ["billing"] });
+    const refused = await h.gql(UPDATE, {
+      input: {
+        ref: issue.id,
+        title: "Mine",
+        labels: ["x"],
+        features: ["mobile"],
+        baseSha: seen.baseSha,
+      },
+    });
+    assert.equal(errorCode(refused), "STALE_CONTENT");
+    assert.deepEqual(moved(refused), ["title", "features"]);
+  });
+
+  it("names the plugin's field when it cannot tell what the client saw", async () => {
+    const issue = await open("Unknown base");
+    const refused = await h.gql(UPDATE, {
+      input: { ref: issue.id, features: ["mobile"], baseSha: "0".repeat(40) },
+    });
+    assert.equal(errorCode(refused), "STALE_CONTENT");
+    assert.deepEqual(moved(refused), ["features"]);
   });
 });

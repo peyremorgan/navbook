@@ -60,7 +60,13 @@ import type {
   UpdateIssueInput,
   UpdatePrInput,
 } from "../generated/resolver-types.ts";
-import { applyEntityPatch, isEmptyPatch, movedFields, namedFields } from "../patch.ts";
+import {
+  applyEntityPatch,
+  isEmptyPatch,
+  movedFields,
+  namedFields,
+  type PluginField,
+} from "../patch.ts";
 import { toCoreKind, toCoreVerdict } from "./map.ts";
 
 /** Mutations always commit: a change nobody committed is not a change made. */
@@ -402,6 +408,7 @@ async function patchEntity(
   // A plugin's own field counts as something to change: `updateIssue` naming
   // only `features` is a patch, not an empty one.
   const extFields = ctx.plugins.patchFields(input as Record<string, unknown>);
+  const pluginFields = ctx.plugins.patchedFields(input as Record<string, unknown>);
   if (isEmptyPatch(input) && Object.keys(extFields).length === 0) {
     throw invalidInput("the patch names no field to change");
   }
@@ -414,7 +421,7 @@ async function patchEntity(
       // After the pull and before the write, like core's own stale check: a
       // refusal leaves the tree exactly as it was.
       if (input.baseSha !== undefined && input.baseSha !== null) {
-        assertFieldsUnmoved(ctx, entity, before, input, input.baseSha);
+        assertFieldsUnmoved(ctx, entity, before, input, input.baseSha, pluginFields);
       }
       const patched = applyEntityPatch(
         before,
@@ -476,17 +483,21 @@ function assertFieldsUnmoved(
   current: string,
   input: UpdateIssueInput | UpdatePrInput,
   baseSha: string,
+  pluginFields: readonly PluginField[],
 ): void {
   if (blobSha(current) === baseSha) return;
 
   const unknown = (): GraphQLError =>
-    stale(`#${entity.id} was read from a version this server does not have`, namedFields(input));
+    stale(
+      `#${entity.id} was read from a version this server does not have`,
+      namedFields(input, pluginFields),
+    );
   const base = blobContent(ctx.ws.repoRoot, baseSha);
   if (base === null) throw unknown();
 
   let moved: string[];
   try {
-    moved = movedFields(base, current, input);
+    moved = movedFields(base, current, input, { fields: pluginFields, ext: ctx.ws.ext });
   } catch (error) {
     if (!(error instanceof FrontmatterError)) throw error;
     throw unknown();

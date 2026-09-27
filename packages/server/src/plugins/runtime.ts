@@ -9,6 +9,7 @@
  */
 
 import type { EntityRecord } from "@navbook/core";
+import type { PluginField } from "../patch.ts";
 import type { PluginResolvers } from "../schema.ts";
 import type { EntityInputBridge, MutationEvent, PluginService } from "./host.ts";
 
@@ -83,6 +84,23 @@ export class PluginRuntime {
   /** Keys every plugin wants patched on an existing entity. */
   patchFields(input: Record<string, unknown>): Record<string, unknown> {
     return Object.assign({}, ...this.bridges.map((b) => b.patchFields?.(input) ?? {}));
+  }
+
+  /**
+   * The fields of a patch that plugins read, each with the keys it writes.
+   *
+   * Asked field by field of the same `patchFields` that writes them, so the
+   * stale check guards exactly what the write changes and names it as the
+   * input does — `features`, not the `feature` key it lands in.
+   */
+  patchedFields(input: Record<string, unknown>): PluginField[] {
+    const fields: PluginField[] = [];
+    for (const [field, value] of Object.entries(input)) {
+      if (value === undefined) continue;
+      const keys = Object.keys(this.patchFields({ [field]: value }));
+      if (keys.length > 0) fields.push({ field, keys });
+    }
+    return fields;
   }
 
   /** Registered query terms every plugin reads out of a filter. */
