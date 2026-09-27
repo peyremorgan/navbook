@@ -2,6 +2,7 @@
 title: nav feature show --commits accepts any argument and silently reports no history
 author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-20T12:37:28Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug, cli]
 feature: [cli, features]
 ---
