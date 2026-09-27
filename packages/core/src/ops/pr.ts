@@ -7,6 +7,7 @@
  * branch it proposes to merge (spec 03 §3.5).
  */
 
+import { existsSync } from "node:fs";
 import { type Revision, readRevisions } from "../core/files.ts";
 import { parseDoc, stringAt } from "../core/frontmatter.ts";
 import { MIN_PREFIX_LENGTH, resolvePrefix } from "../core/id.ts";
@@ -66,7 +67,6 @@ import {
   defaultBranch,
   isMergeInProgress,
   isReplayInProgress,
-  isTrackedTreeClean,
   isTreeClean,
   resolveSha,
   updateBranch,
@@ -1433,6 +1433,13 @@ export interface PrElsewhere {
   worktree: string | null;
   /** Whether that worktree's index and tracked files are clean. */
   worktreeClean: boolean;
+  /**
+   * Whether git still records {@link worktree} although its directory is gone —
+   * deleted without `git worktree prune`, or cleared from a temporary
+   * directory at reboot. Nothing can be written there, and git will not check
+   * the branch out anywhere else until the registration is pruned.
+   */
+  worktreeMissing: boolean;
 }
 
 export interface PrWriteTarget {
@@ -1482,7 +1489,8 @@ export function locatePrToWrite(ws: WsCtx, ref: string): PrWriteTarget {
       sourceRemote,
       branch,
       worktree,
-      worktreeClean: worktree !== null && isTrackedTreeClean(worktree),
+      worktreeClean: worktree !== null && isTreeClean(worktree, { untracked: false }),
+      worktreeMissing: worktree !== null && !existsSync(worktree),
     },
   };
 }
@@ -1497,27 +1505,34 @@ export function locatePrToWrite(ws: WsCtx, ref: string): PrWriteTarget {
 export function findPrToWrite(ws: WsCtx, ref: string): EntityRecord {
   const { entity, elsewhere } = locatePrToWrite(ws, ref);
   if (elsewhere === null) return entity;
+  refusePrWrite(entity, elsewhere);
+}
 
-  const { sourceRef, branch, worktree, worktreeClean } = elsewhere;
+/**
+ * Refuse a write to a pull request that lives elsewhere, saying where.
+ *
+ * Separate from {@link findPrToWrite} so a caller already holding what
+ * {@link locatePrToWrite} found can refuse without scanning every ref again.
+ */
+export function refusePrWrite(entity: EntityRecord, elsewhere: PrElsewhere): never {
+  const { sourceRef, branch, worktree, worktreeClean, worktreeMissing } = elsewhere;
   const why =
     "a pull request is written on its source branch, beside the files it proposes to merge";
-  wsFail(
-    "precondition",
-    `#${entity.id} is on '${sourceRef}', which is not checked out here`,
-    worktree
-      ? [
-          why,
-          // Saying it is dirty is what explains the absence of any offer to
+  const where =
+    worktree === null
+      ? `check out '${branch}' first: 'git switch ${branch}', or 'git worktree add <dir> ${branch}'`
+      : worktreeMissing
+        ? `'${branch}' is registered to a worktree at ${worktree}, which no longer exists; ` +
+          "clear it with 'git worktree prune', then check the branch out"
+        : // Saying it is dirty is what explains the absence of any offer to
           // write there, for a front end that would otherwise have made one.
           `'${branch}' is checked out in ${worktree}${
             worktreeClean ? "" : " (which has uncommitted changes)"
-          }; run the command there`,
-        ]
-      : [
-          why,
-          `check out '${branch}' first: 'git switch ${branch}', or 'git worktree add <dir> ${branch}'`,
-        ],
-  );
+          }; run the command there`;
+  wsFail("precondition", `#${entity.id} is on '${sourceRef}', which is not checked out here`, [
+    why,
+    where,
+  ]);
 }
 
 /** The pull request in this tree, or null when only another branch could hold it. */

@@ -22,6 +22,8 @@ export interface MakeContextOptions {
   stderr?: NodeJS.WriteStream;
   /** Skip repository discovery, for commands that work outside a repository. */
   requireRepo?: boolean;
+  /** The Navbook directory, when the caller already knows it; see `makeWsCtx`. */
+  navDir?: string;
 }
 
 export function makeContext(opts: MakeContextOptions = {}): Ctx {
@@ -33,6 +35,7 @@ export function makeContext(opts: MakeContextOptions = {}): Ctx {
     cwd: opts.cwd,
     env,
     ...(opts.requireRepo !== undefined ? { requireRepo: opts.requireRepo } : {}),
+    ...(opts.navDir !== undefined ? { navDir: opts.navDir } : {}),
   });
 
   return { ...ws, colors: makeColors(stdout, env), stdout, stderr };

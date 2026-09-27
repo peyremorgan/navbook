@@ -225,26 +225,29 @@ export function userIdentity(cwd: string): Identity {
   return name ? { name, email } : { email };
 }
 
-/** True when the working tree and index have no changes at all. */
-export function isTreeClean(cwd: string): boolean {
-  const status = gitRun(["status", "--porcelain"], { cwd });
-  return status.code === 0 && status.stdout.trim() === "";
-}
-
 /**
- * True when the index is empty and no tracked file differs from `HEAD`.
+ * True when the working tree and index have no changes at all.
  *
- * The looser reading of {@link isTreeClean}, which counts untracked files too.
- * Both readings are wanted: before moving a ref or starting a server on a
- * clone, an untracked file is a sign that somebody is working and the strict
- * reading is right. Before writing a tracker file into a checkout the user is
- * not standing in, only the index and the tracked tree matter — that write
- * stages its own paths and nothing else, and a build directory or an installed
- * `node_modules` sitting untracked beside them says nothing about whether it is
- * safe. Judging those would disqualify almost every real worktree.
+ * `untracked: false` is the looser reading, which does not count untracked
+ * files. Both are wanted: before moving a ref or starting a server on a clone,
+ * an untracked file is a sign that somebody is working and the strict reading
+ * is right. Before writing a tracker file into a checkout the user is not
+ * standing in, only the index and the tracked tree matter — that write stages
+ * its own paths and nothing else, and a build directory or an installed
+ * `node_modules` sitting untracked beside them says nothing about whether it
+ * is safe. Judging those would disqualify almost every real worktree.
+ *
+ * A directory that does not exist is not clean: there is nothing there to
+ * write into, and git cannot even be started in it.
  */
-export function isTrackedTreeClean(cwd: string): boolean {
-  const status = gitRun(["status", "--porcelain", "--untracked-files=no"], { cwd });
+export function isTreeClean(cwd: string, opts: { untracked?: boolean } = {}): boolean {
+  if (!existsSync(cwd)) return false;
+  const args = [
+    "status",
+    "--porcelain",
+    ...(opts.untracked === false ? ["--untracked-files=no"] : []),
+  ];
+  const status = gitRun(args, { cwd });
   return status.code === 0 && status.stdout.trim() === "";
 }
 

@@ -25,9 +25,11 @@ import {
   addWorktree,
   type EntityRecord,
   findPrToWrite,
-  isTrackedTreeClean,
+  gitRun,
+  isTreeClean,
   locatePrToWrite,
   type PrElsewhere,
+  refusePrWrite,
   removeWorktree,
 } from "@navbook/core";
 import type { Ctx } from "../context.ts";
@@ -89,12 +91,37 @@ function agreed(ctx: Ctx, entity: EntityRecord, to: Destination, opts: PrWriteOp
   return askYesNo(ctx, "Check it out in a temporary worktree and write it there? [y/N] ");
 }
 
-/** A context rooted at `worktree`, reporting to the terminal we already have. */
+/**
+ * A context rooted at `worktree`, reporting to the terminal we already have.
+ *
+ * The Navbook directory is the one already resolved here rather than found
+ * again: the pull request was located under it, and a second discovery from
+ * another root is one more chance to land somewhere it is not.
+ */
 function contextIn(ctx: Ctx, worktree: string): Ctx {
-  // Discovery runs again from the new root, so `NAV_ROOT` and a nested
-  // Navbook directory resolve there exactly as they would for a command
-  // typed in that worktree.
-  return makeContext({ cwd: worktree, env: ctx.env, stdout: ctx.stdout, stderr: ctx.stderr });
+  return makeContext({
+    cwd: worktree,
+    env: ctx.env,
+    stdout: ctx.stdout,
+    stderr: ctx.stderr,
+    navDir: ctx.navDir,
+  });
+}
+
+/**
+ * Run `write` in `worktree`, refusing if that checkout does not hold the pull
+ * request after all — the branch moved since we looked, say. Without this the
+ * write would land beside no `pr.md`, the stranded comment the refusal exists
+ * to prevent.
+ */
+function writeIn<T>(
+  ctx: Ctx,
+  worktree: string,
+  prefix: string,
+  write: (at: Ctx, entity: EntityRecord) => T,
+): T {
+  const there = contextIn(ctx, worktree);
+  return write(there, findPrToWrite(there, prefix));
 }
 
 /**
@@ -102,37 +129,44 @@ function contextIn(ctx: Ctx, worktree: string): Ctx {
  *
  * `mkdtemp` rather than a fixed name, so two runs never collide and nothing a
  * user made is ever in the way; under `os.tmpdir()`, so `TMPDIR` says where.
+ * The branch only flavours the name, so it is cut short: a directory name has
+ * a length limit and a branch name has none.
  */
 function checkOutTemporarily(ctx: Ctx, branch: string): string {
-  const safe = branch.replace(/[^A-Za-z0-9._-]+/g, "-");
-  const dir = mkdtempSync(join(tmpdir(), `nav-${safe}-`));
+  const safe = branch.replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 40);
+  let dir: string | null = null;
   try {
+    dir = mkdtempSync(join(tmpdir(), `nav-${safe}-`));
     addWorktree(ctx.repoRoot, dir, branch);
+    return dir;
   } catch (error) {
-    rmSync(dir, { recursive: true, force: true });
+    if (dir !== null) rmSync(dir, { recursive: true, force: true });
     fail(`could not check '${branch}' out into a temporary worktree`, [
       error instanceof Error ? error.message.trim() : String(error),
     ]);
   }
-  return dir;
 }
 
 /**
  * Take a temporary worktree away again, unless it holds what the user would lose.
  *
  * After `--commit` the write is on the branch and the worktree holds nothing.
- * Without it, the write is staged there and nowhere else, so the worktree stays
- * and says where it is — removing it would throw the change away. Untracked
- * files do not count: nothing but this run has been in there. A run that
- * failed has nothing worth keeping, and goes regardless.
+ * Without it — or when the commit itself failed, a hook refusing it, say — the
+ * write is staged there and nowhere else, so the worktree stays and says where
+ * it is: removing it would throw away a review somebody just wrote. A run that
+ * failed before writing anything leaves it clean, and it goes. Untracked files
+ * do not count: nothing but this run has been in there.
  */
 function release(ctx: Ctx, dir: string, branch: string, failed: boolean): void {
-  if (failed || isTrackedTreeClean(dir)) {
+  if (isTreeClean(dir, { untracked: false })) {
     try {
       removeWorktree(ctx.repoRoot, dir, { force: true });
     } catch {
       // Never mask the error that brought us here with one about tidying up.
+      // Deleting the directory alone would leave git recording the branch as
+      // checked out at a path that no longer exists, so prune that too.
       rmSync(dir, { recursive: true, force: true });
+      gitRun(["worktree", "prune"], { cwd: ctx.repoRoot });
     }
     if (!failed) {
       ctx.stderr.write(
@@ -145,6 +179,29 @@ function release(ctx: Ctx, dir: string, branch: string, failed: boolean): void {
     `${ctx.colors.yellow("note:")} the change is staged in ${dir}, a temporary worktree on '${branch}'\n` +
       `commit it there, then remove it: 'git worktree remove ${dir}'\n`,
   );
+}
+
+/** Terminal signals, which reach the editor and git as well as us. */
+const TERMINAL_SIGNALS = ["SIGINT", "SIGQUIT", "SIGHUP"] as const;
+
+/**
+ * Run `body` with terminal signals left to the children.
+ *
+ * Ctrl-C while `$EDITOR` is open goes to the whole foreground process group.
+ * By default it would kill us mid-`spawnSync`, before any `finally` runs, and
+ * leave the temporary worktree registered with the branch checked out. Git
+ * ignores these signals while its own editor runs, for the same reason; so
+ * does this. The editor still gets the signal, exits, and the command fails
+ * through its ordinary path — which is the one that tidies up.
+ */
+function sheltered<T>(body: () => T): T {
+  const ignore = (): void => {};
+  for (const signal of TERMINAL_SIGNALS) process.on(signal, ignore);
+  try {
+    return body();
+  } finally {
+    for (const signal of TERMINAL_SIGNALS) process.off(signal, ignore);
+  }
 }
 
 /**
@@ -165,26 +222,25 @@ export function withPrWriteSite<T>(
   if (elsewhere === null) return write(ctx, entity);
 
   const to = destination(elsewhere);
-  if (to === null || !agreed(ctx, entity, to, opts)) {
-    // Throws: this checkout does not hold it, and core says where it is.
-    return write(ctx, findPrToWrite(ctx, prefix));
-  }
+  // Built from what was just found, rather than scanning every ref again.
+  if (to === null || !agreed(ctx, entity, to, opts)) refusePrWrite(entity, elsewhere);
 
   if (to.worktree !== null) {
-    const there = contextIn(ctx, to.worktree);
-    const result = write(there, locatePrToWrite(there, prefix).entity);
+    const result = writeIn(ctx, to.worktree, prefix, write);
     ctx.stderr.write(`${ctx.colors.dim(`written in ${to.worktree}`)}\n`);
     return result;
   }
 
-  const dir = checkOutTemporarily(ctx, to.branch);
-  let failed = true;
-  try {
-    const there = contextIn(ctx, dir);
-    const result = write(there, locatePrToWrite(there, prefix).entity);
-    failed = false;
-    return result;
-  } finally {
-    release(ctx, dir, to.branch, failed);
-  }
+  const { branch } = to;
+  return sheltered(() => {
+    const dir = checkOutTemporarily(ctx, branch);
+    let failed = true;
+    try {
+      const result = writeIn(ctx, dir, prefix, write);
+      failed = false;
+      return result;
+    } finally {
+      release(ctx, dir, branch, failed);
+    }
+  });
 }

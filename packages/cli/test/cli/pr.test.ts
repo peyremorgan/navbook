@@ -4,8 +4,8 @@
  */
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
@@ -1191,6 +1191,82 @@ describe("a pull request that only another branch holds", () => {
       assert.deepEqual(readdirSync(tmp), []);
       assert.equal(repo.git(["worktree", "list"]).stdout.trim().split("\n").length, 1);
     } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("keeps the temporary worktree when the commit is refused, so the review survives", () => {
+    const { repo } = withOpenPr();
+    try {
+      const hooks = repo.git(["rev-parse", "--git-path", "hooks"]).stdout.trim();
+      mkdirSync(join(repo.dir, hooks), { recursive: true });
+      writeFileSync(join(repo.dir, hooks, "pre-commit"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+
+      const refused = repo.nav(
+        ["pr", "review", id0(repo), "-y", "--approve", "--commit", "-m", "A careful review."],
+        { TMPDIR: privateTmp(repo) },
+      );
+      assert.equal(refused.code, 1);
+      // The review was written and staged before git refused to commit it; the
+      // worktree it sits in is the only copy, so it stays.
+      const kept = /the change is staged in (\S+),/.exec(refused.stderr)?.[1];
+      assert.ok(kept, refused.stderr);
+      assert.match(repo.git(["-C", kept, "status", "--porcelain"]).stdout, /^A {2}.*comments\//);
+      repo.git(["worktree", "remove", "--force", kept]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("removes the temporary worktree when Ctrl-C interrupts the editor", async () => {
+    const { repo } = withOpenPr();
+    try {
+      const tmp = privateTmp(repo);
+      // What the terminal does on Ctrl-C: signal the whole foreground process
+      // group, editor and nav alike. Detached, so the group is nav's own and
+      // the signal cannot reach the test runner.
+      const editor = repo.script("ctrl-c", "kill -INT 0\nsleep 1");
+      const command = navCommand();
+      const child = spawn(
+        command[0] as string,
+        [...command.slice(1), "pr", "comment", id0(repo), "-y", "--commit"],
+        {
+          cwd: repo.dir,
+          env: { ...deterministicEnv(repo.home), TMPDIR: tmp, EDITOR: editor },
+          detached: true,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stderr = "";
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      const code = await new Promise<number | null>((resolve) => child.on("close", resolve));
+
+      assert.equal(code, 1, stderr);
+      assert.match(stderr, /was interrupted \(SIGINT\)/);
+      assert.deepEqual(readdirSync(tmp), []);
+      assert.equal(repo.git(["worktree", "list"]).stdout.trim().split("\n").length, 1);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("names the fix when the worktree git records for the branch is gone", () => {
+    const { repo } = withOpenPr();
+    const tree = join(repo.dir, "..", "worktree-gone");
+    try {
+      repo.git(["worktree", "add", "--quiet", tree, "feat/auth"]);
+      rmSync(tree, { recursive: true, force: true });
+
+      // Once "git was not found on PATH", from starting git in a directory that
+      // does not exist. The registration is the problem, and pruning the fix.
+      const refused = repo.nav(["pr", "comment", id0(repo), "-y", "-m", "Read."]);
+      assert.equal(refused.code, 1);
+      assert.match(refused.stderr, /which no longer exists; clear it with 'git worktree prune'/);
+      assert.doesNotMatch(refused.stderr, /not found on PATH/);
+    } finally {
+      repo.git(["worktree", "prune"]);
       repo.cleanup();
     }
   });

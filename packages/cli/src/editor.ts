@@ -44,6 +44,10 @@ export function openInEditor(ctx: Ctx, absolutePath: string): void {
     env: ctx.env,
   });
   if (result.error) fail(`could not start editor '${editor}': ${result.error.message}`);
+  // Ctrl-C reaches the editor too, and a killed process has a signal, not a
+  // status: "status null" would say nothing about what happened.
+  if (result.signal)
+    fail(`editor '${editor}' was interrupted (${result.signal}); nothing was written`);
   if ((result.status ?? 1) !== 0) fail(`editor '${editor}' exited with status ${result.status}`);
 }
 
