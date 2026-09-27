@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -673,5 +673,100 @@ describe("baseSha under a clean filter", () => {
 
     assert.equal(errorCode(await edit("Mine.", spec.baseSha)), "STALE_CONTENT");
     assert.match(fileOf(spec.path), /Theirs\./);
+  });
+});
+
+/**
+ * Features read from the tree the server remembers against HEAD.
+ *
+ * The plugin reads through the request's tree, which with a pull interval is
+ * one parsed at HEAD and kept across requests. The questions are the host's
+ * own for entities: nothing may get stuck — not the server's own writes, not
+ * a push from elsewhere, not an edit made by hand in the served clone.
+ */
+describe("features from the remembered tree", () => {
+  const INTERVAL_MS = 200;
+  let h: Harness;
+
+  const FEATURE = `query Feature($slug: String!) {
+    feature(slug: $slug) { slug title issues { id } }
+  }`;
+  const titleOf = async (slug: string): Promise<string> =>
+    ok<Payload>(await h.gql(FEATURE, { slug })).feature.title;
+  const slugs = async (): Promise<string[]> =>
+    ok<Payload>(await h.gql("{ features { slug } }")).features.map((f: Payload) => f.slug);
+
+  /** Ask until `probe` answers `expected`, for a few pull intervals at most. */
+  async function eventually<T>(probe: () => Promise<T>, expected: T): Promise<void> {
+    let seen: T | undefined;
+    for (let tries = 0; tries < 50; tries++) {
+      seen = await probe();
+      if (JSON.stringify(seen) === JSON.stringify(expected)) return;
+      await new Promise((resolve) => setTimeout(resolve, INTERVAL_MS / 2));
+    }
+    assert.deepEqual(seen, expected);
+  }
+
+  before(async () => {
+    h = await startHarness({ env: ENV, pullIntervalMs: INTERVAL_MS });
+  });
+  after(async () => {
+    await h.stop();
+  });
+
+  it("answers the server's own writes on the very next read", async () => {
+    ok(await h.gql(CREATE, { input: { title: "Cached", slug: "cached" } }));
+    // Read once, so a tree is remembered before the writes below.
+    assert.equal(await titleOf("cached"), "Cached");
+    assert.ok((await slugs()).includes("cached"));
+
+    const current = ok<Payload>(await h.gql(`{ feature(slug: "cached") { baseSha } }`)).feature;
+    const renamed = ok<Payload>(
+      await h.gql(UPDATE_FEATURE, {
+        input: { slug: "cached", title: "Cached, renamed", baseSha: current.baseSha },
+      }),
+    ).updateFeature.feature;
+    assert.equal(renamed.title, "Cached, renamed");
+    assert.equal(await titleOf("cached"), "Cached, renamed");
+
+    // A write elsewhere in the tree reaches a feature's derived fields too.
+    const opened = ok<Payload>(
+      await h.gql(
+        `mutation { openIssue(input: { title: "Attached", body: "b.", features: ["cached"] }) { issue { id } } }`,
+      ),
+    ).openIssue.issue;
+    const feature = ok<Payload>(await h.gql(FEATURE, { slug: "cached" })).feature;
+    assert.deepEqual(
+      feature.issues.map((issue: Payload) => issue.id),
+      [opened.id],
+    );
+  });
+
+  it("sees a feature pushed from elsewhere once it has been pulled", async () => {
+    assert.ok(!(await slugs()).includes("pushed"));
+    const peer = h.fixture.peer;
+    peer.git(["pull", "--quiet", "--no-rebase", "origin", "main"]);
+    peer.write(
+      ".navbook/specs/pushed/feature.md",
+      "---\ntitle: Pushed\nauthor: peer@example.invalid\ncreated: 2026-09-01T10:00:00Z\n---\n",
+    );
+    peer.commitAll("docs(feature): create pushed");
+    assert.equal(peer.git(["push", "--quiet", "origin", "main:main"]).code, 0);
+    await eventually(async () => (await slugs()).includes("pushed"), true);
+  });
+
+  it("sees a feature edited by hand in the served clone, and every edit after it", async () => {
+    ok(await h.gql(CREATE, { input: { title: "By hand", slug: "by-hand" } }));
+    assert.equal(await titleOf("by-hand"), "By hand");
+    const file = join(h.fixture.server.dir, ".navbook/specs/by-hand/feature.md");
+    const original = readFileSync(file, "utf8");
+
+    writeFileSync(file, original.replace("title: By hand", "title: Edited by hand"));
+    await eventually(() => titleOf("by-hand"), "Edited by hand");
+    writeFileSync(file, original.replace("title: By hand", "title: Edited again"));
+    await eventually(() => titleOf("by-hand"), "Edited again");
+
+    writeFileSync(file, original);
+    await eventually(() => titleOf("by-hand"), "By hand");
   });
 });
