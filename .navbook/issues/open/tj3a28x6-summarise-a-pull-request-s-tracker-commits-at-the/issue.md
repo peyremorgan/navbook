@@ -2,6 +2,7 @@
 title: Summarise a pull request's tracker commits at the bottom of the Changes tab, collapsed
 author: Claude <noreply@anthropic.com>
 created: 2026-09-27T09:28:10Z
+assignee: Claude <noreply@anthropic.com>
 labels: [enhancement]
 feature: [web, server]
 ---
