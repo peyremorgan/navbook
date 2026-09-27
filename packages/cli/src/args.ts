@@ -7,20 +7,24 @@
  * happens to read it — which is how `nav feature show --commits 2.5` came to
  * report an empty history instead of a mistake (#kw143sq9).
  *
+ * Both read plain decimal notation only. `Number` alone would also take
+ * `0x10`, `0b11` and `1e3`, none of which anybody means by a count of levels
+ * or a place in a queue, and `Number("")` is 0.
+ *
  * Commander prints the message after its own "option '--x <n>' argument 'v'
  * is invalid.", so each one is a sentence of its own and names the unit.
  */
 
 import { InvalidArgumentError } from "commander";
 
-/**
- * A count: a whole number no smaller than `min`. Blank is refused rather than
- * read as `Number("")`, which is 0 — a count nobody asked for.
- */
+const DIGITS = /^\s*\d+\s*$/;
+const DECIMAL = /^\s*[-+]?(\d+(\.\d*)?|\.\d+)\s*$/;
+
+/** A count: a whole number no smaller than `min`. */
 export function wholeNumber(unit: string, min = 0): (value: string) => number {
   return (value) => {
     const parsed = Number(value);
-    if (value.trim() === "" || !Number.isInteger(parsed) || parsed < min) {
+    if (!DIGITS.test(value) || !Number.isSafeInteger(parsed) || parsed < min) {
       const floor = min > 0 ? `, at least ${min}` : "";
       throw new InvalidArgumentError(`Expected a whole number of ${unit}${floor}.`);
     }
@@ -34,7 +38,7 @@ export function wholeNumber(unit: string, min = 0): (value: string) => number {
  */
 export function finiteNumber(value: string): number {
   const parsed = Number(value);
-  if (value.trim() === "" || !Number.isFinite(parsed)) {
+  if (!DECIMAL.test(value) || !Number.isFinite(parsed)) {
     throw new InvalidArgumentError("Expected a number.");
   }
   return parsed;

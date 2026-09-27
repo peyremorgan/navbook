@@ -580,6 +580,9 @@ describe("the commits that touched a feature", () => {
       assert.equal(featureCommits(ws, feature, members).length, 4);
       assert.equal(featureCommits(ws, feature, members, { limit: 2 }).length, 2);
       assert.deepEqual(featureCommits(ws, feature, members, { limit: 0 }), []);
+      // Past git's C int, git refuses `-n` outright; that must read as no
+      // limit rather than as no commits.
+      assert.equal(featureCommits(ws, feature, members, { limit: 3_000_000_000 }).length, 4);
     });
   });
 });

@@ -367,7 +367,7 @@ describe("nav feature list and show", () => {
   it("refuses a commit count that is not a whole number", () => {
     // '2.5' is the one that mattered: it used to reach git as `-n 2.5`, which
     // git refuses, and render "recent commits (0)" with exit 0 (#kw143sq9).
-    for (const value of ["abc", "2.5", "-1", "", " "]) {
+    for (const value of ["abc", "2.5", "-1", "", " ", "0x10", "1e1", "9007199254740993"]) {
       const result = repo.nav(["feature", "show", "auth", "--commits", value]);
       assert.equal(result.code, 1, `--commits ${JSON.stringify(value)}`);
       assert.match(
@@ -376,6 +376,12 @@ describe("nav feature list and show", () => {
       );
       assert.equal(result.stdout, "");
     }
+  });
+
+  it("lists the whole history for a count past what git's -n can hold", () => {
+    const result = repo.nav(["feature", "show", "auth", "--commits", "3000000000"]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /docs\(feature\): create auth/);
   });
 
   it("says so when there is nothing to list", () => {

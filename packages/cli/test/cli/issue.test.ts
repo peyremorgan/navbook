@@ -751,7 +751,7 @@ describe("nav issue rank and deadline", () => {
   });
 
   it("refuses a rank that is not a number, before opening anything", () => {
-    for (const value of ["abc", "", "NaN", "Infinity"]) {
+    for (const value of ["abc", "", "NaN", "Infinity", "0x1A", "1e3", "-"]) {
       const result = repo.nav(["issue", "open", "T", "-m", "b", "--rank", value], {
         NAV_IDS: "bbbb0001",
       });

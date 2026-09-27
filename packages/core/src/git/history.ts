@@ -11,6 +11,8 @@ import { git, gitMaybe, gitRun, gitRunAsync, splitLines } from "./exec.ts";
 /** ASCII SOH/STX: separators that cannot occur in a commit message or path. */
 const RECORD_SEPARATOR = "\u0001";
 const FIELD_SEPARATOR = "\u0002";
+/** The largest `-n` git accepts: it parses the count into a C `int`. */
+const GIT_MAX_COUNT = 2 ** 31 - 1;
 
 export interface FileVersion {
   sha: string;
@@ -273,7 +275,12 @@ export interface CommitSearch {
  */
 export function searchCommits(cwd: string, search: CommitSearch): CommitSummary[] {
   const args = ["log", ...COMMIT_LOG_ARGS];
-  if (search.limit !== undefined) args.push("-n", String(search.limit));
+  // git reads `-n` as a C int and refuses anything larger outright, which the
+  // `code !== 0` below would report as no commits at all. No repository holds
+  // that many, so a limit past it is no limit.
+  if (search.limit !== undefined && search.limit <= GIT_MAX_COUNT) {
+    args.push("-n", String(search.limit));
+  }
   if (search.grep !== undefined) args.push("--extended-regexp", `--grep=${search.grep}`);
   if (search.paths?.length) args.push("--", ...search.paths);
 
