@@ -10,6 +10,9 @@ revisions:
   - head: 59046cf7bf2384ef1852ef146fc0b218eb8bf0aa
     base: 6c48ca18421ac3f61539e6c7edc29c0db8cf2cc2
     date: 2026-09-27T21:51:42Z
+  - head: dae74f8a7d4b50d98598dbbab157e9f3ceecee51
+    base: ae9aac59e6675b95dadf50874ea94b50cf5a5a6a
+    date: 2026-09-27T22:23:56Z
 ---
 
 Fixes #cvb57nhm. The server's own `git commit`, `fetch` and `merge` start `git maintenance run --auto --detach`, which runs in a session of its own. No drain waits for it, and no signal the server gets reaches it. So `docker stop` SIGKILLs it partway through, and what it leaves stays in the volume. A stale `packed-refs.lock` fails every `fetch --prune` once a branch is deleted on origin, and with it every request (reproduced; see the issue).
