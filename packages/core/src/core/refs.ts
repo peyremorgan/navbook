@@ -14,14 +14,53 @@ const PROSE_REF = /(^|[^\w#/`])#([a-z][a-z0-9]{7})\b/g;
  */
 const TRAILER_LINE = /^(Refs|Closes|Deletes):[ \t]*(.+?)[ \t]*$/gim;
 
+/**
+ * A line that opens or closes a fenced code block (CommonMark §4.5): a run of
+ * three or more backticks or tildes, then the info string. The indent and any
+ * `>` before it are allowed so that a fence inside a list item or a quote
+ * counts; one indented further is an indented code block, code either way.
+ */
+const FENCE_LINE = /^[ \t>]*(`{3,}|~{3,})(.*)$/;
+
 /** Extract `#id` references from Markdown prose, ignoring English words. */
 export function extractProseRefs(markdown: string): string[] {
   const out = new Set<string>();
-  for (const match of markdown.matchAll(PROSE_REF)) {
+  for (const match of withoutFences(markdown).matchAll(PROSE_REF)) {
     const id = match[2] as string;
     if (isId(id)) out.add(id);
   }
   return [...out];
+}
+
+/**
+ * `markdown` with every fenced code block blanked, fences included.
+ *
+ * A fence is code, not prose: pasted terminal output names whatever IDs the
+ * terminal printed, and the web client, which parses Markdown properly, links
+ * none of them. A fence closes on a run of its own character at least as long
+ * as the one that opened it, with nothing after; one never closed runs to the
+ * end of the document. A backtick fence's info string cannot hold a backtick,
+ * which is what tells ```` ```x``` ```` on one line apart from a fence.
+ */
+function withoutFences(markdown: string): string {
+  let open: string | null = null;
+  return markdown
+    .split("\n")
+    .map((line) => {
+      const fence = FENCE_LINE.exec(line);
+      const run = fence?.[1] ?? "";
+      const rest = fence?.[2] ?? "";
+      if (open === null) {
+        if (!fence || (run.startsWith("`") && rest.includes("`"))) return line;
+        open = run;
+        return "";
+      }
+      if (fence && run[0] === open[0] && run.length >= open.length && rest.trim() === "") {
+        open = null;
+      }
+      return "";
+    })
+    .join("\n");
 }
 
 /**

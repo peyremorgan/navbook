@@ -29,6 +29,42 @@ describe("extractProseRefs", () => {
     assert.deepEqual(extractProseRefs("use `#bqlybac0` verbatim"), []);
   });
 
+  it("ignores references inside a fenced code block", () => {
+    const markdown = [
+      "Before #mz4kq1rv.",
+      "```",
+      "41c8295 docs(issue): open #bqlybac0",
+      "```",
+      "After #dk3mp2x9.",
+    ].join("\n");
+    assert.deepEqual(extractProseRefs(markdown), ["mz4kq1rv", "dk3mp2x9"]);
+  });
+
+  it("reads tilde fences, info strings, and fences in list items and quotes", () => {
+    assert.deepEqual(extractProseRefs("~~~text\n#bqlybac0\n~~~\n"), []);
+    assert.deepEqual(extractProseRefs('```json\n{"id":"#bqlybac0"}\n```\n'), []);
+    assert.deepEqual(extractProseRefs("- item\n\n  ```\n  #bqlybac0\n  ```\n"), []);
+    assert.deepEqual(extractProseRefs("> ```\n> #bqlybac0\n> ```\n"), []);
+  });
+
+  it("closes a fence only on a run of its own character at least as long", () => {
+    // A shorter run, the other character, or a run followed by text is content.
+    const markdown = "````\n```\n~~~~\n```` x\n#bqlybac0\n````\nafter #mz4kq1rv";
+    assert.deepEqual(extractProseRefs(markdown), ["mz4kq1rv"]);
+  });
+
+  it("runs a fence nobody closed to the end", () => {
+    assert.deepEqual(extractProseRefs("see #mz4kq1rv\n```\n#bqlybac0\n"), ["mz4kq1rv"]);
+  });
+
+  it("does not take inline code with three backticks for a fence", () => {
+    // A backtick fence's info string cannot hold a backtick (CommonMark §4.5).
+    assert.deepEqual(extractProseRefs("```code``` then #mz4kq1rv\nand #bqlybac0"), [
+      "mz4kq1rv",
+      "bqlybac0",
+    ]);
+  });
+
   it("ignores fragments of URLs", () => {
     assert.deepEqual(extractProseRefs("https://example.com/page#bqlybac0"), []);
   });

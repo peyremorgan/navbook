@@ -7,6 +7,7 @@
  */
 
 import assert from "node:assert/strict";
+import { extractProseRefs } from "@navbook/core";
 import { describe, it } from "vitest";
 import { renderMarkdown, renderMarkdownInline } from "../../app/utils/markdown";
 
@@ -111,6 +112,33 @@ describe("renderMarkdown", () => {
     ]) {
       assert.ok(!renderMarkdown(source).includes("/ref/"), source);
     }
+  });
+
+  it("links exactly the references nav doctor counts, fences and all", () => {
+    // D8 reads the raw Markdown; this reads what markdown-it made of it. A
+    // fence is where the two could part, so the document is mostly fences.
+    const source = [
+      "Before #t4mwvm2j.",
+      "```",
+      "41c8295 docs(issue): open #mdftn010",
+      "```",
+      "- a list item holding one:",
+      "",
+      "  ~~~json",
+      '  {"subject":"docs(issue): open #d9ffyep0"}',
+      "  ~~~",
+      "",
+      "> ```",
+      "> #x8otoby0 quoted",
+      "> ```",
+      "",
+      "After #icroff4l, and ```inline``` code is still prose: #kw143sq9.",
+    ].join("\n");
+    const linked = [...renderMarkdown(source).matchAll(/href="\/ref\/([a-z0-9]{8})"/g)].map(
+      (match) => match[1],
+    );
+    assert.deepEqual(linked.sort(), extractProseRefs(source).sort());
+    assert.deepEqual(linked, ["icroff4l", "kw143sq9", "t4mwvm2j"]);
   });
 
   it("leaves an escaped reference to the author who escaped it", () => {
