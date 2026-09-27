@@ -24,6 +24,8 @@ export class PluginRuntime {
   readonly bridges: EntityInputBridge[] = [];
   readonly extReaders: ExtReader[] = [];
   #listeners: ((event: MutationEvent) => void)[] = [];
+  /** The services running now, in the order they started. */
+  #started: PluginService[] = [];
   #report: (line: string) => void;
 
   constructor(report: (line: string) => void) {
@@ -115,23 +117,38 @@ export class PluginRuntime {
     }
   }
 
-  /** Start every service, in registration order. */
+  /**
+   * Start every service, in registration order.
+   *
+   * One that cannot start stops the ones before it, then rethrows: the server
+   * will not open its port, and a service left running behind it would hold
+   * its sockets for a process that is about to exit on a startup fault.
+   */
   async start(): Promise<void> {
     for (const service of this.services) {
-      await service.start();
+      try {
+        await service.start();
+      } catch (error) {
+        await this.stop();
+        throw error;
+      }
+      this.#started.push(service);
       this.#report(`started plugin service '${service.name}'`);
     }
   }
 
   /**
-   * Stop every service, in reverse order, and report rather than throw.
+   * Stop every running service, in reverse order, and report rather than throw.
    *
    * Shutdown has to finish. A service whose `stop` rejects must not leave the
    * ones after it running, nor stop the clone being released, so each is
-   * awaited on its own and a failure is news rather than an exception.
+   * awaited on its own and a failure is news rather than an exception. Only
+   * what started is stopped, and only once.
    */
   async stop(): Promise<void> {
-    for (const service of [...this.services].reverse()) {
+    const running = this.#started.reverse();
+    this.#started = [];
+    for (const service of running) {
       try {
         await service.stop();
       } catch (error) {
