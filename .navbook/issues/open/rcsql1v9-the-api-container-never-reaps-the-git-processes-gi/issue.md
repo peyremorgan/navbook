@@ -2,6 +2,7 @@
 title: The API container never reaps the git processes git leaves behind
 author: Claude <noreply@anthropic.com>
 created: 2026-09-27T01:13:35Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug]
 feature: [packaging, server]
 ---
