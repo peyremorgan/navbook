@@ -9,10 +9,17 @@
  */
 
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import {
   type CoreExtensions,
+  commentScopeFor,
   ExtensionConflictError,
+  git,
+  listEntities,
+  makeWsCtx,
   matchesQuery,
   mergeExtensions,
   type NavTree,
@@ -317,6 +324,62 @@ describe("query keys", () => {
     assert.ok(!("message" in without) && !("message" in with_));
     assert.equal(needsComments(without, ext), false);
     assert.equal(needsComments(with_, chatty), true);
+  });
+
+  it("makes a listing read the comments such a term needs, and only then", () => {
+    const chatty = mergeExtensions([
+      { queryKeys: [{ key: "said", kinds: ["issue"], needsComments: true, matches: () => true }] },
+    ]);
+    const said = parseQuery(["said:x"], "issue", chatty);
+    const plain = parseQuery(["label:bug"], "issue", chatty);
+    assert.ok(!("message" in said) && !("message" in plain));
+    assert.equal(commentScopeFor(said, "issue", chatty), "all");
+    assert.equal(commentScopeFor(plain, "issue", chatty), "none");
+    // A pull-request listing reads its own comments whatever it is asked.
+    assert.equal(commentScopeFor(plain, "pr", chatty), "prs");
+  });
+
+  it("finds an entity by what a comment says, through a term that reads comments", () => {
+    // End to end over a tree on disk: the listing must load the comments the
+    // term matches against, or it answers from a tree that has none.
+    const dir = mkdtempSync(join(tmpdir(), "navbook-said-"));
+    try {
+      git(["init", "--quiet", "-b", "main"], { cwd: dir });
+      const write = (rel: string, text: string): void => {
+        const abs = join(dir, ".navbook", ...rel.split("/"));
+        mkdirSync(dirname(abs), { recursive: true });
+        writeFileSync(abs, text, "utf8");
+      };
+      write("navbook.json", '{"version": 1}\n');
+      const issue = (title: string) =>
+        `---\ntitle: ${title}\nauthor: a@example.com\ncreated: 2026-08-02T09:14:00Z\n---\n\nBody.\n`;
+      write("issues/open/bqlybac0-x/issue.md", issue("Discussed"));
+      write(
+        "issues/open/bqlybac0-x/comments/2026-08-03T141207Z-t5kr1gq6.md",
+        "---\nauthor: b@example.com\n---\n\nSeen it flaky on CI.\n",
+      );
+      write("issues/open/e9v8jyz3-y/issue.md", issue("Quiet"));
+      const said = mergeExtensions([
+        {
+          queryKeys: [
+            {
+              key: "said",
+              kinds: ["issue"],
+              needsComments: true,
+              matches: (values, entity) =>
+                values.every((value) => entity.comments.some((c) => c.body.includes(value))),
+            },
+          ],
+        },
+      ]);
+      const ws = makeWsCtx({ cwd: dir, env: {}, ext: said });
+      const query = parseQuery(["said:flaky"], "issue", said);
+      assert.ok(!("message" in query));
+      const found = listEntities(ws, "issue", query).map((entity) => entity.id);
+      assert.deepEqual(found, ["bqlybac0"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
