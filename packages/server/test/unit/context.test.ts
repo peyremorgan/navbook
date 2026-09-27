@@ -38,6 +38,7 @@ function makeCtx() {
     remote: "origin",
     pullIntervalMs: 0,
     gitTimeoutMs: 0,
+    maintenanceIntervalMs: 0,
     graphiql: false,
   };
   const sync = new RepoSync({ repoRoot: fixture.server.dir, remote: null, pullIntervalMs: 0 });

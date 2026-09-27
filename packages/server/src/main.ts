@@ -8,6 +8,7 @@
  */
 
 import { ConfigError, loadConfig, parseServerArgs, USAGE } from "./config.ts";
+import { disableAutoMaintenance } from "./git-env.ts";
 import { StartupError, startServer } from "./server.ts";
 
 async function main(argv: readonly string[]): Promise<number> {
@@ -17,6 +18,9 @@ async function main(argv: readonly string[]): Promise<number> {
   }
 
   const config = loadConfig(process.env, argv);
+  // For every git this process starts, from here on: the server runs git's
+  // housekeeping itself, where a shutdown can wait for it (#cvb57nhm).
+  disableAutoMaintenance(process.env);
   const handle = await startServer({
     config,
     report: (line) => process.stderr.write(`${line}\n`),

@@ -20,6 +20,8 @@ import { type Authenticator, makeAuthenticator } from "./auth.ts";
 import { RevisionCache } from "./changes.ts";
 import type { Config } from "./config.ts";
 import { makeGraphQLCtx } from "./context.ts";
+import { clearLeftoversAtStart, findLeftovers, gitDirs, removeLeftovers } from "./leftovers.ts";
+import { Maintenance } from "./maintenance.ts";
 import { AuthorCache } from "./people.ts";
 import { type LoadedPlugins, loadServerPlugins } from "./plugins/load.ts";
 import { resolveServerPlugins } from "./plugins/resolve.ts";
@@ -94,8 +96,19 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
   const { config } = opts;
   const env = opts.env ?? process.env;
   const report = opts.report ?? (() => undefined);
+  // What the clone held before this server started is what an earlier one left.
+  const startedAt = Date.now();
 
   const { repoRoot, navDir, remote, identity } = checkRepo(config, env);
+  const dirs = gitDirs(repoRoot);
+  // Before any git of this server's runs: a stale `packed-refs.lock` would fail
+  // its first fetch. Only when the server owns housekeeping — otherwise
+  // whatever does may be running beside it, holding the very same lock.
+  clearLeftoversAtStart(dirs, repoRoot, {
+    before: startedAt,
+    remove: config.maintenanceIntervalMs > 0,
+    report,
+  });
   if (remote === null) {
     report(`warning: no '${config.remote}' remote; running local-only, nothing will be pushed`);
   }
@@ -120,6 +133,18 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
 
   // One per process, beside the clone it describes, for `AuthorCache`'s reason.
   const trees = new TreeCache({ repoRoot, navDir, intervalMs: config.pullIntervalMs, report });
+  const maintenance = new Maintenance({
+    repoRoot,
+    intervalMs: config.maintenanceIntervalMs,
+    report,
+    // A run that ran out of time goes while the server carries on, and a
+    // fetch writes the same kind of temporary file: clear up only when no git
+    // of the server's can be writing one.
+    tidy: (since) =>
+      sync.exclusive(() =>
+        removeLeftovers(findLeftovers(dirs, { modifiedSince: since }), repoRoot, report),
+      ),
+  });
   const sync = new RepoSync({
     repoRoot,
     remote,
@@ -128,6 +153,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     // A stopped fetch or push is the operator's news as much as the client's.
     report,
     onWrite: () => trees.invalidate(),
+    afterSync: () => maintenance.request(),
   });
 
   // One per process, beside the clone it describes: the history it walks is
@@ -196,6 +222,8 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     port,
     localOnly: remote === null,
     async close() {
+      // At once, so its budget runs beside everything below rather than after it.
+      const housekeeping = maintenance.stop();
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       // Stop accepting, then hang up the keep-alive connections that are not
       // mid-request; without this, `close` waits for clients that will never
@@ -210,7 +238,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
       await trees.stop();
       // Never cut an operation in half: a mutation between its commit and its
       // push is the one moment the clone's state depends on finishing.
-      await sync.drain();
+      await Promise.all([sync.drain(), housekeeping]);
     },
   };
 }

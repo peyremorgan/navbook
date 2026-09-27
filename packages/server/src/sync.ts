@@ -112,6 +112,13 @@ export interface SyncOptions {
    * again on failure, because a body that throws may have written first.
    */
   onWrite?: () => void;
+  /**
+   * Told once git has written to the clone: after a background pull that
+   * succeeded, and after a mutation that committed, whether or not its push
+   * landed. Either may have left new objects for housekeeping to pack. Called
+   * synchronously, so it must return at once and must not throw.
+   */
+  afterSync?: () => void;
 }
 
 /** What a mutation's write did, and whether the commit reached the remote. */
@@ -320,6 +327,7 @@ export class RepoSync {
     if (this.lastRefresh === "failed") this.report("nav-server: background pull recovered");
     this.lastFetch = asked;
     this.lastRefresh = "ok";
+    this.opts.afterSync?.();
   }
 
   /**
@@ -352,9 +360,25 @@ export class RepoSync {
         this.opts.onWrite?.();
         throw error;
       }
-      const pushed = committed(result) ? await this.pushWithRetry() : false;
-      return { result, pushed };
+      if (!committed(result)) return { result, pushed: false };
+      try {
+        return { result, pushed: await this.pushWithRetry() };
+      } finally {
+        this.opts.afterSync?.();
+      }
     });
+  }
+
+  /**
+   * Run `body` while no git of this server's can be running.
+   *
+   * It waits for the clone, then for the network, which is the order a
+   * mutation takes them in — so the two can never wait on each other. For
+   * work that must not meet another git: removing the files one left behind
+   * is only safe when none is writing the same kind of file.
+   */
+  exclusive<T>(body: () => Promise<T> | T): Promise<T> {
+    return this.lock.run(() => this.net.run(body));
   }
 
   /** Wait for in-flight work to finish, so shutdown never cuts one in half. */

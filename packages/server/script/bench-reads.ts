@@ -188,6 +188,8 @@ function start(pullIntervalMs: number): Promise<ServerHandle> {
       remote: "origin",
       pullIntervalMs,
       gitTimeoutMs: 60_000,
+      // A repack beside the reads would be noise in what they measure.
+      maintenanceIntervalMs: 0,
       graphiql: false,
     },
     env: { ...fixture.env, NAVBOOK_PLUGIN_PATH: KB },
