@@ -5,6 +5,7 @@ created: 2026-09-20T12:38:34Z
 assignee: Claude <noreply@anthropic.com>
 labels: [performance, enhancement]
 feature: [format, plugins]
+resolution: fixed
 ---
 
 `readNavTree` walks the whole Navbook directory and reads every file it finds. The only thing it declines to open is a `comments/` directory that is out of scope:
