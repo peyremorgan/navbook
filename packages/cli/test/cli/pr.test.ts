@@ -2580,4 +2580,39 @@ describe("the review policy", () => {
       }
     });
   });
+
+  describe("a marker from a newer Navbook", () => {
+    it("is a doctor warning, so the pre-commit hook lets commits through", () => {
+      const repo = makeNavRepo();
+      try {
+        repo.write(".navbook/navbook.json", '{"version": 2}');
+        repo.commitAll("chore: a tree from the future");
+        const doctor = repo.nav(["doctor"]);
+        assert.equal(doctor.code, 0, doctor.stdout);
+        assert.match(doctor.stdout, /D16 +\.navbook\/navbook\.json: 'version' is 2 .*update nav/);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("is said before the pull request verbs answer", () => {
+      const { repo } = withOpenPr();
+      try {
+        repo.write(".navbook/navbook.json", '{"version": 2}');
+        repo.commitAll("chore: a tree from the future");
+
+        for (const args of [
+          ["pr", "list", "--all-refs"],
+          ["pr", "show", "dk3m"],
+        ]) {
+          const run = repo.nav(args);
+          assert.equal(run.code, 0, run.stderr);
+          assert.match(run.stdout, /dk3mp2x9/);
+          assert.match(run.stderr, /written by a newer Navbook; update nav/, args.join(" "));
+        }
+      } finally {
+        repo.cleanup();
+      }
+    });
+  });
 });

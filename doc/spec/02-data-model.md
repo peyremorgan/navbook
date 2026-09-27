@@ -435,6 +435,17 @@ remains conforming. A tool that creates a root directory MUST write a marker
 into it, so that a repository which later renames the directory stays
 locatable.
 
+`version` is the revision of this format the tree was written to. The MUST
+applies to the value, not to the key: a marker without `version` is read as
+this revision. A tool MUST report a `version` it does not read, rather than
+pass the tree as sound, and it MUST keep reading the tree all the same:
+
+- An integer above `1` means the tree was written by a later revision than the
+  tool implements. Nothing in the file is wrong, and the tool SHOULD tell its
+  user that the tool is out of date (check D16 of [04 §4.3](04-cli.md)).
+- Any other value — a string, `null`, a fraction, an integer below `1` — is a
+  malformed marker, reported as the policies below are (check D15).
+
 ### The review policy
 
 `review`, when present, MUST be an object. It says how the reviews of §2.7 are

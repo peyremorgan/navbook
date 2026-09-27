@@ -528,12 +528,13 @@ Doctor checks (E = error → exit 2, W = warning → exit 0 with report):
 | D12 | The `parent` chain loops, an issue naming itself included | E |
 | D13 | The layout and schema of `specs/`: a feature directory name that is not a slug, a file directly in `specs/`, a feature directory with no `feature.md`, or a `feature.md` or document missing a required key ([2.11](02-data-model.md)) | E |
 | D14 | An entity's `feature` names a slug with no `specs/<slug>/` directory in this tree | W |
-| D15 | `navbook.json` is not a JSON object, or its `review`, `merge` or `plugins` declaration is malformed ([2.10](02-data-model.md), [2.12](02-data-model.md)) | E |
+| D15 | `navbook.json` is not a JSON object, or its `version`, `review`, `merge` or `plugins` is malformed ([2.10](02-data-model.md), [2.12](02-data-model.md)) | E |
+| D16 | `navbook.json` declares a `version` above the one this implementation reads: the tree was written by a newer one ([2.10](02-data-model.md)) | W |
 
 An extension ([02 §2.12](02-data-model.md)) MAY add checks over the data it
 defines. They are numbered `X-<short>-<n>` — outside the `D` series, which
 belongs to this document, so that a reader of a diagnostic can tell at a glance
-which specification to consult and a future `D16` can never collide with
+which specification to consult and a future `D17` can never collide with
 something already shipped. An extension chooses its own levels, subject to the
 same meanings: an error is data that no tool can read, a warning is data that
 may yet be explained by a branch nobody has fetched.
@@ -563,7 +564,14 @@ policy nobody is following, and the file is small enough that whoever wrote it
 can see what is wrong. It never stops a command: every reader falls back to the
 defaults of [02 §2.10](02-data-model.md), reports the fault, and carries on.
 
-D11, D12, D13, D14 and D15 are decidable from the tree alone, so unlike D7, D9
+D16 is a warning although a tree from a newer revision may hold anything,
+because there is nothing in it for the person reading to fix: the remedy is to
+update the tool. As an error it would make the pre-commit hook refuse every
+commit in the repository until then, including commits that touch no Navbook
+file. A tool SHOULD also say it before any output that depends on the format,
+not only under `doctor`.
+
+D11 to D16 are decidable from the tree alone, so unlike D7, D9
 and D10 they run under `--staged` and the pre-commit hook blocks a link broken
 by hand. A
 D11 repair is not offered there, though: it rewrites a whole file, and under

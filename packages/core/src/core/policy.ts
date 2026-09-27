@@ -2,7 +2,7 @@
  * The policies a marker declares — spec 02 §2.10.
  *
  * These are the two things in `navbook.json` a tool reads rather than merely
- * finds. The review policy says how the reviews of §2.7 are counted: whether a
+ * finds, beside the format `version` the marker claims to be written to. The review policy says how the reviews of §2.7 are counted: whether a
  * pull request's own author is among its reviewers, and how many approvals a
  * decision of `approved` takes. The merge policy says what shape a merge
  * leaves in the target branch's history.
@@ -98,6 +98,61 @@ export function parseReviewPolicy(markerText: string | undefined): ReviewPolicyR
   }
 
   return { policy: { selfReview, minApprovals }, declared: true, problems };
+}
+
+/* ---------------------------------------------------------- format version */
+
+/** The one value of the marker's `version` this revision defines (§2.10). */
+export const FORMAT_VERSION = 1;
+
+/**
+ * A marker's `version` this tool cannot take at its word (spec 02 §2.10).
+ *
+ * Two kinds, because only one of them is anybody's mistake, and they want
+ * opposite things from the reader. `newer` is a whole number above
+ * {@link FORMAT_VERSION}: the tree was written by a later Navbook than this
+ * one, nothing is wrong with the file, and what the reader needs to hear is
+ * that this tool is behind. `malformed` is every other way of not being the
+ * integer the format is on, and is a file somebody has to edit.
+ */
+export interface MarkerVersionFault {
+  kind: "newer" | "malformed";
+  message: string;
+}
+
+/**
+ * What this tool cannot take at its word in the marker's `version`, if
+ * anything.
+ *
+ * §2.10 puts its MUST on the value and never on the key, so a marker that
+ * carries no `version` is read as this revision rather than reported: a
+ * repository predating the marker is still conforming, and one written by
+ * hand should not have to repeat what it already is.
+ *
+ * Text that is not a JSON object is no fault of the version's and reads as
+ * none: the policy readers already report it, and D15 would otherwise say so
+ * twice. Returned rather than thrown, like every other fault in the marker.
+ */
+export function parseMarkerVersion(markerText: string | undefined): MarkerVersionFault | null {
+  if (markerText === undefined) return null;
+
+  let marker: unknown;
+  try {
+    marker = JSON.parse(markerText);
+  } catch {
+    return null;
+  }
+  if (!isPlainObject(marker) || marker.version === undefined) return null;
+
+  const value = marker.version;
+  if (value === FORMAT_VERSION) return null;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > FORMAT_VERSION) {
+    return {
+      kind: "newer",
+      message: `'version' is ${value} and this tool reads ${FORMAT_VERSION}: the tree was written by a newer Navbook; update nav`,
+    };
+  }
+  return { kind: "malformed", message: `'version' must be the integer ${FORMAT_VERSION}` };
 }
 
 /** A declared policy in one line, for a tool that has room to say what it counts by. */

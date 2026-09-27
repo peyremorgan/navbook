@@ -750,6 +750,60 @@ describe("D15 the marker", () => {
   });
 });
 
+describe("D15 and D16 the marker's version", () => {
+  const marker = (value: unknown): Record<string, string> => ({
+    "navbook.json": JSON.stringify(value),
+  });
+  const found = (value: unknown) =>
+    validateTree(tree(marker(value))).map((d) => [d.check, d.level, d.message]);
+
+  it("passes a marker with no `version`, since §2.10 requires the value, never the key", () => {
+    assert.deepEqual(codes(marker({})), []);
+    assert.deepEqual(codes(marker({ review: { minApprovals: 2 } })), []);
+  });
+
+  it("warns about a newer version rather than failing, and says to update", () => {
+    for (const version of [2, 99]) {
+      const diagnostics = validateTree(tree(marker({ version })));
+      assert.deepEqual(
+        diagnostics.map((d) => [d.check, d.level, d.path]),
+        [["D16", "warning", "navbook.json"]],
+      );
+      assert.match(String(diagnostics[0]?.message), new RegExp(`is ${version} .*newer Navbook`));
+      // A warning, so the pre-commit hook does not refuse every commit until
+      // somebody upgrades.
+      assert.equal(hasErrors(diagnostics), false);
+    }
+  });
+
+  it("flags every other value as a malformed marker", () => {
+    for (const version of ["1", "banana", null, 1.5, 0, -1, true, [], {}]) {
+      assert.deepEqual(
+        found({ version }),
+        [["D15", "error", "'version' must be the integer 1"]],
+        `for ${JSON.stringify(version)}`,
+      );
+    }
+  });
+
+  it("flags a number too large for JSON to hold, which parses as infinity", () => {
+    assert.deepEqual(codes({ "navbook.json": '{ "version": 1e400 }' }), ["D15"]);
+  });
+
+  it("says text that is not JSON once, not again for the version", () => {
+    assert.deepEqual(codes({ "navbook.json": "{ oops" }), ["D15"]);
+    assert.deepEqual(codes({ "navbook.json": "[1]" }), ["D15"]);
+  });
+
+  it("reports a malformed version beside a malformed policy, one each", () => {
+    assert.deepEqual(codes(marker({ version: "1", merge: 5, plugins: [] })), ["D15", "D15", "D15"]);
+  });
+
+  it("reports a newer version beside a malformed policy, as a warning and an error", () => {
+    assert.deepEqual(codes(marker({ version: 2, review: "strict" })).sort(), ["D15", "D16"]);
+  });
+});
+
 describe("diagnostic ordering", () => {
   it("sorts by check, then path, then message", () => {
     const diagnostics = validateTree(

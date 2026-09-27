@@ -8,6 +8,7 @@
  */
 
 import {
+  type MarkerVersionFault,
   type MergePolicyReading,
   NAV_MARKER,
   type ReviewPolicyReading,
@@ -37,6 +38,21 @@ function warnMarkerProblems(ctx: Ctx, problems: readonly string[]): void {
       `${ctx.colors.yellow("warning:")} ${ctx.navDir}/${NAV_MARKER}: ${problem}; using the default\n`,
     );
   }
+}
+
+/**
+ * Say that the tree was written by a newer Navbook than this one (D16).
+ *
+ * Only the newer kind: a malformed `version` changes nothing a command does
+ * and is D15's to report, while a newer one means every answer that follows
+ * is this tool's guess at a format it has never seen — which is worth hearing
+ * before the answer rather than after a confusing one.
+ */
+export function warnNewerFormat(ctx: Ctx, fault: MarkerVersionFault | null): void {
+  if (fault?.kind !== "newer") return;
+  ctx.stderr.write(
+    `${ctx.colors.yellow("warning:")} ${ctx.navDir}/${NAV_MARKER}: ${fault.message}\n`,
+  );
 }
 
 /**

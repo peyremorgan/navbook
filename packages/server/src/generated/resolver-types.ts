@@ -181,7 +181,7 @@ export type DeadlineState =
 /** One finding of the `doctor` check (spec 04 §4.3). */
 export type Diagnostic = {
   __typename?: 'Diagnostic';
-  /** The check that produced it, D1 through D15. */
+  /** The check that produced it, D1 through D16, or a plugin's `X-` check. */
   check: Scalars['String']['output'];
   /** Whether `nav doctor --fix` could mend it. The server never applies fixes. */
   fixable: Scalars['Boolean']['output'];

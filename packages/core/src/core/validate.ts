@@ -1,7 +1,7 @@
 /**
  * Format validation — the `nav doctor` checks of spec 04 §4.3.
  *
- * Checks D1–D6, D8 and D13–D15 are decidable from the tree alone and live here.
+ * Checks D1–D6, D8 and D13–D16 are decidable from the tree alone and live here.
  * D7, D9 and D10 need git archaeology; their tree-side halves live here and the
  * history queries are supplied by the CLI.
  */
@@ -62,6 +62,7 @@ export const CHECKS = [
   "D13",
   "D14",
   "D15",
+  "D16",
 ] as const;
 export type Check = (typeof CHECKS)[number];
 
@@ -103,6 +104,7 @@ export const CHECK_LEVEL: Record<Check, Level> = {
   D13: "error",
   D14: "warning",
   D15: "error",
+  D16: "warning",
 };
 
 export interface LinkRepairOptions {
@@ -672,26 +674,39 @@ export function isValidCommentFileName(name: string): boolean {
   return parseCommentFileName(name) !== null;
 }
 
-/* --------------------------------------------------- D15 : the marker */
+/* ------------------------------------------- D15, D16 : the marker itself */
 
 /**
- * D15: everything wrong with the marker, whichever key it is wrong in.
+ * D15: everything wrong with the marker, whichever key it is wrong in. D16: a
+ * marker written to a newer revision of the format than this tool reads.
  *
- * An error, because a policy nobody can read is a policy nobody is following,
- * and the file is small enough that whoever wrote it can see what is wrong —
- * but nothing stops for it: every reader has already fallen back to the
- * defaults by the time this reports what it found.
+ * D15 is an error, because a policy nobody can read is a policy nobody is
+ * following, and the file is small enough that whoever wrote it can see what
+ * is wrong — but nothing stops for it: every reader has already fallen back to
+ * the defaults by the time this reports what it found.
  *
- * The three readings are taken independently and can report the same fault —
- * text that is not JSON is neither a policy nor a declaration — so identical
+ * D16 is a warning, and that is the whole point of separating it. A newer
+ * `version` is nobody's mistake, and there is nothing the person reading can
+ * edit to satisfy an older tool. As an error it would exit 2, which the
+ * pre-commit hook turns into a refused commit (spec 04 §4.3), and every commit
+ * in the repository would stop until somebody upgraded.
+ *
+ * The readings are taken independently and can report the same fault — text
+ * that is not JSON is neither a policy nor a declaration — so identical
  * messages are collapsed. One diagnostic per distinct fault is what §2.10 asks
  * for, and saying "is not valid JSON" three times about one file says nothing
  * twice over.
  */
 function checkMarker(repo: Repo): Diagnostic[] {
-  const seen = new Set<string>();
   const out: Diagnostic[] = [];
+  const version = repo.versionFault;
+  if (version?.kind === "newer") {
+    out.push({ check: "D16", level: "warning", path: NAV_MARKER, message: version.message });
+  }
+
+  const seen = new Set<string>();
   for (const problem of [
+    ...(version?.kind === "malformed" ? [version.message] : []),
     ...repo.reviewPolicy.problems,
     ...repo.mergePolicy.problems,
     ...repo.plugins.problems,

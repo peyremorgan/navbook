@@ -1,0 +1,8 @@
+spec-version: 1
+description: D16 warns that the tree was written by a newer implementation, and never blocks on it
+init: {from: tree, date: 2026-09-02T12:00:00Z}
+run: {command: [doctor, --json]}
+expect:
+  exit: 0
+  diagnostics:
+    - {check: D16, level: warning, path: .navbook/navbook.json}

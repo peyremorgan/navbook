@@ -13,7 +13,9 @@ import { blobSha } from "./hash.ts";
 import { dedupePeople, type Person, parsePerson } from "./person.ts";
 import { type PluginDeclarationReading, parsePluginDeclaration } from "./plugins.ts";
 import {
+  type MarkerVersionFault,
   type MergePolicyReading,
+  parseMarkerVersion,
   parseMergePolicy,
   parseReviewPolicy,
   type ReviewPolicyReading,
@@ -167,6 +169,8 @@ export interface Repo {
   mergePolicy: MergePolicyReading;
   /** The plugins the marker declares, and what was wrong with it (§2.12). */
   plugins: PluginDeclarationReading;
+  /** A marker `version` this tool cannot take at its word (§2.10, D15/D16). */
+  versionFault: MarkerVersionFault | null;
   /**
    * What each registered tree location built, by its directory name (§2.12).
    *
@@ -232,6 +236,7 @@ export function parseTree(
     reviewPolicy: parseReviewPolicy(markerText),
     mergePolicy: parseMergePolicy(markerText),
     plugins: parsePluginDeclaration(markerText),
+    versionFault: parseMarkerVersion(markerText),
     ext,
     extProblems,
   };

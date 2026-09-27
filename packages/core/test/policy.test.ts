@@ -15,6 +15,7 @@ import {
   describeMergeMethod,
   describeReviewPolicy,
   MERGE_METHODS,
+  parseMarkerVersion,
   parseMergePolicy,
   parseReviewPolicy,
   rewritesSource,
@@ -172,9 +173,9 @@ describe("parseReviewPolicy", () => {
     });
 
     it("tolerates a marker whose `version` is wrong, which is not its business", () => {
-      // §2.10 says version MUST be 1, and D15 is about the policy; a tool that
-      // conflated the two would refuse to count approvals over a typo in a key
-      // it does not read.
+      // §2.10 says version MUST be 1, and that is `parseMarkerVersion`'s to
+      // report; a policy reader that conflated the two would refuse to count
+      // approvals over a typo in a key it does not read.
       const reading = parseReviewPolicy(marker({ version: 7, review: { minApprovals: 2 } }));
       assert.deepEqual(reading.problems, []);
       assert.equal(reading.policy.minApprovals, 2);
@@ -288,5 +289,31 @@ describe("describeMergeMethod", () => {
       assert.equal(typeof describeMergeMethod(method), "string");
       assert.notEqual(describeMergeMethod(method), "");
     }
+  });
+});
+
+describe("parseMarkerVersion", () => {
+  it("has nothing to say about a missing marker, or a missing key", () => {
+    assert.equal(parseMarkerVersion(undefined), null);
+    assert.equal(parseMarkerVersion(marker({ review: {} })), null);
+  });
+
+  it("accepts the version `nav init` writes", () => {
+    assert.equal(parseMarkerVersion(marker({ version: 1 })), null);
+  });
+
+  it("calls a larger whole number newer, not malformed", () => {
+    assert.equal(parseMarkerVersion(marker({ version: 2 }))?.kind, "newer");
+  });
+
+  it("calls anything else malformed", () => {
+    for (const version of ["1", null, 1.5, 0, false]) {
+      assert.equal(parseMarkerVersion(marker({ version }))?.kind, "malformed");
+    }
+  });
+
+  it("leaves text that is not a JSON object to the policy readers", () => {
+    assert.equal(parseMarkerVersion("{ oops"), null);
+    assert.equal(parseMarkerVersion("[]"), null);
   });
 });

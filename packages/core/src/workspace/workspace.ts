@@ -23,7 +23,9 @@ import type { CoreExtensions } from "../core/extensions.ts";
 import type { FileOp } from "../core/ops.ts";
 import { type PluginDeclarationReading, parsePluginDeclaration } from "../core/plugins.ts";
 import {
+  type MarkerVersionFault,
   type MergePolicyReading,
+  parseMarkerVersion,
   parseMergePolicy,
   parseReviewPolicy,
   type ReviewPolicyReading,
@@ -226,6 +228,14 @@ export function readMergePolicy(ws: WsCtx): MergePolicyReading {
  */
 export function readPluginDeclaration(ws: WsCtx): PluginDeclarationReading {
   return parsePluginDeclaration(readMarker(ws));
+}
+
+/**
+ * What this tool cannot take at its word in the marker's `version` (spec 02
+ * §2.10), read from the working tree like the policies beside it.
+ */
+export function readMarkerVersion(ws: WsCtx): MarkerVersionFault | null {
+  return parseMarkerVersion(readMarker(ws));
 }
 
 /** The marker's text, or undefined when there is none to read. */
