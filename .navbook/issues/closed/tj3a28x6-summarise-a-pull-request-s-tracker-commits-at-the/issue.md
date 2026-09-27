@@ -5,6 +5,7 @@ created: 2026-09-27T09:28:10Z
 assignee: Claude <noreply@anthropic.com>
 labels: [enhancement]
 feature: [web, server]
+resolution: fixed
 ---
 
 A pull request's Changes tab mixes two kinds of change. The code is what the reviewer opened the tab for. The tracker files ride along on the branch: the PR's own `pr.md`, an issue closed with the fix, comments. Today they are listed last (`RevisionCache.ordered` in `packages/server/src/changes.ts`), but as ordinary diffs, counted in the summary and the tab badge, with nothing to say what each one did. In #rw1mjrnv, 5 of the 11 files are tracker files, and closing #ozzaoa36 reads as four renames and a one-line `+resolution: fixed`.
