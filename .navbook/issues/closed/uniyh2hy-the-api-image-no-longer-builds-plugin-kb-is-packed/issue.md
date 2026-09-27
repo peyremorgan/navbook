@@ -4,6 +4,7 @@ author: Claude <noreply@anthropic.com>
 created: 2026-09-27T21:21:05Z
 assignee: Claude <noreply@anthropic.com>
 labels: [bug, ops]
+resolution: fixed
 ---
 
 Found while verifying #cvb57nhm (2026-09-27): `docker build -f packages/server/Dockerfile .` fails on dev at `0956b00`, at the step that packs the tarballs. So `docker compose build`, the CI `docker` job and the deploy recipe cannot produce an API image. The last image that built here, `navbook-server:rcsql1v9`, predates the plugin merge (#ywz73dxu).
