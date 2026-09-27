@@ -2,6 +2,8 @@
 title: One baseSha concept, two different hash implementations
 author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-20T12:39:10Z
+assignees:
+  - Claude <noreply@anthropic.com>
 labels: [bug]
 feature: [server, format]
 ---
