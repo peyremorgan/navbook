@@ -30,7 +30,7 @@ watch(
   <UInput
     v-model="typed"
     icon="i-lucide-search"
-    :placeholder="props.placeholder ?? 'Search title, body and comments'"
+    :placeholder="props.placeholder ?? 'Search ID, title, body and comments'"
     :ui="{ trailing: 'pe-1' }"
     :data-testid="props.testid"
     @keydown.enter="emit('commit', typed)"

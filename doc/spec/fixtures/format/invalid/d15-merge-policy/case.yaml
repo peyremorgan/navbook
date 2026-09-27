@@ -1,0 +1,8 @@
+spec-version: 1
+description: D15 rejects a merge method this revision does not define
+init: {from: tree, date: 2026-09-02T12:00:00Z}
+run: {command: [doctor, --json]}
+expect:
+  exit: 2
+  diagnostics:
+    - {check: D15, level: error, path: .navbook/navbook.json}

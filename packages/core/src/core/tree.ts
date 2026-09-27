@@ -10,7 +10,12 @@ import { parseCommentFileName } from "./comments.ts";
 import { FEATURE_FILE, type ParsedFile, parseFile, readMerged, readPersonList } from "./files.ts";
 import { blobSha } from "./hash.ts";
 import { dedupePeople, type Person, parsePerson } from "./person.ts";
-import { parseReviewPolicy, type ReviewPolicyReading } from "./policy.ts";
+import {
+  type MergePolicyReading,
+  parseMergePolicy,
+  parseReviewPolicy,
+  type ReviewPolicyReading,
+} from "./policy.ts";
 import { parseDirName, SLUG_PATTERN } from "./slug.ts";
 
 export type NavTree = ReadonlyMap<string, string>;
@@ -158,6 +163,8 @@ export interface Repo {
   reserved: string[];
   /** The review policy the marker declares, and what was wrong with it (§2.10). */
   reviewPolicy: ReviewPolicyReading;
+  /** The merge policy the marker declares, and what was wrong with it (§2.10). */
+  mergePolicy: MergePolicyReading;
 }
 
 interface FeatureDraft {
@@ -213,6 +220,7 @@ export function parseTree(files: NavTree, opts: { commentsLoaded?: CommentScope 
     featureBySlug.set(record.slug, record);
   }
 
+  const markerText = files.get(NAV_MARKER);
   return {
     issues,
     prs,
@@ -224,7 +232,8 @@ export function parseTree(files: NavTree, opts: { commentsLoaded?: CommentScope 
     orphans,
     commentsLoaded: opts.commentsLoaded ?? "all",
     reserved,
-    reviewPolicy: parseReviewPolicy(files.get(NAV_MARKER)),
+    reviewPolicy: parseReviewPolicy(markerText),
+    mergePolicy: parseMergePolicy(markerText),
   };
 }
 

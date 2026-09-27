@@ -134,7 +134,7 @@ export function validateRepo(repo: Repo, opts: ValidateOptions = {}): Diagnostic
   out.push(...checkLinkLoops(repo));
   out.push(...checkFeatures(repo));
   out.push(...checkFeatureRefs(repo));
-  out.push(...checkReviewPolicy(repo));
+  out.push(...checkMarker(repo));
   return sortDiagnostics(out);
 }
 
@@ -696,22 +696,29 @@ function checkFeatureRefs(repo: Repo): Diagnostic[] {
   return out;
 }
 
-/* ---------------------------------------------- D15 : the review policy */
+/* --------------------------------------------------- D15 : the marker */
 
 /**
- * A marker whose review policy cannot be read (spec 02 §2.10).
+ * D15: everything wrong with the marker, whichever policy it is wrong in.
  *
- * One diagnostic per fault, so a marker that mistypes both keys names both.
  * An error, because a policy nobody can read is a policy nobody is following,
  * and the file is small enough that whoever wrote it can see what is wrong —
  * but nothing stops for it: every reader has already fallen back to the
  * defaults by the time this reports what it found.
+ *
+ * The two readings are taken independently and can report the same fault —
+ * text that is not JSON is neither a review policy nor a merge policy — so
+ * identical messages are collapsed. One diagnostic per distinct fault is what
+ * §2.10 asks for, and saying "is not valid JSON" twice about one file says
+ * nothing twice.
  */
-function checkReviewPolicy(repo: Repo): Diagnostic[] {
-  return repo.reviewPolicy.problems.map((problem) => ({
-    check: "D15" as const,
-    level: "error" as const,
-    path: NAV_MARKER,
-    message: problem,
-  }));
+function checkMarker(repo: Repo): Diagnostic[] {
+  const seen = new Set<string>();
+  const out: Diagnostic[] = [];
+  for (const problem of [...repo.reviewPolicy.problems, ...repo.mergePolicy.problems]) {
+    if (seen.has(problem)) continue;
+    seen.add(problem);
+    out.push({ check: "D15", level: "error", path: NAV_MARKER, message: problem });
+  }
+  return out;
 }

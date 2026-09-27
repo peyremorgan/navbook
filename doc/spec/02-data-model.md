@@ -320,7 +320,7 @@ Closes: bqlybac0
 | `draft` | MAY | boolean | Not yet requesting review |
 | `reviewer` | MAY | person or list of persons | Who is asked to review (below) |
 | `labels`, `assignee`, `milestone`, `feature` | MAY | as issues | |
-| `merged` | MAY | map | Added at/after merge: `date`, `by` (person), `commit` (40-hex merge commit, added in a follow-up commit since it cannot be known inside the merge itself) |
+| `merged` | MAY | map | Added at/after merge: `date`, `by` (person), `commit` (the 40-hex commit that landed the branch, added in a follow-up commit since it cannot be known inside that commit itself; absent where the merge produced no commit of its own, as a fast-forward does — see the merge policy of §2.10) |
 | `resolution` | MAY | string | For `prs/closed/`: `declined`, `superseded`, `abandoned` RECOMMENDED |
 | `superseded-by` | MAY | ID | With `resolution: superseded` |
 
@@ -392,8 +392,9 @@ ask, and one that does is still not asking.
    accumulate as comment files, all on the source branch. Asking someone to
    review is an edit to `reviewer` on `pr.md`; answering is a comment file, and
    never an edit to `pr.md` (§2.7).
-3. **Merge** — the source branch is merged into `target`; the PR directory is
-   moved to `prs/merged/` either inside the merge commit or in an immediate
+3. **Merge** — the source branch is landed on `target` by whichever of the
+   methods of §2.10 the repository asks for; the PR directory is moved to
+   `prs/merged/` either inside the commit that lands it or in an immediate
    follow-up on the target branch. The full discussion is thereby archived in
    the target's history. The `merged:` block SHOULD be recorded.
 4. **Decline / abandon** — the branch is simply never merged. To keep a durable
@@ -422,8 +423,9 @@ ask, and one that does is still not asking.
 
 `navbook.json`, at the top of the root directory, is the **marker**: its
 presence is what identifies the directory that contains it as a Navbook root
-(§2.1). It MUST be a JSON object. This revision defines two keys, `version`,
-whose value MUST be the integer `1`, and `review`, the review policy below;
+(§2.1). It MUST be a JSON object. This revision defines four keys, `version`,
+whose value MUST be the integer `1`, `review`, the review policy below,
+`merge`, the merge policy below it, and `plugins`, the declaration of §2.12;
 tools MUST ignore keys they do not recognize, and MUST NOT reject a marker for
 carrying them.
 
@@ -436,8 +438,8 @@ locatable.
 ### The review policy
 
 `review`, when present, MUST be an object. It says how the reviews of §2.7 are
-counted, and it is the one thing in the marker a tool reads rather than merely
-finds.
+counted, which is the first of the two things in the marker a tool reads rather
+than merely finds.
 
 ```json
 {
@@ -469,12 +471,72 @@ therefore what every reading of that decision reports, and a tool MAY say that
 a policy is unmet wherever saying so is useful. It remains subject to §2.7: no
 tool refuses an operation because of it.
 
+### The merge policy
+
+`merge`, when present, MUST be an object. It says how step 3 of §2.8 lands a
+pull request — which is to say what shape the merge leaves in the target
+branch's history — and it is the second thing in the marker a tool reads rather
+than merely finds.
+
+```json
+{
+  "version": 1,
+  "merge": {
+    "method": "rebase"
+  }
+}
+```
+
+| Key | Req. | Type | Default | Meaning |
+|-----|------|------|---------|---------|
+| `method` | MAY | one of the six names below | `auto` | How the source branch is landed on `target` |
+
+| `method` | What lands on `target` |
+|----------|------------------------|
+| `auto` | A fast-forward where the branches allow one, otherwise a merge commit |
+| `merge` | A merge commit, always, including where a fast-forward was possible |
+| `merge-ff` | A fast-forward, only; a merge that cannot fast-forward MUST NOT be performed |
+| `rebase` | The source's commits replayed onto `target`, then a fast-forward |
+| `rebase-no-ff` | The same replay, then a merge commit rather than the fast-forward |
+| `squash` | One commit carrying the whole of the source's change |
+
+`auto` is what §2.8 describes with no policy declared, so a repository that
+declares none, and one that predates this revision, land a pull request
+identically.
+
+The first three methods preserve the source's commits as they stand and are
+therefore always available. The last three rewrite them, so a tool MAY be
+unable to carry one out — a replay that conflicts, or a source branch it
+cannot rewrite — and MUST then report what stopped it rather than fall back to
+another method. Which commits a method leaves behind also decides where the
+directory move of §2.8 can go: a method that lands a commit of its own
+(`merge`, `rebase-no-ff`, `squash`, and `auto` where it makes a merge commit)
+MAY move the directory inside that commit, while one that does not (`merge-ff`,
+`rebase`, and `auto` where it fast-forwards) MUST use the immediate follow-up
+commit, and the `merged:` block then has no `commit` key to write.
+
+A malformed merge policy is read exactly as a malformed review policy is:
+reported under D15, defaulted rather than propagated, and never a reason to
+refuse to read the tree.
+
+**A method is a default, not a mandate.** It is what a tool lands a pull
+request with when nothing says otherwise, and a tool MAY offer a way to choose
+another method for a single merge ([04 §4.3](04-cli.md)). It is not subject to
+§2.7, because it says nothing about reviews: `merge-ff` refusing a merge that
+cannot fast-forward is a statement about the shape of two branches, which no
+review could change.
+
 `specs/`, at the top of the root directory, holds features (§2.11).
 
 Future revisions of this spec may define: `.navbook/config.*` (configuration
 beyond what the marker carries), `.navbook/sync/` (forge-sync state), and
 additional files inside entity directories. Tools MUST leave unrecognized files
 in these locations untouched.
+
+A top-level directory this specification does not name is an **extension
+namespace** (§2.12) and MUST be preserved untouched by a tool that does not
+recognize it — which is the same rule, stated for a directory the *marker* may
+explain rather than a future revision of this document.
 
 ## 2.11 Features and specifications
 
@@ -577,3 +639,90 @@ feature: [auth, mobile]
   reference may (§2.9). `doctor` warns.
 - The key is not restricted to issues. A pull request is work on something too,
   and a tool that shows a feature's history has an obvious use for it.
+
+## 2.12 Extension namespaces
+
+Not every project wants every feature, and a format that grew a section for
+each would be a format nobody could implement twice. So this specification
+reserves three namespaces that data defined **outside** it may occupy, and
+fixes what a tool that does not understand such data MUST do with it. Nothing
+here is a mechanism for loading code: that is a tool's affair
+([04 §4.3](04-cli.md)). This section says only where extension data may live,
+so that two implementations reading one tree agree about what they are looking
+at and neither destroys what it cannot read.
+
+An extension is identified by a **short name** matching `^[a-z][a-z0-9]*$`.
+The three namespaces are:
+
+| Namespace | Shape | Example |
+|---|---|---|
+| A top-level directory | `<short>/` at the top of the root directory | `.navbook/reports/` |
+| Inside an entity directory | `<short>/` or `<short>.*` beside `issue.md` or `pr.md` | `.navbook/prs/open/dk3mp2x9-auth/reports.json` |
+| A frontmatter key | `<short>-*` | `reports-latest:` |
+
+- A tool MUST preserve what it finds in these namespaces: unchanged in the
+  tree, and unchanged across any operation it performs on the entity that
+  holds it. This is §2.4 and §2.1 applied to a directory the marker may name,
+  and it is what lets somebody without the extension installed still close an
+  issue, merge a pull request or run `doctor` without losing data.
+- A tool MUST NOT interpret them. A frontmatter key it does not recognize is
+  opaque (§2.4); so is a file.
+- The namespaces do not nest into the shapes this specification does define.
+  `issues/` and `prs/` still contain only their status subdirectories (§2.1),
+  and a status subdirectory still contains only entity directories: an
+  extension that wants a directory of its own takes one at the top.
+
+An extension that defines data in any of these namespaces MUST publish a
+specification for it, in the sense this document is one: what each file and
+key means, which are required, and what a tool may conclude from them. A
+reader of the tree can then find out what the data is, which is the property
+§2.1 protects for everything else.
+
+### Declaring them
+
+`plugins`, in the marker (§2.10), is where a repository says which extensions
+its tree uses. It MUST be a JSON object; each key names an extension and each
+value MUST be an object carrying whatever settings that extension reads.
+
+```json
+{
+  "version": 1,
+  "plugins": {
+    "@navbook/plugin-kb": {}
+  }
+}
+```
+
+The key is the extension's own name for itself, and for the reference
+implementation that is the npm package that implements it
+([04 §4.3](04-cli.md)). Nothing in this format requires an npm package, or any
+particular kind of tool: the key is an identifier a reader can look up, and a
+second implementation naming its extensions some other way is conforming so
+long as the names agree.
+
+The declaration is data about the tree, not instruction to a tool. A tool MUST
+NOT treat the presence of a name here as permission to fetch or execute
+anything; what it is for is that a clone can tell what its own tree contains,
+and say so when something is missing. A tool that finds an extension namespace
+the marker does not declare MUST still preserve it (above), and MAY say that it
+is undeclared.
+
+A malformed declaration is a fault in the marker rather than in the tree it
+marks, and is reported exactly as a malformed review policy is (D15,
+[04 §4.3](04-cli.md)): the entities remain readable, every reader falls back to
+declaring nothing, and the fault is reported rather than acted on.
+
+Settings under a name are **committed, shared and non-secret**: they travel to
+every clone. An extension that needs a credential reads it from the
+environment, where a tool's own configuration lives, and not from here.
+
+### Two names this specification kept
+
+`specs/` and the `feature:` key (§2.11) occupy the first and third namespaces
+without matching their grammars, because they were specified before this
+section existed and renaming them would break every repository using them.
+They are **grandfathered**: this document continues to define them, and no
+extension may claim either name. The reference implementation has moved their
+*implementation* into an extension without moving their definition
+([05 §5.2](05-implementation.md)), which is exactly the arrangement this
+section is meant to make possible.

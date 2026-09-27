@@ -144,7 +144,7 @@ describe("nav issue open --parent", () => {
     try {
       const editor = repo.script(
         "editor-unparent.sh",
-        `${editInPlace("/^parent: /d", '"$1"')}\n` + `printf 'A body.\\n' >> "$1"`,
+        `${editInPlace("/^parent: /d", '"$1"')}\nprintf 'A body.\\n' >> "$1"`,
       );
       const result = repo.nav(["issue", "open", "Sub", "--parent", "aaa1"], {
         NAV_IDS: "eee55555",
@@ -168,7 +168,7 @@ describe("nav issue open --parent", () => {
         `${editInPlace(
           "s/^title: Root$/title: Root, retitled/",
           JSON.stringify(fileOf(repo, "aaa11111")),
-        )}\n` + `printf 'A body.\\n' >> "$1"`,
+        )}\nprintf 'A body.\\n' >> "$1"`,
       );
       const result = repo.nav(["issue", "open", "Sub", "--parent", "aaa1"], {
         NAV_IDS: "eee55555",

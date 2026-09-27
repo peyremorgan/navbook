@@ -76,7 +76,10 @@ complete Navbook clients for reading.
 
 `specs/` holds **features** — the standing concepts work attaches to. A feature
 is a directory named after itself, holding a `feature.md` and however many
-specification documents describe it. An issue joins one by naming it:
+specification documents describe it. Features come from
+[`@navbook/plugin-kb`](doc/plugins.md), a plugin, because not every project
+wants them; the format defines them all the same, so a tree using them is
+readable by any Navbook. An issue joins one by naming it:
 
 ```console
 $ nav feature open "Authentication" --slug auth -m "Signing in, sessions, tokens."
@@ -142,6 +145,32 @@ neither of them ever refuses: Navbook records reviews and enforces nothing
 ([spec 01 §1.7](doc/spec/01-functionality.md)). Leave the key out and one
 approval is enough, which is what every repository did before it existed.
 
+The marker also says what shape a merge should leave in the target branch's
+history, so a project's merges look the same whoever runs them:
+
+```json
+{
+  "version": 1,
+  "merge": {
+    "method": "rebase"
+  }
+}
+```
+
+| `method` | What lands on the target |
+|---|---|
+| `auto` | Fast-forward where the branches allow one, otherwise a merge commit. The default. |
+| `merge` | A merge commit, always. |
+| `merge-ff` | A fast-forward, only; `nav pr merge` stops if one is not possible. |
+| `rebase` | The branch's commits replayed onto the target, then a fast-forward. |
+| `rebase-no-ff` | The same replay, then a merge commit — semi-linear history. |
+| `squash` | The whole branch as one commit. |
+
+`nav pr merge --method <name>` takes any of them for a single merge. Unlike
+the review policy this one can stop a merge, but only ever over the shape of
+two branches: `merge-ff` says so and tells you what would make a fast-forward
+possible.
+
 ## Commands
 
 Everything is noun-verb, with one verb vocabulary shared by both entity kinds.
@@ -171,7 +200,7 @@ usually enough. A full directory name works too.
 | `nav pr list awaiting:me@example.com` | Pull requests waiting on one person. `reviewer:` and `review:approved` filter the same listing. |
 | `nav pr list --all-refs` | Find PRs on branches you have fetched but not checked out. |
 | `nav pr comment <id>` | A PR is written on its source branch, so this needs that branch. When a clean worktree already has it, `nav` offers to write there instead of sending you; `--in-worktree` answers in advance. The same goes for `edit`, `update`, `request` and `review`. |
-| `nav pr merge <id>` | Merge into the checked-out target, archiving the discussion into its history, then fast-forward the source branch so it does not keep the PR open; `--no-sync-source` skips that. Says what a declared review policy is missing, and asks; `--yes` answers in advance. |
+| `nav pr merge <id>` | Merge into the checked-out target, archiving the discussion into its history, then fast-forward the source branch so it does not keep the PR open; `--no-sync-source` skips that. `--method` picks how it lands, overriding the marker. Says what a declared review policy is missing, and asks; `--yes` answers in advance. |
 | `nav feature open <title>` | Create a feature under `specs/`. `--slug` names its directory; the title otherwise. |
 | `nav feature show <slug>` | Its documents, the issues and pull requests that name it, and the commits that touched any of them. |
 | `nav feature spec add <slug> <title>` | Add a specification document. `nav feature spec edit` opens one in `$EDITOR`. |
@@ -192,7 +221,10 @@ nav issue list status:closed label:bug assignee:example.com "timeout"
 
 `status:`, `label:`, `assignee:`, `author:`, `milestone:`, `feature:`,
 `deadline:overdue|none`, and bare words that match the title, description or
-any comment body. Terms AND together; the default query is `status:open`.
+any comment body — or the entity's own ID, from four characters, so `bqly`
+and `"#bqlybac0"` both find `#bqlybac0` — quoted, because a shell may read an
+unquoted `#` as the start of a comment. Terms AND together; the default query is
+`status:open`.
 
 `--sort priority|deadline|newest` reads the listing in a different order.
 Sorting is a front end's reading and never an order the files hold, so it is
@@ -269,12 +301,31 @@ The details of each half — every server option, and what the client reads at
 boot — are in [`packages/server`](packages/server/README.md#deploying-it) and
 [`packages/web`](packages/web/README.md#deploying-it).
 
+## Plugins
+
+Navbook's core is issues, pull requests and the format they live in. Anything a
+project might not want — test reports on a pull request, a bridge to a chat
+platform, the knowledge base above — is a plugin: an npm package the repository
+names in `navbook.json` and each machine installs.
+
+```console
+$ nav plugin install          # install what this repository declares
+$ nav plugin list
+@navbook/plugin-kb  1.0.0  declared
+```
+
+A repository naming a plugin never causes anything to be fetched or run:
+declaring is one act, installing is another, and they are made by different
+people. [`doc/plugins.md`](doc/plugins.md) is the list of plugins and the guide
+to writing one.
+
 ## Documentation
 
 The [specification](doc/spec/README.md) is the normative definition of the file
 format and the reference for anyone writing another implementation. Start with
 [01-functionality.md](doc/spec/01-functionality.md) for what Navbook does, or
 [02-data-model.md](doc/spec/02-data-model.md) for the exact file format.
+[`doc/plugins.md`](doc/plugins.md) covers plugins.
 
 ## Contributing
 
@@ -288,7 +339,7 @@ pnpm check         # lint and type-check
 pnpm bench         # the performance budget, on its own machine
 ```
 
-The repository is a pnpm workspace of four packages. `packages/core`
+The repository is a pnpm workspace of five packages. `packages/core`
 (`@navbook/core`) is the whole implementation — format logic, git plumbing,
 workspace I/O, and the operations behind each verb — and knows nothing about
 terminals. `packages/cli` (`@navbook/cli`) adds argument parsing, `$EDITOR`,
@@ -299,6 +350,10 @@ the same operations the CLI runs. `packages/web`
 it: a static single-page app that sends fields and lets the server compose the
 files, so nothing about the format ships to a browser
 ([spec 05 §5.2](doc/spec/05-implementation.md), [06 §6.3](doc/spec/06-future.md)).
+`packages/plugin-kb`
+([`@navbook/plugin-kb`](packages/plugin-kb/README.md)) is the knowledge base,
+and the first plugin: it is where features and `specs/` are implemented, and
+what proves the plugin surface is enough to build on.
 Development needs no build step outside the web client: a library's entry point
 is its TypeScript source, and Node runs it directly.
 

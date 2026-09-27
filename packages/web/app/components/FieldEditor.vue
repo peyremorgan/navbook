@@ -53,7 +53,7 @@ function open(): void {
  * a caller that assumed a string would throw inside this emit — where Vue
  * swallows it, closing the form on an edit that was never sent.
  */
-function save(): void {
+function commit(): void {
   const typed: unknown = draft.value;
   emit("save", typed === null || typed === undefined ? "" : String(typed));
   editing.value = false;
@@ -86,14 +86,14 @@ function save(): void {
         class="w-full"
         :aria-label="props.title"
         :data-testid="`input-${props.testid}`"
-        @keydown.enter="save"
+        @keydown.enter="commit"
       />
       <div class="flex gap-1.5">
         <UButton
           size="xs"
           :loading="props.save?.saving"
           :data-testid="`save-${props.testid}`"
-          @click="save"
+          @click="commit"
         >
           Save
         </UButton>

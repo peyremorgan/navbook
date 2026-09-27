@@ -7,12 +7,32 @@
  * §2.10 keeps a declared policy inside that. These are sentences, not gates.
  */
 
-import { NAV_MARKER, type ReviewPolicyReading, type ReviewSummary } from "@navbook/core";
+import {
+  type MergePolicyReading,
+  NAV_MARKER,
+  type ReviewPolicyReading,
+  type ReviewSummary,
+} from "@navbook/core";
 import type { Ctx } from "../context.ts";
 
 /** Warn about a marker whose policy could not be read; D15 is the full report. */
 export function warnPolicyProblems(ctx: Ctx, reading: ReviewPolicyReading): void {
-  for (const problem of reading.problems) {
+  warnMarkerProblems(ctx, reading.problems);
+}
+
+/**
+ * The same, for the merge policy (spec 02 §2.10).
+ *
+ * Kept separate from the review policy's rather than folded into it, because a
+ * merge is the one command that reads both and a caller reading only one
+ * should not be made to hold the other.
+ */
+export function warnMergePolicyProblems(ctx: Ctx, reading: MergePolicyReading): void {
+  warnMarkerProblems(ctx, reading.problems);
+}
+
+function warnMarkerProblems(ctx: Ctx, problems: readonly string[]): void {
+  for (const problem of problems) {
     ctx.stderr.write(
       `${ctx.colors.yellow("warning:")} ${ctx.navDir}/${NAV_MARKER}: ${problem}; using the default\n`,
     );

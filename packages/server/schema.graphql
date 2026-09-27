@@ -391,7 +391,7 @@ input EntityFilter {
   of what `issues` does with the three above.
   """
   deadline: [DeadlineState!]
-  "Free text, matched against title, body and comments."
+  "Free text, matched against title, body and comments, and against the entity's own ID from four characters."
   text: [String!]
 }
 

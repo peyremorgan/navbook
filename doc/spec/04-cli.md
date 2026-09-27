@@ -60,6 +60,18 @@ family below, and repository-level utilities at the root of the command tree
 other kind MUST fail with a pointer to the right noun (e.g.
 `#dk3mp2x9 is a pull request — use 'nav pr show'`).
 
+A tool MAY let an extension ([02 §2.12](02-data-model.md)) add to this command
+tree. Where it does, the added nouns sit at the root beside `issue` and `pr`,
+because a noun buried under the extension's own name would read as the
+extension's business rather than the repository's — `nav feature show auth`,
+not `nav kb feature show auth`. A name that collides with a built-in noun, or
+with one an extension loaded earlier has taken, MUST be refused rather than
+resolved by precedence, and the refusal MUST name the extension that was
+skipped: a tree where the same word means two things depending on load order
+is worse than one where it means nothing.
+
+Extensions are the subject of the next section.
+
 ### Setup
 
 - `nav init` — create the Navbook skeleton (`issues/{open,closed}`,
@@ -87,6 +99,60 @@ other kind MUST fail with a pointer to the right noun (e.g.
 - `nav uninstall [--alias[=NAME]] [--hooks] [--completions] [-y]` — remove
   what `install` set up (no flags: everything it may have installed), with
   the same confirm-or-`--yes` behavior.
+
+### Plugins — `nav plugin <verb>`
+
+A **plugin** is how an extension ([02 §2.12](02-data-model.md)) reaches this
+CLI. The format names extensions and says where their data may live; this
+section says how a machine comes to have one, and the division is deliberate:
+a second implementation may load code in an entirely different way and still
+read the same trees.
+
+- `nav plugin install [<name>...] [-y]` — install plugins into the store
+  below. With no argument it reads the repository's declaration
+  ([02 §2.12](02-data-model.md)) and installs what is declared but missing,
+  which is the common case after a clone. Like `nav install`, it prints the
+  exact actions it is about to take and asks; `-y` skips the question.
+- `nav plugin remove <name>` — take one out of the store. The declaration is
+  not touched: what a repository says its tree contains is a property of the
+  tree, and one machine's uninstall does not change it.
+- `nav plugin update [<name>]` — update one, or all of them.
+- `nav plugin list [--json]` — what is installed, at which version, and
+  whether the repository in hand declares it.
+
+**Names.** A plugin is named by its npm package: `@navbook/plugin-<name>`,
+`navbook-plugin-<name>`, or `@scope/navbook-plugin-<name>`, and the package
+MUST carry `navbook-plugin` among its `keywords`. The prefix and the keyword
+are checked at install, and a package satisfying neither MUST be refused —
+which is what keeps `nav plugin install lodash` from being a thing that
+happens. `install` MAY accept a short name and expand it (`kb` →
+`@navbook/plugin-kb`, then `navbook-plugin-kb`); what it records and what
+`list` prints is always the full name.
+
+**The store is per-user, and installing is explicit.** Plugins live in a
+directory the tool owns, outside any repository — the reference implementation
+uses `$XDG_DATA_HOME/navbook/plugins`. A tool MUST NOT fetch or execute code
+because a repository's marker names it: the declaration is read to *report*
+what is missing, never to go and get it. This is the one security property of
+the whole arrangement, and it is why the declaration and the installation are
+two different acts by two different parties.
+
+**What a plugin adds, it declares.** A tool MUST be able to build its command
+tree, its help and its completions from a plugin's declaration alone, without
+executing the plugin, and MUST NOT load a plugin's code for a command whose
+declaration does not name it. This is a performance requirement (§4.2's budget
+is measured on a repository with plugins installed) and a predictability one:
+`nav --help` and `nav issue list` cost the same whether five plugins are
+installed or none.
+
+**Reserved: `nav-<name>` executables on PATH.** The git and cargo convention —
+an unrecognized first word sending the tool to look for `nav-<word>` on `PATH`
+— is reserved here and deliberately not implemented. It is the obvious way to
+write a plugin in another language, and a future revision may take it; what it
+cannot do is participate in any of the above. Such a program is not declared by
+the repository, cannot add an option to an existing verb, a column to a
+listing, a check to `doctor` or a completion, and has no way to be discovered.
+Implementations MUST NOT use the `nav-` prefix for anything else.
 
 ### Issues — `nav issue <verb>`
 
@@ -263,28 +329,63 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   §2.10](02-data-model.md)). The file is the record and it is never refused;
   what the warning prevents is somebody approving their own work and believing
   they have moved the decision.
-- `nav pr merge <id> [--no-ff] [-y|--yes] [--no-sync-source]` — from the target
-  branch: `git merge` the source branch with the PR directory moved to
-  `prs/merged/` inside the merge commit, then record the `merged:` block in a
-  follow-up commit (the merge SHA is unknowable inside the merge itself). When
-  the merge can fast-forward and `--no-ff` was not given, there is no merge
-  commit to carry the move, so the archive and the `merged:` block are written
-  together in the immediate follow-up commit that [02 §2.8](02-data-model.md)
-  allows; the block then has no `commit:` key, because no merge commit exists
-  to name.
+- `nav pr merge <id> [--method METHOD] [-y|--yes] [--no-sync-source]` — from
+  the target branch: land the source branch by the merge method the marker
+  declares ([02 §2.10](02-data-model.md)), with the PR directory moved to
+  `prs/merged/` and the `merged:` block recorded. `--method` chooses another
+  method for this merge alone and takes any of the six names §2.10 defines; a
+  name it does not define is exit 1 before anything is read or written.
 
-  That follow-up commit lands on the target and nowhere else, so a source
-  branch that outlives the merge — `dev` into `main` — would be left one commit
-  behind it, with the same pull request reading `merged` on one branch and
-  `open` on the other, which is exactly what `--all-refs` would then report.
-  Once the merge is recorded, `nav pr merge` therefore fast-forwards the source
-  branch to the target and prints `Fast-forwarded <source> to <target>`. It is
-  only ever a fast-forward of a local branch that nothing is standing on: a
-  source that is a remote-tracking ref, or a branch this clone does not hold,
-  is not touched and not mentioned; one that has commits the target does not,
-  or that another worktree has checked out, is left where it is with a warning
-  saying so — never a merge, never a commit, never a conflict. `--no-sync-source`
-  moves the target and nothing else. `--continue` performs the same step.
+  | Method | What it runs | Where the directory move goes |
+  |--------|--------------|-------------------------------|
+  | `auto` | a fast-forward where the branches allow one, else a merge commit | inside the merge commit, or the follow-up where it fast-forwarded |
+  | `merge` | a merge commit, always | inside the merge commit |
+  | `merge-ff` | a fast-forward, only | the follow-up commit |
+  | `rebase` | the source replayed onto the target, then a fast-forward | the follow-up commit |
+  | `rebase-no-ff` | the same replay, then a merge commit | inside the merge commit |
+  | `squash` | the whole of the source's change as one commit | inside the squash commit |
+
+  The `merged:` block is always written in a commit of its own, because the SHA
+  of the commit that lands the branch is unknowable inside that commit. Where
+  the method lands no commit of its own, that follow-up carries the directory
+  move as well — the immediate follow-up [02 §2.8](02-data-model.md) allows —
+  and the block has no `commit:` key, because there is no commit to name.
+
+  `merge-ff` MUST exit 1 without writing anything when the branches cannot
+  fast-forward, saying what would make one possible. It is the one method that
+  refuses to merge, and what it refuses is a shape of history rather than a
+  review state, which is why it is not the gate [02 §2.7](02-data-model.md)
+  forbids.
+
+  A replay that conflicts stops exactly as a merge that conflicts does, and is
+  finished the same way (`--continue`, below). A replay a tool cannot start —
+  a source branch whose commits it is unable to rewrite — is reported rather
+  than quietly performed as some other method.
+
+  The commit that records `merged:` lands on the target and nowhere else, so a
+  source branch that outlives the merge — `dev` into `main` — would be left one
+  commit behind it, with the same pull request reading `merged` on one branch
+  and `open` on the other, which is exactly what `--all-refs` would then
+  report. Once the merge is recorded, `nav pr merge` therefore fast-forwards
+  the source branch to the target and prints `Fast-forwarded <source> to
+  <target>`. It is only ever a fast-forward of a local branch that nothing is
+  standing on: a source that is a remote-tracking ref, or a branch this clone
+  does not hold, is not touched and not mentioned; one that has commits the
+  target does not, or that another worktree has checked out, is left where it
+  is with a warning saying so — never a merge, never a commit, never a
+  conflict. `--no-sync-source` moves the target and nothing else. `--continue`
+  performs the same step.
+
+  A method that rewrote the source's commits is reported for what it did
+  instead. `rebase` and `rebase-no-ff` move the branch onto the commits the
+  replay produced and print `Rebased <source> onto <target>`: the one move that
+  is not a fast-forward, made only because rewriting that branch is precisely
+  what the method asked for, and made under the same limits as the
+  fast-forward — never to a remote-tracking ref, never under another worktree.
+  `squash` moves nothing and prints that the source's commits are not on the
+  target, because the commit that replaced them is not one anything on that
+  branch can fast-forward to; deleting the branch, or resetting it by hand, is
+  the user's decision and not the tool's.
 
   When the repository declares a review policy ([02 §2.10](02-data-model.md))
   and the pull request's decision is not `approved`, it MUST print what is
@@ -299,9 +400,13 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   resolution. `nav pr merge` never aborts a conflicted merge: the author's
   resolution is worth keeping, and the remaining steps (moving the directory
   and recording `merged:`) are exactly what is easy to forget. `--continue`
-  refuses while any path is still unmerged, and infers the pull request from
-  `MERGE_HEAD` when no ID is given. An unmet policy is reported here as a
-  warning and never as a question: the merge is already under way, and the
+  refuses while any path is still unmerged. With no ID it infers the pull
+  request, the method and the target branch from state the interrupted merge
+  recorded beside the repository — not inside the tracker, which is a merge
+  away from being rewritten — and falls back to `MERGE_HEAD` for a merge git is
+  holding that Navbook did not start. `MERGE_HEAD` alone would not do: a
+  replay and a squash both stop without one. An unmet policy is reported here
+  as a warning and never as a question: the merge is already under way, and the
   moment to have asked has passed.
 
 ### Features — `nav feature <verb>`
@@ -352,7 +457,7 @@ kind. Terms AND together:
 | `milestone:M` | Exact milestone |
 | `feature:SLUG` | `SLUG` ∈ the entity's `feature` ([02 §2.11](02-data-model.md)) |
 | `deadline:overdue\|none` | `overdue`: a `deadline` strictly before today; `none`: no `deadline` at all. Issues only |
-| bare word / quoted string | Case-insensitive substring of title, description, or any comment body |
+| bare word / quoted string | Case-insensitive substring of title, description, or any comment body; also the entity's own ID, when the term is a prefix of `<id>-<slug>` ([02 §2.3](02-data-model.md)) of length ≥ 4, with an optional leading `#` |
 
 A query naming no status matches every status. The `status:open` default above
 is one the `list` commands supply for themselves, not a property of the
@@ -403,7 +508,22 @@ Doctor checks (E = error → exit 2, W = warning → exit 0 with report):
 | D12 | The `parent` chain loops, an issue naming itself included | E |
 | D13 | The layout and schema of `specs/`: a feature directory name that is not a slug, a file directly in `specs/`, a feature directory with no `feature.md`, or a `feature.md` or document missing a required key ([2.11](02-data-model.md)) | E |
 | D14 | An entity's `feature` names a slug with no `specs/<slug>/` directory in this tree | W |
-| D15 | `navbook.json` is not a JSON object, or its `review` policy is malformed ([2.10](02-data-model.md)) | E |
+| D15 | `navbook.json` is not a JSON object, or its `review`, `merge` or `plugins` declaration is malformed ([2.10](02-data-model.md), [2.12](02-data-model.md)) | E |
+
+An extension ([02 §2.12](02-data-model.md)) MAY add checks over the data it
+defines. They are numbered `X-<short>-<n>` — outside the `D` series, which
+belongs to this document, so that a reader of a diagnostic can tell at a glance
+which specification to consult and a future `D16` can never collide with
+something already shipped. An extension chooses its own levels, subject to the
+same meanings: an error is data that no tool can read, a warning is data that
+may yet be explained by a branch nobody has fetched.
+
+D13 and D14 are the exception, for the reason the names they check are
+([02 §2.12](02-data-model.md)): they predate extensions, this document still
+defines what they check, and they are what the conformance fixtures assert. An
+implementation is free to provide features natively or through an extension,
+and either way reports D13 and D14 — which is what lets one fixture suite
+validate both.
 
 D8 MUST NOT report a trailer naming an entity that a `docs(<kind>): delete
 #<id>` commit later removed, or that such a commit's `Deletes:` trailers name.
@@ -417,8 +537,8 @@ nobody has fetched, and an error would make the order in which two branches
 land a correctness question. D13 is an error because a directory that violates
 the layout can be read by nothing.
 
-D15 reports one diagnostic per fault it finds, so a marker that mistypes both
-policy keys names both. It is an error because a policy nobody can read is a
+D15 reports one diagnostic per fault it finds, so a marker that mistypes two of
+its policy keys names both. It is an error because a policy nobody can read is a
 policy nobody is following, and the file is small enough that whoever wrote it
 can see what is wrong. It never stops a command: every reader falls back to the
 defaults of [02 §2.10](02-data-model.md), reports the fault, and carries on.
@@ -465,6 +585,8 @@ a house style.
 - No network operations of any kind in v1.
 - No automatic archiving, renumbering, or "cleanup" — every mutation is an
   explicit command.
+- No plugin code loaded for a command whose declaration does not name it
+  (§4.3), and nothing installed on a repository's say-so.
 
 ## 4.5 Git hooks
 

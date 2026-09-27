@@ -261,7 +261,43 @@ function matchesDeadline(query: Query, entity: EntityRecord): boolean {
 }
 
 function matchesText(needle: string, entity: EntityRecord): boolean {
+  if (matchesIdentifier(needle, entity)) return true;
   if (entity.title.toLowerCase().includes(needle)) return true;
   if (entity.body.toLowerCase().includes(needle)) return true;
   return entity.comments.some((comment) => comment.body.toLowerCase().includes(needle));
+}
+
+/**
+ * The shortest partial ID any surface accepts (spec 02 §2.2).
+ *
+ * It is a floor here rather than a rule about ambiguity: it is what keeps an
+ * ordinary word search from reaching an ID it did not mean.
+ */
+const ID_PREFIX_FLOOR = 4;
+
+/**
+ * True when a bare term names the entity itself rather than something it says.
+ *
+ * Without this the one identifier every entity is guaranteed to have is the
+ * one thing it cannot be found by, and searching an ID finds every entity that
+ * *mentioned* it and never the entity itself (spec 04 §4.3).
+ *
+ * The term is matched as a prefix of the directory name, which is `<id>-<slug>`
+ * (spec 02 §2.3), so the same test accepts both spellings a reader has to hand:
+ * the partial ID of length >= 4 that every other surface takes, and the whole
+ * directory name they copied out of a path. Anchoring it at the start is what
+ * makes it quiet — a term can only reach an entity whose ID it names from the
+ * first character, so no ordinary word search changes what it returns unless
+ * that word happens to open an ID.
+ *
+ * Ambiguity is not an error as it is for an ID *argument*: a filter matching
+ * two entities lists two rows, which is what a listing is for.
+ *
+ * A leading `#` is optional because that is how every mention of an ID is
+ * written, and so what gets pasted into a search box.
+ */
+function matchesIdentifier(needle: string, entity: EntityRecord): boolean {
+  const wanted = needle.startsWith("#") ? needle.slice(1) : needle;
+  if (wanted.length < ID_PREFIX_FLOOR) return false;
+  return entity.dirName.toLowerCase().startsWith(wanted);
 }

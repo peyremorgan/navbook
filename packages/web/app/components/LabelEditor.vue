@@ -79,7 +79,7 @@ watch(draft, (next) => {
   if (props.single === true && next.length > 1) draft.value = next.slice(-1);
 });
 
-function save(): void {
+function commit(): void {
   emit("save", draft.value);
   editing.value = false;
 }
@@ -144,7 +144,7 @@ function toggleSelf(): void {
           size="xs"
           :loading="props.save?.saving"
           :data-testid="`save-${props.testid}`"
-          @click="save"
+          @click="commit"
         >
           Save
         </UButton>

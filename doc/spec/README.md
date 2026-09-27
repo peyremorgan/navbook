@@ -14,9 +14,9 @@ Functionality first, technical details after:
 | # | Document | Contents |
 |---|----------|----------|
 | 1 | [01-functionality.md](01-functionality.md) | What Navbook does: concepts, user workflows, guarantees, non-goals |
-| 2 | [02-data-model.md](02-data-model.md) | **Normative.** Directory layout, identifiers, file formats, frontmatter schemas, features |
+| 2 | [02-data-model.md](02-data-model.md) | **Normative.** Directory layout, identifiers, file formats, frontmatter schemas, features, extension namespaces |
 | 3 | [03-merge-and-branches.md](03-merge-and-branches.md) | **Normative.** Branch semantics, concurrent-edit scenarios, conflict resolution |
-| 4 | [04-cli.md](04-cli.md) | The `nav` CLI: commands, query syntax, hooks, completions, exit codes |
+| 4 | [04-cli.md](04-cli.md) | The `nav` CLI: commands, query syntax, plugins, hooks, completions, exit codes |
 | 5 | [05-implementation.md](05-implementation.md) | Reference implementation (TypeScript), planned Rust rewrite, conformance testing |
 | 6 | [06-future.md](06-future.md) | Reserved extension points: forge sync, non-committer gateways, signatures; and the web client, which has since been built |
 
@@ -47,6 +47,9 @@ Each decision below is expanded in the linked document.
 | CLI naming | `nav` binary; configurable git alias defaulting to `git nav` | Short to type; `nav` verified unclaimed by any widely used program (checked 2026-08: no exact-name hit in Debian/Ubuntu, Homebrew, or npm bins; the only bare `nav` command belongs to the niche server-side NAV network-monitoring suite). Alias name stays configurable (e.g. `git issue`) | 04 |
 | CLI structure | Noun-verb: `nav {issue\|pr} {open\|list\|show\|edit\|comment\|close\|reopen\|delete}` + issue-only `link`/`unlink` + PR-only `update`/`review`/`merge` + root utilities (`nav id`, `nav doctor`, setup) | One shared verb vocabulary is easier to learn and remember than per-entity command names | 04 |
 | Features | A directory per feature under `specs/`, holding a `feature.md` and its documents; membership is asserted by the entity's `feature:` key and never listed in the feature | A slug is readable where an ID would not be, and no file every attachment must touch means no conflict magnet | 02 |
+| Extensibility | Three reserved namespaces an extension may put data in (a top-level directory, files inside an entity directory, prefixed frontmatter keys), declared in the marker; every tool preserves what it does not understand | A format that grew a section per optional feature is one nobody can implement twice; reserving the shapes instead means a plugin-less tool never loses a plugin's data | 02 |
+| Plugin loading | The repository declares which extensions its tree uses; each machine installs them explicitly, and a declaration never causes a fetch | A clone must be able to say what its tree contains, but cloning a repository must not be an act of trust in its committers' choice of code | 02, 04 |
+| Plugin contributions | Declared in the package's manifest, not discovered by running it: the manifest alone builds commands, help and completions | Auto-discovery costs an import on every invocation, which is the startup budget's main enemy (Prettier removed theirs for this reason) | 04, 05 |
 | Decomposition | Both sides of a parent/subtask link stored in frontmatter, kept in step by the CLI and reconciled by `doctor` | Redundancy costs a check but keeps every file self-describing: neither a listing nor a `show` has to traverse a graph, and either half survives the other being lost to a bad merge | 02, 04 |
 | Priority and dates | A decimal `rank` reordered by halving the gap to a neighbour, and a bare `deadline` date; sorting by either is a front end's reading, never an order the files or the API hold | A decimal needs no renumbering, so placing one issue rewrites one file; a date with no time has no zone for two readers to disagree about; an order the server owned would be the index of 06 §6.6 | 02, 04 |
 | Implementation | TypeScript reference implementation now; Rust CLI rewrite when mature, cross-checked against it | Measured trade-offs (see 05); the TS core survives as the future web layer | 05 |

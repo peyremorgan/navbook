@@ -54,7 +54,7 @@ function cancel(): void {
   editing.value = false;
 }
 
-function save(): void {
+function commit(): void {
   // Said here rather than in a toast, and the editor stays open: a message
   // that appears while the words it is about have already been discarded is
   // not much of a message.
@@ -102,7 +102,7 @@ function save(): void {
         class="w-full"
         :aria-label="props.label"
         :data-testid="props.testid ? `input-${props.testid}` : undefined"
-        @keydown.enter="save"
+        @keydown.enter="commit"
         @keydown.esc="cancel"
       />
       <p v-if="problem" class="text-sm text-error" :data-testid="props.testid ? `error-${props.testid}` : undefined">
@@ -113,7 +113,7 @@ function save(): void {
           size="sm"
           :loading="props.save?.saving"
           :data-testid="props.testid ? `save-${props.testid}` : undefined"
-          @click="save"
+          @click="commit"
         >
           Save
         </UButton>
