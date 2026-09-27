@@ -12,7 +12,7 @@ revisions:
     date: 2026-09-27T17:12:16Z
 ---
 
-Follow-up to #egvv9205. It adds the two tests worth keeping from the superseded #d0jz7ovl, and fixes the gap that reviewing them turned up.
+Follow-up to #egvv9205. It adds the two tests worth keeping from the superseded `#d0jz7ovl` (on its own branch), and fixes the gap that reviewing them turned up.
 
 ## What changed
 
