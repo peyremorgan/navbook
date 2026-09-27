@@ -14,7 +14,7 @@
 import { type Dirent, existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { NAV_MARKER } from "../core/tree.ts";
-import { git, gitMaybe, gitMaybeAsync, gitRun, splitLines, splitNul } from "./exec.ts";
+import { git, gitAsync, gitMaybe, gitMaybeAsync, gitRun, splitLines, splitNul } from "./exec.ts";
 
 /** The directory name used unless a repository says otherwise. */
 export const DEFAULT_NAV_DIR = ".navbook";
@@ -249,6 +249,20 @@ export function isTreeClean(cwd: string, opts: { untracked?: boolean } = {}): bo
   ];
   const status = gitRun(args, { cwd });
   return status.code === 0 && status.stdout.trim() === "";
+}
+
+/**
+ * True when anything under `path` differs from HEAD: an edit, a deletion, or
+ * a file git does not track. Without blocking, and without writing: git would
+ * otherwise refresh the index as a side effect, and whoever asks this may be
+ * running beside something that holds the index.
+ */
+export async function hasChangesUnderAsync(cwd: string, path: string): Promise<boolean> {
+  const status = await gitAsync(
+    ["--no-optional-locks", "status", "--porcelain", "-z", "--untracked-files=all", "--", path],
+    { cwd },
+  );
+  return status !== "";
 }
 
 /** True when a merge is currently in progress. */

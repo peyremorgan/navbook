@@ -2,6 +2,7 @@
 title: "nav {issue,pr} list --help omits the deadline: query term"
 author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-20T12:39:37Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug, cli]
 feature: cli
 ---

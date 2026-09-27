@@ -35,7 +35,6 @@ import {
   findEntity,
   findFeature,
   findParentIssue,
-  loadRepo,
   locatePr,
   type NewCommentInput,
   newCommentFile,
@@ -100,11 +99,12 @@ function commitInfo(result: RunPlanResult, pushed: boolean): CommitInfo {
  * applied — a closed issue's record still says `open`, and its path still names
  * the directory it has left — so a payload has to read it back. That read
  * happens inside the write transaction, because once the lock is released the
- * next mutation is free to move the very files being reported on.
+ * next mutation is free to move the very files being reported on. It is also
+ * the tree the payload's own fields then read.
  */
 function afterWrite(ctx: GraphQLCtx): Repo {
   ctx.invalidateRepo();
-  return loadRepo(ctx.ws);
+  return ctx.loadRepo("all");
 }
 
 /** One entity from an already-loaded tree. */

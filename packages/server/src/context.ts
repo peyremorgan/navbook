@@ -12,18 +12,21 @@
  */
 
 import {
+  type CommentScope,
+  type EntityRecord,
   type Identity,
-  loadRepo,
   makeWsCtx,
   type Repo,
   type ReviewPolicyReading,
   readReviewPolicy,
   type WsCtx,
+  withComments,
 } from "@navbook/core";
 import type { RevisionCache } from "./changes.ts";
 import type { Config } from "./config.ts";
 import type { AuthorCache } from "./people.ts";
 import type { RepoSync } from "./sync.ts";
+import type { TreeCache } from "./trees.ts";
 
 export interface GraphQLCtx {
   /** Who the presented token says is acting. */
@@ -37,9 +40,33 @@ export interface GraphQLCtx {
    * as much as rendering the repository.
    *
    * Read under the repository lock, because a field resolver runs after its
-   * parent's transaction has already released it.
+   * parent's transaction has already released it. Read without comments, which
+   * are most of what a parse costs and which no link needs; a field that wants
+   * an entity's asks {@link commented}.
    */
   repo(): Promise<Repo>;
+  /**
+   * The tree as it is now, kept as this request's `repo()`.
+   *
+   * For a root resolver whose fields go on to ask for the tree: it parses it
+   * once, inside its own transaction, and the fields read that same parse
+   * rather than making a second one after the lock has let go — which on a
+   * large repository doubled what the request cost (#esqpmn7i), and could
+   * describe a tree a write had moved in between. Call it only inside
+   * `sync.read` or `sync.write`, where the tree is held still.
+   *
+   * `comments` says whose comments to read; the fields read the others through
+   * {@link commented} if they need them.
+   */
+  loadRepo(comments: CommentScope): Repo;
+  /**
+   * The entity with its comments, read when the tree it came from left them out.
+   *
+   * Every resolver that reads an entity's comments goes through this, so a
+   * record from a read without them answers with its comments, not with an
+   * empty list. Read under the lock, at most once per record per request.
+   */
+  commented(entity: EntityRecord): Promise<EntityRecord>;
   /**
    * How this repository counts reviews (spec 02 §2.10), read at most once.
    *
@@ -48,7 +75,10 @@ export interface GraphQLCtx {
    * the policy is still the working tree's.
    */
   reviewPolicy(): Promise<ReviewPolicyReading>;
-  /** Drops the memo after a write, so a payload reads the tree it just made. */
+  /**
+   * Drops the memo after a write, so a payload reads the tree it just made.
+   * The trees remembered across requests go with it, for the same reason.
+   */
   invalidateRepo(): void;
   sync: RepoSync;
   /**
@@ -70,6 +100,8 @@ export interface MakeContextOptions {
   sync: RepoSync;
   authors: AuthorCache;
   revisions: RevisionCache;
+  /** Parsed trees, remembered across requests against the commit they describe. */
+  trees: TreeCache;
   env?: NodeJS.ProcessEnv;
   /**
    * The Navbook directory, already resolved at startup.
@@ -94,13 +126,29 @@ export function makeGraphQLCtx(opts: MakeContextOptions): GraphQLCtx {
   // share one load rather than queueing one apiece behind the lock.
   let memo: Promise<Repo> | null = null;
   let policyMemo: Promise<ReviewPolicyReading> | null = null;
+  const commentMemo = new WeakMap<EntityRecord, Promise<EntityRecord>>();
   return {
     viewer: opts.viewer,
     ws,
-    repo: () => (memo ??= opts.sync.locked(() => loadRepo(ws))),
+    repo: () => (memo ??= opts.sync.locked(() => opts.trees.at(ws, "none"))),
+    loadRepo: (comments) => {
+      const repo = opts.trees.at(ws, comments);
+      memo = Promise.resolve(repo);
+      return repo;
+    },
+    commented: (entity) => {
+      if (entity.commentsLoaded) return Promise.resolve(entity);
+      let read = commentMemo.get(entity);
+      if (!read) {
+        read = opts.sync.locked(() => withComments(ws, entity));
+        commentMemo.set(entity, read);
+      }
+      return read;
+    },
     reviewPolicy: () => (policyMemo ??= opts.sync.locked(() => readReviewPolicy(ws))),
     invalidateRepo: () => {
       memo = null;
+      opts.trees.invalidate();
       // The marker is a file like any other, so a write may have changed it.
       policyMemo = null;
     },

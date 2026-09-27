@@ -3,6 +3,7 @@ title: Spec 04 does not document nav install --merge-config, which a bare nav in
 author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-20T12:40:06Z
 labels: [bug, install]
+assignee: Claude <noreply@anthropic.com>
 feature: cli
 ---
 
