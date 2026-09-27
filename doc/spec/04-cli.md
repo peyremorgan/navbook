@@ -77,11 +77,18 @@ Extensions are the subject of the next section.
 - `nav init` — create the Navbook skeleton (`issues/{open,closed}`,
   `prs/{open,merged,closed}`, with `.gitkeep` files so the empty tree commits),
   and the `navbook.json` marker that identifies the directory (02 §2.10).
-- `nav install [--alias[=NAME]] [--hooks] [--completions[=SHELL]] [-y]` — set
-  up environment integrations:
+- `nav install [--alias[=NAME]] [--hooks] [--merge-config] [--completions[=SHELL]] [-y]`
+  — set up environment integrations:
   - `--alias[=NAME]` — run `git config --global alias.<NAME> '!nav'`
     (see 4.1). `NAME` defaults to `nav`.
   - `--hooks` — install the `pre-commit` hook described in 4.5.
+  - `--merge-config` — run `git config --local merge.directoryRenames true`,
+    the SHOULD of [03 §3.3.1](03-merge-and-branches.md): git's default for
+    that key is `conflict`, which places a comment racing a close correctly
+    and then stops the merge to ask; `true` lets it complete. Local rather
+    than global, because it is a property of a repository whose tree makes a
+    status change a directory rename, not of the person running the command.
+    Directory rename detection exists from git 2.18.
   - `--completions[=SHELL]` — completions for `SHELL` (`bash`, `zsh`, or
     `fish`; default: detected from `$SHELL`), including dynamic ID/slug
     completion for commands taking an ID. Given explicitly, the script is
@@ -90,13 +97,13 @@ Extensions are the subject of the next section.
     user completions directory.
 
   With no flags, `nav install` sets up everything: alias (default name),
-  hook, and completions (installed, not printed). Like `apt`, any invocation
+  hook, merge config, and completions (installed, not printed). Like `apt`, any invocation
   that will change files or configuration first prints the exact actions it
   is about to take (the `git config` command to be run, the hook path, the
   completions file) and asks for confirmation; `-y`/`--yes` skips the
   prompt. Printing completions to stdout changes nothing and therefore never
   prompts.
-- `nav uninstall [--alias[=NAME]] [--hooks] [--completions] [-y]` — remove
+- `nav uninstall [--alias[=NAME]] [--hooks] [--merge-config] [--completions] [-y]` — remove
   what `install` set up (no flags: everything it may have installed), with
   the same confirm-or-`--yes` behavior.
 

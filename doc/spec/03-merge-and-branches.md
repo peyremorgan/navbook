@@ -97,6 +97,12 @@ git config merge.directoryRenames true
 clean" and "merges correctly but stops to ask" for the single most common
 concurrent pair in the whole system.
 
+The setting has no effect where rename detection itself is off: git ignores
+`merge.directoryRenames` and treats it as `false` when `merge.renames` is
+`false`. The merge then completes cleanly and leaves the racing comment under
+the old status directory — the unrepairable case below, reached silently and
+for *every* comment racing a close, not only the first.
+
 **The first-comment race is not repairable by git.** When the racing comment is
 the entity's *first*, `comments/` exists only on the commenting side, so no
 rename exists to follow and no setting helps: the comment lands under the old
