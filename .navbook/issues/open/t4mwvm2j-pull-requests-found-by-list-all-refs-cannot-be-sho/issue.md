@@ -8,7 +8,7 @@ feature: [pull-requests, cli]
 
 Reported by an agent reviewing a pull request from its own worktree.
 
-`nav pr list --all-refs` found #sf9fu6z4 (source `feat/inventory-transfers`, target `dev`) and showed the reporter as a pending reviewer. Nothing it printed could then be used to act on it:
+`nav pr list --all-refs` found `#sf9fu6z4` (source `feat/inventory-transfers`, target `dev`) and showed the reporter as a pending reviewer. Nothing it printed could then be used to act on it:
 
 - `nav pr show sf9fu6z4` → `nav: no pull request matches 'sf9fu6z4'`
 - `nav pr show '#sf9fu6z4'` → the same
