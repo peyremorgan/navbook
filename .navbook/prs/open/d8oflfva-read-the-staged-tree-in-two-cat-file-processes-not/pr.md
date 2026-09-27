@@ -29,7 +29,7 @@ Fixes #j35o7oe4. `nav doctor --staged`, which the pre-commit hook runs, read eac
 - A larger blob is read with `git cat-file blob <sha>` only when `parseTree` asks for it. So a big report under §2.12, or an image, is listed in `reserved` and never read. A small one rides along in the batch, where it costs bytes rather than a process.
 - Objects are asked for by name, never by path, so no answer from git carries a path, and every header is checked against the SHA asked for. A blob that does not come back throws, rather than letting the hook pass a tree with files missing.
 
-`refscan.ts` and `catBlobs` are untouched, because #u0a6u6ev (PR #krc96gzg) is changing them. `catBlobs` keys its answers by `<ref>:<path>`, so it could not take SHAs anyway.
+`refscan.ts` and `catBlobs` are untouched, because #u0a6u6ev (PR `krc96gzg`) is changing them. `catBlobs` keys its answers by `<ref>:<path>`, so it could not take SHAs anyway.
 
 ## Self-review (commit `fix(core): read the staged tree by object name…`)
 
