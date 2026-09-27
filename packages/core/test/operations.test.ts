@@ -7,7 +7,9 @@
  */
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -23,7 +25,7 @@ import { newCommentFile, newIssueFile, newPrFile, readRevisions } from "../src/c
 import type { MergeMethod } from "../src/core/policy.ts";
 import { emptyQuery } from "../src/core/query.ts";
 import type { EntityRecord } from "../src/core/tree.ts";
-import { git } from "../src/git/exec.ts";
+import { GitError, git } from "../src/git/exec.ts";
 import { resolveSha } from "../src/git/repo.ts";
 import {
   applyComment,
@@ -703,6 +705,96 @@ describe("ops: updating and merging a pull request", () => {
         () => planPrMerge(ws, "ppp1"),
         (error: unknown) => error instanceof WorkspaceError && error.code === "precondition",
       );
+    });
+  });
+
+  /** The pull request's directory on `feature`, from the repository root. */
+  function openPrDir(dir: string): string {
+    const names = git(["ls-tree", "--name-only", "feature:.navbook/prs/open"], { cwd: dir });
+    const name = names.split("\n").find((each) => each !== "" && each !== ".gitkeep");
+    return `.navbook/prs/open/${name}`;
+  }
+
+  /**
+   * Run `use` with a `git` first on PATH that records what `cat-file --batch`
+   * is asked for, one spec per line, and exits 128 instead of running the
+   * `cat-file` mode named by `fail`. Everything else passes through to git.
+   */
+  function withCatFileShim(
+    fail: "--batch" | "--batch-check" | null,
+    use: (asked: () => string[]) => void,
+  ): void {
+    const bin = mkdtempSync(join(tmpdir(), "nav-git-shim-"));
+    const log = join(bin, "cat-file.log");
+    const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+    const failing =
+      fail === null ? "" : `"cat-file ${fail}") echo "fatal: simulated failure" >&2; exit 128 ;;`;
+    const script = [
+      "#!/bin/sh",
+      `case "$1 $2" in ${failing}`,
+      `"cat-file --batch") tee -a '${log}' | '${real}' "$@"; exit ;;`,
+      "esac",
+      `exec '${real}' "$@"`,
+    ];
+    writeFileSync(join(bin, "git"), `${script.join("\n")}\n`);
+    chmodSync(join(bin, "git"), 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    try {
+      use(() => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []));
+    } finally {
+      process.env.PATH = path;
+      rmSync(bin, { recursive: true, force: true });
+    }
+  }
+
+  it("never reads an open pull request's extension namespace off other refs", () => {
+    inPrWorkspace((ws, dir) => {
+      const prDir = openPrDir(dir);
+      writeFileSync(join(dir, prDir, "reports.json"), '{"runs": [1, 2, 3]}\n');
+      git(["add", "-A"], { cwd: dir });
+      git(["commit", "-qm", "reports"], { cwd: dir });
+      git(["branch", "copy"], { cwd: dir });
+      git(["update-ref", "refs/remotes/origin/feature", "feature"], { cwd: dir });
+      git(["checkout", "-q", "main"], { cwd: dir });
+
+      withCatFileShim(null, (asked) => {
+        const found = listPrsAcrossRefs(ws, parseListQuery(ws, [], "pr"));
+        assert.deepEqual(
+          found.map((entry) => [entry.entity.id, entry.refs.map((ref) => ref.short).sort()]),
+          [["ppp11111", ["copy", "feature", "origin/feature"]]],
+        );
+        // Listed, so a front end can say it is there (§2.12)...
+        assert.deepEqual(found[0]?.entity.extraFiles, [
+          `${prDir.slice(".navbook/".length)}/reports.json`,
+        ]);
+        // ...and never read, on any of the three refs that carry it (#u0a6u6ev).
+        assert.deepEqual(
+          asked().filter((spec) => spec.endsWith("/reports.json")),
+          [],
+        );
+        // The three refs share one `prs/open` tree, so it is read once for all of them.
+        assert.equal(asked().filter((spec) => spec.endsWith("/pr.md")).length, 1);
+      });
+    });
+  });
+
+  it("reports a batch it could not read, rather than finding no pull request", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "main"], { cwd: dir });
+      // Resolving the refs' trees, then reading their blobs: either failing is
+      // a failure to read, not an answer of "no pull requests here".
+      for (const mode of ["--batch-check", "--batch"] as const) {
+        withCatFileShim(mode, () => {
+          assert.throws(
+            () => listPrsAcrossRefs(ws, parseListQuery(ws, [], "pr")),
+            (error: unknown) =>
+              error instanceof GitError &&
+              error.args.join(" ") === `cat-file ${mode}` &&
+              /simulated failure/.test(error.message),
+          );
+        });
+      }
     });
   });
 

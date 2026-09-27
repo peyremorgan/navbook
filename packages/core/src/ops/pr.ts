@@ -29,7 +29,14 @@ import {
 } from "../core/policy.ts";
 import { matchesQuery, type Query } from "../core/query.ts";
 import { type ReviewSummary, reviewSummary } from "../core/review.ts";
-import { allEntities, type EntityRecord, parseTree, type Repo } from "../core/tree.ts";
+import {
+  allEntities,
+  type EntityRecord,
+  type NavTree,
+  parsedPaths,
+  parseTree,
+  type Repo,
+} from "../core/tree.ts";
 import { gitMaybe } from "../git/exec.ts";
 import { isAncestor, mergeBase, objectExists } from "../git/history.ts";
 import { add, commit, composeMessage } from "../git/index-ops.ts";
@@ -56,9 +63,8 @@ import {
   batchResolve,
   catBlobs,
   listBranchRefs,
-  lsTreeNames,
   lsTreeNamesOfTree,
-  lsTreeRecursive,
+  lsTreeRecursiveOfTree,
   type Ref,
 } from "../git/refscan.ts";
 import {
@@ -375,35 +381,51 @@ export function scanRefsForOpenPrs(ws: WsCtx): FoundPr[] {
   const cwd = ws.repoRoot;
   const refs = listBranchRefs(cwd);
   const byId = new Map<string, FoundPr>();
+  const dir = `${ws.navDir}/${PR_OPEN_DIR}`;
+
+  // Each ref's `prs/open` resolved to its tree in one `--batch-check`, as
+  // {@link countOpenPrsOnOtherRefs} does, so the refs that share one — a
+  // branch and its `origin/` copy, most often — are listed and read once.
+  const treeOf = batchResolve(
+    cwd,
+    refs.map((ref) => `${ref.full}:${dir}`),
+  );
+  const listings = new Map<string, { paths: string[]; wanted: string[] }>();
+  for (const tree of new Set(treeOf.values())) {
+    const paths = lsTreeRecursiveOfTree(cwd, tree).map((path) => `${PR_OPEN_DIR}/${path}`);
+    listings.set(tree, { paths, wanted: parsedPaths(paths, { ext: ws.ext }) });
+  }
+  // Then one batch for every tree, holding only what `parseTree` will read: an
+  // entity's extension namespace (§2.12) is listed, which is what fills
+  // `extraFiles`, and never read — so however large it is, it costs nothing.
+  const relative = (path: string): string => path.slice(PR_OPEN_DIR.length + 1);
+  const blobs = catBlobs(
+    cwd,
+    [...listings].flatMap(([tree, { wanted }]) =>
+      wanted.map((path) => ({ ref: tree, path: relative(path) })),
+    ),
+  );
+
+  const parsed = new Map<string, EntityRecord[]>();
+  for (const [tree, { paths, wanted }] of listings) {
+    const asked = new Set(wanted);
+    const blobAt = (path: string): string | undefined => blobs.get(`${tree}:${relative(path)}`);
+    const files: NavTree = {
+      // A blob asked for that did not come back is missing from the object
+      // store — a partial clone — and reads as a file the tree does not hold.
+      keys: () => paths.filter((path) => !asked.has(path) || blobAt(path) !== undefined),
+      get: blobAt,
+    };
+    // A pull request read out of another branch is parsed with this
+    // checkout's extensions, as it is counted by this checkout's policy: the
+    // alternative is asking what that branch declared, which is a second
+    // answer to a question that has one (spec 02 §2.10).
+    parsed.set(tree, parseTree(files, { ext: ws.ext }).prs);
+  }
 
   for (const ref of refs) {
-    const dirs = lsTreeNames(cwd, ref.full, `${ws.navDir}/${PR_OPEN_DIR}`).filter(
-      (name) => name !== ".gitkeep",
-    );
-    if (dirs.length === 0) continue;
-
-    for (const dirName of dirs) {
-      const dirPath = `${ws.navDir}/${PR_OPEN_DIR}/${dirName}`;
-      const paths = lsTreeRecursive(cwd, ref.full, dirPath);
-      if (paths.length === 0) continue;
-
-      const blobs = catBlobs(
-        cwd,
-        paths.map((path) => ({ ref: ref.full, path: `${dirPath}/${path}` })),
-      );
-      const files = new Map<string, string>();
-      for (const path of paths) {
-        const content = blobs.get(`${ref.full}:${dirPath}/${path}`);
-        if (content !== undefined) files.set(`${PR_OPEN_DIR}/${dirName}/${path}`, content);
-      }
-
-      // A pull request read out of another branch is parsed with this
-      // checkout's extensions, as it is counted by this checkout's policy: the
-      // alternative is asking what that branch declared, which is a second
-      // answer to a question that has one (spec 02 §2.10).
-      const entity = parseTree(files, { ext: ws.ext }).prs[0];
-      if (!entity) continue;
-
+    const tree = treeOf.get(`${ref.full}:${dir}`);
+    for (const entity of tree === undefined ? [] : (parsed.get(tree) ?? [])) {
       const existing = byId.get(entity.id);
       if (!existing) {
         byId.set(entity.id, { entity, refs: [ref] });

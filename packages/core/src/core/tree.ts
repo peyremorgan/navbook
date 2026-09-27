@@ -197,20 +197,7 @@ export function parseTree(
 ): Repo {
   const extensions = opts.ext ?? NO_EXTENSIONS;
   const scope = opts.commentsLoaded ?? "all";
-  const problems: StructuralProblem[] = [];
-  const reserved: string[] = [];
-  const drafts = new Map<string, EntityDraft>();
-  // One bucket per registered location, made up front so a location that
-  // matches nothing still builds — an empty `specs/` is a real state, and a
-  // plugin that never heard about it could not report the difference between
-  // no features and no directory.
-  const extPaths = new Map<string, string[]>(
-    extensions.treeLocations.map((location) => [location.dir, []]),
-  );
-
-  for (const path of [...files.keys()].sort()) {
-    classify(path, drafts, problems, reserved, extPaths);
-  }
+  const { drafts, problems, reserved, extPaths } = classifyAll(files.keys(), extensions);
 
   const issues: EntityRecord[] = [];
   const prs: EntityRecord[] = [];
@@ -248,6 +235,53 @@ export function parseTree(
     ext,
     extProblems,
   };
+}
+
+/**
+ * The paths whose content {@link parseTree} may ask a tree with these keys for.
+ *
+ * The marker, each entity's file and comments, and whatever lies under a
+ * registered location, whose plugin decides what it opens. Everything else —
+ * an entity's extension namespace (§2.12), an unregistered directory — is
+ * listed and never read. Worked out by the same classification `parseTree`
+ * runs, so a reader that must fetch in advance, like the scan of other
+ * branches, has no second copy of the directory grammar to drift from it.
+ */
+export function parsedPaths(keys: Iterable<string>, opts: { ext?: CoreExtensions } = {}): string[] {
+  const listed = [...keys];
+  const { drafts, extPaths } = classifyAll(listed, opts.ext ?? NO_EXTENSIONS);
+  const paths: string[] = [];
+  for (const draft of drafts.values()) {
+    if (draft.entityFile !== undefined) paths.push(draft.entityFile);
+    paths.push(...draft.comments.values());
+  }
+  for (const bucket of extPaths.values()) paths.push(...bucket);
+  if (listed.includes(NAV_MARKER)) paths.push(NAV_MARKER);
+  return paths.sort();
+}
+
+interface Classified {
+  drafts: Map<string, EntityDraft>;
+  problems: StructuralProblem[];
+  reserved: string[];
+  extPaths: Map<string, string[]>;
+}
+
+function classifyAll(keys: Iterable<string>, extensions: CoreExtensions): Classified {
+  const problems: StructuralProblem[] = [];
+  const reserved: string[] = [];
+  const drafts = new Map<string, EntityDraft>();
+  // One bucket per registered location, made up front so a location that
+  // matches nothing still builds — an empty `specs/` is a real state, and a
+  // plugin that never heard about it could not report the difference between
+  // no features and no directory.
+  const extPaths = new Map<string, string[]>(
+    extensions.treeLocations.map((location) => [location.dir, []]),
+  );
+  for (const path of [...keys].sort()) {
+    classify(path, drafts, problems, reserved, extPaths);
+  }
+  return { drafts, problems, reserved, extPaths };
 }
 
 function classify(

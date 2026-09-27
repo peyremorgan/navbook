@@ -9,6 +9,7 @@ import {
   type CommentScope,
   type EntityRecord,
   type NavTree,
+  parsedPaths,
   parseTree,
   statusDir,
   treePeople,
@@ -360,6 +361,84 @@ describe("readNavTree comment scope", () => {
     const path = "issues/open/bqlybac0-x/comments/2026-08-03T141207Z-t5kr1gq6.md";
     assert.equal(readNavTree(root).get(path), "---\n---\n\nc\n");
     assert.equal(readNavTree(root, { comments: "none" }).get(path), undefined);
+  });
+});
+
+describe("parsedPaths", () => {
+  // Every shape `classify` sorts a path into: entity files and comments, live
+  // and archived, a comment name that is not one, an entity file that does not
+  // parse, an entity's own namespace (§2.12), a registered location and an
+  // unregistered one, and the marker.
+  const files = tree({
+    "navbook.json": '{"version": 1}\n',
+    "issues/open/bqlybac0-x/issue.md": issue(),
+    "issues/open/bqlybac0-x/comments/2026-08-03T141207Z-t5kr1gq6.md": comment(),
+    "issues/open/bqlybac0-x/comments/notes.md": comment(),
+    "issues/open/bqlybac0-x/reports.json": "{}",
+    "issues/closed/mz4kq1rv-y/issue.md": "---\ntitle: [unclosed\n---\n",
+    "issues/closed/mz4kq1rv-y/comments/2026-08-03T141207Z-t5kr1gq6.md": comment(),
+    "prs/open/dk3mp2x9-z/pr.md": pr(),
+    "prs/open/dk3mp2x9-z/reports/trace.bin": "\u0000\u00ff",
+    "prs/open/dk3mp2x9-z/comments/2026-08-03T141207Z-t5kr1gq6.md": comment(),
+    "archive/2026/prs/merged/q8zm3vp1-w/pr.md": pr(),
+    "specs/auth/feature.md": "---\ntitle: Auth\n---\n",
+    "specs/auth/diagram.png": "\u0089PNG",
+    "reports/coverage.json": "{}",
+  });
+  const ext = mergeExtensions([
+    {
+      treeLocations: [
+        {
+          dir: "specs",
+          build: (tree, paths) => {
+            for (const path of paths) tree.get(path);
+            return { model: paths, problems: [] };
+          },
+        },
+      ],
+    },
+  ]);
+
+  /** What `parseTree` asks `files` for. */
+  const asked = (opts: Parameters<typeof parseTree>[1]): string[] => {
+    const seen = new Set<string>();
+    const recording: NavTree = {
+      keys: () => files.keys(),
+      get(path) {
+        seen.add(path);
+        return files.get(path);
+      },
+    };
+    parseTree(recording, opts);
+    return [...seen].sort();
+  };
+
+  it("covers every file parseTree reads, and nothing it lists without reading", () => {
+    for (const opts of [{}, { ext }]) {
+      const wanted = parsedPaths(files.keys(), opts);
+      const outside = asked(opts).filter((path) => !wanted.includes(path));
+      assert.deepEqual(outside, [], "parseTree read a path parsedPaths left out");
+    }
+  });
+
+  it("leaves out what no reader interprets", () => {
+    assert.deepEqual(parsedPaths(files.keys()), [
+      "archive/2026/prs/merged/q8zm3vp1-w/pr.md",
+      "issues/closed/mz4kq1rv-y/comments/2026-08-03T141207Z-t5kr1gq6.md",
+      "issues/closed/mz4kq1rv-y/issue.md",
+      "issues/open/bqlybac0-x/comments/2026-08-03T141207Z-t5kr1gq6.md",
+      "issues/open/bqlybac0-x/issue.md",
+      "navbook.json",
+      "prs/open/dk3mp2x9-z/comments/2026-08-03T141207Z-t5kr1gq6.md",
+      "prs/open/dk3mp2x9-z/pr.md",
+    ]);
+  });
+
+  it("hands a registered location's files to its plugin, all of them", () => {
+    const wanted = parsedPaths(files.keys(), { ext });
+    assert.ok(wanted.includes("specs/auth/diagram.png"));
+    assert.ok(wanted.includes("specs/auth/feature.md"));
+    assert.ok(!wanted.includes("reports/coverage.json"));
   });
 });
 

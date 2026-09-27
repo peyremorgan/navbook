@@ -90,7 +90,7 @@ function gitEnv(extra: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
 }
 
 /** What a failure to spawn git at all means to the person running it. */
-function spawnFailure(error: NodeJS.ErrnoException): Error {
+export function spawnFailure(error: NodeJS.ErrnoException): Error {
   if (error.code === "ENOENT") {
     return new Error("git was not found on PATH; Navbook requires a working git installation");
   }
