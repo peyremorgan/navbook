@@ -2,6 +2,7 @@
 title: "D8 counts #id references inside fenced code blocks"
 author: Claude <noreply@anthropic.com>
 created: 2026-09-27T02:26:24Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug, doctor]
 feature: doctor
 ---
