@@ -3,7 +3,9 @@
  */
 
 import type { Trailer } from "../core/ops.ts";
-import { git, gitRun, splitLines, splitNul } from "./exec.ts";
+import type { NavTree } from "../core/tree.ts";
+import { GitError, git, gitRun, splitLines, splitNul } from "./exec.ts";
+import { catBlobs } from "./refscan.ts";
 
 /** Repository-relative paths currently staged in the index. */
 export function stagedPaths(cwd: string): string[] {
@@ -17,6 +19,80 @@ export function stagedPaths(cwd: string): string[] {
 export function stagedContent(cwd: string, path: string): string | null {
   const result = gitRun(["show", `:${path}`], { cwd });
   return result.code === 0 ? result.stdout : null;
+}
+
+/**
+ * The largest staged file {@link stagedTree} reads up front. A bigger one
+ * waits until it is asked for, which for extension data (§2.12) is never.
+ */
+const PREFETCH_LIMIT = 1024 * 1024;
+
+/**
+ * Staged files as a tree, keyed by their path with `prefix` removed.
+ *
+ * A path the index holds no blob for — a staged deletion, a conflicted path
+ * with no stage 0 — is left out, as it was when each file cost a
+ * `git show :<path>` that failed. The rest costs two `git cat-file`
+ * processes whatever their number: one for each blob's size, one to read
+ * every blob up to {@link PREFETCH_LIMIT}. A larger file is read on its own
+ * when asked for, so a report or an image nothing parses is listed and never
+ * read.
+ *
+ * A blob the first process found and the second did not return means the
+ * batch failed, and throws: the pre-commit hook would otherwise judge a tree
+ * with files missing from it, and pass it.
+ */
+export function stagedTree(cwd: string, paths: readonly string[], prefix: string): NavTree {
+  if (paths.length === 0) return new Map();
+  // The batch protocol is one spec per line, so a path with a newline in it,
+  // which git allows, is read on its own rather than splitting the batch.
+  const batched = paths.filter((path) => !path.includes("\n"));
+  const args = ["cat-file", "--batch-check"];
+  const check = gitRun(args, { cwd, input: batched.map((path) => `:${path}\n`).join("") });
+  if (check.code !== 0) throw new GitError(args, check);
+
+  // One line per spec, in the order asked: `<sha> <type> <size>`, or
+  // `<spec> missing` when the index has nothing at stage 0 for it.
+  const sizes = new Map<string, number>();
+  for (const [index, line] of splitLines(check.stdout).entries()) {
+    const path = batched[index];
+    const [, type, size] = line.split(" ");
+    if (path !== undefined && type === "blob") sizes.set(path, Number(size));
+  }
+
+  const small = [...sizes].filter(([, size]) => size <= PREFETCH_LIMIT).map(([path]) => path);
+  const read = catBlobs(
+    cwd,
+    small.map((path) => ({ ref: "", path })),
+  );
+  const contents = new Map<string, string>();
+  for (const path of small) {
+    const text = read.get(`:${path}`);
+    if (text === undefined) throw new Error(`git cat-file --batch did not return ':${path}'`);
+    contents.set(path, text);
+  }
+  for (const path of paths) {
+    if (!path.includes("\n")) continue;
+    const text = stagedContent(cwd, path);
+    if (text !== null) contents.set(path, text);
+  }
+
+  const listed = [...sizes.keys(), ...contents.keys()];
+  const keys = new Map(listed.map((path) => [path.slice(prefix.length), path]));
+  return {
+    keys: () => keys.keys(),
+    get(key) {
+      const path = keys.get(key);
+      if (path === undefined) return undefined;
+      let text = contents.get(path);
+      if (text === undefined) {
+        const size = sizes.get(path) ?? 0;
+        text = git(["cat-file", "blob", `:${path}`], { cwd, maxBuffer: size + 1024 });
+        contents.set(path, text);
+      }
+      return text;
+    },
+  };
 }
 
 /**

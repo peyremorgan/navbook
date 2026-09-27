@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { makeNavRepo, makeTempRepo, type TempRepo } from "../helpers/temprepo.ts";
@@ -63,6 +63,75 @@ describe("nav doctor", () => {
 
       repo.git(["add", "-A"]);
       assert.equal(repo.nav(["doctor", "--staged"]).code, 2, "staging it makes it visible");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("--staged reads the index in a fixed number of git processes, whatever its size", () => {
+    const repo = makeNavRepo();
+    try {
+      repo.nav(["issue", "open", "Busy", "-m", "Body.", "--commit"], { NAV_IDS: "bsy11111" });
+      for (let n = 10; n < 50; n++) {
+        repo.write(
+          `.navbook/issues/open/bsy11111-busy/comments/2026-08-05T1000${n}Z-cmt111${n}.md`,
+          `---\nauthor: bob@example.com\n---\n\nComment ${n}.\n`,
+        );
+      }
+      repo.git(["add", "-A"]);
+
+      const trace = join(repo.home, "trace.log");
+      const result = repo.nav(["doctor", "--staged"], { GIT_TRACE: trace });
+      assert.equal(result.code, 0, result.stdout);
+      const spawned = readFileSync(trace, "utf8").match(/built-in: git .*/g) ?? [];
+      assert.deepEqual(
+        spawned.filter((line) => / git show /.test(line)),
+        [],
+        "no file is read with a git show of its own",
+      );
+      assert.ok(spawned.length <= 6, `${spawned.length} git processes:\n${spawned.join("\n")}`);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("--staged leaves a large file nothing parses unread, and reads one it parses", () => {
+    const repo = makeNavRepo();
+    try {
+      // Extension data (§2.12) and an issue file, both over a megabyte.
+      repo.write(".navbook/reports/run.json", `"${"r".repeat(2 * 1024 * 1024)}"\n`);
+      repo.write(
+        ".navbook/issues/open/big11111-big/issue.md",
+        `---\ntitle: [unclosed\n---\n\n${"b".repeat(2 * 1024 * 1024)}\n`,
+      );
+      repo.git(["add", "-A"]);
+      const report = repo.git(["rev-parse", ":.navbook/reports/run.json"]).stdout.trim();
+
+      const trace = join(repo.home, "trace.log");
+      const result = repo.nav(["doctor", "--staged"], { GIT_TRACE: trace });
+      assert.equal(result.code, 2, "the large issue file is read, and judged");
+      assert.match(result.stdout, /big11111-big\/issue\.md/);
+      const log = readFileSync(trace, "utf8");
+      assert.doesNotMatch(log, /reports\/run\.json/, "the report is not read by name");
+      assert.doesNotMatch(log, new RegExp(report), "nor by its object name");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("--staged skips what the index no longer holds, and paths git would batch badly", () => {
+    const repo = makeNavRepo();
+    try {
+      repo.nav(["issue", "open", "Kept", "-m", "Body.", "--commit"], { NAV_IDS: "kpt11111" });
+      repo.nav(["issue", "open", "Gone", "-m", "Body.", "--commit"], { NAV_IDS: "gne11111" });
+      repo.git(["rm", "-r", "--cached", "--quiet", ".navbook/issues/open/gne11111-gone"]);
+      // A newline is legal in a git path, and the batch protocol is line-based.
+      repo.write(".navbook/reports/a\nb.json", "{}\n");
+      repo.git(["add", "--", ".navbook/reports"]);
+
+      const result = repo.nav(["doctor", "--staged", "--json"]);
+      assert.equal(result.code, 0, result.stdout);
+      assert.equal(result.stdout, "", "a clean tree, the deletion and the odd name included");
     } finally {
       repo.cleanup();
     }

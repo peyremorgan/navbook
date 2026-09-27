@@ -11,7 +11,7 @@ import type { FileOp } from "../core/ops.ts";
 import { parseTree, type Repo } from "../core/tree.ts";
 import { type Diagnostic, sortDiagnostics, validateRepo } from "../core/validate.ts";
 import { git, gitMaybe, splitNul } from "../git/exec.ts";
-import { stagedContent, stagedPaths } from "../git/index-ops.ts";
+import { stagedPaths, stagedTree } from "../git/index-ops.ts";
 import {
   applyOps,
   loadRepo,
@@ -121,12 +121,7 @@ function describeFix(navDir: string, op: FileOp): string {
 function stagedRepo(ws: WsCtx): Repo {
   const prefix = `${ws.navDir}/`;
   const paths = allIndexedNavPaths(ws).filter((path) => path.startsWith(prefix));
-  const files = new Map<string, string>();
-  for (const path of paths) {
-    const content = stagedContent(ws.repoRoot, path);
-    if (content !== null) files.set(path.slice(prefix.length), content);
-  }
-  return parseTree(files, { ext: ws.ext });
+  return parseTree(stagedTree(ws.repoRoot, paths, prefix), { ext: ws.ext });
 }
 
 /**
