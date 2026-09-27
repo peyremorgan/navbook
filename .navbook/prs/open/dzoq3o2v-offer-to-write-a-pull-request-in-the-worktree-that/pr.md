@@ -59,6 +59,30 @@ The refusal now says when a worktree was passed over for being unclean, so the a
 
 `update` pins the HEAD of wherever it runs. Moving it to the worktree that has the source branch pins the head actually under review — this checkout's `HEAD` was never a sensible thing to record, which is why the verb refuses here at all. Covered by a test that asserts the recorded head is the branch's.
 
+## When no worktree has the branch
+
+Added in revision 2. When the source is a local branch that no worktree has checked out, the same five verbs offer to check it out into a temporary worktree:
+
+```console
+$ nav pr comment rmkm --commit -m "Read."
+#rmkm1p1v is on 'feat/auth', which no worktree has checked out
+Check it out in a temporary worktree and write it there? [y/N] y
+Commented on #rmkm1p1v  .navbook/prs/open/rmkm1p1v-feat-auth/comments/...md  (#...)
+Committed docs(pr): comment on #rmkm1p1v
+written in a temporary worktree on 'feat/auth', since removed
+```
+
+- The directory comes from `mkdtemp` under `os.tmpdir()`, so `TMPDIR` decides where it goes and two runs never collide.
+- It is removed once it holds nothing you would lose: after `--commit`, after a no-op, or when the command failed partway (a refused request, an editor that exits non-zero). The teardown runs in a `finally`.
+- Without `--commit`, the write is staged in that worktree and nowhere else, so the worktree is kept and the run prints its path and the `git worktree remove` to run once you have committed.
+- A branch that only a remote-tracking ref carries is not checked out this way, because that would create a local branch.
+
+`prWriteSite` became `withPrWriteSite(ctx, prefix, opts, write)`, since the temporary checkout has a lifecycle around the write. `nav pr review` now checks its flags before resolving anything.
+
+The earlier test "has nowhere to offer when no worktree holds the branch" asserted the old refusal and has been replaced by four cases: removed after commit, kept when only staged, removed on failure, and not used for a remote-only branch.
+
+This revision also merges `dev` (0.4.0). The conflicts were import lists and one README table row, and both sides are kept. Suites: cli 354, core 748, server 344, conformance 117, deploy 59, all passing.
+
 ## Tests
 
 Five new cases in `packages/cli/test/cli/pr.test.ts`: the write landing on the source branch with the calling checkout untouched; `update` pinning the source branch's head; the dirty-worktree refusal and its wording; untracked files not disqualifying a worktree; and no worktree at all falling back to `git switch`. The existing test at `pr.test.ts:986`, which asserts today's refusal under `spawnSync` pipes, passes unchanged — that is the non-interactive path.
