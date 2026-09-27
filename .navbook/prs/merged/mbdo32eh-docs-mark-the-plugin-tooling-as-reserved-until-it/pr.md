@@ -13,6 +13,9 @@ revisions:
   - head: e40b3e4af1465cfb06fcf879e9227097b7a86ed7
     base: 47b8901f9b5722b952b96dd4818e59be38182cc5
     date: 2026-09-27T10:45:50Z
+merged:
+  date: 2026-09-27T10:45:56Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #sle5dwk9: follows the implementation plan in its comments, plus the four extra passages the confirmation comment found.
