@@ -383,6 +383,25 @@ describe("nav feature list and show", () => {
     );
   });
 
+  it("lists as many commits as --commits asks for", () => {
+    const one = repo.nav(["feature", "show", "auth", "--commits", "1"]);
+    assert.equal(one.code, 0, one.stderr);
+    assert.match(one.stdout, /recent commits \(1\):/);
+  });
+
+  it("refuses a --commits that is not a whole number, rather than showing no history", () => {
+    // #kw143sq9: `abc` dropped the section silently, and `2.5` reached git,
+    // which refused it, and was reported as a feature with no commits.
+    for (const value of ["abc", "2.5", "-1", " "]) {
+      const shown = repo.nav(["feature", "show", "auth", "--commits", value]);
+      assert.equal(shown.code, 1, `--commits '${value}' was accepted`);
+      assert.match(shown.stderr, /--commits takes a whole number of commits/);
+      assert.equal(shown.stdout, "", "nothing is printed before the refusal");
+    }
+    const json = repo.nav(["feature", "show", "auth", "--json", "--commits", "abc"]);
+    assert.equal(json.code, 1, "--json does not excuse a malformed --commits");
+  });
+
   it("says so when there is nothing to list", () => {
     const empty = makeKbRepo();
     try {

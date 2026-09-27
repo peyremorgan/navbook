@@ -130,6 +130,12 @@ export function activate(host: CliPluginHost): void {
   /* ------------------------------------------------------------------ show */
 
   host.command("feature show", ([slug], opts) => {
+    // Refused rather than read as "no history", and before anything is read:
+    // a value that is not a whole number would otherwise drop the section, or
+    // reach git and be refused there, and either way look like a feature
+    // nothing has touched.
+    const limit = opts.commits === undefined ? 10 : Number(opts.commits);
+    if (!Number.isInteger(limit) || limit < 0) ui.fail("--commits takes a whole number of commits");
     const repo = core.loadRepo(ctx, { comments: "none" });
     const feature = resolveFeature(core, repo, slug as string);
     const attached = featureMembers(core, repo, feature.slug);
@@ -164,8 +170,6 @@ export function activate(host: CliPluginHost): void {
       lines.push(`  #${entity.id}  ${entity.status.padEnd(7)}${entity.title}`);
     }
 
-    const limit = opts.commits === undefined ? 10 : Number(opts.commits);
-    if (!Number.isFinite(limit)) ui.fail("--commits takes a whole number of commits");
     if (limit > 0) {
       const commits = featureCommits(core, ctx, feature, attached, { limit });
       lines.push("", c.dim(`recent commits (${commits.length}):`));
