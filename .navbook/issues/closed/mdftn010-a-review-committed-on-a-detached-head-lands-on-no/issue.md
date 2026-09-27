@@ -4,6 +4,7 @@ author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-13T16:14:24Z
 labels: [bug]
 feature: [pull-requests, cli]
+resolution: fixed
 ---
 
 Reported by an agent reviewing a pull request from its own worktree:
