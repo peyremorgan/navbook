@@ -127,8 +127,20 @@ describe("the query grammar in 'list --help'", () => {
   }
 
   it("names in the closing paragraph every term that ORs and every one that ANDs", () => {
-    const help = repo.nav(["issue", "list", "--help"]).stdout;
-    assert.match(help, /single-valued fields \(status, author, milestone, deadline\)/);
-    assert.match(help, /multi-valued ones \(label, assignee, feature\)\./);
+    const issues = repo.nav(["issue", "list", "--help"]).stdout;
+    assert.match(issues, /single-valued fields \(status, author, milestone, deadline\)/);
+    assert.match(issues, /multi-valued ones \(label, assignee, feature\)\./);
+    const prs = repo.nav(["pr", "list", "--help"]).stdout;
+    assert.match(prs, /single-valued fields \(status, author, milestone, review\)/);
+    assert.match(prs, /multi-valued ones \(label, assignee, feature, reviewer, awaiting\)\./);
+  });
+
+  it("gives every term it documents a description", () => {
+    for (const kind of ["issue", "pr"]) {
+      const help = repo.nav([kind, "list", "--help"]).stdout;
+      for (const [, syntax] of help.matchAll(/^ {2}([a-z]+:\S*)(?: *)$/gm)) {
+        assert.fail(`'${syntax}' is listed with no description`);
+      }
+    }
   });
 });

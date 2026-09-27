@@ -2,9 +2,9 @@
  * Query grammar for `nav issue list` / `nav pr list` — spec 04.
  *
  * Terms AND together. Within a single key the semantics follow the field:
- * single-valued fields (`status`, `author`, `milestone`) OR their terms, since
- * requiring two different values at once could never match; multi-valued fields
- * (`label`, `assignee`, `feature`) AND theirs, matching forge convention.
+ * single-valued fields OR their terms, since requiring two different values at
+ * once could never match; multi-valued fields AND theirs, matching forge
+ * convention. Which is which is `QUERY_TERMS`'s `combines`, below.
  */
 
 import { readAssignees, readDeadline, readFeatures, readLabels, readReviewers } from "./files.ts";
@@ -47,23 +47,41 @@ export interface QueryError {
   message: string;
 }
 
+/** The keys of the query grammar (spec 04 §4.3). */
+export type QueryKey =
+  | "status"
+  | "label"
+  | "assignee"
+  | "author"
+  | "milestone"
+  | "feature"
+  | "reviewer"
+  | "review"
+  | "awaiting"
+  | "deadline";
+
 /** One keyed term of the query grammar (spec 04 §4.3). */
-export interface QueryTerm {
-  key: string;
-  /** The one noun that has the field, when only one does; both when absent. */
-  only?: EntityKind;
+export type QueryTerm = {
+  key: QueryKey;
   /** How several terms of this key combine: see the head of this file. */
   combines: "and" | "or";
-}
+} & (
+  | { only?: undefined }
+  | {
+      /** The one noun that has the field. */
+      only: EntityKind;
+      /** What the other noun has none of, in the words its refusal uses. */
+      lacks: string;
+    }
+);
 
 /**
  * Every keyed term the parser accepts, in the order help lists them.
  *
  * The one list the parser, `--help` and shell completion all read, so a term
- * added here cannot reach one of them and miss another. `deadline` ORs
- * although it is not single-valued in spirit: asking for both the overdue and
- * the undated is a question with an answer, unlike two labels naming
- * different things.
+ * added here cannot reach one of them and miss another. `deadline` is
+ * single-valued, so it ORs: asking for both the overdue and the undated is a
+ * question with an answer.
  */
 export const QUERY_TERMS: readonly QueryTerm[] = [
   { key: "status", combines: "or" },
@@ -72,16 +90,24 @@ export const QUERY_TERMS: readonly QueryTerm[] = [
   { key: "author", combines: "or" },
   { key: "milestone", combines: "or" },
   { key: "feature", combines: "and" },
-  { key: "reviewer", only: "pr", combines: "and" },
-  { key: "review", only: "pr", combines: "or" },
-  { key: "awaiting", only: "pr", combines: "and" },
-  { key: "deadline", only: "issue", combines: "or" },
+  { key: "reviewer", only: "pr", lacks: "reviews", combines: "and" },
+  { key: "review", only: "pr", lacks: "reviews", combines: "or" },
+  { key: "awaiting", only: "pr", lacks: "reviews", combines: "and" },
+  { key: "deadline", only: "issue", lacks: "deadline", combines: "or" },
 ];
 
 /** The terms a query over one noun accepts; the rest it refuses. */
 export function queryTermsFor(kind: EntityKind): QueryTerm[] {
   return QUERY_TERMS.filter((term) => term.only === undefined || term.only === kind);
 }
+
+/** What `status:` can ask of each noun: the directories it has (spec 02 §2.1). */
+export const QUERY_STATUSES: Readonly<Record<EntityKind, readonly string[]>> = {
+  issue: ["open", "closed"],
+  pr: ["open", "closed", "merged"],
+};
+
+const TERM_BY_KEY = new Map(QUERY_TERMS.map((term) => [term.key, term]));
 
 // Every key is `[a-z]+`, so none needs escaping in the alternation.
 const KEYED_TERM = new RegExp(`^(${QUERY_TERMS.map((term) => term.key).join("|")}):(.*)$`);
@@ -125,19 +151,21 @@ export function parseQuery(terms: readonly string[], kind: EntityKind): Query | 
       query.text.push(term);
       continue;
     }
-    const key = match[1] as string;
+    const key = match[1] as QueryKey;
     const value = (match[2] as string).trim();
     if (value === "") return { message: `query term '${term}' is missing a value` };
-    const only = QUERY_TERMS.find((known) => known.key === key)?.only;
-    if (kind === "issue" && only === "pr") {
-      return { message: `'${key}:' describes a pull request; issues have no reviews` };
-    }
-    if (kind === "pr" && only === "issue") {
-      return { message: `'${key}:' describes an issue; pull requests have no deadline` };
+    const known = TERM_BY_KEY.get(key);
+    if (known?.only !== undefined && known.only !== kind) {
+      return {
+        message:
+          known.only === "pr"
+            ? `'${key}:' describes a pull request; issues have no ${known.lacks}`
+            : `'${key}:' describes an issue; pull requests have no ${known.lacks}`,
+      };
     }
     switch (key) {
       case "status": {
-        const allowed = kind === "issue" ? ["open", "closed"] : ["open", "merged", "closed"];
+        const allowed = QUERY_STATUSES[kind];
         if (!allowed.includes(value)) {
           return {
             message: `unknown status '${value}' for ${kind === "issue" ? "issues" : "pull requests"} (expected ${allowed.join(", ")})`,
@@ -182,9 +210,14 @@ export function parseQuery(terms: readonly string[], kind: EntityKind): Query | 
         query.deadline.push(value as DeadlineTerm);
         break;
       }
-      default:
+      case "milestone":
         query.milestones.push(value);
         break;
+      default: {
+        // A key in `QUERY_TERMS` that no case reads: typing makes this unreachable.
+        const unread: never = key;
+        throw new Error(`query key '${unread}' has no parser`);
+      }
     }
   }
   return query;
@@ -271,8 +304,8 @@ export function matchesQuery(
 /**
  * Where an issue stands against its deadline (spec 02 §2.5).
  *
- * The terms OR, as every single-valued key's do: asking for both the overdue
- * and the undated is a question with an answer, unlike two labels naming
+ * The terms OR, as `QUERY_TERMS` declares: asking for both the overdue and
+ * the undated is a question with an answer, unlike two labels naming
  * different things.
  *
  * A query that asks `overdue` without a day to judge it against is a caller

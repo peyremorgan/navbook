@@ -5,7 +5,15 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type EntityKind, MERGE_METHODS, queryTermsFor } from "@navbook/core";
+import {
+  DEADLINE_TERMS,
+  type EntityKind,
+  MERGE_METHODS,
+  QUERY_STATUSES,
+  type QueryKey,
+  queryTermsFor,
+  REVIEW_DECISIONS,
+} from "@navbook/core";
 import { Command, Option } from "commander";
 import { cmdComplete } from "./commands/complete.ts";
 import { cmdDoctor } from "./commands/doctor.ts";
@@ -64,10 +72,12 @@ export const VERSION = readOwnVersion();
  * What each keyed term means, in the words `--help` uses.
  *
  * Only the prose lives here: which terms exist, which noun has them and how
- * they combine all come from `QUERY_TERMS`, which the parser reads too. A term
- * added there without a line here still gets listed, as `key:VALUE`.
+ * they combine all come from `QUERY_TERMS`, which the parser reads too, and so
+ * do the values of the three keys that take a fixed set. Keyed by `QueryKey`,
+ * so a term added to the grammar does not type-check until it is described.
+ * `status` is the one whose values differ by noun, so `queryHelp` writes it.
  */
-const TERM_HELP: Record<string, { syntax: string; hint: string[] }> = {
+const TERM_HELP: Record<Exclude<QueryKey, "status">, { syntax: string; hint: string[] }> = {
   label: { syntax: "label:L", hint: ["L is among the entity's labels (repeatable, ANDs)"] },
   assignee: { syntax: "assignee:EMAIL", hint: ["assignee address, or a fragment of its domain"] },
   author: { syntax: "author:EMAIL", hint: ["author address, same matching"] },
@@ -77,10 +87,10 @@ const TERM_HELP: Record<string, { syntax: string; hint: string[] }> = {
     hint: ["SLUG is among the entity's features (repeatable, ANDs)"],
   },
   reviewer: { syntax: "reviewer:EMAIL", hint: ["asked to review it; same matching"] },
-  review: { syntax: "review:DECISION", hint: ["pending, approved or changes-requested"] },
+  review: { syntax: "review:DECISION", hint: [`one of ${REVIEW_DECISIONS.join(", ")}`] },
   awaiting: { syntax: "awaiting:EMAIL", hint: ["asked to review it and has not yet"] },
   deadline: {
-    syntax: "deadline:overdue|none",
+    syntax: `deadline:${DEADLINE_TERMS.join("|")}`,
     hint: ["overdue: due before today (UTC), strictly;", "none: no deadline at all"],
   },
 };
@@ -101,11 +111,9 @@ function queryHelp(kind: EntityKind): string {
   const terms = queryTermsFor(kind);
   const rows = terms.flatMap(({ key }) => {
     if (key === "status") {
-      const statuses = kind === "issue" ? "open|closed" : "open|closed|merged";
-      return helpRow(`status:${statuses}`, ["entity status (path)"]);
+      return helpRow(`status:${QUERY_STATUSES[kind].join("|")}`, ["entity status (path)"]);
     }
-    const help = TERM_HELP[key] ?? { syntax: `${key}:VALUE`, hint: [""] };
-    return helpRow(help.syntax, help.hint);
+    return helpRow(TERM_HELP[key].syntax, TERM_HELP[key].hint);
   });
   const combining = (combines: "and" | "or") =>
     terms

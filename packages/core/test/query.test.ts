@@ -8,6 +8,7 @@ import {
   parseQuery,
   QUERY_TERMS,
   type Query,
+  type QueryKey,
   queryTermsFor,
 } from "../src/core/query.ts";
 import { type EntityRecord, type NavTree, parseTree } from "../src/core/tree.ts";
@@ -544,4 +545,58 @@ describe("QUERY_TERMS", () => {
     assert.ok(!isQueryError(unknown));
     assert.deepEqual(unknown.text, ["priority:high"]);
   });
+});
+
+/**
+ * `combines` is what `--help` says about each key, so it is held against what
+ * the matcher does: one entity that satisfies the first of two terms and not
+ * the second matches the pair exactly when the key ORs.
+ */
+describe("how each key combines its terms", () => {
+  const TODAY = "2026-09-08";
+  const issue = build([
+    {
+      id: "aaaaaaa1",
+      labels: ["bug"],
+      assignee: "alice@example.com",
+      author: "alice@example.com",
+      milestone: "m1",
+      features: ["auth"],
+    },
+  ]);
+  const pr = buildPrs([{ id: "bbbbbbb2", reviewer: "alice@example.com" }]);
+
+  /** Per key: the entity, and a term it satisfies then one it does not. */
+  const CASES: Record<QueryKey, { entities: EntityRecord[]; terms: [string, string] }> = {
+    status: { entities: issue, terms: ["open", "closed"] },
+    label: { entities: issue, terms: ["bug", "docs"] },
+    assignee: { entities: issue, terms: ["alice@example.com", "zoe@example.com"] },
+    author: { entities: issue, terms: ["alice@example.com", "zoe@example.com"] },
+    milestone: { entities: issue, terms: ["m1", "m2"] },
+    feature: { entities: issue, terms: ["auth", "web"] },
+    deadline: { entities: issue, terms: ["none", "overdue"] },
+    reviewer: { entities: pr, terms: ["alice@example.com", "zoe@example.com"] },
+    review: { entities: pr, terms: ["pending", "approved"] },
+    awaiting: { entities: pr, terms: ["alice@example.com", "zoe@example.com"] },
+  };
+
+  for (const term of QUERY_TERMS) {
+    it(`${term.combines === "or" ? "ORs" : "ANDs"} two '${term.key}:' terms, as QUERY_TERMS says`, () => {
+      const { entities, terms } = CASES[term.key];
+      const kind = entities === pr ? "pr" : "issue";
+      const one = parseQuery([`${term.key}:${terms[0]}`], kind);
+      const both = parseQuery(
+        terms.map((value) => `${term.key}:${value}`),
+        kind,
+      );
+      assert.ok(!isQueryError(one) && !isQueryError(both));
+      const entity = entities[0] as EntityRecord;
+      assert.equal(
+        matchesQuery({ ...one, today: TODAY }, entity),
+        true,
+        "the first term alone matches",
+      );
+      assert.equal(matchesQuery({ ...both, today: TODAY }, entity), term.combines === "or");
+    });
+  }
 });
