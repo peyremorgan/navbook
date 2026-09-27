@@ -713,7 +713,7 @@ describe("D15 the marker", () => {
       diagnostics.map((d) => d.check),
       ["D15", "D15"],
     );
-    assert.match(String(diagnostics[0]?.message), /'plugins\."@navbook\/plugin-kb"' must be/);
+    assert.match(String(diagnostics[0]?.message), /'plugins' entry "@navbook\/plugin-kb" must be/);
   });
 
   it("flags a fault in the plugins beside one in a policy, naming both", () => {

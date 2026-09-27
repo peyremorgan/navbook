@@ -24,7 +24,12 @@ import {
   findRepo,
 } from "../src/git/repo.ts";
 import { rewritePlan } from "../src/ops/entity.ts";
-import { makeWsCtx, readReviewPolicy, WorkspaceError } from "../src/workspace/index.ts";
+import {
+  makeWsCtx,
+  readPluginDeclaration,
+  readReviewPolicy,
+  WorkspaceError,
+} from "../src/workspace/index.ts";
 
 /** A fresh repository with one commit, so the index and HEAD both exist. */
 function inRepo(use: (dir: string) => void): void {
@@ -417,6 +422,37 @@ describe("readReviewPolicy", () => {
         declared: false,
         problems: [],
       });
+    });
+  });
+});
+
+describe("readPluginDeclaration", () => {
+  it("reads the working tree's marker, found by the same rules as the root", () => {
+    inRepo((dir) => {
+      plantMarker(dir, ".issues");
+      writeFileSync(
+        join(dir, ".issues", NAV_MARKER),
+        '{"version": 1, "plugins": {"@navbook/plugin-kb": {"depth": 2}}}',
+        "utf8",
+      );
+      git(["add", "-A"], { cwd: dir });
+      const ws = makeWsCtx({ cwd: dir });
+      assert.equal(ws.navDir, ".issues");
+      const reading = readPluginDeclaration(ws);
+      assert.equal(reading.declared, true);
+      assert.deepEqual({ ...reading.declaration.plugins }, { "@navbook/plugin-kb": { depth: 2 } });
+    });
+  });
+
+  it("declares nothing where there is no marker, and reports one it cannot read", () => {
+    inRepo((dir) => {
+      mkdirSync(join(dir, ".navbook"), { recursive: true });
+      assert.equal(readPluginDeclaration(makeWsCtx({ cwd: dir })).declared, false);
+      plantMarker(dir, ".navbook");
+      writeFileSync(join(dir, ".navbook", NAV_MARKER), "{ not json", "utf8");
+      assert.deepEqual(readPluginDeclaration(makeWsCtx({ cwd: dir })).problems, [
+        "is not valid JSON",
+      ]);
     });
   });
 });

@@ -15,7 +15,7 @@ import {
   describeMergeMethod,
   describeReviewPolicy,
   MERGE_METHODS,
-  NO_PLUGINS,
+  type PluginReading,
   parseMergePolicy,
   parsePluginDeclaration,
   parseReviewPolicy,
@@ -294,13 +294,19 @@ describe("describeMergeMethod", () => {
 });
 
 describe("parsePluginDeclaration", () => {
+  /** The reading with its null-prototype map spread into a plain one, to compare. */
+  const plain = (reading: PluginReading) => ({
+    ...reading,
+    declaration: { plugins: { ...reading.declaration.plugins } },
+  });
+  const nothing = { declaration: { plugins: {} }, declared: false, problems: [] };
+
   it("declares nothing for a repository with no marker at all", () => {
-    assert.deepEqual(parsePluginDeclaration(undefined), NO_PLUGINS);
-    assert.deepEqual(NO_PLUGINS, { declaration: { plugins: {} }, declared: false, problems: [] });
+    assert.deepEqual(plain(parsePluginDeclaration(undefined)), nothing);
   });
 
   it("declares nothing for the marker `nav init` writes", () => {
-    assert.deepEqual(parsePluginDeclaration(marker({ version: 1 })), NO_PLUGINS);
+    assert.deepEqual(plain(parsePluginDeclaration(marker({ version: 1 }))), nothing);
   });
 
   it("reads each extension and the settings it carries", () => {
@@ -310,7 +316,7 @@ describe("parsePluginDeclaration", () => {
         plugins: { "@navbook/plugin-kb": {}, "acme-reports": { dir: "reports", depth: 2 } },
       }),
     );
-    assert.deepEqual(reading, {
+    assert.deepEqual(plain(reading), {
       declaration: {
         plugins: { "@navbook/plugin-kb": {}, "acme-reports": { dir: "reports", depth: 2 } },
       },
@@ -321,44 +327,62 @@ describe("parsePluginDeclaration", () => {
 
   it("counts an empty declaration as declared, since somebody wrote it down", () => {
     const reading = parsePluginDeclaration(marker({ version: 1, plugins: {} }));
-    assert.deepEqual(reading, { declaration: { plugins: {} }, declared: true, problems: [] });
+    assert.deepEqual(plain(reading), { ...nothing, declared: true });
   });
 
-  it("takes any key as a name, since §2.12 leaves naming to the extension", () => {
+  it("takes any name, since §2.12 leaves naming to the extension", () => {
     // Not the short-name grammar of a namespace: the spec's own example is an
     // npm package name, which that grammar would refuse.
-    for (const name of ["@navbook/plugin-kb", "Kb", "kb.v2", "", "__proto__"]) {
+    for (const name of ["@navbook/plugin-kb", "Kb", "kb.v2", "a'b", "__proto__", "constructor"]) {
       const reading = parsePluginDeclaration(`{"plugins": {${JSON.stringify(name)}: {"a": 1}}}`);
       assert.deepEqual(reading.problems, [], `for ${JSON.stringify(name)}`);
       assert.deepEqual(Object.keys(reading.declaration.plugins), [name]);
-      assert.deepEqual(Object.getPrototypeOf(reading.declaration.plugins), Object.prototype);
+      assert.deepEqual(reading.declaration.plugins[name], { a: 1 });
     }
+  });
+
+  it("finds only the names that were declared", () => {
+    // A lookup is how a tool asks whether an extension is declared, so nothing
+    // inherited may answer it.
+    for (const text of [undefined, marker({ plugins: { kb: {} } }), marker({ plugins: [] })]) {
+      const { plugins } = parsePluginDeclaration(text).declaration;
+      assert.equal(Object.getPrototypeOf(plugins), null);
+      assert.equal(plugins.toString, undefined);
+      assert.equal("constructor" in plugins, false);
+    }
+  });
+
+  it("refuses an empty name, which names nothing", () => {
+    const reading = parsePluginDeclaration(marker({ plugins: { "": {}, kb: {} } }));
+    assert.deepEqual(Object.keys(reading.declaration.plugins), ["kb"]);
+    assert.deepEqual(reading.problems, [`'plugins' entry "" must name an extension`]);
   });
 
   it("refuses a `plugins` that is not an object, and declares nothing", () => {
     for (const value of [["@navbook/plugin-kb"], [], null, "@navbook/plugin-kb", 1, true]) {
       const reading = parsePluginDeclaration(marker({ version: 1, plugins: value }));
       assert.deepEqual(
-        reading,
-        { ...NO_PLUGINS, problems: ["'plugins' must be an object"] },
+        plain(reading),
+        { ...nothing, problems: ["'plugins' must be an object"] },
         `for ${JSON.stringify(value)}`,
       );
     }
   });
 
   it("refuses an entry that is not an object, and keeps the ones that are", () => {
+    // Each entry falls back on its own, as each review key does (§2.10, §2.12).
     const reading = parsePluginDeclaration(
       marker({
         version: 1,
         plugins: { "@navbook/plugin-kb": true, good: { x: 1 }, listed: [], gone: null },
       }),
     );
-    assert.deepEqual(reading.declaration, { plugins: { good: { x: 1 } } });
+    assert.deepEqual(plain(reading).declaration, { plugins: { good: { x: 1 } } });
     assert.equal(reading.declared, true);
     assert.deepEqual(reading.problems, [
-      `'plugins."@navbook/plugin-kb"' must be an object`,
-      `'plugins."listed"' must be an object`,
-      `'plugins."gone"' must be an object`,
+      `'plugins' entry "@navbook/plugin-kb" must be an object`,
+      `'plugins' entry "listed" must be an object`,
+      `'plugins' entry "gone" must be an object`,
     ]);
   });
 
@@ -369,10 +393,23 @@ describe("parsePluginDeclaration", () => {
     assert.deepEqual(reading.problems, []);
   });
 
+  it("hands every caller a declaration of its own", () => {
+    // A tool recording what it just installed must not declare it for every
+    // later reading in the process — the server's especially.
+    for (const text of [undefined, marker({ version: 1 }), "{ oops", marker({ plugins: {} })]) {
+      const first = parsePluginDeclaration(text);
+      first.declaration.plugins.kb = {};
+      first.problems.push("scribbled");
+      const second = parsePluginDeclaration(text);
+      assert.equal("kb" in second.declaration.plugins, false, `for ${text}`);
+      assert.equal(second.problems.includes("scribbled"), false, `for ${text}`);
+    }
+  });
+
   it("reports text that is not JSON the same way the policies do", () => {
     assert.deepEqual(parsePluginDeclaration("{ oops").problems, ["is not valid JSON"]);
     assert.deepEqual(parsePluginDeclaration("[]").problems, ["is not a JSON object"]);
-    assert.deepEqual(parsePluginDeclaration("{ oops").declaration, { plugins: {} });
+    assert.deepEqual(Object.keys(parsePluginDeclaration("{ oops").declaration.plugins), []);
   });
 
   it("reads its own key and leaves the policies alone", () => {

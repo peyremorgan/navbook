@@ -149,20 +149,16 @@ describe("parseTree", () => {
       const repo = parseTree(
         tree({ "navbook.json": '{"version": 1, "plugins": {"@navbook/plugin-kb": {}}}' }),
       );
-      assert.deepEqual(repo.plugins, {
-        declaration: { plugins: { "@navbook/plugin-kb": {} } },
-        declared: true,
-        problems: [],
-      });
+      assert.deepEqual({ ...repo.plugins.declaration.plugins }, { "@navbook/plugin-kb": {} });
+      assert.equal(repo.plugins.declared, true);
+      assert.deepEqual(repo.plugins.problems, []);
     });
 
     it("declares no plugins for a tree that has no marker", () => {
       const repo = parseTree(tree({ "issues/open/bqlybac0-x/issue.md": issue() }));
-      assert.deepEqual(repo.plugins, {
-        declaration: { plugins: {} },
-        declared: false,
-        problems: [],
-      });
+      assert.deepEqual(Object.keys(repo.plugins.declaration.plugins), []);
+      assert.equal(repo.plugins.declared, false);
+      assert.deepEqual(repo.plugins.problems, []);
     });
 
     it("declares no merge policy for a tree that has none", () => {
