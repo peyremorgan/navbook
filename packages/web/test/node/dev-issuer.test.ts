@@ -345,10 +345,11 @@ describe("end session", () => {
       client_id: "navbook-web",
     });
     const idToken = (json as unknown as Record<string, string>).id_token as string;
-    // The shape the web client sends: the id token as the hint, no client_id.
+    // The shape the web client sends: the id token as the hint, and its client.
     const response = await fetch(
       endSessionUrl({
         id_token_hint: idToken,
+        client_id: "navbook-web",
         post_logout_redirect_uri: "http://localhost:3000/signed-out",
         state: "st8",
       }),
@@ -369,10 +370,36 @@ describe("end session", () => {
       ["no client at all", { post_logout_redirect_uri: "http://localhost:3000/signed-out" }],
       ["another client", { client_id: "somebody-else" }],
       ["a hint that is not a token", { id_token_hint: "not-a-token" }],
+      ["a hint for another client", { id_token_hint: unsigned({ aud: "somebody-else" }) }],
+      [
+        "a client the hint was not issued to",
+        { id_token_hint: unsigned({ aud: "navbook-web" }), client_id: "somebody-else" },
+      ],
+      [
+        "a way back that is not a URL",
+        { client_id: "navbook-web", post_logout_redirect_uri: "not a url" },
+      ],
     ];
     for (const [what, parameters] of cases) {
       const response = await fetch(endSessionUrl(parameters), { redirect: "manual" });
       assert.equal(response.status, 400, `${what} should be refused`);
     }
   });
+
+  it("takes a hint issued to several audiences, the client among them", async () => {
+    const response = await fetch(
+      endSessionUrl({
+        id_token_hint: unsigned({ aud: ["navbook-web", "https://api.example.invalid"] }),
+        post_logout_redirect_uri: "http://localhost:3000/signed-out",
+      }),
+      { redirect: "manual" },
+    );
+    assert.equal(response.status, 302);
+  });
+
+  /** A token-shaped string with these claims; the issuer reads, not verifies, a hint. */
+  function unsigned(claims: Record<string, unknown>): string {
+    const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+    return `${part({ alg: "none" })}.${part(claims)}.`;
+  }
 });

@@ -167,9 +167,38 @@ describe("signing out", () => {
       assert.equal(`${url.origin}${url.pathname}`, `${issuer}/end-session`);
       assert.equal(url.searchParams.get("id_token_hint"), "id.t0ken.sig");
       assert.equal(url.searchParams.get("post_logout_redirect_uri"), `${APP}/signed-out`);
+      // Named although there is a hint, which oidc-client-ts would leave out:
+      // a provider that cannot verify the hint needs it to send the browser back.
+      assert.deepEqual(url.searchParams.getAll("client_id"), ["navbook-web"]);
       // `audience` is the authorization request's, and has no business here.
       assert.equal(url.searchParams.get("audience"), null);
       assert.equal(await manager.getUser(), null, "the token is forgotten before leaving");
+    } finally {
+      delete scope.window;
+    }
+  });
+
+  it("names the client once when there is no id token to send", async () => {
+    const manager = new ApiUserManager(settings(), AUDIENCE);
+    await manager.storeUser(
+      new User({
+        access_token: "acc3ss",
+        token_type: "Bearer",
+        profile: { sub: "s", iss: issuer, aud: "navbook-web", exp: 0, iat: 0 },
+      }),
+    );
+    const scope = globalThis as { window?: unknown };
+    const navigated = new Promise<string>((resolve) => {
+      scope.window = {
+        self: { location: { assign: resolve } },
+        addEventListener: () => {},
+      };
+    });
+    try {
+      void manager.signoutRedirect();
+      const url = new URL(await navigated);
+      assert.equal(url.searchParams.get("id_token_hint"), null);
+      assert.deepEqual(url.searchParams.getAll("client_id"), ["navbook-web"]);
     } finally {
       delete scope.window;
     }

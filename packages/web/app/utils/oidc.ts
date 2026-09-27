@@ -66,9 +66,19 @@ export class ApiUserManager extends UserManager {
    * as well as the authorization one, and `audience` means nothing there. The
    * stored id token goes as `id_token_hint` on its own, which is what lets a
    * provider (Better Auth, for one) end the session without asking first.
+   *
+   * `client_id` goes too. oidc-client-ts adds it only when there is no hint,
+   * but a provider that cannot verify the hint (a rotated key, a token with no
+   * session id) falls back to asking, and Better Auth then keeps the way back
+   * only for a request that names its client. So it is added here exactly when
+   * the library would leave it out, and never twice.
    */
-  override signoutRedirect(args: SignoutRedirectArgs = {}): Promise<void> {
-    return super.signoutRedirect({ extraQueryParams: {}, ...args });
+  override async signoutRedirect(args: SignoutRedirectArgs = {}): Promise<void> {
+    const hinted = (args.id_token_hint ?? (await this.getUser())?.id_token) !== undefined;
+    return await super.signoutRedirect({
+      extraQueryParams: hinted ? { client_id: this.settings.client_id } : {},
+      ...args,
+    });
   }
 }
 
