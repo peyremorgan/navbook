@@ -54,6 +54,7 @@ Every option has a flag and an environment variable. Flags win.
 | `--remote <name>` | `NAV_SERVER_REMOTE` | no | `origin` |
 | `--pull-interval-ms <n>` | `NAV_SERVER_PULL_INTERVAL_MS` | no | `10000` |
 | `--git-timeout-ms <n>` | `NAV_SERVER_GIT_TIMEOUT_MS` | no | `30000` (`0` waits as long as git does) |
+| `--maintenance-interval-ms <n>` | `NAV_SERVER_MAINTENANCE_INTERVAL_MS` | no | `300000` (`0` leaves git's housekeeping to something else) |
 | `--no-graphiql` | `NAV_SERVER_GRAPHIQL=false` | no | the explorer is served |
 
 The provider is named by its discovery document, which declares both the
@@ -81,6 +82,23 @@ fails with `SYNC_FAILED`, so a remote that has stopped answering costs one
 request rather than every request queued behind it. A stopped push leaves its
 commit in the clone, and the next push carries it. There is no way to turn
 authentication off: every operation, read or write, needs a valid token.
+
+`--maintenance-interval-ms` is the least time between two runs of git's
+housekeeping on the clone: `git maintenance run --auto`, which packs what
+fetches and commits leave loose and does nothing when there is nothing to do.
+Git would otherwise start it by itself after a commit or a fetch, detached,
+where a stop cuts it off halfway — and a lock file it leaves, `packed-refs.lock`
+above all, fails every request after the next start. So the server turns
+that off for every git it runs and starts the run itself, after a pull or a
+write, beside the requests rather than in front of them. A stop gives a run
+five seconds to finish, then stops it whole; git removes its locks when asked
+to. At startup the server removes what an interrupted run left anyway (a
+SIGKILL or a crash, say): the locks maintenance and ref packing take, and
+their half-written temporary files, each named in the log. A lock on the
+index, on HEAD or on a ref is never touched: it means a commit or an update
+was cut short, and that is a person's to look at. `0` leaves housekeeping to
+a cron job or a sidecar, which then owns its leftovers too: the server only
+warns about a stale lock, since the other process may be holding it.
 
 ### Who is allowed in
 
@@ -147,6 +165,11 @@ off if reaching it at all is more than you want to offer.
 - **Start it clean.** The server refuses to start on a dirty tree, a detached
   HEAD, or a repository with no `.navbook/` — each of those would otherwise
   surface as a puzzling failure on somebody's first mutation.
+- **Let it keep the clone.** It runs git's housekeeping itself, and at startup
+  clears the locks and temporary files an interrupted run left
+  ([above](#configuration)). Anything else running git in the clone at that
+  moment could lose its lock; `--maintenance-interval-ms 0` for a clone that
+  something else maintains.
 - **Say who is allowed in.** Without a policy, any token the issuer signs for
   this audience may read and write — everybody a shared provider knows. Give
   the server the claim, domain or verification it should insist on
