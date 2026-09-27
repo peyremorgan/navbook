@@ -5,6 +5,7 @@ created: 2026-09-27T10:10:43Z
 assignee: Claude <noreply@anthropic.com>
 labels: [performance, doctor]
 feature: [doctor, plugins]
+resolution: fixed
 ---
 
 Follow-up to #egvv9205 (merged in #zhdz48sn). `nav doctor --staged`, which is what the pre-commit hook that `nav install` writes runs (`packages/cli/src/install/hook.ts:33`), still reads every file in the tree, and it pays for each file with its own `git` process.
