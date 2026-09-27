@@ -7,17 +7,8 @@
  * cost is one subprocess rather than one per file.
  */
 
-import { spawnSync } from "node:child_process";
-import {
-  exitedEarly,
-  GitError,
-  git,
-  gitMaybe,
-  gitRun,
-  spawnFailure,
-  splitLines,
-  splitNul,
-} from "./exec.ts";
+import { catObjects } from "./blobs.ts";
+import { GitError, git, gitMaybe, gitRun, splitLines, splitNul } from "./exec.ts";
 
 export interface Ref {
   /** Full ref name, e.g. `refs/heads/feat/auth`. */
@@ -52,14 +43,11 @@ export function listBranchRefs(cwd: string): Ref[] {
 }
 
 /**
- * How much one `cat-file --batch` may send back. {@link readBlobsBySha} splits
- * its requests by their known sizes to stay under {@link BLOB_BATCH_BYTES}, so
- * only a single blob larger than this can reach it.
+ * How much one {@link catBlobs} may send back. Its callers ask by path and do
+ * not know the sizes, so the cap is fixed; a reader that does know them uses
+ * {@link readBlobsBySha}, which sizes each batch instead.
  */
-const CAT_FILE_MAX_BUFFER = 256 * 1024 * 1024;
-
-/** How many bytes of blob content one batch of {@link readBlobsBySha} asks for. */
-const BLOB_BATCH_BYTES = 64 * 1024 * 1024;
+const CAT_BLOBS_MAX_BUFFER = 256 * 1024 * 1024;
 
 export interface BlobRequest {
   ref: string;
@@ -70,101 +58,15 @@ export interface BlobRequest {
  * Read many blobs in one `git cat-file --batch` process.
  *
  * Results are keyed `<ref>:<path>`; missing objects are simply absent, which is
- * the normal case for a branch that has no Navbook directory at all.
- *
- * Anything else throws. A batch that could not be read is not a batch of
- * missing objects: answering with an empty map made a pull request whose
- * directory outgrew the buffer vanish from every listing without a word
- * (#u0a6u6ev).
+ * the normal case for a branch that has no Navbook directory at all. Anything
+ * else throws (see {@link catObjects}).
  */
 export function catBlobs(cwd: string, requests: readonly BlobRequest[]): Map<string, string> {
   return catObjects(
     cwd,
     requests.map((request) => `${request.ref}:${request.path}`),
+    CAT_BLOBS_MAX_BUFFER,
   );
-}
-
-/**
- * Read blobs named by SHA, in as many `cat-file --batch` processes as their
- * sizes need, and throw if any of them is missing.
- *
- * For a reader that listed the blobs itself, so every one of them is in a tree
- * git has just shown: an object missing now is a broken or partial object
- * store, not an absent file, and reading it as absent would drop whatever it
- * belonged to. Each SHA is read once, however many trees share it.
- */
-export function readBlobsBySha(
-  cwd: string,
-  blobs: readonly { sha: string; size: number }[],
-  batchBytes = BLOB_BATCH_BYTES,
-): Map<string, string> {
-  const out = new Map<string, string>();
-  let batch: string[] = [];
-  let bytes = 0;
-  const flush = (): void => {
-    for (const [sha, text] of catObjects(cwd, batch)) out.set(sha, text);
-    batch = [];
-    bytes = 0;
-  };
-  for (const { sha, size } of new Map(blobs.map((blob) => [blob.sha, blob])).values()) {
-    if (batch.length > 0 && bytes + size > batchBytes) flush();
-    batch.push(sha);
-    bytes += size;
-  }
-  if (batch.length > 0) flush();
-
-  const missing = [...new Set(blobs.map((blob) => blob.sha))].filter((sha) => !out.has(sha));
-  if (missing.length > 0) {
-    throw new Error(
-      `git cannot read ${missing.length === 1 ? "object" : "objects"} ${missing.join(", ")}, ` +
-        "listed in a tree it has; the object store is incomplete",
-    );
-  }
-  return out;
-}
-
-/** `cat-file --batch` over `specs`, keyed by spec; missing objects are absent. */
-function catObjects(cwd: string, specs: readonly string[]): Map<string, string> {
-  const out = new Map<string, string>();
-  if (specs.length === 0) return out;
-
-  const args = ["cat-file", "--batch"];
-  // No `encoding` option: stdout must stay a Buffer, because the batch protocol
-  // frames each blob by byte length rather than by any text delimiter.
-  const result = spawnSync("git", args, {
-    cwd,
-    input: `${specs.join("\n")}\n`,
-    maxBuffer: CAT_FILE_MAX_BUFFER,
-    env: { ...process.env, LC_ALL: "C" },
-  });
-  if (result.error && !exitedEarly(result)) {
-    throw spawnFailure(result.error as NodeJS.ErrnoException, args, CAT_FILE_MAX_BUFFER);
-  }
-  if (result.status !== 0) {
-    throw new GitError(args, {
-      code: result.status ?? 1,
-      stdout: "",
-      stderr: result.stderr.toString("utf8"),
-    });
-  }
-
-  const stdout = result.stdout;
-  let offset = 0;
-  for (const spec of specs) {
-    const newline = stdout.indexOf(0x0a, offset);
-    if (newline === -1) break;
-    const header = stdout.subarray(offset, newline).toString("utf8");
-    offset = newline + 1;
-
-    // A missing object reports "<spec> missing" and consumes no body.
-    const parts = header.split(" ");
-    const size = Number(parts[2]);
-    if (parts.length < 3 || Number.isNaN(size)) continue;
-
-    out.set(spec, stdout.subarray(offset, offset + size).toString("utf8"));
-    offset += size + 1; // the body is followed by a newline
-  }
-  return out;
 }
 
 /**

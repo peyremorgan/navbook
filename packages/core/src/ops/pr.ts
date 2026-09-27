@@ -37,6 +37,7 @@ import {
   parseTree,
   type Repo,
 } from "../core/tree.ts";
+import { readBlobsBySha } from "../git/blobs.ts";
 import { gitMaybe } from "../git/exec.ts";
 import { isAncestor, mergeBase, objectExists } from "../git/history.ts";
 import { add, commit, composeMessage } from "../git/index-ops.ts";
@@ -66,7 +67,6 @@ import {
   lsTreeEntries,
   lsTreeNamesOfTree,
   type Ref,
-  readBlobsBySha,
 } from "../git/refscan.ts";
 import {
   checkoutBranch,

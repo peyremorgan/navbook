@@ -2,10 +2,10 @@
  * Index and commit operations.
  */
 
-import { spawnSync } from "node:child_process";
 import type { Trailer } from "../core/ops.ts";
 import type { NavTree } from "../core/tree.ts";
-import { GitError, git, gitRun, splitLines, splitNul } from "./exec.ts";
+import { blobSizes, readBlobsBySha } from "./blobs.ts";
+import { git, gitRun, splitLines, splitNul } from "./exec.ts";
 
 /** Repository-relative paths currently staged in the index. */
 export function stagedPaths(cwd: string): string[] {
@@ -67,24 +67,13 @@ export function stagedTree(
     if (path.startsWith(prefix)) shaOf.set(path.slice(prefix.length), sha);
   }
 
-  const shas = [...new Set(shaOf.values())];
-  const sizes = blobSizes(cwd, shas);
-  const contents = new Map<string, string>();
-  let chunk: string[] = [];
-  let chunkBytes = 0;
-  const flush = () => {
-    for (const [sha, text] of catObjects(cwd, chunk, chunkBytes)) contents.set(sha, text);
-    chunk = [];
-    chunkBytes = 0;
-  };
-  for (const sha of shas) {
-    const size = sizes.get(sha) as number;
-    if (size > limits.prefetch) continue;
-    if (chunk.length > 0 && chunkBytes + size > limits.batch) flush();
-    chunk.push(sha);
-    chunkBytes += size;
-  }
-  if (chunk.length > 0) flush();
+  const sizes = blobSizes(cwd, [...new Set(shaOf.values())]);
+  const small = [...sizes].filter(([, size]) => size <= limits.prefetch);
+  const contents = readBlobsBySha(
+    cwd,
+    small.map(([sha, size]) => ({ sha, size })),
+    limits.batch,
+  );
 
   return {
     keys: () => shaOf.keys(),
@@ -100,64 +89,6 @@ export function stagedTree(
       return text;
     },
   };
-}
-
-/** The size of each blob, from one `cat-file --batch-check`; anything else throws. */
-function blobSizes(cwd: string, shas: readonly string[]): Map<string, number> {
-  const sizes = new Map<string, number>();
-  if (shas.length === 0) return sizes;
-  const args = ["cat-file", "--batch-check"];
-  const result = gitRun(args, { cwd, input: `${shas.join("\n")}\n` });
-  if (result.code !== 0) throw new GitError(args, result);
-  const lines = splitLines(result.stdout);
-  for (const [index, sha] of shas.entries()) {
-    // `<sha> blob <size>` for each name asked, in order; the index only
-    // names blobs, so anything else means the object store let it down.
-    const [name, type, size] = (lines[index] ?? "").split(" ");
-    if (name !== sha || type !== "blob" || !/^\d+$/.test(size ?? "")) {
-      throw new Error(`git cat-file --batch-check could not size staged blob ${sha}`);
-    }
-    sizes.set(sha, Number(size));
-  }
-  return sizes;
-}
-
-/**
- * The contents of blobs, by name, from one `cat-file --batch` process.
- *
- * `bytes` is their total size, known from {@link blobSizes}, so the buffer
- * is sized to fit rather than capped. Every name asked must come back.
- */
-function catObjects(cwd: string, shas: readonly string[], bytes: number): Map<string, string> {
-  const args = ["cat-file", "--batch"];
-  // No `encoding` option: stdout must stay a Buffer, because the batch protocol
-  // frames each blob by byte length rather than by any text delimiter.
-  const result = spawnSync("git", args, {
-    cwd,
-    input: `${shas.join("\n")}\n`,
-    maxBuffer: bytes + shas.length * 128 + 1024,
-    env: { ...process.env, LC_ALL: "C" },
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    const stderr = result.stderr.toString("utf8");
-    throw new GitError(args, { code: result.status ?? 1, stdout: "", stderr });
-  }
-
-  const out = new Map<string, string>();
-  const stdout = result.stdout;
-  let offset = 0;
-  for (const sha of shas) {
-    const newline = stdout.indexOf(0x0a, offset);
-    const [name, type, size] = stdout.subarray(offset, newline).toString("utf8").split(" ");
-    if (newline === -1 || name !== sha || type !== "blob" || !/^\d+$/.test(size ?? "")) {
-      throw new Error(`git cat-file --batch did not return staged blob ${sha}`);
-    }
-    offset = newline + 1;
-    out.set(sha, stdout.subarray(offset, offset + Number(size)).toString("utf8"));
-    offset += Number(size) + 1; // the body is followed by a newline
-  }
-  return out;
 }
 
 /**
