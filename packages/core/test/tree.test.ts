@@ -420,6 +420,33 @@ describe("readNavTree reads only what parseTree parses", () => {
     assert.deepEqual(opened, ["specs/auth/feature.md"]);
   });
 
+  it("remembers a file once read", () => {
+    // An entity file is asked for twice, to parse it and to hash it, and both
+    // must see the same bytes even if the file changes in between.
+    const files = readNavTree(root);
+    const first = files.get("issues/open/bqlybac0-x/issue.md");
+    write("issues/open/bqlybac0-x/issue.md", issue("Changed underneath"));
+    try {
+      assert.equal(files.get("issues/open/bqlybac0-x/issue.md"), first);
+    } finally {
+      write("issues/open/bqlybac0-x/issue.md", issue());
+    }
+  });
+
+  it("answers nothing for a file its walk left out", () => {
+    // A comment outside the read's scope is on disk but was never listed, so
+    // asking for it must not open it after all.
+    const path = "issues/open/bqlybac0-x/comments/2026-08-03T141207Z-t5kr1gq6.md";
+    const abs = write(path, comment());
+    try {
+      const files = readNavTree(root, { comments: "none" });
+      assert.equal([...files.keys()].includes(path), false);
+      assert.equal(files.get(path), undefined);
+    } finally {
+      rmSync(dirname(abs), { recursive: true, force: true });
+    }
+  });
+
   it("still fails on a file it must parse and cannot read", { skip: asRoot }, () => {
     // Not a problem to record and carry on from: the entity would be missing
     // from a tree the server caches until HEAD moves.
