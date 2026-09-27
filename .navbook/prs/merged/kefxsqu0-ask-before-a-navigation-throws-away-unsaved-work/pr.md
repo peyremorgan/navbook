@@ -14,6 +14,9 @@ revisions:
   - head: 145e7e5939d43af26b589266f1e91637d3d011de
     base: 5a7718e8e09e5677bb4bbd5d8357056dd6e7dc4a
     date: 2026-09-27T17:30:00Z
+merged:
+  date: 2026-09-27T17:30:44Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #x8otoby0: nothing in the web client asked before a navigation threw away typed, unsaved work.
