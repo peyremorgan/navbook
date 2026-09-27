@@ -42,6 +42,7 @@
   "dependencies": {
     "@navbook/core": "workspace:*",
     "commander": "^14.0.2",
-    "picocolors": "^1.1.1"
+    "picocolors": "^1.1.1",
+    "string-width": "^8.2.2"
   }
 }

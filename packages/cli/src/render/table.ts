@@ -2,6 +2,7 @@
  * Column-aligned listings for `nav issue list` / `nav pr list`.
  */
 
+import stringWidth from "string-width";
 import type { Colors } from "./colors.ts";
 
 export interface Column {
@@ -80,14 +81,43 @@ function pad(text: string, width: number): string {
   return padding > 0 ? text + " ".repeat(padding) : text;
 }
 
-/** Truncate to `width`, marking the cut with a single ellipsis character. */
+const GRAPHEMES = new Intl.Segmenter("en", { granularity: "grapheme" });
+
+/**
+ * Truncate to `width` columns, marking the cut with a single ellipsis character.
+ *
+ * By grapheme cluster, not by code unit: `slice` cuts between the halves of a
+ * surrogate pair, leaving a lone surrogate that is not valid UTF-8, and takes a
+ * ZWJ sequence apart into the people it is made of. By column, not by count,
+ * for the reason `displayWidth` is: a wide character needs two, so the result
+ * can be a column short of `width` when one does not fit beside the ellipsis.
+ */
 export function truncate(text: string, width: number): string {
   if (width <= 0) return "";
   if (displayWidth(text) <= width) return text;
   if (width === 1) return "~";
-  return `${text.slice(0, width - 1)}~`;
+
+  const budget = width - 1;
+  let used = 0;
+  let kept = "";
+  for (const { segment } of GRAPHEMES.segment(text)) {
+    const cost = displayWidth(segment);
+    if (used + cost > budget) break;
+    used += cost;
+    kept += segment;
+  }
+  return `${kept}~`;
 }
 
+/**
+ * How many terminal columns a cell occupies.
+ *
+ * Not code points: UAX #11 gives East Asian Wide and Fullwidth characters two
+ * columns and combining marks none, so a Japanese title counted by code point
+ * is padded to half the space it takes and every column after it shifts.
+ * `string-width` carries the generated table; a second implementation lays out
+ * the same table from the same data (`unicode-width` in Rust).
+ */
 function displayWidth(text: string): number {
-  return [...text].length;
+  return stringWidth(text);
 }

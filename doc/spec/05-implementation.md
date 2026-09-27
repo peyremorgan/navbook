@@ -34,11 +34,16 @@ is mature and widely installed.
   the format keeps their definition, this codebase keeps them out of the core.
   It is what proves the plugin surface is enough to build with, since it uses
   every part of it.
-- **Dependencies:** deliberately minimal. A YAML parser (`yaml`) in the core
-  and an argument parser in the CLI; no framework. Every dependency added to
-  the core is a liability for the Rust rewrite (behavior to reproduce) and MUST
-  be justified. The server is a leaf: its GraphQL and token-verification
-  dependencies are reproduced by nothing and constrain no other package.
+- **Dependencies:** deliberately minimal. A YAML parser (`yaml`) in the core;
+  an argument parser, a colour library and a Unicode width table
+  (`string-width`) in the CLI; no framework. The CLI's three are presentation
+  rather than format, which is why they are there and not in the core: a
+  second implementation reproduces the format function for function and is
+  free to lay out its own tables (`unicode-width` is the same UAX #11 data in
+  Rust). Every dependency added to the core is a liability for the Rust
+  rewrite (behavior to reproduce) and MUST be justified. The server is a
+  leaf: its GraphQL and token-verification dependencies are reproduced by
+  nothing and constrain no other package.
 - **Structure:** `@navbook/core` is four layers in dependency order — `core/`
   (pure functions: parse/serialize/validate/query/plan — no I/O, no git),
   `git/` (subprocess calls to the `git` binary; no libgit bindings, so
