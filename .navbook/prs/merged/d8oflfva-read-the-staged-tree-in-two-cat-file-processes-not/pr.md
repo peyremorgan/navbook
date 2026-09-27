@@ -16,6 +16,9 @@ revisions:
   - head: 568edacefd4a633981af13ceb61f32ce9165d393
     base: a0471142f46e6ac655a84b020703864e91c6c91e
     date: 2026-09-27T19:54:37Z
+merged:
+  date: 2026-09-27T19:55:09Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #j35o7oe4. `nav doctor --staged`, which the pre-commit hook runs, read each indexed Navbook file with its own `git show :<path>`. On this repository that meant 312 processes, about 3 s on every commit, and the cost grew with every comment and every file of extension data.
