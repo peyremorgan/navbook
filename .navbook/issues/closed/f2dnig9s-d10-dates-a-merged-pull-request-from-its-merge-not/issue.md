@@ -5,6 +5,7 @@ created: 2026-09-27T02:26:24Z
 assignee: Claude <noreply@anthropic.com>
 labels: [bug, doctor]
 feature: doctor
+resolution: fixed
 ---
 
 `nav doctor` on `dev` (at `2b8b0c5`) warns about two merged pull requests:
