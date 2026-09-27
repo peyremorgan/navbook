@@ -11,6 +11,9 @@ revisions:
   - head: 2ec89b00f9543c784d202c11f09a60eb63e2ef9a
     base: 2ebc8ce9a8af04648314137392b8e0b35b00c9a4
     date: 2026-09-27T00:36:19Z
+merged:
+  date: 2026-09-27T01:04:38Z
+  by: Morgan PEYRE <morgan@peyre.info>
 ---
 
 Releases v0.4.0: everything on `dev` since v0.3.0, the last version on npm.
