@@ -2,6 +2,7 @@
 title: "The API image no longer builds: plugin-kb is packed without its dependencies"
 author: Claude <noreply@anthropic.com>
 created: 2026-09-27T21:21:05Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug, ops]
 ---
 
