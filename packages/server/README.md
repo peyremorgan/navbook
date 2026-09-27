@@ -208,7 +208,9 @@ Three mutations have a shape worth knowing:
   server surfaces rather than resolves. Read the file again, apply the change
   to what it says now, and save with the hash it now carries.
 - **`updateIssue`** and **`updatePr`** take the same `baseSha` — `Issue.baseSha`
-  and `Pr.baseSha` are the hash of `issue.md` or `pr.md` — but optionally, and
+  and `Pr.baseSha` are the hash of `issue.md` or `pr.md`, worked out exactly as
+  a feature's is: of the text, not git's name for the stored object, which
+  differs under a clean filter or SHA-256 — but optionally, and
   compare per field rather than per file. A patch is refused with
   `STALE_CONTENT` only when a field it names has changed since the version it
   was composed against; a label set on an issue somebody has just retitled is

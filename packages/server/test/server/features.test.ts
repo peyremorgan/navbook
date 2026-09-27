@@ -9,9 +9,10 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { blobSha } from "@navbook/core";
 import { errorCode, type Harness, ok, startHarness } from "../helpers/harness.ts";
 import { originSubjects } from "../helpers/temprepo.ts";
 
@@ -568,5 +569,64 @@ describe("a document a tool would not have created", () => {
       ),
       "INVALID_INPUT",
     );
+  });
+});
+
+describe("baseSha under a clean filter", () => {
+  let h: Harness;
+
+  before(async () => {
+    h = await startHarness();
+    // A clean filter makes git's hash of a file differ from a hash of its
+    // text, and it is repository configuration: nothing a CLI checkout is
+    // guaranteed not to have. Scoped to these tests' own files.
+    const clone = h.fixture.server;
+    clone.git(["config", "filter.pad.clean", "cat; echo"]);
+    appendFileSync(join(clone.dir, ".git/info/attributes"), "**/*filtered*/*.md filter=pad\n");
+  });
+  after(async () => {
+    await h.stop();
+  });
+
+  const fileOf = (path: string): string => readFileSync(join(h.fixture.server.dir, path), "utf8");
+
+  it("is one token for an issue and a feature, and both round-trip", async () => {
+    const created = ok<Payload>(
+      await h.gql(CREATE, { input: { title: "Filtered", slug: "filtered" } }),
+    ).createFeature.feature;
+    const featureFile = `${created.path}/feature.md`;
+    const issue = ok<Payload>(
+      await h.gql(
+        `mutation Open($input: OpenIssueInput!) { openIssue(input: $input) { issue { id path baseSha } } }`,
+        { input: { title: "Filtered issue", body: "Body." } },
+      ),
+    ).openIssue.issue;
+    const issueFile = `${issue.path}/issue.md`;
+
+    // git itself names the committed feature file differently from its text,
+    // so this test is actually under the configuration it means to be.
+    const stored = h.fixture.server.git(["rev-parse", `HEAD:${featureFile}`]).stdout.trim();
+    assert.notEqual(stored, blobSha(fileOf(featureFile)));
+
+    // Both halves hash the text they were read from, the same way.
+    assert.equal(created.baseSha, blobSha(fileOf(featureFile)));
+    assert.equal(issue.baseSha, blobSha(fileOf(issueFile)));
+
+    const feature = ok<Payload>(
+      await h.gql(UPDATE_FEATURE, {
+        input: { slug: "filtered", summary: "Mine.", baseSha: created.baseSha },
+      }),
+    ).updateFeature.feature;
+    assert.equal(feature.summary, "Mine.");
+    assert.equal(feature.baseSha, blobSha(fileOf(featureFile)));
+
+    const retitled = ok<Payload>(
+      await h.gql(
+        `mutation Update($input: UpdateIssueInput!) { updateIssue(input: $input) { issue { title baseSha } } }`,
+        { input: { ref: issue.id, title: "Filtered issue, retitled", baseSha: issue.baseSha } },
+      ),
+    ).updateIssue.issue;
+    assert.equal(retitled.title, "Filtered issue, retitled");
+    assert.equal(retitled.baseSha, blobSha(fileOf(issueFile)));
   });
 });

@@ -44,6 +44,10 @@ export function uncommittedPaths(cwd: string, pathspecs: readonly string[]): str
 /**
  * Blob hashes of files as they stand on disk, keyed by the path asked for.
  *
+ * git's own answer, filters and object format included — which is not what a
+ * `baseSha` is. That one is `core/hash.ts`'s `blobSha`, a function of the
+ * text alone; reach for this only when the object store's name is wanted.
+ *
  * Asked of git rather than computed here, because the answer depends on the
  * repository: which hash algorithm it uses, and which filters its attributes
  * apply. A hash worked out in this process would be right for most

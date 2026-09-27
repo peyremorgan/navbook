@@ -84,7 +84,7 @@ export interface EntityRecord {
   /** Path of `issue.md` or `pr.md`, relative to the Navbook directory. */
   filePath: string;
   /**
-   * The git blob hash of that file's text, exactly as it was parsed.
+   * The hash of that file's text, exactly as it was parsed (`core/hash.ts`).
    *
    * What an editor hands back to say which version it started from. It is of
    * the text this record was built from, so a record and its hash can never
@@ -111,6 +111,8 @@ export interface SpecRecord {
   fileName: string;
   /** Path relative to the Navbook directory. */
   path: string;
+  /** The hash of this file's text, exactly as it was parsed; see `EntityRecord.blobSha`. */
+  blobSha: string;
   parsed: ParsedFile;
   fm: Record<string, unknown>;
   body: string;
@@ -131,6 +133,8 @@ export interface FeatureRecord {
   dirPath: string;
   /** Path of `feature.md`, relative to the Navbook directory. */
   filePath: string;
+  /** The hash of `feature.md`'s text, exactly as it was parsed; see `EntityRecord.blobSha`. */
+  blobSha: string;
   parsed: ParsedFile;
   fm: Record<string, unknown>;
   body: string;
@@ -439,6 +443,7 @@ function materializeFeature(
     specs.push({
       fileName,
       path,
+      blobSha: blobSha(files.get(path) ?? ""),
       parsed: specParsed,
       fm: specParsed.fm,
       body: specParsed.body,
@@ -450,6 +455,7 @@ function materializeFeature(
     slug: draft.slug,
     dirPath: draft.dirPath,
     filePath: draft.featureFile,
+    blobSha: blobSha(files.get(draft.featureFile) ?? ""),
     parsed,
     fm: parsed.fm,
     body: parsed.body,

@@ -79,8 +79,8 @@ describe("a stale edit to an issue", () => {
     const edited = await update({ ref: issue.id, title: "Hashed again" });
     assert.match(edited.baseSha, SHA);
     assert.notEqual(edited.baseSha, issue.baseSha);
-    // It is the hash git itself gives the file, so a CLI user hashing their
-    // checkout would get the same answer.
+    // In a repository with no filters, which this clone is, it coincides with
+    // the hash git gives the file — what lets an older version be found by it.
     const hashed = h.fixture.server.git(["hash-object", `${issue.path}/issue.md`]);
     assert.equal(edited.baseSha, hashed.stdout.trim());
   });

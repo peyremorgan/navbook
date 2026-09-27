@@ -589,6 +589,12 @@ async function patchEntity(
  * not a hash at all, or one naming a blob that was never an entity file — is
  * refused as stale rather than crashed on: there is no way to tell what the
  * client was looking at, and the refusal says so.
+ *
+ * That lookup is best-effort. `blobSha` is a function of the text, not git's
+ * name for it, and the two coincide only in the default configuration: under
+ * a clean filter, `core.autocrlf` with CRLF on disk, or SHA-256 objects, the
+ * version the client saw is not found by its hash and a concurrent edit is
+ * refused whole — "reload and try again" rather than "this field moved".
  */
 function assertFieldsUnmoved(
   ctx: GraphQLCtx,

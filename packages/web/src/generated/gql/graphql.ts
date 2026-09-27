@@ -197,7 +197,7 @@ export type UpdateIssueInput = {
    * `STALE_CONTENT` when a field it names has changed since — and only then, so
    * a label set on an issue somebody has just retitled still lands. The refusal
    * lists the fields that moved in `extensions.moved`, spelled as this input
-   * spells them. A hash this server cannot resolve is stale by definition.
+   * spells them. A token this server cannot resolve is stale by definition.
    */
   baseSha?: string | null | undefined;
   body?: string | null | undefined;
