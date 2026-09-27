@@ -2,6 +2,7 @@
 title: Every command reads extension-namespace data it never interprets
 author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-20T12:38:34Z
+assignee: Claude <noreply@anthropic.com>
 labels: [performance, enhancement]
 feature: [format, plugins]
 ---
