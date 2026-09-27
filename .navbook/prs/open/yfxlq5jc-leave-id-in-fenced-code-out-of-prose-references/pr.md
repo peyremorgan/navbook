@@ -30,7 +30,7 @@ Fixes #t1kpljkt. Three of the D8 warnings `nav doctor` gives on `dev` point at I
 
 ## Verification
 
-- `nav doctor` from this branch on this tree: the D8 warnings for the fenced IDs on #gkbu9yhp, #hslxi9a3 and #dzoq3o2v are gone, and nothing new appears. Four unrelated D8 warnings remain; they are real prose references, fixed separately on `dev`. One more on #tvxw30h3 names , an open PR on its own branch, and clears when that PR merges. The two D10 warnings are #feu6fmzu's.
+- `nav doctor` from this branch on this tree: the D8 warnings for the fenced IDs on #gkbu9yhp, #hslxi9a3 and #dzoq3o2v are gone, and nothing new appears. Four unrelated D8 warnings remain; they are real prose references, fixed separately on `dev`. One more on #tvxw30h3 names `#na3o4794`, an open PR on its own branch, and clears when that PR merges. The two D10 warnings are #feu6fmzu's.
 - `biome check .`, `tsc --noEmit` (root and core), and `nuxi typecheck` are clean.
 - Suites: core 768, cli 357, server 375, conformance 119, web vitest 374, all passing.
 
