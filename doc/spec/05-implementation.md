@@ -28,12 +28,14 @@ is mature and widely installed.
   on type-stripping behavior; `npx @navbook/cli` is the zero-install trial path.
   A fourth, `@navbook/web`, is the browser client of [06 §6.3](06-future.md) and
   is not published: it is a static bundle to be served, not a dependency to be
-  installed, and it is the one package here that needs a build step. A fifth,
-  `@navbook/plugin-kb`, is the first plugin ([04 §4.3](04-cli.md)) and holds
-  the implementation of features and specifications ([02 §2.11](02-data-model.md)):
-  the format keeps their definition, this codebase keeps them out of the core.
-  It is what proves the plugin surface is enough to build with, since it uses
-  every part of it.
+  installed, and it is the one package here that needs a build step. A fifth
+  is planned: `@navbook/plugin-kb`, the first plugin ([04 §4.3](04-cli.md)),
+  which will hold the implementation of features and specifications
+  ([02 §2.11](02-data-model.md)) — the format keeping their definition while
+  this codebase keeps them out of the core. It is meant to prove the plugin
+  surface is enough to build with, since it would use every part of it. Until
+  it exists, features are implemented in `@navbook/core` and `@navbook/cli`,
+  which changes nothing about the format.
 - **Dependencies:** deliberately minimal. A YAML parser (`yaml`) in the core;
   an argument parser, a colour library and a Unicode width table
   (`string-width`) in the CLI; no framework. The CLI's three are presentation
@@ -60,15 +62,17 @@ is mature and widely installed.
   into a plan half and an execute half rather than calling back into its caller.
   A front end that cannot stop and ask answers the question in its request
   instead: the server takes an explicit flag where the CLI prompts.
-- **Plugins:** a plugin is one npm package with a part for each front end
+- **Plugins (planned; [04 §4.3](04-cli.md) is reserved):** nothing below is
+  built yet, and the reference implementation loads no plugins. A plugin will
+  be one npm package with a part for each front end
   (`./core`, `./cli`, `./server`, `./web` as `exports` subpaths) and a
   declaration of what it contributes in its `package.json`. The rule that makes
   this affordable is in [04 §4.3](04-cli.md): the declaration alone builds the
   command tree, the help and the completions, and a plugin's code is imported
-  only when one of its contributions actually runs. A plugin receives the
+  only when one of its contributions actually runs. A plugin will receive the
   host's own `@navbook/core` rather than resolving one of its own — two copies
   would mean two class identities for the same error and two parsers on the
-  startup path — and declares the plugin API version it was built against, so
+  startup path — and declare the plugin API version it was built against, so
   a mismatch is reported rather than discovered as a missing function.
 - **Performance budget:** cold `nav issue list` on a 1 000-issue repo MUST
   complete in under 500 ms on commodity hardware. (Measured floor: ~40 ms

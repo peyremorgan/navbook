@@ -76,9 +76,9 @@ complete Navbook clients for reading.
 
 `specs/` holds **features** — the standing concepts work attaches to. A feature
 is a directory named after itself, holding a `feature.md` and however many
-specification documents describe it. Features come from
-[`@navbook/plugin-kb`](doc/plugins.md), a plugin, because not every project
-wants them; the format defines them all the same, so a tree using them is
+specification documents describe it. Features are on their way to becoming a
+plugin ([`@navbook/plugin-kb`](doc/plugins.md)), because not every project
+wants them; the format defines them either way, so a tree using them is
 readable by any Navbook. An issue joins one by naming it:
 
 ```console
@@ -308,11 +308,10 @@ project might not want — test reports on a pull request, a bridge to a chat
 platform, the knowledge base above — is a plugin: an npm package the repository
 names in `navbook.json` and each machine installs.
 
-```console
-$ nav plugin install          # install what this repository declares
-$ nav plugin list
-@navbook/plugin-kb  1.0.0  declared
-```
+The format reserves where a plugin's data may live and how a repository
+declares one ([spec 02 §2.12](doc/spec/02-data-model.md)), and every Navbook
+already preserves data it finds there. The `nav plugin` commands that install
+them are specified ([spec 04 §4.3](doc/spec/04-cli.md)) and not yet built.
 
 A repository naming a plugin never causes anything to be fetched or run:
 declaring is one act, installing is another, and they are made by different
@@ -339,7 +338,7 @@ pnpm check         # lint and type-check
 pnpm bench         # the performance budget, on its own machine
 ```
 
-The repository is a pnpm workspace of five packages. `packages/core`
+The repository is a pnpm workspace of four packages. `packages/core`
 (`@navbook/core`) is the whole implementation — format logic, git plumbing,
 workspace I/O, and the operations behind each verb — and knows nothing about
 terminals. `packages/cli` (`@navbook/cli`) adds argument parsing, `$EDITOR`,
@@ -350,10 +349,6 @@ the same operations the CLI runs. `packages/web`
 it: a static single-page app that sends fields and lets the server compose the
 files, so nothing about the format ships to a browser
 ([spec 05 §5.2](doc/spec/05-implementation.md), [06 §6.3](doc/spec/06-future.md)).
-`packages/plugin-kb`
-([`@navbook/plugin-kb`](packages/plugin-kb/README.md)) is the knowledge base,
-and the first plugin: it is where features and `specs/` are implemented, and
-what proves the plugin surface is enough to build on.
 Development needs no build step outside the web client: a library's entry point
 is its TypeScript source, and Node runs it directly.
 

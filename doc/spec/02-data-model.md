@@ -722,7 +722,7 @@ environment, where a tool's own configuration lives, and not from here.
 without matching their grammars, because they were specified before this
 section existed and renaming them would break every repository using them.
 They are **grandfathered**: this document continues to define them, and no
-extension may claim either name. The reference implementation has moved their
-*implementation* into an extension without moving their definition
+extension may claim either name. The reference implementation intends to move
+their *implementation* into an extension without moving their definition
 ([05 §5.2](05-implementation.md)), which is exactly the arrangement this
 section is meant to make possible.

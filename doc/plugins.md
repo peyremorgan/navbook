@@ -1,5 +1,15 @@
 # Plugins
 
+> **Reserved.** The format's half of this is in force
+> ([02 §2.12](spec/02-data-model.md)): a tree may carry extension data today,
+> and every Navbook preserves it. Everything else here is specified and not yet
+> implemented: the `nav plugin` commands, the store, the plugin API
+> (`activate`, `CorePluginHost`), `NAVBOOK_PLUGIN_PATH`,
+> `NAVBOOK_WEB_PLUGINS` and `NAVBOOK_PLUGINS`, and `@navbook/plugin-kb`
+> itself, whose features are still built into `@navbook/core` and
+> `@navbook/cli`. This document stays useful as the design, but it describes
+> none of what exists yet; see #sle5dwk9.
+
 Navbook's core is issues, pull requests and the format they live in. Everything
 else — test reports attached to a pull request, an assistant that helps write a
 ticket, a bridge to a chat platform, the knowledge base — is a **plugin**: an
@@ -8,7 +18,7 @@ npm package the repository names and each machine installs.
 This document is the reference for writing one and the list of the ones that
 exist. The normative rules are in the specification: [02
 §2.12](spec/02-data-model.md) says where a plugin's data may live in a tree,
-and [04 §4.3](spec/04-cli.md) says what `nav plugin` does.
+and [04 §4.3](spec/04-cli.md), reserved, says what `nav plugin` will do.
 
 ## Using them
 
@@ -60,7 +70,7 @@ credential reads it from the environment.
 
 | Plugin | What it adds |
 |---|---|
-| [`@navbook/plugin-kb`](../packages/plugin-kb/README.md) | The knowledge base: features under `specs/`, the documents describing them, and the `feature:` key that attaches work to one |
+| `@navbook/plugin-kb` (planned) | The knowledge base: features under `specs/`, the documents describing them, and the `feature:` key that attaches work to one |
 
 To have one listed here, open a pull request adding a row. There is no registry
 to submit to and nothing to approve: the list is what somebody thought worth
