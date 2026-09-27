@@ -2,6 +2,7 @@
 title: Doctor check D15 never reads the plugins declaration the spec requires it to
 author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-20T12:36:27Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug, doctor]
 feature: [doctor, plugins]
 ---
