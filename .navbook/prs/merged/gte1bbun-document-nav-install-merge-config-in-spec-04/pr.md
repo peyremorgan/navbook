@@ -16,6 +16,9 @@ revisions:
   - head: d22faf7106f2fe4d7e4efdb07ffbed5a087a9d07
     base: 7d8662c65e653837dc48322a648f8e767cd06abe
     date: 2026-09-27T02:10:46Z
+merged:
+  date: 2026-09-27T02:11:52Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #e9v8jyz3.
