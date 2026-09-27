@@ -12,7 +12,13 @@
  * is one the reader chose.
  */
 
-import type { DeadlineState, IssueFilter, PrFilter, Status } from "~~/src/generated/gql/graphql";
+import type {
+  DeadlineState,
+  IssueFilter,
+  IssueStatus,
+  PrFilter,
+  Status,
+} from "~~/src/generated/gql/graphql";
 
 /** The parameters the filter owns. Everything else in a query belongs to the page. */
 export const FILTER_KEYS = [
@@ -243,6 +249,10 @@ export function filterToQuery(filter: FilterState): Record<string, string[]> {
  */
 export function toIssueFilter(filter: FilterState): IssueFilter {
   const issueFilter: IssueFilter = sharedFilter(filter);
+  // `queryToFilter` already keeps only the listing's statuses; this narrows
+  // the type, and drops a `MERGED` the API would refuse on an issue.
+  const status = filter.status.filter((value): value is IssueStatus => value !== "MERGED");
+  if (status.length > 0) issueFilter.status = status;
   if (filter.deadline.length > 0) issueFilter.deadline = [...filter.deadline];
   return issueFilter;
 }
@@ -250,14 +260,14 @@ export function toIssueFilter(filter: FilterState): IssueFilter {
 /** The pull request half of `toIssueFilter`. */
 export function toPrFilter(filter: FilterState): PrFilter {
   const prFilter: PrFilter = sharedFilter(filter);
+  if (filter.status.length > 0) prFilter.status = [...filter.status];
   if (filter.reviewers.length > 0) prFilter.reviewers = [...filter.reviewers];
   return prFilter;
 }
 
-/** The keys both nouns have, which is most of them. */
-function sharedFilter(filter: FilterState): IssueFilter & PrFilter {
-  const shared: IssueFilter & PrFilter = {};
-  if (filter.status.length > 0) shared.status = [...filter.status];
+/** The keys both nouns have, which is most of them; `status` differs in type. */
+function sharedFilter(filter: FilterState): Omit<IssueFilter & PrFilter, "status"> {
+  const shared: Omit<IssueFilter & PrFilter, "status"> = {};
   if (filter.labels.length > 0) shared.labels = [...filter.labels];
   if (filter.assignees.length > 0) shared.assignees = [...filter.assignees];
   if (filter.authors.length > 0) shared.authors = [...filter.authors];

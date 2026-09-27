@@ -379,10 +379,20 @@ export type IssueFilter = {
   labels?: InputMaybe<Array<Scalars['String']['input']>>;
   milestones?: InputMaybe<Array<Scalars['String']['input']>>;
   /** Absent or empty means any status; the listing is not narrowed by one. */
-  status?: InputMaybe<Array<Status>>;
+  status?: InputMaybe<Array<IssueStatus>>;
   /** Free text, matched against title, body and comments, and against the issue's own ID from four characters. */
   text?: InputMaybe<Array<Scalars['String']['input']>>;
 };
+
+/**
+ * The statuses an issue can be in, for `IssueFilter`.
+ *
+ * `Status` less `MERGED`, which only a pull request reaches: as with the review
+ * terms, asking an issue for it is refused rather than matching nothing.
+ */
+export type IssueStatus =
+  | 'CLOSED'
+  | 'OPEN';
 
 export type Kind =
   | 'ISSUE'
@@ -1034,6 +1044,7 @@ export type ResolversTypes = {
   Int: ResolverTypeWrapper<Scalars['Int']['output']>;
   Issue: ResolverTypeWrapper<IssueParent>;
   IssueFilter: IssueFilter;
+  IssueStatus: IssueStatus;
   Kind: Kind;
   LinkIssueInput: LinkIssueInput;
   LinkIssuePayload: ResolverTypeWrapper<Omit<LinkIssuePayload, 'child' | 'parent'> & { child: ResolversTypes['Issue'], parent: ResolversTypes['Issue'] }>;

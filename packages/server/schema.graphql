@@ -50,6 +50,17 @@ enum Status {
 }
 
 """
+The statuses an issue can be in, for `IssueFilter`.
+
+`Status` less `MERGED`, which only a pull request reaches: as with the review
+terms, asking an issue for it is refused rather than matching nothing.
+"""
+enum IssueStatus {
+  OPEN
+  CLOSED
+}
+
+"""
 What a review says about the revision it names (spec 02 §2.6).
 
 `COMMENT` is the third: a review that judges nothing and records only that its
@@ -377,7 +388,7 @@ input composition, so the keys both nouns share are written out twice.
 """
 input IssueFilter {
   "Absent or empty means any status; the listing is not narrowed by one."
-  status: [Status!]
+  status: [IssueStatus!]
   labels: [String!]
   assignees: [String!]
   authors: [String!]

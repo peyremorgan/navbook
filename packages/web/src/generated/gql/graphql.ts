@@ -93,10 +93,20 @@ export type IssueFilter = {
   labels?: Array<string> | null | undefined;
   milestones?: Array<string> | null | undefined;
   /** Absent or empty means any status; the listing is not narrowed by one. */
-  status?: Array<Status> | null | undefined;
+  status?: Array<IssueStatus> | null | undefined;
   /** Free text, matched against title, body and comments, and against the issue's own ID from four characters. */
   text?: Array<string> | null | undefined;
 };
+
+/**
+ * The statuses an issue can be in, for `IssueFilter`.
+ *
+ * `Status` less `MERGED`, which only a pull request reaches: as with the review
+ * terms, asking an issue for it is refused rather than matching nothing.
+ */
+export type IssueStatus =
+  | 'CLOSED'
+  | 'OPEN';
 
 export type Kind =
   | 'ISSUE'

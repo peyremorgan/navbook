@@ -209,6 +209,11 @@ describe("toIssueFilter and toPrFilter", () => {
   it("passes statuses through in the schema's spelling", () => {
     assert.deepEqual(toIssueFilter({ ...emptyFilter(), status: ["CLOSED"] }).status, ["CLOSED"]);
     assert.deepEqual(toPrFilter({ ...emptyFilter(), status: ["MERGED"] }).status, ["MERGED"]);
+    // An issue is never merged, and the API refuses to be asked.
+    assert.deepEqual(toIssueFilter({ ...emptyFilter(), status: ["OPEN", "MERGED"] }).status, [
+      "OPEN",
+    ]);
+    assert.equal(toIssueFilter({ ...emptyFilter(), status: ["MERGED"] }).status, undefined);
   });
 
   it("sends each noun only its own keys, which the API refuses on the other", () => {

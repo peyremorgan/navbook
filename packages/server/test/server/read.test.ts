@@ -391,6 +391,15 @@ describe("rank and deadline", () => {
     }
   });
 
+  it("refuses MERGED on issues, which only a pull request reaches", async () => {
+    // The CLI refuses `status:merged` on an issue at parse time; the API's
+    // `IssueStatus` has no such value, so validation does the same.
+    const response = await h.gql(`query { issues(filter: { status: [MERGED] }) { id } }`);
+    assert.equal(errorCode(response), "GRAPHQL_VALIDATION_FAILED");
+    assert.equal(response.data, null);
+    assert.match(response.errors[0]?.message ?? "", /MERGED/);
+  });
+
   it("refuses a deadline that is not a day, before anything is written", async () => {
     const response = await h.gql(OPEN, {
       input: { title: "Bad", body: "Body.", deadline: "2026-02-30" },
