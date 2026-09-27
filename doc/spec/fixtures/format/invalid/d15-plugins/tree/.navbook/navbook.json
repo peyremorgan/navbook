@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "plugins": {
+    "navbook-plugin-alpha": {},
+    "navbook-plugin-beta": true,
+    "navbook-plugin-gamma": null,
+    "navbook-plugin-delta": [
+      "main"
+    ]
+  }
+}

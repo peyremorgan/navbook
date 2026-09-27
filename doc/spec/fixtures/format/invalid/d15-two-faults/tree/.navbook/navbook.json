@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "plugins": {
+    "navbook-plugin-alpha": true
+  },
+  "review": {
+    "minApprovals": "two"
+  }
+}
