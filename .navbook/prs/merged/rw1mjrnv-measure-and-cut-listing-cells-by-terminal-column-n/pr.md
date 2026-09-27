@@ -13,6 +13,9 @@ revisions:
   - head: 054af45112c2c6a6db0a1870c27d9508890f1bb8
     base: ee73ae873ddbdd61565b5e38cf9b44281288baf4
     date: 2026-09-27T03:25:29Z
+merged:
+  date: 2026-09-27T03:25:59Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #ozzaoa36 (audit finding 06).
