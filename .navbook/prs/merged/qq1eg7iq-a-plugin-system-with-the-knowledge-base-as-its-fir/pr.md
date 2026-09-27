@@ -10,6 +10,9 @@ revisions:
   - head: a64d9e6d60cc6b034a6e2b3291ca94cf2432ec78
     base: 47b8901f9b5722b952b96dd4818e59be38182cc5
     date: 2026-09-27T12:28:03Z
+merged:
+  date: 2026-09-27T12:28:30Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Brings the plugin system (#ywz73dxu, P0–P6) onto `dev`, with the knowledge base extracted into `@navbook/plugin-kb` as its first plugin. Until now the docs on `dev` described `nav plugin` and plugin-kb as shipped while nothing implemented them (#sle5dwk9). This makes them true.
