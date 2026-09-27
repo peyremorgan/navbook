@@ -6,7 +6,7 @@ target: dev
 source: fix/f2dnig9s-follow-merges
 reviewer: morgan.peyre@brickcode.tech
 labels: [bug, doctor]
-assignee: noreply@anthropic.com
+assignee: Claude <noreply@anthropic.com>
 feature: doctor
 revisions:
   - head: fb554362225a6bd03256cbc12663270ef8a4c12b
