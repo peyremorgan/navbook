@@ -28,12 +28,11 @@ const html = computed(() => renderMarkdown(props.source));
  *
  * Following one leaves a page that may hold unsaved work — `SpecEditor`'s
  * preview renders a draft, and a reference is the sort of thing such a draft
- * is full of. Nothing here guards that, because nothing in this app does: the
- * sidebar discards the same draft with the same click. Opening a tab instead
- * was tried and is worse, since the token lives in `sessionStorage` on
- * purpose (`plugins/02.auth.ts`) and a new tab therefore signs in again. The
- * guard belongs to whatever page owns the unsaved work, for every way out of
- * it rather than this one.
+ * is full of. Nothing here guards that, and nothing needs to: this is a
+ * router navigation like the sidebar's, and `plugins/04.unsaved.ts` asks
+ * before any of them discards a draft. Opening a tab instead was tried and is
+ * worse, since the token lives in `sessionStorage` on purpose
+ * (`plugins/02.auth.ts`) and a new tab therefore signs in again.
  */
 function follow(event: MouseEvent): void {
   if (event.defaultPrevented || event.button !== 0) return;

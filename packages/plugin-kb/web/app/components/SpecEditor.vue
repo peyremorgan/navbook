@@ -39,6 +39,12 @@ const title = ref(props.spec.title);
 const body = ref(props.spec.body);
 const problem = ref<string | null>(null);
 
+// Against the document as it is now, so a draft left behind by a stale save
+// still counts: it differs from what the file says, and nobody has stored it.
+useUnsavedWork(
+  () => editing.value && (title.value !== props.spec.title || body.value !== props.spec.body),
+);
+
 watch(
   () => props.spec,
   (next) => {

@@ -34,6 +34,40 @@ const parent = ref(String(route.query.parent ?? ""));
 const slots = useNavbookSlots();
 const extra = ref<Record<string, unknown>>({});
 
+// The first value each plugin field pushes up, which is its pre-fill — a
+// `?feature=` it read from the link here — rather than anything typed. Kept
+// per key as it arrives, since a field may mount after the page does.
+const prefilledExtra = new Map<string, string>();
+watch(
+  extra,
+  (next) => {
+    for (const [key, value] of Object.entries(next)) {
+      if (!prefilledExtra.has(key)) prefilledExtra.set(key, JSON.stringify(value));
+    }
+  },
+  { immediate: true, flush: "sync" },
+);
+
+/**
+ * Set once the issue exists, so the navigation to it is not asked about: what
+ * was typed is in the repository now. The pre-filled parent and plugin fields
+ * are where the page was opened from rather than anything typed, so only a
+ * change to them counts.
+ */
+const filed = ref(false);
+const prefilledParent = parent.value;
+useUnsavedWork(
+  () =>
+    !filed.value &&
+    ([title, body, milestone, rank, deadline].some((field) => String(field.value).trim() !== "") ||
+      labels.value.length > 0 ||
+      assignees.value.length > 0 ||
+      parent.value !== prefilledParent ||
+      Object.entries(extra.value).some(
+        ([key, value]) => prefilledExtra.get(key) !== JSON.stringify(value),
+      )),
+);
+
 /* For labels, the only source of suggestions there is; see the detail page. */
 const { result: listing } = useQuery(ISSUES_QUERY, { filter: {} }, { fetchPolicy: "cache-first" });
 /* Asked of the server, which knows who is around; the listing does not. */
@@ -71,7 +105,10 @@ async function submit(): Promise<void> {
     // the format's own values with its own.
     ...(extra.value as Record<string, unknown>),
   });
-  if (payload) await navigateTo(`/issues/${payload.issue.id}`);
+  if (payload) {
+    filed.value = true;
+    await navigateTo(`/issues/${payload.issue.id}`);
+  }
 }
 </script>
 

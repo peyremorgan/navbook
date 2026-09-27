@@ -95,6 +95,13 @@ export function useAuth(): Auth {
     },
 
     async logout() {
+      // Asked before the token goes rather than by the navigation after it,
+      // so that staying keeps the session the draft would be saved under.
+      const unsaved = nuxtApp.$unsaved;
+      if (unsaved.dirty()) {
+        if (!(await unsaved.confirmLeave())) return;
+        unsaved.discard();
+      }
       // Forgetting the token is not enough on its own: the provider still
       // holds a session cookie, and the next sign-in would come straight back
       // as the same person without asking. So the provider is asked to end

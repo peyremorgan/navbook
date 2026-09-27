@@ -13,6 +13,10 @@ const emit = defineEmits<{ submit: [string]; cancelReply: [] }>();
 
 const body = ref("");
 
+// Until the owner clears it: a comment in flight has not landed, and one the
+// server refuses is still only here.
+useUnsavedWork(() => body.value.trim() !== "");
+
 function submit(): void {
   const text = body.value.trim();
   if (text === "") return;

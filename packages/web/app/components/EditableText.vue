@@ -35,6 +35,8 @@ const editing = ref(false);
 const draft = ref(props.value);
 const problem = ref<string | null>(null);
 
+useUnsavedWork(() => editing.value && draft.value !== props.value);
+
 watch(
   () => props.value,
   (next) => {

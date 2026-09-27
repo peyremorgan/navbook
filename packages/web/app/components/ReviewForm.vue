@@ -49,6 +49,10 @@ const revision = ref<string>("");
 const file = ref("");
 const line = ref("");
 
+// The body alone: nothing is sent without it, and `clear` empties only the
+// body, so a file and line left from a landed review are not a draft.
+useUnsavedWork(() => body.value.trim() !== "");
+
 /**
  * Newest first, which the API's own order is not: `revisions:` is append-only,
  * so the latest is the last entry. It is the one a review binds to when none is
