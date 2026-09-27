@@ -13,6 +13,9 @@ revisions:
   - head: 20a9dd718372619f74aa765d8e6e379c3ff3a681
     base: 16e70221cab4c4d1ceb5a7a0f00ae2f6f7d1927c
     date: 2026-09-27T17:14:43Z
+  - head: f1a374cb1d9822f1d27bb62be518c662a991ea72
+    base: 86ad414c8bbcbb0981eae66e832f29f32f363204
+    date: 2026-09-27T19:28:24Z
 ---
 
 Follow-up to #egvv9205. It adds the two tests worth keeping from the superseded `#d0jz7ovl` (on its own branch), and fixes the gap that reviewing them turned up.
