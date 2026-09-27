@@ -94,11 +94,14 @@ write, beside the requests rather than in front of them. A stop gives a run
 five seconds to finish, then stops it whole; git removes its locks when asked
 to. At startup the server removes what an interrupted run left anyway (a
 SIGKILL or a crash, say): the locks maintenance and ref packing take, and
-their half-written temporary files, each named in the log. A lock on the
-index, on HEAD or on a ref is never touched: it means a commit or an update
-was cut short, and that is a person's to look at. `0` leaves housekeeping to
-a cron job or a sidecar, which then owns its leftovers too: the server only
-warns about a stale lock, since the other process may be holding it.
+their half-written temporary files, each named in the log — unless a git is
+running in the clone at that moment (on Linux it looks), since the lock may
+be that git's; then it only warns. A lock on the index, on HEAD or on a ref
+is never touched: it means a commit or an update was cut short, and that is a
+person's to look at, so it is named in the log and left. `0` leaves
+housekeeping to a cron job or a sidecar, which then owns its leftovers too:
+the server warns that it runs none, and only warns about a stale lock, since
+the other process may be holding it.
 
 ### Who is allowed in
 

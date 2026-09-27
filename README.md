@@ -312,7 +312,7 @@ What the server does clear away by itself is git's own housekeeping. It runs
 waits for a run instead of cutting it off, and at the next start it removes
 the lock files and half-written packs an interrupted run left, saying so in
 the log. A lock on the index, HEAD or a ref is never among them: that is a
-commit cut short, and it stays for a person to look at.
+commit cut short, so it is named in the log and stays for a person to look at.
 
 The details of each half — every server option, and what the client reads at
 boot — are in [`packages/server`](packages/server/README.md#deploying-it) and
