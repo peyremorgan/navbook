@@ -5,6 +5,7 @@ created: 2026-09-20T12:40:06Z
 labels: [bug, install]
 assignee: Claude <noreply@anthropic.com>
 feature: cli
+resolution: fixed
 ---
 
 Spec 04 §4.3's "Setup" section gives `nav install` a synopsis and a bullet per flag — `--alias`, `--hooks`, `--completions` — and closes with "With no flags, `nav install` sets up everything: alias (default name), hook, and completions (installed, not printed)."
