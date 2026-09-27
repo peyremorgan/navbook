@@ -12,6 +12,9 @@ revisions:
   - head: 09d704899ac8948de1e873baa074e0cc8783d642
     base: 0a7201f71e619c06b58f447c6f0c1ef2f3245b65
     date: 2026-09-27T02:48:09Z
+  - head: 50e28d87b19569176928c6bb56d0b74b65aa10f9
+    base: 0a7201f71e619c06b58f447c6f0c1ef2f3245b65
+    date: 2026-09-27T02:59:19Z
 ---
 
 Fixes #t1kpljkt. Five of the D8 warnings `nav doctor` gives on `dev` point at IDs inside code: pasted terminal output in two comments and one PR description, and `` `nav pr show '#id'` `` in two merged PR descriptions. Spec 02 §2.9 defines references in prose, and the web client doesn't link any of these IDs. D8 still counted them.
