@@ -10,6 +10,9 @@ revisions:
   - head: 7f0dddb2a44c64609ffa6ffb0fe291aba8c625a3
     base: ec8ba495941cf3a33b40c41434b926fa29af77f8
     date: 2026-09-27T20:27:52Z
+  - head: e7cbd4f4982240730195354c5158bb557fe24612
+    base: ec8ba495941cf3a33b40c41434b926fa29af77f8
+    date: 2026-09-27T20:42:06Z
 ---
 
 Follow-up to #krc96gzg, as noted in its review: the `doctor --staged` fix (#d8oflfva) and the ref-scan fix each added their own SHA-keyed `cat-file --batch` reader.
