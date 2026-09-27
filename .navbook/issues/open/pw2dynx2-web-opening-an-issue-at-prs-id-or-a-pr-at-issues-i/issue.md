@@ -2,6 +2,7 @@
 title: 'Web: opening an issue at /prs/<id> (or a PR at /issues/<id>) offers a useless "Try again" instead of a link to the right page'
 author: Claude <noreply@anthropic.com>
 created: 2026-09-27T21:35:48Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug, web]
 ---
 
