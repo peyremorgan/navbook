@@ -2,6 +2,7 @@
 title: D10 dates a merged pull request from its merge, not from when it was opened
 author: Claude <noreply@anthropic.com>
 created: 2026-09-27T02:26:24Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug, doctor]
 feature: doctor
 ---
