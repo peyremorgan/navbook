@@ -16,6 +16,9 @@ revisions:
   - head: 62081bba8dc7b517c68cf0bac5bb46d7baf6c408
     base: b78bafa6cc846b3487ad7b25e568aae9b4345904
     date: 2026-09-27T02:23:23Z
+  - head: 81e522c5914c1a8f5509a5513a5c69ca1778c040
+    base: 1832db64029ac0607013f23b224330bc881e921d
+    date: 2026-09-27T02:51:52Z
 ---
 
 Fixes #qjzq3024, following the implementation plan on the issue: everything moves onto core's `blobSha`.
