@@ -23,16 +23,14 @@ import {
   isEmptyFilter,
   queryToFilter,
   type RouteQuery,
-  toEntityFilter,
   withoutFilter,
 } from "~/utils/filter-params";
-import type { EntityFilter } from "~~/src/generated/gql/graphql";
 
-export interface EntityFilterHandle {
+export interface EntityFilterHandle<Variables> {
   /** The filter the current URL means. */
   filter: ComputedRef<FilterState>;
   /** The same thing as the API takes it. */
-  variables: ComputedRef<EntityFilter>;
+  variables: ComputedRef<Variables>;
   empty: ComputedRef<boolean>;
   /** Replace the filter, and the query string with it. */
   set(next: FilterState): void;
@@ -41,7 +39,15 @@ export interface EntityFilterHandle {
   clear(): void;
 }
 
-export function useEntityFilter(keys: FilterKeys): EntityFilterHandle {
+/**
+ * `toVariables` is the listing's own projection, `toIssueFilter` or
+ * `toPrFilter`: the API takes a different filter per noun, so the page names
+ * which one it is asking about.
+ */
+export function useEntityFilter<Variables>(
+  keys: FilterKeys,
+  toVariables: (filter: FilterState) => Variables,
+): EntityFilterHandle<Variables> {
   const route = useRoute();
   const router = useRouter();
 
@@ -60,7 +66,7 @@ export function useEntityFilter(keys: FilterKeys): EntityFilterHandle {
 
   return {
     filter,
-    variables: computed(() => toEntityFilter(filter.value)),
+    variables: computed(() => toVariables(filter.value)),
     empty: computed(() => isEmptyFilter(filter.value)),
     set,
     patch: (next) => set({ ...filter.value, ...next }),

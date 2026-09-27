@@ -41,9 +41,9 @@ type Documents = {
     "\n  query Viewer {\n    viewer {\n      name\n      email\n    }\n  }\n": typeof types.ViewerDocument,
     "\n  query ReviewPolicy {\n    reviewPolicy {\n      selfReview\n      minApprovals\n      declared\n      problems\n    }\n  }\n": typeof types.ReviewPolicyDocument,
     "\n  query People {\n    people\n  }\n": typeof types.PeopleDocument,
-    "\n  query Issues($filter: EntityFilter) {\n    issues(filter: $filter) {\n      ...IssueListItem\n    }\n  }\n": typeof types.IssuesDocument,
+    "\n  query Issues($filter: IssueFilter) {\n    issues(filter: $filter) {\n      ...IssueListItem\n    }\n  }\n": typeof types.IssuesDocument,
     "\n  query Issue($ref: ID!) {\n    issue(ref: $ref) {\n      ...IssueDetail\n    }\n  }\n": typeof types.IssueDocument,
-    "\n  query Prs($filter: EntityFilter, $allRefs: Boolean!) {\n    prs(filter: $filter, allRefs: $allRefs) {\n      ...PrListItem\n    }\n  }\n": typeof types.PrsDocument,
+    "\n  query Prs($filter: PrFilter, $allRefs: Boolean!) {\n    prs(filter: $filter, allRefs: $allRefs) {\n      ...PrListItem\n    }\n  }\n": typeof types.PrsDocument,
     "\n  query Pr($ref: ID!) {\n    pr(ref: $ref) {\n      ...PrDetail\n    }\n  }\n": typeof types.PrDocument,
     "\n  query Features {\n    features {\n      ...FeatureListItem\n    }\n  }\n": typeof types.FeaturesDocument,
     "\n  query Feature($slug: String!) {\n    feature(slug: $slug) {\n      ...FeatureDetail\n    }\n  }\n": typeof types.FeatureDocument,
@@ -80,9 +80,9 @@ const documents: Documents = {
     "\n  query Viewer {\n    viewer {\n      name\n      email\n    }\n  }\n": types.ViewerDocument,
     "\n  query ReviewPolicy {\n    reviewPolicy {\n      selfReview\n      minApprovals\n      declared\n      problems\n    }\n  }\n": types.ReviewPolicyDocument,
     "\n  query People {\n    people\n  }\n": types.PeopleDocument,
-    "\n  query Issues($filter: EntityFilter) {\n    issues(filter: $filter) {\n      ...IssueListItem\n    }\n  }\n": types.IssuesDocument,
+    "\n  query Issues($filter: IssueFilter) {\n    issues(filter: $filter) {\n      ...IssueListItem\n    }\n  }\n": types.IssuesDocument,
     "\n  query Issue($ref: ID!) {\n    issue(ref: $ref) {\n      ...IssueDetail\n    }\n  }\n": types.IssueDocument,
-    "\n  query Prs($filter: EntityFilter, $allRefs: Boolean!) {\n    prs(filter: $filter, allRefs: $allRefs) {\n      ...PrListItem\n    }\n  }\n": types.PrsDocument,
+    "\n  query Prs($filter: PrFilter, $allRefs: Boolean!) {\n    prs(filter: $filter, allRefs: $allRefs) {\n      ...PrListItem\n    }\n  }\n": types.PrsDocument,
     "\n  query Pr($ref: ID!) {\n    pr(ref: $ref) {\n      ...PrDetail\n    }\n  }\n": types.PrDocument,
     "\n  query Features {\n    features {\n      ...FeatureListItem\n    }\n  }\n": types.FeaturesDocument,
     "\n  query Feature($slug: String!) {\n    feature(slug: $slug) {\n      ...FeatureDetail\n    }\n  }\n": types.FeatureDocument,
@@ -217,7 +217,7 @@ export function graphql(source: "\n  query People {\n    people\n  }\n"): (typeo
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  query Issues($filter: EntityFilter) {\n    issues(filter: $filter) {\n      ...IssueListItem\n    }\n  }\n"): (typeof documents)["\n  query Issues($filter: EntityFilter) {\n    issues(filter: $filter) {\n      ...IssueListItem\n    }\n  }\n"];
+export function graphql(source: "\n  query Issues($filter: IssueFilter) {\n    issues(filter: $filter) {\n      ...IssueListItem\n    }\n  }\n"): (typeof documents)["\n  query Issues($filter: IssueFilter) {\n    issues(filter: $filter) {\n      ...IssueListItem\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
@@ -225,7 +225,7 @@ export function graphql(source: "\n  query Issue($ref: ID!) {\n    issue(ref: $r
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  query Prs($filter: EntityFilter, $allRefs: Boolean!) {\n    prs(filter: $filter, allRefs: $allRefs) {\n      ...PrListItem\n    }\n  }\n"): (typeof documents)["\n  query Prs($filter: EntityFilter, $allRefs: Boolean!) {\n    prs(filter: $filter, allRefs: $allRefs) {\n      ...PrListItem\n    }\n  }\n"];
+export function graphql(source: "\n  query Prs($filter: PrFilter, $allRefs: Boolean!) {\n    prs(filter: $filter, allRefs: $allRefs) {\n      ...PrListItem\n    }\n  }\n"): (typeof documents)["\n  query Prs($filter: PrFilter, $allRefs: Boolean!) {\n    prs(filter: $filter, allRefs: $allRefs) {\n      ...PrListItem\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */

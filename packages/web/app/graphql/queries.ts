@@ -62,7 +62,7 @@ export const PEOPLE_QUERY = graphql(`
 `);
 
 export const ISSUES_QUERY = graphql(`
-  query Issues($filter: EntityFilter) {
+  query Issues($filter: IssueFilter) {
     issues(filter: $filter) {
       ...IssueListItem
     }
@@ -78,7 +78,7 @@ export const ISSUE_QUERY = graphql(`
 `);
 
 export const PRS_QUERY = graphql(`
-  query Prs($filter: EntityFilter, $allRefs: Boolean!) {
+  query Prs($filter: PrFilter, $allRefs: Boolean!) {
     prs(filter: $filter, allRefs: $allRefs) {
       ...PrListItem
     }

@@ -4,7 +4,7 @@
   The listings answer "what is there"; this answers "what is mine", which is a
   different question and needs a different page. Three things make an entity
   somebody's: it is assigned to them, they opened the pull request, or it is
-  waiting on their review. `EntityFilter` ANDs its keys, so those are three
+  waiting on their review. The API's filters AND their keys, so those are three
   questions rather than one, asked in a single round trip and merged here —
   and which of them an entity came back in is what a row says about itself.
 

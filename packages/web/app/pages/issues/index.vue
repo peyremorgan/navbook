@@ -14,7 +14,7 @@
 import { useQuery } from "@vue/apollo-composable";
 import { FEATURES_QUERY, ISSUES_QUERY } from "~/graphql/queries";
 import { distinctValues } from "~/utils/entities";
-import { DEADLINE_STATES, ISSUE_STATUSES } from "~/utils/filter-params";
+import { DEADLINE_STATES, ISSUE_STATUSES, toIssueFilter } from "~/utils/filter-params";
 import { isSortOrder, type SortOrder, sortRows } from "~/utils/sort";
 import { pageTitle } from "~/utils/title";
 
@@ -22,7 +22,10 @@ useHead({ title: pageTitle("Issues") });
 
 const route = useRoute();
 const router = useRouter();
-const filter = useEntityFilter({ statuses: ISSUE_STATUSES, deadlines: DEADLINE_STATES });
+const filter = useEntityFilter(
+  { statuses: ISSUE_STATUSES, deadlines: DEADLINE_STATES },
+  toIssueFilter,
+);
 
 /*
  * The order, in the query string beside the filter.

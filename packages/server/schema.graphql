@@ -364,40 +364,53 @@ type Viewer {
 }
 
 """
-Which entities to list.
+Which issues to list.
 
 Terms are ANDed across keys. Within a key the semantics follow the field:
 single-valued fields OR their terms, multi-valued fields AND theirs (spec 04).
+
+A separate input from `PrFilter` rather than one input whose keys each apply
+to one noun: spec 04 §4.3 requires a term describing the other kind to be
+refused rather than to match nothing, and two inputs make that refusal the
+validator's job instead of a check a resolver has to remember. GraphQL has no
+input composition, so the keys both nouns share are written out twice.
 """
-input EntityFilter {
+input IssueFilter {
   "Absent or empty means any status; the listing is not narrowed by one."
   status: [Status!]
   labels: [String!]
   assignees: [String!]
   authors: [String!]
   milestones: [String!]
-  "Feature slugs; an entity must name every one of them."
+  "Feature slugs; an issue must name every one of them."
   features: [String!]
   """
-  Asked to review it; a pull request must name every one of them.
+  Where the issue stands against its deadline; any one of them matches.
 
-  This and the two below describe something only a pull request has, so
-  `issues` rejects them rather than matching nothing.
+  Judged against the server's own day, in UTC.
   """
+  deadline: [DeadlineState!]
+  "Free text, matched against title, body and comments, and against the issue's own ID from four characters."
+  text: [String!]
+}
+
+"Which pull requests to list. The twin of `IssueFilter`, which says why there are two."
+input PrFilter {
+  "Absent or empty means any status; the listing is not narrowed by one."
+  status: [Status!]
+  labels: [String!]
+  assignees: [String!]
+  authors: [String!]
+  milestones: [String!]
+  "Feature slugs; a pull request must name every one of them."
+  features: [String!]
+  "Asked to review it; a pull request must name every one of them."
   reviewers: [String!]
   "The pull request's derived decision; any one of them matches."
   reviews: [ReviewDecision!]
   "Asked to review it and has not answered the latest revision."
   awaiting: [String!]
-  """
-  Where the issue stands against its deadline; any one of them matches.
-
-  Judged against the server's own day, in UTC. This describes something only
-  an issue has, so `prs` rejects it rather than matching nothing — the mirror
-  of what `issues` does with the three above.
-  """
-  deadline: [DeadlineState!]
-  "Free text, matched against title, body and comments, and against the entity's own ID from four characters."
+  "Free text, matched against title, body and comments, and against the pull request's own ID from four characters."
   text: [String!]
 }
 
@@ -466,7 +479,7 @@ type Commit {
 }
 
 type Query {
-  issues(filter: EntityFilter): [Issue!]!
+  issues(filter: IssueFilter): [Issue!]!
   "`ref` is a full ID or an unambiguous prefix of at least four characters."
   issue(ref: ID!): Issue!
   """
@@ -477,7 +490,7 @@ type Query {
   branch instead (spec 03 §3.5). That scan finds open pull requests only, so
   `allRefs` narrows the statuses on offer no matter what `filter` names.
   """
-  prs(filter: EntityFilter, allRefs: Boolean! = false): [Pr!]!
+  prs(filter: PrFilter, allRefs: Boolean! = false): [Pr!]!
   pr(ref: ID!): Pr!
   "Every feature in the working tree, in slug order (spec 02 §2.11)."
   features: [Feature!]!

@@ -245,44 +245,6 @@ export type Entity = {
 };
 
 /**
- * Which entities to list.
- *
- * Terms are ANDed across keys. Within a key the semantics follow the field:
- * single-valued fields OR their terms, multi-valued fields AND theirs (spec 04).
- */
-export type EntityFilter = {
-  assignees?: InputMaybe<Array<Scalars['String']['input']>>;
-  authors?: InputMaybe<Array<Scalars['String']['input']>>;
-  /** Asked to review it and has not answered the latest revision. */
-  awaiting?: InputMaybe<Array<Scalars['String']['input']>>;
-  /**
-   * Where the issue stands against its deadline; any one of them matches.
-   *
-   * Judged against the server's own day, in UTC. This describes something only
-   * an issue has, so `prs` rejects it rather than matching nothing — the mirror
-   * of what `issues` does with the three above.
-   */
-  deadline?: InputMaybe<Array<DeadlineState>>;
-  /** Feature slugs; an entity must name every one of them. */
-  features?: InputMaybe<Array<Scalars['String']['input']>>;
-  labels?: InputMaybe<Array<Scalars['String']['input']>>;
-  milestones?: InputMaybe<Array<Scalars['String']['input']>>;
-  /**
-   * Asked to review it; a pull request must name every one of them.
-   *
-   * This and the two below describe something only a pull request has, so
-   * `issues` rejects them rather than matching nothing.
-   */
-  reviewers?: InputMaybe<Array<Scalars['String']['input']>>;
-  /** The pull request's derived decision; any one of them matches. */
-  reviews?: InputMaybe<Array<ReviewDecision>>;
-  /** Absent or empty means any status; the listing is not narrowed by one. */
-  status?: InputMaybe<Array<Status>>;
-  /** Free text, matched against title, body and comments, and against the entity's own ID from four characters. */
-  text?: InputMaybe<Array<Scalars['String']['input']>>;
-};
-
-/**
  * A feature: a standing concept work attaches to (spec 02 §2.11).
  *
  * It has no ID and no status. Its `slug` is the directory that holds it and is
@@ -389,6 +351,37 @@ export type Issue = Entity & {
 
 export type IssueSubtasksArgs = {
   depth?: Scalars['Int']['input'];
+};
+
+/**
+ * Which issues to list.
+ *
+ * Terms are ANDed across keys. Within a key the semantics follow the field:
+ * single-valued fields OR their terms, multi-valued fields AND theirs (spec 04).
+ *
+ * A separate input from `PrFilter` rather than one input whose keys each apply
+ * to one noun: spec 04 §4.3 requires a term describing the other kind to be
+ * refused rather than to match nothing, and two inputs make that refusal the
+ * validator's job instead of a check a resolver has to remember. GraphQL has no
+ * input composition, so the keys both nouns share are written out twice.
+ */
+export type IssueFilter = {
+  assignees?: InputMaybe<Array<Scalars['String']['input']>>;
+  authors?: InputMaybe<Array<Scalars['String']['input']>>;
+  /**
+   * Where the issue stands against its deadline; any one of them matches.
+   *
+   * Judged against the server's own day, in UTC.
+   */
+  deadline?: InputMaybe<Array<DeadlineState>>;
+  /** Feature slugs; an issue must name every one of them. */
+  features?: InputMaybe<Array<Scalars['String']['input']>>;
+  labels?: InputMaybe<Array<Scalars['String']['input']>>;
+  milestones?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** Absent or empty means any status; the listing is not narrowed by one. */
+  status?: InputMaybe<Array<Status>>;
+  /** Free text, matched against title, body and comments, and against the issue's own ID from four characters. */
+  text?: InputMaybe<Array<Scalars['String']['input']>>;
 };
 
 export type Kind =
@@ -628,6 +621,26 @@ export type PrCommitsArgs = {
   limit?: Scalars['Int']['input'];
 };
 
+/** Which pull requests to list. The twin of `IssueFilter`, which says why there are two. */
+export type PrFilter = {
+  assignees?: InputMaybe<Array<Scalars['String']['input']>>;
+  authors?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** Asked to review it and has not answered the latest revision. */
+  awaiting?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** Feature slugs; a pull request must name every one of them. */
+  features?: InputMaybe<Array<Scalars['String']['input']>>;
+  labels?: InputMaybe<Array<Scalars['String']['input']>>;
+  milestones?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** Asked to review it; a pull request must name every one of them. */
+  reviewers?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** The pull request's derived decision; any one of them matches. */
+  reviews?: InputMaybe<Array<ReviewDecision>>;
+  /** Absent or empty means any status; the listing is not narrowed by one. */
+  status?: InputMaybe<Array<Status>>;
+  /** Free text, matched against title, body and comments, and against the pull request's own ID from four characters. */
+  text?: InputMaybe<Array<Scalars['String']['input']>>;
+};
+
 export type Query = {
   __typename?: 'Query';
   doctor: DoctorReport;
@@ -689,7 +702,7 @@ export type QueryIssueArgs = {
 
 
 export type QueryIssuesArgs = {
-  filter?: InputMaybe<EntityFilter>;
+  filter?: InputMaybe<IssueFilter>;
 };
 
 
@@ -700,7 +713,7 @@ export type QueryPrArgs = {
 
 export type QueryPrsArgs = {
   allRefs?: Scalars['Boolean']['input'];
-  filter?: InputMaybe<EntityFilter>;
+  filter?: InputMaybe<PrFilter>;
 };
 
 export type ReopenIssuePayload = {
@@ -1015,12 +1028,12 @@ export type ResolversTypes = {
   DiagnosticLevel: DiagnosticLevel;
   DoctorReport: ResolverTypeWrapper<Omit<DoctorReport, 'diagnostics'> & { diagnostics: Array<ResolversTypes['Diagnostic']> }>;
   Entity: ResolverTypeWrapper<EntityParent>;
-  EntityFilter: EntityFilter;
   Feature: ResolverTypeWrapper<FeatureParent>;
   Float: ResolverTypeWrapper<Scalars['Float']['output']>;
   ID: ResolverTypeWrapper<Scalars['ID']['output']>;
   Int: ResolverTypeWrapper<Scalars['Int']['output']>;
   Issue: ResolverTypeWrapper<IssueParent>;
+  IssueFilter: IssueFilter;
   Kind: Kind;
   LinkIssueInput: LinkIssueInput;
   LinkIssuePayload: ResolverTypeWrapper<Omit<LinkIssuePayload, 'child' | 'parent'> & { child: ResolversTypes['Issue'], parent: ResolversTypes['Issue'] }>;
@@ -1030,6 +1043,7 @@ export type ResolversTypes = {
   OpenIssueInput: OpenIssueInput;
   OpenIssuePayload: ResolverTypeWrapper<Omit<OpenIssuePayload, 'issue' | 'parent'> & { issue: ResolversTypes['Issue'], parent?: Maybe<ResolversTypes['Issue']> }>;
   Pr: ResolverTypeWrapper<PrParent>;
+  PrFilter: PrFilter;
   Query: ResolverTypeWrapper<Record<PropertyKey, never>>;
   ReopenIssuePayload: ResolverTypeWrapper<Omit<ReopenIssuePayload, 'issue'> & { issue: ResolversTypes['Issue'] }>;
   ReviewDecision: ReviewDecision;
@@ -1074,12 +1088,12 @@ export type ResolversParentTypes = {
   Diagnostic: DiagnosticParent;
   DoctorReport: Omit<DoctorReport, 'diagnostics'> & { diagnostics: Array<ResolversParentTypes['Diagnostic']> };
   Entity: EntityParent;
-  EntityFilter: EntityFilter;
   Feature: FeatureParent;
   Float: Scalars['Float']['output'];
   ID: Scalars['ID']['output'];
   Int: Scalars['Int']['output'];
   Issue: IssueParent;
+  IssueFilter: IssueFilter;
   LinkIssueInput: LinkIssueInput;
   LinkIssuePayload: Omit<LinkIssuePayload, 'child' | 'parent'> & { child: ResolversParentTypes['Issue'], parent: ResolversParentTypes['Issue'] };
   LinkNode: LinkNodeParent;
@@ -1088,6 +1102,7 @@ export type ResolversParentTypes = {
   OpenIssueInput: OpenIssueInput;
   OpenIssuePayload: Omit<OpenIssuePayload, 'issue' | 'parent'> & { issue: ResolversParentTypes['Issue'], parent?: Maybe<ResolversParentTypes['Issue']> };
   Pr: PrParent;
+  PrFilter: PrFilter;
   Query: Record<PropertyKey, never>;
   ReopenIssuePayload: Omit<ReopenIssuePayload, 'issue'> & { issue: ResolversParentTypes['Issue'] };
   ReviewPolicy: ReviewPolicy;

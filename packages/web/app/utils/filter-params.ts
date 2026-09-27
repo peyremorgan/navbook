@@ -1,5 +1,6 @@
 /**
- * The filter bar, the address bar and `EntityFilter`, kept in one shape.
+ * The filter bar, the address bar and the API's `IssueFilter` and `PrFilter`,
+ * kept in one shape.
  *
  * A listing's filter belongs in the URL: it is what makes a filtered view
  * something you can bookmark, reload and send to somebody. So the query string
@@ -11,7 +12,7 @@
  * is one the reader chose.
  */
 
-import type { DeadlineState, EntityFilter, Status } from "~~/src/generated/gql/graphql";
+import type { DeadlineState, IssueFilter, PrFilter, Status } from "~~/src/generated/gql/graphql";
 
 /** The parameters the filter owns. Everything else in a query belongs to the page. */
 export const FILTER_KEYS = [
@@ -34,7 +35,7 @@ export const PR_STATUSES: readonly Status[] = ["OPEN", "MERGED", "CLOSED"];
 export const DEADLINE_STATES: readonly DeadlineState[] = ["OVERDUE", "NONE"];
 
 export interface FilterState {
-  /** Empty means any status, as an empty `EntityFilter.status` does. */
+  /** Empty means any status, as an empty `status` in the API's filter does. */
   status: Status[];
   labels: string[];
   assignees: string[];
@@ -182,6 +183,8 @@ export interface FilterKeys {
   statuses: readonly Status[];
   /** Deadline states it has: none, on a listing whose noun is not scheduled. */
   deadlines?: readonly DeadlineState[];
+  /** Whether it has reviewers at all: only a pull request does (spec 02 §2.7). */
+  reviewers?: boolean;
 }
 
 export function queryToFilter(query: RouteQuery, keys: FilterKeys): FilterState {
@@ -192,7 +195,9 @@ export function queryToFilter(query: RouteQuery, keys: FilterKeys): FilterState 
     authors: queryValues(query.author),
     milestones: queryValues(query.milestone),
     features: queryValues(query.feature),
-    reviewers: queryValues(query.reviewer),
+    // Dropped on a listing that has none, as a deadline is: `?reviewer=` on the
+    // issue list reads as no narrowing, not as a term the API would refuse.
+    reviewers: keys.reviewers === true ? queryValues(query.reviewer) : [],
     deadline: deadlineStates(query.deadline, keys.deadlines ?? []),
     text: joinTerms(queryValues(query.q).flatMap(splitTerms)),
   };
@@ -229,18 +234,36 @@ export function filterToQuery(filter: FilterState): Record<string, string[]> {
   return query;
 }
 
-/** The filter as the API takes it; empty keys are omitted, not sent empty. */
-export function toEntityFilter(filter: FilterState): EntityFilter {
-  const entityFilter: EntityFilter = {};
-  if (filter.status.length > 0) entityFilter.status = [...filter.status];
-  if (filter.labels.length > 0) entityFilter.labels = [...filter.labels];
-  if (filter.assignees.length > 0) entityFilter.assignees = [...filter.assignees];
-  if (filter.authors.length > 0) entityFilter.authors = [...filter.authors];
-  if (filter.milestones.length > 0) entityFilter.milestones = [...filter.milestones];
-  if (filter.features.length > 0) entityFilter.features = [...filter.features];
-  if (filter.reviewers.length > 0) entityFilter.reviewers = [...filter.reviewers];
-  if (filter.deadline.length > 0) entityFilter.deadline = [...filter.deadline];
+/**
+ * The filter as the issue listing's query takes it; empty keys are omitted,
+ * not sent empty.
+ *
+ * One function per noun, each writing only its own input's keys, because the
+ * API refuses the other noun's rather than matching nothing (spec 04 §4.3).
+ */
+export function toIssueFilter(filter: FilterState): IssueFilter {
+  const issueFilter: IssueFilter = sharedFilter(filter);
+  if (filter.deadline.length > 0) issueFilter.deadline = [...filter.deadline];
+  return issueFilter;
+}
+
+/** The pull request half of `toIssueFilter`. */
+export function toPrFilter(filter: FilterState): PrFilter {
+  const prFilter: PrFilter = sharedFilter(filter);
+  if (filter.reviewers.length > 0) prFilter.reviewers = [...filter.reviewers];
+  return prFilter;
+}
+
+/** The keys both nouns have, which is most of them. */
+function sharedFilter(filter: FilterState): IssueFilter & PrFilter {
+  const shared: IssueFilter & PrFilter = {};
+  if (filter.status.length > 0) shared.status = [...filter.status];
+  if (filter.labels.length > 0) shared.labels = [...filter.labels];
+  if (filter.assignees.length > 0) shared.assignees = [...filter.assignees];
+  if (filter.authors.length > 0) shared.authors = [...filter.authors];
+  if (filter.milestones.length > 0) shared.milestones = [...filter.milestones];
+  if (filter.features.length > 0) shared.features = [...filter.features];
   const terms = splitTerms(filter.text);
-  if (terms.length > 0) entityFilter.text = terms;
-  return entityFilter;
+  if (terms.length > 0) shared.text = terms;
+  return shared;
 }

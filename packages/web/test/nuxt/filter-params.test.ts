@@ -18,7 +18,8 @@ import {
   PR_STATUSES,
   queryToFilter,
   splitTerms,
-  toEntityFilter,
+  toIssueFilter,
+  toPrFilter,
   withoutFilter,
 } from "../../app/utils/filter-params";
 
@@ -49,9 +50,14 @@ describe("splitTerms", () => {
   });
 });
 
-/** What each listing's URL can say: the issue list is the one that is scheduled. */
+/**
+ * What each listing's URL can say: the issue list is the one that is
+ * scheduled, the pull request list the one that is reviewed.
+ */
 const ISSUES = { statuses: ISSUE_STATUSES, deadlines: DEADLINE_STATES };
-const PRS = { statuses: PR_STATUSES };
+const PRS = { statuses: PR_STATUSES, reviewers: true };
+/** Every key at once, which no one listing has; for the serialisation cases. */
+const EVERY = { statuses: ISSUE_STATUSES, deadlines: DEADLINE_STATES, reviewers: true };
 
 describe("queryToFilter", () => {
   it("reads every parameter, single or repeated", () => {
@@ -67,7 +73,7 @@ describe("queryToFilter", () => {
         deadline: ["overdue", "none"],
         q: "timeout",
       },
-      ISSUES,
+      EVERY,
     );
     assert.deepEqual(filter, {
       status: ["OPEN", "CLOSED"],
@@ -88,6 +94,16 @@ describe("queryToFilter", () => {
     // refuse. Same rule as a status the listing cannot show.
     assert.deepEqual(queryToFilter({ deadline: "overdue" }, PRS).deadline, []);
     assert.deepEqual(queryToFilter({ deadline: "soon" }, ISSUES).deadline, []);
+  });
+
+  it("ignores a reviewer on a listing whose noun is not reviewed", () => {
+    // Only a pull request has reviewers (spec 02 §2.7), and the API refuses
+    // the term on issues, so `?reviewer=` on the issue list reads as no
+    // narrowing — it used to be sent, and to list nothing.
+    assert.deepEqual(queryToFilter({ reviewer: "d@example.invalid" }, ISSUES).reviewers, []);
+    assert.deepEqual(queryToFilter({ reviewer: "d@example.invalid" }, PRS).reviewers, [
+      "d@example.invalid",
+    ]);
   });
 
   it("reads a deadline state in any case, in the schema's order", () => {
@@ -163,33 +179,46 @@ describe("filterToQuery", () => {
       text: 'timeout "slow link"',
     };
     const query = filterToQuery({ ...original, status: [...original.status] });
-    const back = queryToFilter(query, ISSUES);
+    const back = queryToFilter(query, EVERY);
     assert.deepEqual(back, { ...original, status: [...original.status] });
     // And again, so the second pass is a fixed point.
     assert.deepEqual(filterToQuery(back), query);
   });
 });
 
-describe("toEntityFilter", () => {
+describe("toIssueFilter and toPrFilter", () => {
   it("sends nothing at all for an empty filter", () => {
     // An omitted key and an empty one mean the same thing to the server, so
     // sending empty keys would only be noise on the wire.
-    assert.deepEqual(toEntityFilter(emptyFilter()), {});
+    assert.deepEqual(toIssueFilter(emptyFilter()), {});
+    assert.deepEqual(toPrFilter(emptyFilter()), {});
   });
 
   it("sends only the keys that are set", () => {
-    assert.deepEqual(toEntityFilter({ ...emptyFilter(), labels: ["bug"] }), { labels: ["bug"] });
+    assert.deepEqual(toIssueFilter({ ...emptyFilter(), labels: ["bug"] }), { labels: ["bug"] });
+    assert.deepEqual(toPrFilter({ ...emptyFilter(), labels: ["bug"] }), { labels: ["bug"] });
   });
 
   it("splits the search box into terms", () => {
-    assert.deepEqual(toEntityFilter({ ...emptyFilter(), text: '"slow link" timeout' }).text, [
+    assert.deepEqual(toIssueFilter({ ...emptyFilter(), text: '"slow link" timeout' }).text, [
       "slow link",
       "timeout",
     ]);
   });
 
   it("passes statuses through in the schema's spelling", () => {
-    assert.deepEqual(toEntityFilter({ ...emptyFilter(), status: ["CLOSED"] }).status, ["CLOSED"]);
+    assert.deepEqual(toIssueFilter({ ...emptyFilter(), status: ["CLOSED"] }).status, ["CLOSED"]);
+    assert.deepEqual(toPrFilter({ ...emptyFilter(), status: ["MERGED"] }).status, ["MERGED"]);
+  });
+
+  it("sends each noun only its own keys, which the API refuses on the other", () => {
+    const both = {
+      ...emptyFilter(),
+      reviewers: ["c@example.invalid"],
+      deadline: ["OVERDUE" as const],
+    };
+    assert.deepEqual(toIssueFilter(both), { deadline: ["OVERDUE"] });
+    assert.deepEqual(toPrFilter(both), { reviewers: ["c@example.invalid"] });
   });
 });
 

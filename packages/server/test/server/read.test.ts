@@ -147,7 +147,7 @@ describe("reads", () => {
 
     const ids = async (filter: Record<string, string[]>): Promise<string[]> =>
       ok<{ issues: { id: string }[] }>(
-        await h.gql(`query Issues($filter: EntityFilter) { issues(filter: $filter) { id } }`, {
+        await h.gql(`query Issues($filter: IssueFilter) { issues(filter: $filter) { id } }`, {
           filter,
         }),
       ).issues.map((issue) => issue.id);
@@ -368,9 +368,27 @@ describe("rank and deadline", () => {
   });
 
   it("refuses the deadline filter on pull requests, which are not scheduled", async () => {
+    // `PrFilter` has no such key, so validation refuses it before a resolver
+    // runs, rather than a filter that matches nothing (spec 04 §4.3).
     const response = await h.gql(`query { prs(filter: { deadline: [OVERDUE] }) { id } }`);
-    assert.equal(errorCode(response), "INVALID_INPUT");
-    assert.match(response.errors[0]?.message ?? "", /describes an issue/);
+    assert.equal(errorCode(response), "GRAPHQL_VALIDATION_FAILED");
+    assert.equal(response.data, null);
+    assert.match(response.errors[0]?.message ?? "", /"deadline"/);
+  });
+
+  it("refuses the review filters on issues, which have no reviews", async () => {
+    // `reviews: [PENDING]` is the one that mattered: an issue has no revisions,
+    // so its decision is `pending` and the filter used to match every issue.
+    for (const [key, term] of [
+      ["reviewers", 'reviewers: ["a@example.com"]'],
+      ["reviews", "reviews: [PENDING]"],
+      ["awaiting", 'awaiting: ["a@example.com"]'],
+    ] as const) {
+      const response = await h.gql(`query { issues(filter: { ${term} }) { id } }`);
+      assert.equal(errorCode(response), "GRAPHQL_VALIDATION_FAILED", term);
+      assert.equal(response.data, null, term);
+      assert.match(response.errors[0]?.message ?? "", new RegExp(`"${key}"`), term);
+    }
   });
 
   it("refuses a deadline that is not a day, before anything is written", async () => {

@@ -62,7 +62,7 @@ const UPDATE_ISSUE = `mutation Update($input: UpdateIssueInput!) {
   updateIssue(input: $input) { issue { id features } commit { subject } }
 }`;
 
-const ISSUES = `query Issues($filter: EntityFilter) { issues(filter: $filter) { id title features } }`;
+const ISSUES = `query Issues($filter: IssueFilter) { issues(filter: $filter) { id title features } }`;
 
 // biome-ignore lint/suspicious/noExplicitAny: test payloads are read positionally
 type Payload = any;

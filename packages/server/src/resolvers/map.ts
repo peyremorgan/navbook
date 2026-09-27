@@ -21,9 +21,10 @@ import {
 import type {
   DeadlineState,
   DiagnosticLevel,
-  EntityFilter,
   Status as GqlStatus,
+  IssueFilter,
   Kind,
+  PrFilter,
   ReviewDecision,
   ReviewState,
   Verdict,
@@ -107,8 +108,28 @@ export function toGqlVerdict(value: unknown): Verdict | null {
  * `today` is the day `OVERDUE` is judged against, and it is always supplied:
  * core has no clock, and a filter that asked which work is late without saying
  * when would be a question with no answer.
+ *
+ * One function per noun, each reading only its own input's keys. A single one
+ * over the union would compile too, but a key the union has is a key it could
+ * read on the wrong noun — the bug the two inputs exist to rule out.
  */
-export function toQuery(filter: EntityFilter | null | undefined, today: string): Query {
+export function toIssueQuery(filter: IssueFilter | null | undefined, today: string): Query {
+  const query = sharedQuery(filter, today);
+  if (filter?.deadline) query.deadline = filter.deadline.map((state) => DEADLINE_IN[state]);
+  return query;
+}
+
+/** The pull request half of `toIssueQuery`. */
+export function toPrQuery(filter: PrFilter | null | undefined, today: string): Query {
+  const query = sharedQuery(filter, today);
+  if (filter?.reviewers) query.reviewers = [...filter.reviewers];
+  if (filter?.reviews) query.reviews = filter.reviews.map((decision) => DECISION_IN[decision]);
+  if (filter?.awaiting) query.awaiting = [...filter.awaiting];
+  return query;
+}
+
+/** The keys both nouns have, which is most of them. */
+function sharedQuery(filter: IssueFilter | PrFilter | null | undefined, today: string): Query {
   const query = emptyQuery();
   query.today = today;
   if (!filter) return query;
@@ -118,10 +139,6 @@ export function toQuery(filter: EntityFilter | null | undefined, today: string):
   if (filter.authors) query.authors = [...filter.authors];
   if (filter.milestones) query.milestones = [...filter.milestones];
   if (filter.features) query.features = [...filter.features];
-  if (filter.reviewers) query.reviewers = [...filter.reviewers];
-  if (filter.reviews) query.reviews = filter.reviews.map((decision) => DECISION_IN[decision]);
-  if (filter.awaiting) query.awaiting = [...filter.awaiting];
-  if (filter.deadline) query.deadline = filter.deadline.map((state) => DEADLINE_IN[state]);
   if (filter.text) query.text = [...filter.text];
   return query;
 }

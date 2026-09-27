@@ -22,14 +22,14 @@
 import { useQuery } from "@vue/apollo-composable";
 import { FEATURES_QUERY, PRS_QUERY } from "~/graphql/queries";
 import { distinctValues } from "~/utils/entities";
-import { PR_STATUSES } from "~/utils/filter-params";
+import { PR_STATUSES, toPrFilter } from "~/utils/filter-params";
 import { pageTitle } from "~/utils/title";
 
 useHead({ title: pageTitle("Pull requests") });
 
 const route = useRoute();
 const router = useRouter();
-const filter = useEntityFilter({ statuses: PR_STATUSES });
+const filter = useEntityFilter({ statuses: PR_STATUSES, reviewers: true }, toPrFilter);
 
 const allRefs = computed({
   get: () => route.query.refs === "all",

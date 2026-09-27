@@ -26,10 +26,10 @@ import {
   withComments,
 } from "@navbook/core";
 import type { GraphQLCtx } from "../context.ts";
-import { invalidInput, run } from "../errors.ts";
+import { run } from "../errors.ts";
 import type { QueryResolvers } from "../generated/resolver-types.ts";
 import type { PrParent } from "../mappers.ts";
-import { toQuery } from "./map.ts";
+import { toIssueQuery, toPrQuery } from "./map.ts";
 
 /**
  * The day a `deadline` filter is judged against: the server's own, in UTC.
@@ -57,7 +57,7 @@ function listed(ctx: GraphQLCtx, kind: EntityKind, query: ListQuery): EntityReco
 
 export const Query: QueryResolvers = {
   issues: (_parent, args, ctx) =>
-    run(() => ctx.sync.read(() => listed(ctx, "issue", toQuery(args.filter, today(ctx))))),
+    run(() => ctx.sync.read(() => listed(ctx, "issue", toIssueQuery(args.filter, today(ctx))))),
 
   issue: (_parent, args, ctx) =>
     run(() =>
@@ -71,13 +71,9 @@ export const Query: QueryResolvers = {
   prs: (_parent, args, ctx) =>
     run(() =>
       ctx.sync.read((): PrParent[] => {
-        // The mirror of what `parseQuery` refuses on an issue: a term that
-        // describes something this noun does not have is an error rather than
-        // a filter that matches nothing (spec 04 §4.3).
-        if (args.filter?.deadline?.length) {
-          throw invalidInput("'deadline' describes an issue; pull requests have no deadline");
-        }
-        const query = toQuery(args.filter, today(ctx));
+        // No guard against an issue's terms here: `PrFilter` has no key for
+        // one, so validation refuses it before this runs (spec 04 §4.3).
+        const query = toPrQuery(args.filter, today(ctx));
         // A pull request's files live on the branch it proposes to merge, so
         // the working tree usually does not hold them (spec 03 §3.5).
         if (args.allRefs) {

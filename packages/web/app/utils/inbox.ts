@@ -2,7 +2,7 @@
  * The inbox: three questions about one person, merged into one list.
  *
  * The server answers each of them separately — assigned, authored, asked to
- * review — because `EntityFilter` ANDs its keys and there is no way to ask for
+ * review — because the API's filters AND their keys and there is no way to ask for
  * a union. So the union is made here, and which question an entity came back
  * in is kept, because that is the only thing that says *why* a row is in
  * somebody's inbox. Nothing here compares one address with another: the client

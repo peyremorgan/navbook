@@ -16,7 +16,8 @@ import {
   toGqlLevel,
   toGqlStatus,
   toGqlVerdict,
-  toQuery,
+  toIssueQuery,
+  toPrQuery,
 } from "../../src/resolvers/map.ts";
 
 describe("enum translation", () => {
@@ -58,17 +59,19 @@ describe("enum translation", () => {
   });
 });
 
-describe("toQuery", () => {
+describe("toIssueQuery and toPrQuery", () => {
   const TODAY = "2026-09-08";
 
   it("is an empty query but for the day, when no filter was given", () => {
-    assert.deepEqual(toQuery(null, TODAY), { ...emptyQuery(), today: TODAY });
-    assert.deepEqual(toQuery(undefined, TODAY), { ...emptyQuery(), today: TODAY });
+    for (const toQuery of [toIssueQuery, toPrQuery]) {
+      assert.deepEqual(toQuery(null, TODAY), { ...emptyQuery(), today: TODAY });
+      assert.deepEqual(toQuery(undefined, TODAY), { ...emptyQuery(), today: TODAY });
+    }
   });
 
-  it("carries every key across, translating the statuses", () => {
+  it("carries every issue key across, translating the statuses", () => {
     assert.deepEqual(
-      toQuery(
+      toIssueQuery(
         {
           status: ["OPEN", "CLOSED"],
           labels: ["bug"],
@@ -98,12 +101,59 @@ describe("toQuery", () => {
     );
   });
 
+  it("carries every pull request key across, translating the decisions", () => {
+    assert.deepEqual(
+      toPrQuery(
+        {
+          status: ["MERGED"],
+          labels: ["bug"],
+          assignees: ["a@x.invalid"],
+          authors: ["b@x.invalid"],
+          milestones: ["v1"],
+          features: ["auth"],
+          reviewers: ["c@x.invalid"],
+          reviews: ["CHANGES_REQUESTED", "PENDING"],
+          awaiting: ["d@x.invalid"],
+          text: ["crash"],
+        },
+        TODAY,
+      ),
+      {
+        status: ["merged"],
+        labels: ["bug"],
+        assignees: ["a@x.invalid"],
+        authors: ["b@x.invalid"],
+        milestones: ["v1"],
+        features: ["auth"],
+        reviewers: ["c@x.invalid"],
+        reviews: ["changes-requested", "pending"],
+        awaiting: ["d@x.invalid"],
+        deadline: [],
+        today: TODAY,
+        text: ["crash"],
+      },
+    );
+  });
+
+  it("reads only its own noun's keys, even when handed the other's", () => {
+    // Validation refuses these before a resolver runs; this is the second
+    // line, so a caller that skipped validation still cannot ask an issue
+    // about reviews (spec 04 §4.3). `reviews: [PENDING]` on an issue would
+    // otherwise match every one of them.
+    const issue = toIssueQuery(
+      { reviewers: ["c@x.invalid"], reviews: ["PENDING"], awaiting: ["d@x.invalid"] } as never,
+      TODAY,
+    );
+    assert.deepEqual([issue.reviewers, issue.reviews, issue.awaiting], [[], [], []]);
+    assert.deepEqual(toPrQuery({ deadline: ["OVERDUE"] } as never, TODAY).deadline, []);
+  });
+
   it("leaves an unmentioned key empty, which filters by none of its values", () => {
-    assert.deepEqual(toQuery({ labels: ["bug"] }, TODAY).status, []);
-    assert.deepEqual(toQuery({ labels: ["bug"] }, TODAY).deadline, []);
+    assert.deepEqual(toIssueQuery({ labels: ["bug"] }, TODAY).status, []);
+    assert.deepEqual(toIssueQuery({ labels: ["bug"] }, TODAY).deadline, []);
   });
 
   it("always carries the day, so `overdue` is never a question with no answer", () => {
-    assert.equal(toQuery({ deadline: ["OVERDUE"] }, TODAY).today, TODAY);
+    assert.equal(toIssueQuery({ deadline: ["OVERDUE"] }, TODAY).today, TODAY);
   });
 });
