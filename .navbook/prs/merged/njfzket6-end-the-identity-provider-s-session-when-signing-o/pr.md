@@ -14,6 +14,9 @@ revisions:
   - head: 082fbc5741f3543197f2ecdbc0b437bf82338e83
     base: 7e18cf64b1d246d2fceace05d209c007a94bcc5e
     date: 2026-09-27T13:03:52Z
+merged:
+  date: 2026-09-27T13:04:47Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #icroff4l: **Sign out** on the web client only removed the stored token, so the identity provider's session cookie stayed. **Sign in again** then came straight back as the same account without asking.
