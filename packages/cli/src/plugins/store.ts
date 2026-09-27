@@ -128,11 +128,16 @@ function installArgs(specs: readonly string[]): string[] {
     // not, and a postinstall script is the classic way a package does
     // something nobody asked for. npm runs none of them here.
     "--ignore-scripts",
-    // The one that keeps a second `@navbook/core` out of the store. A plugin
+    // The pair that keeps a second `@navbook/core` out of the store. A plugin
     // declares core as a peer for its types; installing peers would give it a
     // copy of its own, and then `instanceof WorkspaceError` would be false
     // across the boundary and the YAML parser would be loaded twice.
+    // `--omit=peer` alone only leaves peers off the disk: npm still resolves
+    // them, from the registry, and refuses the install when a web half's
+    // optional framework peers do not reconcile. `--legacy-peer-deps` stops it
+    // resolving them at all — the host provides every one.
     "--omit=peer",
+    "--legacy-peer-deps",
     "--no-audit",
     "--no-fund",
     "--save-exact",

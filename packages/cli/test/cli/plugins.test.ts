@@ -9,7 +9,8 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { makeTempRepo, PACKAGE_ROOT, type TempRepo } from "../helpers/temprepo.ts";
@@ -564,6 +565,55 @@ describe("nav plugin", () => {
       const result = repo.nav(["plugin", "install"]);
       assert.equal(result.code, 0, result.stderr);
       assert.match(result.stdout, /Nothing to do/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("installs a plugin whose peers are the host's, and leaves them to the host", () => {
+    // A plugin names @navbook/core as a peer for its types, and a web half
+    // names its framework the same way, optionally. None of them belongs in
+    // the store — the running `nav` is the core — so npm must not so much as
+    // resolve them: a knowledge base whose optional Vue peers npm could not
+    // reconcile was refused outright. Offline, so resolving any peer at all
+    // would fail here rather than depend on what the registry holds today.
+    const repo = probeRepo({ declare: false });
+    try {
+      const pkg = join(repo.home, "peerful");
+      cpSync(PROBE, pkg, { recursive: true });
+      const manifest = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8"));
+      manifest.peerDependencies = {
+        "@navbook/core": "^0.4.0",
+        vue: "^3.5.0",
+        "@vue/apollo-composable": "^4.2.2",
+      };
+      manifest.peerDependenciesMeta = {
+        vue: { optional: true },
+        "@vue/apollo-composable": { optional: true },
+      };
+      writeFileSync(join(pkg, "package.json"), JSON.stringify(manifest, null, 2));
+      // A tarball, as a release smoke-tests and a registry serves: npm only
+      // links a directory, and never looks at a linked package's peers.
+      const packed = spawnSync("npm", ["pack", "--silent", "--pack-destination", repo.home], {
+        cwd: pkg,
+        encoding: "utf8",
+        env: { PATH: process.env.PATH, HOME: repo.home, npm_config_offline: "true" },
+      });
+      assert.equal(packed.status, 0, packed.stderr);
+      const tarball = join(repo.home, packed.stdout.trim());
+
+      const installed = repo.nav(["plugin", "install", tarball, "-y"], {
+        npm_config_offline: "true",
+      });
+      assert.equal(installed.code, 0, `${installed.stdout}${installed.stderr}`);
+      assert.match(installed.stdout, /Installed @navbook\/plugin-probe@1\.0\.0/);
+
+      const modules = join(repo.home, ".local", "share", "navbook", "plugins", "node_modules");
+      assert.ok(existsSync(join(modules, "@navbook", "plugin-probe")));
+      for (const peer of ["@navbook/core", "vue", "@vue/apollo-composable"]) {
+        assert.ok(!existsSync(join(modules, peer)), `${peer} was installed into the store`);
+      }
+      assert.match(repo.nav(["plugin", "list"]).stdout, /@navbook\/plugin-probe\s+1\.0\.0/);
     } finally {
       repo.cleanup();
     }
