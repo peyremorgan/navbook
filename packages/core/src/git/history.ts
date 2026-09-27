@@ -26,24 +26,91 @@ export interface FileVersion {
  * `pr.md` readable across its move from `prs/open/` to `prs/merged/`.
  */
 export function fileVersions(cwd: string, path: string): FileVersion[] {
+  return followFrom(cwd, "HEAD", path);
+}
+
+/**
+ * {@link fileVersions} from `rev` back.
+ *
+ * `nav pr merge` moves a pull request's files inside the merge commit, and
+ * `git log` does not diff a merge, so `--follow` never sees that rename: the
+ * history it gives opens on a later edit, or is empty when there was none. Its
+ * `-m` is no cure, because diffing a merge against the parent that lacks a file
+ * pairs it with whatever similar file that parent holds. So a history that does
+ * not open on an add, a rename or a copy is resumed from the merge by hand.
+ */
+function followFrom(cwd: string, rev: string, path: string): FileVersion[] {
   const output = gitMaybe(
-    ["log", "--follow", "--name-only", "--format=%x01%H%x02%aI", "--", path],
+    ["log", "--follow", "--name-status", "--format=%x01%H%x02%aI", rev, "--", path],
     { cwd },
   );
   if (output === null) return [];
 
   const versions: FileVersion[] = [];
+  let opening = "";
   for (const record of output.split(RECORD_SEPARATOR)) {
     if (record.trim() === "") continue;
     const [header, ...rest] = record.split("\n");
     const [sha, authored] = (header ?? "").split(FIELD_SEPARATOR);
     if (!sha || !authored) continue;
-    const names = rest.filter((line) => line.trim() !== "");
+    // `M\tpath`, `A\tpath`, or `R087\told\tnew`: the path is the last field.
+    const change = (rest.find((line) => line.trim() !== "") ?? "").split("\t");
     const date = new Date(authored);
     if (Number.isNaN(date.getTime())) continue;
-    versions.push({ sha, path: names[0] ?? path, authored: date });
+    versions.push({ sha, path: change.at(-1) || path, authored: date });
+    opening = change[0] ?? "";
   }
-  return versions.reverse();
+  versions.reverse();
+
+  if (/^[ARC]/.test(opening)) return versions;
+  const oldest = versions[0];
+  return [...throughMerge(cwd, oldest?.sha ?? rev, oldest?.path ?? path), ...versions];
+}
+
+/**
+ * The history of `path` up to and including the merge that brought it into
+ * `rev`'s line, for a history `--follow` cut short there.
+ *
+ * Without `--follow`, `git log` does list a merge that no parent shares the
+ * path with, so the oldest commit it names is that merge. The merge's diff
+ * against each parent says which one held the file, and under what name.
+ */
+function throughMerge(cwd: string, rev: string, path: string): FileVersion[] {
+  const output = gitMaybe(["log", "--format=%H%x02%aI%x02%P", rev, "--", path], { cwd });
+  const [sha, authored, parents] =
+    splitLines(output ?? "")
+      .at(-1)
+      ?.split(FIELD_SEPARATOR) ?? [];
+  const parentShas = (parents ?? "").split(" ").filter(Boolean);
+  if (!sha || !authored || parentShas.length < 2) return [];
+  const date = new Date(authored);
+  if (Number.isNaN(date.getTime())) return [];
+
+  const merge: FileVersion = { sha, path, authored: date };
+  for (const parent of parentShas) {
+    const from = renamedFrom(cwd, parent, sha, path);
+    if (from !== null) return [...followFrom(cwd, parent, from), merge];
+  }
+  // No parent held it under any name: the merge itself created it.
+  return [merge];
+}
+
+/** The path that became `path` between two commits, or null if none did. */
+function renamedFrom(cwd: string, from: string, to: string, path: string): string | null {
+  const output = gitMaybe(["diff", "--name-status", "-M", "-z", from, to], { cwd });
+  // `-z` puts every field in its own NUL-terminated slot: a rename or a copy is
+  // `R087`, the old path, the new path; anything else is a status and a path.
+  const fields = (output ?? "").split("\0");
+  for (let i = 0; i < fields.length; ) {
+    const status = fields[i] ?? "";
+    if (/^[RC]/.test(status)) {
+      if (fields[i + 2] === path) return fields[i + 1] ?? null;
+      i += 3;
+    } else {
+      i += 2;
+    }
+  }
+  return null;
 }
 
 /** File contents at a commit, or null when the path did not exist there. */
