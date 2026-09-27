@@ -13,6 +13,9 @@ revisions:
   - head: 6d65f5fc8503c1ef76a725366927a1b7ba61aab7
     base: 8e016f0ed50636051246556d0414131e17866828
     date: 2026-09-27T11:00:30Z
+merged:
+  date: 2026-09-27T11:01:01Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #gqu14qtl. D15 now reads the `plugins` declaration that spec 04 §4.3 and spec 02 §2.12 require it to check. This implements the plan in the issue's comments.
