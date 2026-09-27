@@ -64,7 +64,12 @@ export interface ReadTreeOptions {
  * an extension namespace (§2.12) or a feature's image (§2.11) is listed — which
  * is what `Repo.reserved` and `extraFiles` are made of — and never opened. A
  * read is remembered, since an entity file is asked for twice (to parse it and
- * to hash it). A file that cannot be read answers `undefined`.
+ * to hash it).
+ *
+ * A file that is asked for and cannot be read throws, as the eager read did:
+ * answering `undefined` would drop the entity from a tree that the server
+ * caches until HEAD moves, and that a mutation would then plan against. What
+ * changes is only that a file nobody asks for can no longer fail the command.
  */
 export function readNavTree(navRoot: string, opts: ReadTreeOptions = {}): NavTree {
   const paths = new Set<string>();
@@ -76,11 +81,7 @@ export function readNavTree(navRoot: string, opts: ReadTreeOptions = {}): NavTre
       if (!paths.has(path)) return undefined;
       let text = contents.get(path);
       if (text === undefined) {
-        try {
-          text = readFileSync(join(navRoot, ...path.split("/")), "utf8");
-        } catch {
-          return undefined;
-        }
+        text = readFileSync(join(navRoot, ...path.split("/")), "utf8");
         contents.set(path, text);
       }
       return text;
@@ -173,9 +174,9 @@ export function loadRepoForQuery(ws: WsCtx, query: Query, kind: EntityKind): Rep
  * say, which is a second answer to a question that has one.
  *
  * A path that cannot be read as a file — a directory wearing the name, or one
- * the process has no permission for — is treated as no marker at all, which is
- * exactly what `readNavTree` concludes about it: it walks files, so the same
- * path is simply absent from the tree `parseTree` judges. Agreeing with that
+ * the process has no permission for — is treated as no marker at all. For the
+ * directory that is exactly what `readNavTree` concludes: it lists files, so
+ * the path is simply absent from the tree `parseTree` judges. Agreeing with that
  * matters more than reporting it, since a repository whose `doctor` and whose
  * `pr list` disagreed about whether a policy exists would be worse than one
  * quietly counting by the defaults.

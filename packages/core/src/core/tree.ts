@@ -26,8 +26,7 @@ import { parseDirName, SLUG_PATTERN } from "./slug.ts";
  * others, so a lazy implementation never opens an extension namespace (§2.12)
  * or a feature's images (§2.11), whose bytes nothing here interprets. A
  * `Map<string, string>` satisfies it, which is what keeps the eager readers —
- * the index, the blobs of another branch — as they are. `get` answers
- * `undefined` for a listed path whose content could not be read.
+ * the index, the blobs of another branch — as they are.
  */
 export interface NavTree {
   keys(): Iterable<string>;
@@ -485,11 +484,9 @@ function parseOrReport(
   path: string,
   problems: StructuralProblem[],
 ): ParsedFile | null {
-  const text = files.get(path);
-  if (text === undefined) {
-    problems.push({ path, message: "file could not be read" });
-    return null;
-  }
+  // Read outside the `try`: a file that cannot be read is not one that failed
+  // to parse, and must fail the load rather than drop the entity from it.
+  const text = files.get(path) ?? "";
   try {
     return parseFile(text);
   } catch (error) {

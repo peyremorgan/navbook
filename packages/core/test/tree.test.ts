@@ -338,17 +338,16 @@ describe("readNavTree reads only what parseTree parses", () => {
     assert.deepEqual(repo.features[0]?.extraFiles, ["specs/auth/diagram.png"]);
   });
 
-  it("reports a file it must parse and cannot read, without throwing", { skip: asRoot }, () => {
+  it("still fails on a file it must parse and cannot read", { skip: asRoot }, () => {
+    // Not a problem to record and carry on from: the entity would be missing
+    // from a tree the server caches until HEAD moves.
     const dir = mkdtempSync(join(tmpdir(), "navbook-unreadable-"));
     try {
       const abs = join(dir, "issues", "open", "bqlybac0-x", "issue.md");
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, issue());
       chmodSync(abs, 0o000);
-      const repo = parseTree(readNavTree(dir));
-      assert.deepEqual(repo.problems, [
-        { path: "issues/open/bqlybac0-x/issue.md", message: "file could not be read" },
-      ]);
+      assert.throws(() => parseTree(readNavTree(dir)), { code: "EACCES" });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
