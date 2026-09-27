@@ -2,6 +2,7 @@
 title: The pre-commit hook blocks a commit on a non-format error when the existing hook uses set -e
 author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-20T12:35:56Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug, install]
 feature: cli
 ---
