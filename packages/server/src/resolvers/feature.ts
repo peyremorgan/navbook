@@ -7,7 +7,7 @@
  */
 
 import { featureCommits, featureMembers, toIsoSeconds } from "@navbook/core";
-import { run } from "../errors.ts";
+import { invalidInput, run } from "../errors.ts";
 import type {
   CommitResolvers,
   FeatureResolvers,
@@ -31,6 +31,11 @@ export const Feature: FeatureResolvers = {
     featureMembers(await ctx.repo(), feature.slug).prs.map((entity) => ({ entity, refs: [] })),
 
   commits: async (feature, args, ctx) => {
+    // The same refusal `Pr.commits` makes: `featureCommits` answers [] for a
+    // negative limit, which would read as a feature nothing has touched.
+    if (!Number.isInteger(args.limit) || args.limit < 0) {
+      throw invalidInput("limit takes a whole number of commits");
+    }
     const members = featureMembers(await ctx.repo(), feature.slug);
     // Under the lock but without a pull: a field must see the tree its parent
     // saw, and the parent's own read has already brought the clone up to date.

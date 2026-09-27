@@ -36,8 +36,8 @@ export function cmdIssueOpen(ctx: Ctx, title: string, opts: IssueOpenOptions): v
   if (title.trim() === "") fail("an issue needs a title");
   // Refused here rather than left to the file's own validation, for the reason
   // `--parent` is resolved here: being told a flag will not do is worth much
-  // more before an editor has been filled in than after.
-  if (opts.rank !== undefined && !Number.isFinite(opts.rank)) fail("--rank must be a number");
+  // more before an editor has been filled in than after. `--rank` is refused
+  // earlier still, by its parser (args.ts).
   if (opts.deadline !== undefined && !isCalendarDate(opts.deadline)) {
     fail("--deadline must be a calendar date, as YYYY-MM-DD");
   }

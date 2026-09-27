@@ -15,6 +15,7 @@ import {
   REVIEW_DECISIONS,
 } from "@navbook/core";
 import { Command, Option } from "commander";
+import { finiteNumber, wholeNumber } from "./args.ts";
 import { cmdComplete } from "./commands/complete.ts";
 import { cmdDoctor } from "./commands/doctor.ts";
 import {
@@ -175,7 +176,7 @@ export function buildProgram(getCtx: () => Ctx): Command {
   program
     .command("id")
     .description("mint and print a fresh Navbook ID")
-    .option("-n, --count <n>", "how many IDs to print", (value) => Number.parseInt(value, 10), 1)
+    .option("-n, --count <n>", "how many IDs to print", wholeNumber("IDs", 1), 1)
     .action((opts) => cmdId(getCtx(), opts));
 
   program
@@ -318,9 +319,7 @@ function buildFeatureCommand(getCtx: () => Ctx): Command {
     .argument("<slug>", "the feature's directory name")
     .description("render a feature, its documents, and what has touched it")
     .option("--json", "emit a single JSON object naming its issues and pull requests")
-    .option("--commits <n>", "recent commits to list (default 10)", (value) =>
-      value.trim() === "" ? Number.NaN : Number(value),
-    )
+    .option("--commits <n>", "recent commits to list (default 10)", wholeNumber("commits"))
     .action((slug: string, opts) => cmdFeatureShow(getCtx(), slug, opts));
 
   feature
@@ -379,12 +378,7 @@ function buildIssueCommand(getCtx: () => Ctx): Command {
     .option("--assignee <email>", "assign to a person (repeatable)", collect, [])
     .option("--milestone <name>", "milestone")
     .option("--feature <slug>", "attach it to a feature (repeatable)", collect, [])
-    // Number rather than parseInt, and blank rather than 0, for the reason
-    // `--depth` does it: a value the command must refuse has to reach it
-    // intact rather than arrive silently rounded or defaulted.
-    .option("--rank <n>", "where it sits in the queue; lower first", (value) =>
-      value.trim() === "" ? Number.NaN : Number(value),
-    )
+    .option("--rank <n>", "where it sits in the queue; lower first", finiteNumber)
     .option("--deadline <date>", "when the work is wanted, YYYY-MM-DD")
     .option("--parent <id>", "file it as a subtask of an existing issue")
     .option("--commit", commitHelp("issue"))
@@ -414,11 +408,11 @@ function buildIssueCommand(getCtx: () => Ctx): Command {
         `listing order: ${SORT_ORDERS.join(", ")} (default ${DEFAULT_SORT})`,
       ),
     configureShow: (command) =>
-      // Number, not parseInt: '2.5' has to reach the command as 2.5 so it can
-      // be refused, rather than being silently rounded to something valid.
       // No default here — `cmdShow` owns it, so every caller gets the same one.
-      command.option("--depth <n>", "levels of subtasks to render (default 1)", (value) =>
-        value.trim() === "" ? Number.NaN : Number(value),
+      command.option(
+        "--depth <n>",
+        "levels of subtasks to render (default 1)",
+        wholeNumber("levels"),
       ),
     configureDelete: (command) =>
       command.option("-r, --recursive", "delete its subtasks too, to any depth"),

@@ -217,7 +217,6 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
     return;
   }
   const depth = opts.depth ?? 1;
-  if (!Number.isInteger(depth) || depth < 0) fail("--depth takes a whole number of levels");
   // To stderr, so the detail itself reads the same wherever it came from.
   if (ref !== null) {
     ctx.stderr.write(

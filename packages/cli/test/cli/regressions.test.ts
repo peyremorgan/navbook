@@ -234,6 +234,21 @@ describe("ID minting", () => {
       repo.cleanup();
     }
   });
+
+  it("refuses a count that is not a whole number of IDs, rather than truncating it", () => {
+    const repo = makeNavRepo();
+    try {
+      // parseInt read '2.5' as 2 and '3abc' as 3, and printed that many (#kw143sq9).
+      for (const value of ["2.5", "3abc", "0", "-1", ""]) {
+        const result = repo.nav(["id", "--count", value], { NAV_IDS: "aaa11111,bbb22222" });
+        assert.equal(result.code, 1, `--count ${JSON.stringify(value)}`);
+        assert.match(result.stderr, /Expected a whole number of IDs, at least 1/);
+        assert.equal(result.stdout, "");
+      }
+    } finally {
+      repo.cleanup();
+    }
+  });
 });
 
 describe("nav install --completions", () => {

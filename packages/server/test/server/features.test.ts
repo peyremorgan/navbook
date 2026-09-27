@@ -437,6 +437,11 @@ describe("features", () => {
     assert.deepEqual(none.commits, []);
   });
 
+  it("rejects a limit that is not a count, as Pr.commits does", async () => {
+    const response = await h.gql(`query { feature(slug: "auth") { commits(limit: -1) { sha } } }`);
+    assert.equal(errorCode(response), "INVALID_INPUT");
+  });
+
   it("reports the hash each write in one request actually left behind", async () => {
     // GraphQL runs a document's mutations serially and completes each payload
     // before the next begins, so a hash worked out for the first write is

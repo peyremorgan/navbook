@@ -364,6 +364,20 @@ describe("nav feature list and show", () => {
     );
   });
 
+  it("refuses a commit count that is not a whole number", () => {
+    // '2.5' is the one that mattered: it used to reach git as `-n 2.5`, which
+    // git refuses, and render "recent commits (0)" with exit 0 (#kw143sq9).
+    for (const value of ["abc", "2.5", "-1", "", " "]) {
+      const result = repo.nav(["feature", "show", "auth", "--commits", value]);
+      assert.equal(result.code, 1, `--commits ${JSON.stringify(value)}`);
+      assert.match(
+        result.stderr,
+        /'--commits <n>' argument .* is invalid\. Expected a whole number of commits/,
+      );
+      assert.equal(result.stdout, "");
+    }
+  });
+
   it("says so when there is nothing to list", () => {
     const empty = makeNavRepo();
     try {

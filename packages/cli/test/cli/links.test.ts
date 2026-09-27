@@ -472,7 +472,10 @@ describe("nav issue show, with links", () => {
       for (const depth of ["-1", "2.5", "many", ""]) {
         const result = repo.nav(["issue", "show", "aaa1", "--depth", depth]);
         assert.equal(result.code, 1, `--depth ${JSON.stringify(depth)}`);
-        assert.match(result.stderr, /--depth takes a whole number/);
+        assert.match(
+          result.stderr,
+          /'--depth <n>' argument .* is invalid\. Expected a whole number of levels/,
+        );
       }
     } finally {
       repo.cleanup();

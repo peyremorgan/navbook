@@ -724,6 +724,12 @@ describe("nav issue rank and deadline", () => {
     try {
       zeroed.nav(["issue", "open", "Zero", "-m", "b", "--rank", "0"], { NAV_IDS: "aaaa0005" });
       assert.match(zeroed.nav(["issue", "show", "aaaa0005"]).stdout, /^rank:\s+0$/m);
+      // A position, not a count: negative decimals pass the parser too.
+      const negative = zeroed.nav(["issue", "open", "Neg", "-m", "b", "--rank", "-3.5"], {
+        NAV_IDS: "aaaa0006",
+      });
+      assert.equal(negative.code, 0, negative.stderr);
+      assert.match(zeroed.nav(["issue", "show", "aaaa0006"]).stdout, /^rank:\s+-3\.5$/m);
     } finally {
       zeroed.cleanup();
     }
@@ -750,7 +756,11 @@ describe("nav issue rank and deadline", () => {
         NAV_IDS: "bbbb0001",
       });
       assert.equal(result.code, 1, value);
-      assert.match(result.stderr, /--rank must be a number/, value);
+      assert.match(
+        result.stderr,
+        /'--rank <n>' argument .* is invalid\. Expected a number\./,
+        value,
+      );
     }
     assert.equal(existsSync(join(repo.dir, ".navbook/issues/open/bbbb0001-t")), false);
   });
