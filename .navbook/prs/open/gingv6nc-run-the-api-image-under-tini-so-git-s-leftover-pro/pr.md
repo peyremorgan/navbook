@@ -16,11 +16,12 @@ Fixes #rcsql1v9: the API container never reaped the zombie `git` processes that 
 
 ## Change
 
-- `packages/server/Dockerfile`: `apk add … tini`, and `ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]`. tini is PID 1, reaps orphans and forwards signals; `nav-server` is its child.
+- `packages/server/Dockerfile`: `apk add … tini`, and `ENTRYPOINT ["/sbin/tini", "-s", "--", "/entrypoint.sh"]`. tini is PID 1, reaps orphans and forwards signals; `nav-server` is its child. `-s` makes it a subreaper, so it still reaps when something else is PID 1.
 - `packages/server/docker/entrypoint.sh`: the header comment no longer says the server is PID 1.
-- `test/deploy/images.test.ts`: asserts the image installs tini and starts through it. It fails on `dev`.
+- `test/deploy/images.test.ts`: asserts the image installs tini and starts through it, with `-s`, handing over to `/entrypoint.sh`. It fails on `dev`.
+- `test/deploy/compose.test.ts`: refuses an `entrypoint:` on the `api` service, which would replace tini along with the rest.
 
-The fix goes in the image instead of Compose's `init: true` (the issue's first suggestion) so that the Kubernetes deployment in #d8l5m6ub gets it as well. A deployment that also sets `init: true` still works: tini just runs as a child of docker-init.
+The fix goes in the image instead of Compose's `init: true` (the issue's first suggestion) so that the Kubernetes deployment in #d8l5m6ub gets it as well. A deployment that also sets `init: true` still works: tini runs as a subreaper under docker-init, with 0 zombies and no warning (checked with `docker run --init`).
 
 ## Verification
 
@@ -33,8 +34,12 @@ Built `navbook-server:rcsql1v9` from this branch. Each image ran with its real e
 
 An entrypoint failure (no `NAVBOOK_REPO_URL`) still exits 1 through tini.
 
-- `node --test "test/deploy/**/*.test.ts"`: 60/60 pass. The 4 tests that read `packages/web/.output` need a web build and don't run in a worktree.
+- `node --test "test/deploy/**/*.test.ts"`: 61/61 pass. The 4 tests that read `packages/web/.output` need a web build and don't run in a worktree.
 - `biome check` is clean.
+
+## Out of scope
+
+The self-review found that git's detached gc can still be SIGKILLed on stop and leave lock files in the clone. That was already the case before this change, and fixing it has a latency trade-off, so it is filed as #cvb57nhm.
 
 ## After deploy
 
