@@ -115,7 +115,7 @@ It writes you the way the server's `people` answer already spells you, matched b
 
 ### Search by ID (#sfedl5jt, #x1nqfqsq)
 
-A bare query term now also matches an entity whose directory name, `<id>-<slug>`, starts with it, from four characters. A leading `#` is allowed. `bqly`, `"#bqlybac0"` and a whole directory name all find `#bqlybac0`. The ID match is anchored at the first character, so shorter terms and word searches return what they did before.
+A bare query term now also matches an entity whose directory name, `<id>-<slug>`, starts with it, from four characters. A leading `#` is allowed. `bqly`, `#bqlybac0` (quoted in a shell) and a whole directory name all find `#bqlybac0`. The ID match is anchored at the first character, so shorter terms and word searches return what they did before.
 
 The change is in core's shared query, so `nav issue list`, `nav pr list`, the API's filter and the web client's search box all gain it. Spec 04, `nav list --help`, the README, the schema's `EntityFilter.text`, the search box placeholder and the inbox's empty state describe it. Quote the `#` form in a shell, which would otherwise read it as a comment.
 
