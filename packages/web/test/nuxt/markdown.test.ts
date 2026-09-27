@@ -114,9 +114,9 @@ describe("renderMarkdown", () => {
     }
   });
 
-  it("links exactly the references nav doctor counts, fences and all", () => {
-    // D8 reads the raw Markdown; this reads what markdown-it made of it. A
-    // fence is where the two could part, so the document is mostly fences.
+  it("links exactly the references nav doctor counts, code and all", () => {
+    // D8 reads the raw Markdown; this reads what markdown-it made of it. Code
+    // is where the two could part, so the document is mostly fences and spans.
     const source = [
       "Before #t4mwvm2j.",
       "```",
@@ -133,12 +133,14 @@ describe("renderMarkdown", () => {
       "> ```",
       "",
       "After #icroff4l, and ```inline``` code is still prose: #kw143sq9.",
+      "",
+      "Run `nav pr show '#ozzaoa36'`, or ``a ` #gqu14qtl``; a stray ` leaves #r6l7w4hn.",
     ].join("\n");
     const linked = [...renderMarkdown(source).matchAll(/href="\/ref\/([a-z0-9]{8})"/g)].map(
       (match) => match[1],
     );
     assert.deepEqual(linked.sort(), extractProseRefs(source).sort());
-    assert.deepEqual(linked, ["icroff4l", "kw143sq9", "t4mwvm2j"]);
+    assert.deepEqual(linked, ["icroff4l", "kw143sq9", "r6l7w4hn", "t4mwvm2j"]);
   });
 
   it("leaves an escaped reference to the author who escaped it", () => {

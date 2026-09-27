@@ -29,6 +29,20 @@ describe("extractProseRefs", () => {
     assert.deepEqual(extractProseRefs("use `#bqlybac0` verbatim"), []);
   });
 
+  it("ignores references anywhere inside inline code, not just at its start", () => {
+    assert.deepEqual(extractProseRefs("run `nav pr show '#bqlybac0'` for #mz4kq1rv"), ["mz4kq1rv"]);
+    assert.deepEqual(extractProseRefs("``a ` #bqlybac0`` and `x`#mz4kq1rv"), ["mz4kq1rv"]);
+  });
+
+  it("reads a backtick nobody closed as text", () => {
+    assert.deepEqual(extractProseRefs("a stray ` then #mz4kq1rv"), ["mz4kq1rv"]);
+    assert.deepEqual(extractProseRefs("``x` #mz4kq1rv"), ["mz4kq1rv"]);
+  });
+
+  it("does not let a code span run across paragraphs", () => {
+    assert.deepEqual(extractProseRefs("a ` here\n\n#mz4kq1rv and ` there"), ["mz4kq1rv"]);
+  });
+
   it("ignores references inside a fenced code block", () => {
     const markdown = [
       "Before #mz4kq1rv.",

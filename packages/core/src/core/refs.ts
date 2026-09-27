@@ -22,10 +22,18 @@ const TRAILER_LINE = /^(Refs|Closes|Deletes):[ \t]*(.+?)[ \t]*$/gim;
  */
 const FENCE_LINE = /^[ \t>]*(`{3,}|~{3,})(.*)$/;
 
+/**
+ * A code span (CommonMark §6.1): a run of backticks, then anything up to a run
+ * of exactly as many, within one paragraph. Lookarounds make each run whole, so
+ * a run with no partner is literal text rather than the start of a shorter one.
+ */
+const CODE_SPAN = /(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g;
+
 /** Extract `#id` references from Markdown prose, ignoring English words. */
 export function extractProseRefs(markdown: string): string[] {
   const out = new Set<string>();
-  for (const match of withoutFences(markdown).matchAll(PROSE_REF)) {
+  const prose = withoutFences(markdown).replace(CODE_SPAN, " ");
+  for (const match of prose.matchAll(PROSE_REF)) {
     const id = match[2] as string;
     if (isId(id)) out.add(id);
   }
