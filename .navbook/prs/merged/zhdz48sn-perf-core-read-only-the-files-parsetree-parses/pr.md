@@ -13,6 +13,10 @@ revisions:
   - head: dca29cc9b3c705278d23d95804d4824e9ca6eeed
     base: 27e46ef43e1ebe2aaff472dd43e931e4d6caefef
     date: 2026-09-27T09:09:39Z
+merged:
+  date: 2026-09-27T09:44:24Z
+  by: Claude <noreply@anthropic.com>
+  commit: 72b7f18f012a145277369e522289877708aa8df9
 ---
 
 Fixes #egvv9205.
