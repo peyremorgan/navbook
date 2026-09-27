@@ -13,6 +13,9 @@ revisions:
   - head: fc3249982941f814c30e38dde5defc2d4fb1e6b9
     base: a37e22e99c3dd3223843c1f3e55237f98fb3f500
     date: 2026-09-27T12:10:34Z
+merged:
+  date: 2026-09-27T12:10:44Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes #zlr44nen (audit finding 01).
