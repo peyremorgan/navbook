@@ -2,14 +2,15 @@
  * Leaving a page that holds something typed and not yet saved.
  *
  * Every way out is covered by one of two guards, and these prove both from
- * the outside: a navigation inside the app — a sidebar link, a reference in a
- * preview, Back — asks in the app's own dialog, and so do the app's own ways
- * out of the document (signing out, and the redirect to the identity provider
- * when the API refuses the token). One the browser starts — a reload, a
- * closed tab — gets the browser's `beforeunload` prompt. What is never
- * asked about is a page with nothing unsaved on it, and the app's own
- * navigation once a save has landed. A refusal asks once, and not again
- * until the person has moved.
+ * the outside, on the host's own editors (the knowledge base proves its
+ * drafts in its own suite). A navigation inside the app — a sidebar link,
+ * Back — asks in the app's own dialog, and so do the app's own ways out of
+ * the document: signing out, and the redirect to the identity provider when
+ * the API refuses the token. One the browser starts — a reload, a closed
+ * tab — gets the browser's `beforeunload` prompt. What is never asked about
+ * is a page with nothing unsaved on it, and the app's own navigation once a
+ * save has landed. A refusal asks once, and not again until the person has
+ * moved.
  *
  * Nothing here saves an edit to the shared fixtures except the one filed
  * issue, which is new and named so that no other spec reads it.
@@ -17,8 +18,6 @@
 
 import type { Dialog, Page } from "@playwright/test";
 import { expect, test } from "./helpers/fixtures.ts";
-
-const SPEC = "/features/authentication/session-policy.md";
 
 /** Collect every browser dialog, answering each one as told. */
 function dialogs(page: Page, answer: "accept" | "dismiss"): Dialog[] {
@@ -30,67 +29,40 @@ function dialogs(page: Page, answer: "accept" | "dismiss"): Dialog[] {
   return seen;
 }
 
-test("asks before a sidebar link throws away a document being written", async ({
+test("asks before a sidebar link throws away a comment half written", async ({
   signedIn,
   stack,
 }) => {
-  await signedIn.goto(`${stack.appUrl}${SPEC}`);
-  await signedIn.getByTestId("edit-spec").click();
-  await signedIn.getByTestId("input-spec-body").fill("Three paragraphs nobody has saved.");
-
-  await signedIn.getByTestId("nav-issues").click();
-  await expect(signedIn.getByTestId("leave-dialog")).toBeVisible();
-  await expect(signedIn).toHaveURL(new RegExp(`${SPEC.replaceAll(".", "\\.")}$`));
-
-  // Staying keeps the editor and every word in it.
-  await signedIn.getByTestId("leave-stay").click();
-  await expect(signedIn.getByTestId("leave-dialog")).toHaveCount(0);
-  await expect(signedIn.getByTestId("input-spec-body")).toHaveValue(
-    "Three paragraphs nobody has saved.",
-  );
-
-  // Asking again and choosing to go does go.
-  await signedIn.getByTestId("nav-issues").click();
-  await signedIn.getByTestId("leave-discard").click();
-  await expect(signedIn).toHaveURL(/\/issues$/);
-});
-
-test("asks before a reference in the preview leaves the draft", async ({ signedIn, stack }) => {
-  await signedIn.goto(`${stack.appUrl}${SPEC}`);
-  await signedIn.getByTestId("edit-spec").click();
-  await signedIn.getByTestId("input-spec-body").fill("See #aaaa0001 for the details.");
-  await signedIn.getByTestId("spec-tab-preview").click();
-
-  await signedIn.getByTestId("spec-preview").locator("a.nav-reference").click();
-  await expect(signedIn.getByTestId("leave-dialog")).toBeVisible();
-  await signedIn.getByTestId("leave-stay").click();
-  await signedIn.getByTestId("spec-tab-write").click();
-  await expect(signedIn.getByTestId("input-spec-body")).toHaveValue(
-    "See #aaaa0001 for the details.",
-  );
-});
-
-test("does not ask when an editor is open with nothing changed", async ({ signedIn, stack }) => {
-  const seen = dialogs(signedIn, "dismiss");
-  await signedIn.goto(`${stack.appUrl}${SPEC}`);
-  await signedIn.getByTestId("edit-spec").click();
-
-  await signedIn.getByTestId("nav-issues").click();
-  await expect(signedIn).toHaveURL(/\/issues$/);
-  await expect(signedIn.getByTestId("leave-dialog")).toHaveCount(0);
-  expect(seen).toHaveLength(0);
-});
-
-test("asks before leaving a comment half written", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/issues/aaaa0001`);
   await signedIn.getByTestId("comment-body").fill("I was about to say something useful.");
 
   await signedIn.getByTestId("nav-prs").click();
   await expect(signedIn.getByTestId("leave-dialog")).toBeVisible();
+  await expect(signedIn).toHaveURL(/\/issues\/aaaa0001$/);
+
+  // Staying keeps the form and every word in it.
   await signedIn.getByTestId("leave-stay").click();
+  await expect(signedIn.getByTestId("leave-dialog")).toHaveCount(0);
   await expect(signedIn.getByTestId("comment-body")).toHaveValue(
     "I was about to say something useful.",
   );
+
+  // Asking again and choosing to go does go.
+  await signedIn.getByTestId("nav-prs").click();
+  await signedIn.getByTestId("leave-discard").click();
+  await expect(signedIn).toHaveURL(/\/prs$/);
+});
+
+test("does not ask when an editor is open with nothing changed", async ({ signedIn, stack }) => {
+  const seen = dialogs(signedIn, "dismiss");
+  await signedIn.goto(`${stack.appUrl}/issues/aaaa0001`);
+  await signedIn.getByTestId("edit-title").click();
+  await expect(signedIn.getByTestId("input-title")).toBeVisible();
+
+  await signedIn.getByTestId("nav-issues").click();
+  await expect(signedIn).toHaveURL(/\/issues$/);
+  await expect(signedIn.getByTestId("leave-dialog")).toHaveCount(0);
+  expect(seen).toHaveLength(0);
 });
 
 test("asks when Back would move to another issue on the same page", async ({ signedIn, stack }) => {
@@ -250,22 +222,6 @@ test("asks before leaving a refused edit that is kept on the page", async ({ sig
   await expect(signedIn.getByTestId("leave-dialog")).toBeVisible();
   await signedIn.getByTestId("leave-stay").click();
   await expect(signedIn.getByTestId("save-failed-title")).toBeVisible();
-});
-
-test("has the browser ask before a reload loses a document being added", async ({
-  signedIn,
-  stack,
-}) => {
-  await signedIn.goto(`${stack.appUrl}/features/billing`);
-  await signedIn.getByTestId("add-spec").click();
-  await signedIn.getByTestId("new-spec-body").fill("A document nobody has saved.");
-
-  const seen = dialogs(signedIn, "dismiss");
-  await signedIn.reload({ timeout: 3_000 }).catch(() => {
-    // Cancelled by the dismissed prompt, as above.
-  });
-  expect(seen.map((dialog) => dialog.type())).toEqual(["beforeunload"]);
-  await expect(signedIn.getByTestId("new-spec-body")).toHaveValue("A document nobody has saved.");
 });
 
 test("files an issue and lands on it without being asked", async ({ signedIn, stack }) => {

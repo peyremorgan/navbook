@@ -24,6 +24,11 @@ export interface Auth {
   login(returnTo?: string): Promise<void>;
   logout(): Promise<void>;
   /**
+   * True while `logout` is running: the token is going on purpose, so a
+   * refusal of it is not a reason to sign in, or to ask about leaving.
+   */
+  signingOut(): boolean;
+  /**
    * The server refused the signed-in account (`FORBIDDEN`): go to the page
    * that says so. The token is kept, since it is good, and signing in again
    * would only come back here.
@@ -129,6 +134,8 @@ export function useAuth(): Auth {
         state._navSigningOut = false;
       }
     },
+
+    signingOut: () => state._navSigningOut === true,
 
     async refused() {
       await navigateTo(NOT_ALLOWED, { replace: true });

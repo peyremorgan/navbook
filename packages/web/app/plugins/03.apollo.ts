@@ -99,6 +99,9 @@ export default defineNuxtPlugin((nuxtApp) => {
    * was saved, since the refused operation is otherwise never mentioned.
    */
   async function signInAgain(failure: ApiFailure): Promise<void> {
+    // Mid sign-out the token was dropped on purpose, and whatever was typed
+    // has already been asked about; `login` would decline to go anyway.
+    if (auth.signingOut()) return;
     const unsaved = nuxtApp.$unsaved;
     if (unsaved.dirty()) {
       if (!(await unsaved.confirmLeave())) {
