@@ -10,6 +10,9 @@ revisions:
   - head: 3ca7d700912a5efb241af4cb83c8203a0cc2ff71
     base: d27dc6ccd1c9c8c52fc04ff1cee449084406c805
     date: 2026-09-27T12:35:21Z
+  - head: 3ba95ea560fc46b9b4763ff011ced3bef9629be9
+    base: d27dc6ccd1c9c8c52fc04ff1cee449084406c805
+    date: 2026-09-27T12:52:45Z
 ---
 
 Fixes #rcsql1v9: the API container never reaped the zombie `git` processes that git's own background gc and maintenance leave to PID 1.
