@@ -8,7 +8,7 @@
  */
 
 import { parseFile, readRevisions } from "../core/files.ts";
-import { parseIso } from "../core/time.ts";
+import { calendarDateOf, parseIso } from "../core/time.ts";
 import { allEntities, type Repo } from "../core/tree.ts";
 import {
   checkRevisionsAppendOnly,
@@ -30,6 +30,14 @@ import { repoPath } from "./workspace.ts";
  * catching a timestamp that was copied or typed from the wrong year.
  */
 export const TIMESTAMP_SKEW_HOURS = 48;
+
+/**
+ * A D10 gap in whole hours for the message, rounded up: rounding down would
+ * word a 48.5h gap as "48h from the commit … more than 48h".
+ */
+function skewHours(deltaHours: number): string {
+  return `${Math.ceil(deltaHours)}h`;
+}
 
 export function runHistoryChecks(ws: WsCtx, repo: Repo): Diagnostic[] {
   return [
@@ -122,7 +130,7 @@ function checkTimestamps(ws: WsCtx, repo: Repo): Diagnostic[] {
             check: "D10",
             level: "warning",
             path: entity.filePath,
-            message: `'created: ${entity.fm.created}' is ${skew.deltaHours}h from the commit that added it (${added.authored.toISOString().slice(0, 10)}), more than ${TIMESTAMP_SKEW_HOURS}h`,
+            message: `'created: ${entity.fm.created}' is ${skewHours(skew.deltaHours)} from the commit that added it (${calendarDateOf(added.authored)}), more than ${TIMESTAMP_SKEW_HOURS}h`,
           });
         }
       }
@@ -137,7 +145,7 @@ function checkTimestamps(ws: WsCtx, repo: Repo): Diagnostic[] {
         check: "D10",
         level: "warning",
         path: comment.path,
-        message: `the filename timestamp is ${skew.deltaHours}h from the commit that added it (${added.authored.toISOString().slice(0, 10)}), more than ${TIMESTAMP_SKEW_HOURS}h`,
+        message: `the filename timestamp is ${skewHours(skew.deltaHours)} from the commit that added it (${calendarDateOf(added.authored)}), more than ${TIMESTAMP_SKEW_HOURS}h`,
       });
     }
   }

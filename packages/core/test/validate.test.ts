@@ -772,7 +772,13 @@ describe("checkTimestampSkew", () => {
   it("rejects timestamps beyond it, in either direction, saying by how much", () => {
     const a = new Date("2026-08-02T09:00:00Z");
     const b = new Date("2026-08-10T09:30:00Z");
-    assert.deepEqual(checkTimestampSkew(a, b, 48), { ok: false, deltaHours: 192 });
-    assert.deepEqual(checkTimestampSkew(b, a, 48), { ok: false, deltaHours: 192 });
+    assert.deepEqual(checkTimestampSkew(a, b, 48), { ok: false, deltaHours: 192.5 });
+    assert.deepEqual(checkTimestampSkew(b, a, 48), { ok: false, deltaHours: 192.5 });
+  });
+
+  it("rejects a gap just past the threshold, and leaves it unrounded", () => {
+    const a = new Date("2026-09-01T09:00:00Z");
+    const b = new Date("2026-09-03T09:30:00Z");
+    assert.deepEqual(checkTimestampSkew(a, b, 48), { ok: false, deltaHours: 48.5 });
   });
 });

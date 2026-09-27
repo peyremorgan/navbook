@@ -617,7 +617,7 @@ export function checkRevisionsAppendOnly(
  * that added it, in either direction. The threshold is the implementation's to
  * choose — spec 04 §4.3 requires only that it be documented — and
  * `TIMESTAMP_SKEW_HOURS` in `workspace/history-checks.ts` is the reference one.
- * A failure carries the whole hours between the two, for the diagnostic.
+ * A failure carries the gap in hours, unrounded, for the caller to word.
  */
 export function checkTimestampSkew(
   frontmatterIso: Date,
@@ -625,9 +625,7 @@ export function checkTimestampSkew(
   thresholdHours: number,
 ): { ok: true } | { ok: false; deltaHours: number } {
   const deltaHours = Math.abs(frontmatterIso.getTime() - gitAuthoredIso.getTime()) / 3_600_000;
-  return deltaHours <= thresholdHours
-    ? { ok: true }
-    : { ok: false, deltaHours: Math.floor(deltaHours) };
+  return deltaHours <= thresholdHours ? { ok: true } : { ok: false, deltaHours };
 }
 
 /** Where a merged-but-unarchived pull request should be moved (check D9). */

@@ -2141,7 +2141,10 @@ describe("history-based doctor checks", () => {
 
       const result = repo.nav(["doctor"]);
       assert.equal(result.code, 0, "D10 is a warning");
-      assert.match(result.stdout, /D10/);
+      assert.match(
+        result.stdout,
+        /D10 .*'created: 2019-01-01T00:00:00Z' is [1-9]\d*h from the commit that added it \(\d{4}-\d{2}-\d{2}\), more than 48h/,
+      );
     } finally {
       repo.cleanup();
     }
