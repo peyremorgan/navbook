@@ -2,6 +2,7 @@
 title: Listing truncation splits surrogate pairs and miscounts wide characters
 author: Morgan PEYRE <morgan.peyre@brickcode.tech>
 created: 2026-09-20T12:38:00Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug, cli]
 feature: cli
 ---
