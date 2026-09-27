@@ -5,6 +5,7 @@ created: 2026-09-20T12:35:22Z
 assignee: Claude <noreply@anthropic.com>
 labels: [bug]
 feature: [server, format]
+resolution: fixed
 ---
 
 `EntityFilter` carries three terms that describe something only a pull request has — `reviewers`, `reviews`, `awaiting` — and one that describes something only an issue has, `deadline`. The `prs` resolver rejects `deadline`. The `issues` resolver rejects nothing.
