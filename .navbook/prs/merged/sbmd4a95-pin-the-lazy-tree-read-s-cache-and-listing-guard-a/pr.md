@@ -16,6 +16,9 @@ revisions:
   - head: f1a374cb1d9822f1d27bb62be518c662a991ea72
     base: 86ad414c8bbcbb0981eae66e832f29f32f363204
     date: 2026-09-27T19:28:24Z
+merged:
+  date: 2026-09-27T19:28:31Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Follow-up to #egvv9205. It adds the two tests worth keeping from the superseded `#d0jz7ovl` (on its own branch), and fixes the gap that reviewing them turned up.
