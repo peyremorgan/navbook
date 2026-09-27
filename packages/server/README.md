@@ -218,6 +218,11 @@ Three mutations have a shape worth knowing:
   rank wants: neither has read the file, and neither needs to. A hash this
   server cannot resolve — from a clone it has not fetched — is stale by
   definition.
+- **Every `baseSha`** — issue, pull request, feature or document — is a hash
+  of the file's text, worked out the same way for all four. It is shaped like
+  a git blob hash and is not git's name for the stored object: the two differ
+  in a repository with a clean filter, end-of-line conversion or SHA-256
+  objects. Hand it back unchanged; nothing else about it is a contract.
 
 ### Features
 

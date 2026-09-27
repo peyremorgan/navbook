@@ -34,7 +34,6 @@ import {
   type SpecRecord,
 } from "../core/tree.ts";
 import { type CommitSummary, searchCommits } from "../git/history.ts";
-import { hashObject } from "../git/index-ops.ts";
 import {
   absPath,
   loadRepo,
@@ -229,7 +228,9 @@ export function addSpec(
 
 export interface EditOptions extends CommitOptions {
   /**
-   * The blob hash the editor started from.
+   * The `baseSha` the editor started from: `blobSha` of the text it read, as
+   * the record carries it — not `git hash-object`, which differs in a
+   * repository with filters, end-of-line conversion or SHA-256 objects.
    *
    * Given, a write that would overwrite somebody else's is refused instead
    * (spec 06 §6.3: conflicts surface, they are not resolved). Absent, the write
@@ -247,7 +248,7 @@ export function editFeature(
   opts: EditOptions,
 ): { feature: FeatureRecord; run: RunPlanResult } {
   const feature = findFeature(ws, slug);
-  assertUnchanged(ws, feature.filePath, `${feature.slug}/${FEATURE_FILE}`, opts.baseSha);
+  assertUnchanged(feature.blobSha, `${feature.slug}/${FEATURE_FILE}`, opts.baseSha);
   return {
     feature,
     run: runPlan(ws, planFeatureEdit(feature, content), { commit: opts.commit }),
@@ -264,7 +265,7 @@ export function editSpec(
 ): { feature: FeatureRecord; spec: SpecRecord; run: RunPlanResult } {
   const feature = findFeature(ws, slug);
   const spec = resolveSpec(feature, fileName);
-  assertUnchanged(ws, spec.path, `${feature.slug}/${spec.fileName}`, opts.baseSha);
+  assertUnchanged(spec.blobSha, `${feature.slug}/${spec.fileName}`, opts.baseSha);
   return {
     feature,
     spec,
@@ -277,18 +278,14 @@ export function editSpec(
  *
  * Checked before anything is written, so a refusal leaves the tree exactly as
  * it was and the caller still holds the only copy of what they wrote.
+ *
+ * `current` is the hash the record carries, taken of the text this very load
+ * parsed: there is no second read to disagree with the first, and it is the
+ * same token `Issue.baseSha` is, worked out the same way (`core/hash.ts`).
  */
-function assertUnchanged(
-  ws: WsCtx,
-  filePath: string,
-  describe: string,
-  baseSha: string | undefined,
-): void {
+function assertUnchanged(current: string, describe: string, baseSha: string | undefined): void {
   if (baseSha === undefined) return;
-  // A file that has gone is not the file the editor started from either, so a
-  // hash git cannot work out counts as changed rather than as unchanged.
-  const current = hashObject(ws.repoRoot, absPath(ws, filePath));
-  if (current !== null && current === baseSha) return;
+  if (current === baseSha) return;
   wsFail("stale-content", `${describe} changed since you opened it`, [
     "reload it and apply your change to what it says now",
   ]);

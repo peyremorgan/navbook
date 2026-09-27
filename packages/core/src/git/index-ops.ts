@@ -44,10 +44,12 @@ export function uncommittedPaths(cwd: string, pathspecs: readonly string[]): str
 /**
  * Blob hashes of files as they stand on disk, keyed by the path asked for.
  *
- * Asked of git rather than computed here, because the answer depends on the
+ * The name git's object store would give each file — which depends on the
  * repository: which hash algorithm it uses, and which filters its attributes
- * apply. A hash worked out in this process would be right for most
- * repositories and quietly wrong for the rest.
+ * apply — and so asked of git rather than computed here. That is not what a
+ * `baseSha` is: that one names a version of the text, whatever the repository
+ * would store for it, and is `core/hash.ts`'s `blobSha`. Reach for this only
+ * when the object store's own name is wanted.
  *
  * Batched, since the caller usually wants a directory's worth at once and one
  * subprocess is the difference between a listing costing one and costing one

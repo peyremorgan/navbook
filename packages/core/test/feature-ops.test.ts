@@ -12,8 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { newFeatureFile, newIssueFile, newSpecFile } from "../src/core/files.ts";
+import { blobSha } from "../src/core/hash.ts";
 import { git } from "../src/git/exec.ts";
-import { hashObject } from "../src/git/index-ops.ts";
 import {
   addSpec,
   applyFeatureEdit,
@@ -260,6 +260,12 @@ describe("adding and editing documents", () => {
 });
 
 describe("refusing a write that would overwrite somebody else's", () => {
+  const specHash = (ws: WsCtx): string => {
+    const spec = findFeature(ws, "auth").specs.find((s) => s.fileName === "login-flow.md");
+    assert.ok(spec, "login-flow.md is one of auth's documents");
+    return spec.blobSha;
+  };
+
   it("takes the hash the editor started from and refuses a later one", () => {
     inWorkspace((ws, dir) => {
       create(ws, "Authentication", "auth");
@@ -273,7 +279,7 @@ describe("refusing a write that would overwrite somebody else's", () => {
         { commit: true },
       );
       const path = join(dir, ".navbook/specs/auth/login-flow.md");
-      const stale = hashObject(dir, path) as string;
+      const stale = specHash(ws);
 
       // Somebody else writes, as a peer's push would once it was merged in.
       editSpec(ws, "auth", "login-flow.md", newSpecFile({ title: "Login flow", body: "Theirs." }), {
@@ -295,7 +301,7 @@ describe("refusing a write that would overwrite somebody else's", () => {
       assert.match(readFileSync(path, "utf8"), /Theirs\./);
 
       // With the hash it actually has, the same write goes through.
-      const fresh = hashObject(dir, path) as string;
+      const fresh = specHash(ws);
       editSpec(ws, "auth", "login-flow.md", newSpecFile({ title: "Login flow", body: "Mine." }), {
         commit: true,
         baseSha: fresh,
@@ -305,9 +311,9 @@ describe("refusing a write that would overwrite somebody else's", () => {
   });
 
   it("guards the identity card the same way", () => {
-    inWorkspace((ws, dir) => {
+    inWorkspace((ws) => {
       create(ws, "Authentication", "auth");
-      const stale = hashObject(dir, join(dir, ".navbook/specs/auth/feature.md")) as string;
+      const stale = findFeature(ws, "auth").blobSha;
       editFeature(ws, "auth", featureText(ws, "Authentication", "Theirs."), { commit: true });
       assert.throws(
         () =>
@@ -317,6 +323,49 @@ describe("refusing a write that would overwrite somebody else's", () => {
           }),
         (error: WorkspaceError) => error.code === "stale-content",
       );
+    });
+  });
+});
+
+describe("the hash a feature carries", () => {
+  it("is a hash of its text, whatever git would store for it", () => {
+    inWorkspace((ws, dir) => {
+      create(ws, "Authentication", "auth");
+      // A CRLF file in a checkout that stores LF: git's name for the file is
+      // the LF blob, and an entity's hash is of the CRLF text on disk.
+      git(["config", "core.autocrlf", "true"], { cwd: dir });
+      const path = join(dir, ".navbook/specs/auth/feature.md");
+      const crlf = readFileSync(path, "utf8").replace(/\n/g, "\r\n");
+      writeFileSync(path, crlf);
+      assert.notEqual(git(["hash-object", path], { cwd: dir }).trim(), blobSha(crlf));
+
+      const feature = findFeature(ws, "auth");
+      assert.equal(feature.blobSha, blobSha(crlf));
+      editFeature(ws, "auth", featureText(ws, "Authentication", "Mine."), {
+        commit: true,
+        baseSha: feature.blobSha,
+      });
+      assert.match(readFileSync(path, "utf8"), /Mine\./);
+    });
+  });
+
+  it("is of the text the record was parsed from, not the file as it is later", () => {
+    inWorkspace((ws, dir) => {
+      create(ws, "Authentication", "auth");
+      const seen = findFeature(ws, "auth");
+      const path = join(dir, ".navbook/specs/auth/feature.md");
+      const original = readFileSync(path, "utf8");
+      writeFileSync(path, featureText(ws, "Authentication", "Behind its back."));
+      assert.equal(seen.blobSha, blobSha(original));
+      assert.throws(
+        () =>
+          editFeature(ws, "auth", featureText(ws, "Authentication", "Mine."), {
+            commit: true,
+            baseSha: seen.blobSha,
+          }),
+        (error: WorkspaceError) => error.code === "stale-content",
+      );
+      assert.match(readFileSync(path, "utf8"), /Behind its back\./);
     });
   });
 });

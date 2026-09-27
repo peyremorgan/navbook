@@ -293,7 +293,8 @@ export type Feature = {
   /** RFC 5322 address as stored in frontmatter: `Name <email>`. */
   author: Scalars['String']['output'];
   /**
-   * The blob hash of `feature.md` as it now stands.
+   * A token for the version of `feature.md` this was read from, computed as
+   * `Issue.baseSha` is.
    *
    * Hand it back as `baseSha` when editing, and an edit made against an older
    * version is refused rather than landed on top of somebody else's.
@@ -340,7 +341,13 @@ export type Issue = Entity & {
   assignees: Array<Scalars['String']['output']>;
   author: Scalars['String']['output'];
   /**
-   * The blob hash of `issue.md` as it now stands.
+   * A token for the version of `issue.md` this was read from.
+   *
+   * Opaque: its only contract is that handing it back unchanged names the same
+   * text. It is shaped like a git blob hash and is not one — git applies
+   * `.gitattributes` filters and end-of-line conversion that this does not, and
+   * may use SHA-256 — so the two differ in a repository that configures either.
+   * `Pr`, `Feature` and `Spec` compute theirs the same way.
    *
    * Hand it back as `baseSha` when editing a field from a rendered value, and an
    * edit made against an older version of that field is refused rather than
@@ -554,7 +561,7 @@ export type Pr = Entity & {
   archived: Scalars['Boolean']['output'];
   assignees: Array<Scalars['String']['output']>;
   author: Scalars['String']['output'];
-  /** The blob hash of `pr.md` as it now stands; see `Issue.baseSha`. */
+  /** A token for the version of `pr.md` this was read from; see `Issue.baseSha`. */
   baseSha: Scalars['String']['output'];
   body: Scalars['String']['output'];
   /**
@@ -760,7 +767,7 @@ export type Revision = {
 /** One of a feature's specification documents (spec 02 §2.11). */
 export type Spec = {
   __typename?: 'Spec';
-  /** The blob hash of this file as it now stands; see `Feature.baseSha`. */
+  /** A token for the version of this file it was read from; see `Feature.baseSha`. */
   baseSha: Scalars['String']['output'];
   /** Markdown body, trimmed. */
   body: Scalars['String']['output'];
@@ -829,7 +836,7 @@ export type UpdateIssueInput = {
    * `STALE_CONTENT` when a field it names has changed since — and only then, so
    * a label set on an issue somebody has just retitled still lands. The refusal
    * lists the fields that moved in `extensions.moved`, spelled as this input
-   * spells them. A hash this server cannot resolve is stale by definition.
+   * spells them. A token this server cannot resolve is stale by definition.
    */
   baseSha?: InputMaybe<Scalars['String']['input']>;
   body?: InputMaybe<Scalars['String']['input']>;
