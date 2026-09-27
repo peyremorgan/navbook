@@ -760,13 +760,19 @@ describe("checkTimestampSkew", () => {
   it("accepts timestamps within the threshold", () => {
     const a = new Date("2026-08-02T09:00:00Z");
     const b = new Date("2026-08-02T20:00:00Z");
-    assert.equal(checkTimestampSkew(a, b, 48), true);
+    assert.deepEqual(checkTimestampSkew(a, b, 48), { ok: true });
   });
 
-  it("rejects timestamps beyond it, in either direction", () => {
+  it("accepts a delta exactly at the threshold", () => {
     const a = new Date("2026-08-02T09:00:00Z");
-    const b = new Date("2026-08-10T09:00:00Z");
-    assert.equal(checkTimestampSkew(a, b, 48), false);
-    assert.equal(checkTimestampSkew(b, a, 48), false);
+    const b = new Date("2026-08-04T09:00:00Z");
+    assert.deepEqual(checkTimestampSkew(a, b, 48), { ok: true });
+  });
+
+  it("rejects timestamps beyond it, in either direction, saying by how much", () => {
+    const a = new Date("2026-08-02T09:00:00Z");
+    const b = new Date("2026-08-10T09:30:00Z");
+    assert.deepEqual(checkTimestampSkew(a, b, 48), { ok: false, deltaHours: 192 });
+    assert.deepEqual(checkTimestampSkew(b, a, 48), { ok: false, deltaHours: 192 });
   });
 });

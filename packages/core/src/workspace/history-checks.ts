@@ -115,25 +115,29 @@ function checkTimestamps(ws: WsCtx, repo: Repo): Diagnostic[] {
     const created = typeof entity.fm.created === "string" ? parseIso(entity.fm.created) : null;
     if (created) {
       const added = addedAt(ws.repoRoot, repoPath(ws.navDir, entity.filePath));
-      if (added && !checkTimestampSkew(created, added.authored, TIMESTAMP_SKEW_HOURS)) {
-        out.push({
-          check: "D10",
-          level: "warning",
-          path: entity.filePath,
-          message: `'created: ${entity.fm.created}' is more than ${TIMESTAMP_SKEW_HOURS}h from the commit that added it (${added.authored.toISOString().slice(0, 10)})`,
-        });
+      if (added) {
+        const skew = checkTimestampSkew(created, added.authored, TIMESTAMP_SKEW_HOURS);
+        if (!skew.ok) {
+          out.push({
+            check: "D10",
+            level: "warning",
+            path: entity.filePath,
+            message: `'created: ${entity.fm.created}' is ${skew.deltaHours}h from the commit that added it (${added.authored.toISOString().slice(0, 10)}), more than ${TIMESTAMP_SKEW_HOURS}h`,
+          });
+        }
       }
     }
 
     for (const comment of entity.comments) {
       const added = addedAt(ws.repoRoot, repoPath(ws.navDir, comment.path));
       if (!added) continue;
-      if (checkTimestampSkew(comment.date, added.authored, TIMESTAMP_SKEW_HOURS)) continue;
+      const skew = checkTimestampSkew(comment.date, added.authored, TIMESTAMP_SKEW_HOURS);
+      if (skew.ok) continue;
       out.push({
         check: "D10",
         level: "warning",
         path: comment.path,
-        message: `the filename timestamp is more than ${TIMESTAMP_SKEW_HOURS}h from the commit that added it (${added.authored.toISOString().slice(0, 10)})`,
+        message: `the filename timestamp is ${skew.deltaHours}h from the commit that added it (${added.authored.toISOString().slice(0, 10)}), more than ${TIMESTAMP_SKEW_HOURS}h`,
       });
     }
   }

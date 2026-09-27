@@ -1,0 +1,9 @@
+spec-version: 1
+description: D10 - a timestamp a year from the commit that added it is a warning, for the frontmatter and a comment filename alike; the skew is far beyond any threshold, so the case holds any implementation to the check and none to the reference 48 hours
+init: {from: tree, date: 2026-09-01T10:00:00Z}
+run: {command: [doctor, --json]}
+expect:
+  exit: 0
+  diagnostics:
+    - {check: D10, level: warning, path: .navbook/issues/open/bqlybac0-login-timeout/issue.md}
+    - {check: D10, level: warning, path: .navbook/issues/open/bqlybac0-login-timeout/comments/2025-09-01T091500Z-t5kr1gq6.md}
