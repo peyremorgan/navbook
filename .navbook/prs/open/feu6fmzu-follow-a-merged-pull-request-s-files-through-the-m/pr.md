@@ -22,30 +22,44 @@ Fixes #f2dnig9s. `nav doctor` on `dev` gave two D10 warnings, for #x1nqfqsq and 
 
 ## Change
 
-`packages/core/src/git/history.ts`: `fileVersions` still runs `git log --follow`, now with `--name-status`. A complete history opens on an `A`, `R` or `C`. If it opens on anything else, or is empty, the history was cut short at a merge, and `throughMerge` fills in the rest:
+In `packages/core/src/git/history.ts`, `fileVersions` still runs `git log --follow`, now with `-z --name-status`.
 
-1. Plain `git log -- <path>` does list a merge whose parents both lack the path, so the oldest commit it names is that merge.
-2. The merge's `git diff -M` against each parent gives the file's earlier name.
-3. The history continues from that parent under that name, recursively.
+- **Complete histories.** A history that opens on an `A` (add) or a `C` (copy) is complete.
+- **Copies.** `--follow` reads a new file that closely resembles an older one as a copy, and would otherwise continue into the older file's history. A copy is where a file begins, so the history stops there.
+- **Resuming.** Any other opening (an edit, a rename, or nothing at all) means the history was cut at a merge. `throughMerge` resumes from the parent of the oldest commit, under the path the file had there:
+  1. `git log -n1 -- <path>` names the nearest commit that brought the path in. When no parent holds the path, that commit is the merge.
+  2. The merge is diffed against each parent, last parent first. The parent whose diff shows the path as a modification or the highest-scoring rename wins. An exact match ends the search.
+  3. The history continues from that parent under that name. This is recursive, so chained moves work.
+- **Caching.** Each merge-against-parent diff is cached, keeping the last 32. Every file a merge moved asks for the same diff.
 
-I first tried `git log --follow -m`, and it was wrong. Diffed against the parent that lacks the file, the merge pairs it with any similar file that parent holds. In this repository, a comment on #cl15lj69 was matched to a 54%-similar comment on #zno8oe2q, and D10 reported it as 207h off. The third test below covers that case.
+I first tried `git log --follow -m`, and it was wrong. Diffed against the parent that lacks the file, the merge pairs it with any similar file that parent holds. That is why the parents are compared by score here.
 
 ## Tests
 
 In `packages/core/test/history.test.ts`, each test builds a real repository:
 
-- a file moved inside a merge with no later edit (the empty-history case)
-- the same with a later edit (the #z3j95v3e case)
-- a later unrelated merge whose other side holds a similar file (the `-m` case)
+- a move inside a merge with no later edit
+- the same with a later edit
+- a lookalike in the first parent that the branch deleted
+- a rename after the merge move
+- two merge-time moves in a row
+- a new file that git reads as a copy
+- a later unrelated merge
 - a path no commit has held
-
-The first two fail on `dev`.
 
 ## Verification
 
-- `nav doctor` from this branch on this tree: both D10 warnings are gone and nothing new appears. The D8 count is unchanged; #t1kpljkt covers those.
+- `nav doctor` from this branch on current `dev`: both D10 warnings are gone and nothing new appears. That includes a #cl15lj69 comment that an intermediate version had mispaired.
 - `biome check .` and `tsc --noEmit` (root and core) are clean.
-- Suites: core 767, cli 357, server 375, conformance 119, all passing.
-- `nav doctor` takes 8.5s before and 8.9s after. The fallback runs only for histories that were cut short.
+- Suites: core 804, cli 363, server 377, conformance 119, all passing.
+- `nav doctor` takes 8.0s before and 9.6s after, because merged-PR comments that used to go undated now go through the fallback.
+
+## Review
+
+`/code-review high` found six problems in revision 1: the first parent was trusted, a rename opening was trusted, the oldest commit was taken instead of the nearest merge, diffs were repeated, paths could come back quoted, and there were too few tests. All are fixed in revision 2, as described above.
+
+Two review points I didn't adopt:
+- **Parsing `git diff` in `diff.ts`.** `diff.ts` imports from `history.ts`, and its `ChangedFile` doesn't carry the similarity score the parent choice needs.
+- **Mapping `merged/<dir>` back to `open/<dir>` directly.** `fileVersions` is plain git and knows nothing about entity layout. Every merge `nav pr merge` makes is an exact rename, so the score is never in doubt.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
