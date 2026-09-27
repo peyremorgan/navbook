@@ -203,6 +203,20 @@ value every built-in verb produces — and hands it to `runPlan`. That is not a
 formality: it is how a plugin's changes get `--commit`, the staged-changes
 guard and the commit message conventions without implementing any of them.
 
+On the server, a resolver reads the tree through the request's context rather
+than parsing it itself, so that every field of a request — and every request
+since the tree last changed — shares one parse:
+
+- a root field reads inside `ctx.sync.read(() => …)`, which brings the clone
+  up to date first, and takes the tree from `ctx.loadRepo(scope)`, where
+  `scope` names whose comments it needs: `"none"`, `"prs"` or `"all"`;
+- a field beneath one reads `await ctx.repo()`, the tree its parent read;
+- an entity read without its comments answers them through
+  `await ctx.commented(entity)`.
+
+A root field that used `ctx.repo()` alone would answer from whatever the clone
+last fetched, and miss what somebody pushed a moment ago.
+
 ### The web half
 
 `./web` is a [Nuxt layer](https://nuxt.com/docs/getting-started/layers): a
