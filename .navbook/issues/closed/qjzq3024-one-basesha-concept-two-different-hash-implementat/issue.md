@@ -5,6 +5,7 @@ created: 2026-09-20T12:39:10Z
 assignee: Claude <noreply@anthropic.com>
 labels: [bug]
 feature: [server, format]
+resolution: fixed
 ---
 
 The API exposes one field on four types — `Issue.baseSha`, `Pr.baseSha`, `Feature.baseSha`, `Spec.baseSha` — described in the schema in the same words ("The blob hash of `issue.md` as it now stands", "The blob hash of `feature.md` as it now stands"). They are computed two different ways.
