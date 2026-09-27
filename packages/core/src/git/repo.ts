@@ -309,6 +309,23 @@ export function worktreeHolding(cwd: string, branch: string): string | null {
 }
 
 /**
+ * Check `branch` out into a new worktree at `path`, which must not exist or be
+ * empty. A branch another worktree already has is refused by git, as it should
+ * be: two checkouts of one branch each hold an index the other cannot see.
+ */
+export function addWorktree(cwd: string, path: string, branch: string): void {
+  git(["worktree", "add", "--quiet", path, branch], { cwd });
+}
+
+/**
+ * Remove the worktree at `path` and its directory. `force` discards whatever
+ * it still holds, so a caller passes it only for a worktree it created itself.
+ */
+export function removeWorktree(cwd: string, path: string, opts: { force?: boolean } = {}): void {
+  git(["worktree", "remove", ...(opts.force ? ["--force"] : []), path], { cwd });
+}
+
+/**
  * Point a local branch at `to`, provided it still points at `from`.
  *
  * `update-ref` rather than `branch -f`: it takes the expected old value, so a

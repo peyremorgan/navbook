@@ -276,6 +276,16 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   refusal SHOULD say when a worktree was passed over for being unclean, so the
   absence of the offer is not a silence.
 
+  When no worktree has the branch and it is a local one, they MAY instead
+  check it out into a new worktree in a fresh temporary directory, under the
+  same condition of being asked or told. That worktree MUST be removed once
+  the command ends and it holds nothing the user would lose — after
+  `--commit`, or when the command failed — and MUST be kept, with its path and
+  the command to remove it printed, when the write is only staged there. A
+  branch that only a remote-tracking ref carries MUST NOT be checked out this
+  way: doing so creates a local branch, which is more than the verb was asked
+  to do.
+
   Nothing about this changes where the files go: the write happens on the
   source branch either way, and the calling shell's working directory is not
   its business to change.

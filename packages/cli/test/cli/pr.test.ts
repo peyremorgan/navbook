@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
@@ -1132,14 +1132,93 @@ describe("a pull request that only another branch holds", () => {
     }
   });
 
-  it("has nowhere to offer when no worktree holds the branch", () => {
+  /** A private `TMPDIR`, so a test can see what a run left behind in it. */
+  function privateTmp(repo: TempRepo): string {
+    const dir = join(repo.home, "tmp");
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  it("checks the branch out into a temporary worktree, and removes it once committed", () => {
     const { repo } = withOpenPr();
     try {
-      // The flag says yes to a question that cannot be asked: `feat/auth` is a
-      // branch nothing has checked out, so the refusal is the ordinary one.
-      const refused = repo.nav(["pr", "comment", id0(repo), "--in-worktree", "-m", "Read."]);
+      const tmp = privateTmp(repo);
+      const written = repo.nav(
+        ["pr", "comment", id0(repo), "--in-worktree", "--commit", "-m", "Read."],
+        { TMPDIR: tmp },
+      );
+      assert.equal(written.code, 0, written.stderr);
+      assert.match(written.stdout, /Commented on #dk3mp2x9/);
+      assert.match(written.stderr, /temporary worktree on 'feat\/auth', since removed/);
+
+      assert.match(
+        repo.git(["log", "--oneline", "-1", "feat/auth"]).stdout,
+        /docs\(pr\): comment on #dk3mp2x9/,
+      );
+      // Nothing is left: not the checkout, not its registration, not its
+      // directory — and the checkout that asked is exactly as it was.
+      assert.deepEqual(readdirSync(tmp), []);
+      assert.equal(repo.git(["worktree", "list"]).stdout.trim().split("\n").length, 1);
+      assert.equal(repo.git(["status", "--porcelain"]).stdout.trim(), "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("keeps the temporary worktree when the write is only staged there", () => {
+    const { repo } = withOpenPr();
+    try {
+      const written = repo.nav(["pr", "comment", id0(repo), "--in-worktree", "-m", "Read."], {
+        TMPDIR: privateTmp(repo),
+      });
+      assert.equal(written.code, 0, written.stderr);
+      // Removing it would throw the change away: it is staged there and
+      // nowhere else, so the run says where, and how to finish.
+      const kept = /the change is staged in (\S+),/.exec(written.stderr)?.[1];
+      assert.ok(kept, written.stderr);
+      assert.match(written.stderr, /git worktree remove/);
+      assert.match(
+        repo.git(["-C", kept, "status", "--porcelain"]).stdout,
+        /^A {2}\.navbook\/prs\/open\/dk3mp2x9-[^/]+\/comments\//,
+      );
+      repo.git(["worktree", "remove", "--force", kept]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("removes the temporary worktree when the write fails", () => {
+    const { repo } = withOpenPr();
+    try {
+      const tmp = privateTmp(repo);
+      const failed = repo.nav(["pr", "edit", id0(repo), "--in-worktree", "--commit"], {
+        TMPDIR: tmp,
+        EDITOR: "false",
+      });
+      assert.equal(failed.code, 1);
+      assert.match(failed.stderr, /editor 'false' exited/);
+      assert.deepEqual(readdirSync(tmp), []);
+      assert.equal(repo.git(["worktree", "list"]).stdout.trim().split("\n").length, 1);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("does not check out a branch only a remote-tracking ref carries", () => {
+    const { repo } = withOpenPr();
+    try {
+      repo.git(["update-ref", "refs/remotes/origin/feat/auth", "feat/auth"]);
+      repo.git(["branch", "--quiet", "-D", "feat/auth"]);
+      const tmp = privateTmp(repo);
+
+      // Checking it out would create a local branch, which is more than a
+      // comment should do: the flag has nothing to say yes to.
+      const refused = repo.nav(["pr", "comment", "dk3m", "--in-worktree", "-m", "Read."], {
+        TMPDIR: tmp,
+      });
       assert.equal(refused.code, 1);
       assert.match(refused.stderr, /git switch feat\/auth/);
+      assert.deepEqual(readdirSync(tmp), []);
     } finally {
       repo.cleanup();
     }

@@ -22,7 +22,6 @@ import {
   entityJson,
   executeEntityDelete,
   findEntity,
-  findPrToWrite,
   listEntities,
   loadRepo,
   type NewCommentInput,
@@ -54,7 +53,7 @@ import { type Column, renderTable } from "../render/table.ts";
 import { parseSortOrder, sortListing } from "../sort.ts";
 import { composeFile } from "./compose.ts";
 import { warnPolicyProblems } from "./policy.ts";
-import { type PrWriteOptions, type PrWriteSite, prWriteSite, reportMove } from "./pr-elsewhere.ts";
+import { type PrWriteOptions, withPrWriteSite } from "./pr-elsewhere.ts";
 
 export interface GlobalFlags {
   json?: boolean;
@@ -243,18 +242,18 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
 export interface EditOptions extends GlobalFlags, PrWriteOptions {}
 
 export function cmdEdit(ctx: Ctx, kind: EntityKind, prefix: string, opts: EditOptions): void {
-  const { ctx: at, entity, movedTo } = writeTarget(ctx, kind, prefix, opts);
-  const path = absPath(at, entity.filePath);
-  openInEditor(at, path);
+  withWriteTarget(ctx, kind, prefix, opts, (at, entity) => {
+    const path = absPath(at, entity.filePath);
+    openInEditor(at, path);
 
-  for (const problem of revalidateEntityFile(path, kind)) {
-    ctx.stderr.write(`${ctx.colors.yellow("warning:")} ${entity.filePath}: ${problem}\n`);
-  }
+    for (const problem of revalidateEntityFile(path, kind)) {
+      ctx.stderr.write(`${ctx.colors.yellow("warning:")} ${entity.filePath}: ${problem}\n`);
+    }
 
-  const result = applyEntityEdit(at, entity, { commit: opts.commit });
-  ctx.stdout.write(`Edited #${entity.id}  ${at.navDir}/${entity.filePath}\n`);
-  reportMove(ctx, movedTo);
-  if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
+    const result = applyEntityEdit(at, entity, { commit: opts.commit });
+    ctx.stdout.write(`Edited #${entity.id}  ${at.navDir}/${entity.filePath}\n`);
+    if (opts.commit) ctx.stdout.write(`${commitReport(result)}\n`);
+  });
 }
 
 /* ------------------------------------------------------------------ comment */
@@ -267,59 +266,57 @@ export interface CommentOptions extends GlobalFlags, PrWriteOptions {
 }
 
 export function cmdComment(ctx: Ctx, kind: EntityKind, prefix: string, opts: CommentOptions): void {
-  const { ctx: at, entity, movedTo } = writeTarget(ctx, kind, prefix, opts);
-  const replyTo = opts.replyTo ? resolveComment(entity, opts.replyTo) : undefined;
-  const isReview = opts.review?.verdict !== undefined;
-  const noun = isReview ? "review" : "comment";
+  withWriteTarget(ctx, kind, prefix, opts, (at, entity) => {
+    const replyTo = opts.replyTo ? resolveComment(entity, opts.replyTo) : undefined;
+    const isReview = opts.review?.verdict !== undefined;
+    const noun = isReview ? "review" : "comment";
 
-  const base: NewCommentInput = {
-    author: currentAuthor(at),
-    body: "",
-    ...(replyTo ? { replyTo } : {}),
-    ...(opts.review ?? {}),
-  };
+    const base: NewCommentInput = {
+      author: currentAuthor(at),
+      body: "",
+      ...(replyTo ? { replyTo } : {}),
+      ...(opts.review ?? {}),
+    };
 
-  const composed = composeFile(ctx, {
-    message: opts.message,
-    bufferName: "NAVBOOK_COMMENT.md",
-    noun,
-    render: (body) => newCommentFile({ ...base, body }),
-    validate: (parsed) => validateComment(parsed, { onPr: kind === "pr" }),
+    const composed = composeFile(ctx, {
+      message: opts.message,
+      bufferName: "NAVBOOK_COMMENT.md",
+      noun,
+      render: (body) => newCommentFile({ ...base, body }),
+      validate: (parsed) => validateComment(parsed, { onPr: kind === "pr" }),
+    });
+
+    const { id, path, run } = applyComment(
+      at,
+      entity,
+      { content: composed.content, review: isReview },
+      { commit: opts.commit },
+    );
+
+    ctx.stdout.write(
+      `${isReview ? "Reviewed" : "Commented on"} #${entity.id}  ${at.navDir}/${path}  (#${id})\n`,
+    );
+    if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
   });
-
-  const { id, path, run } = applyComment(
-    at,
-    entity,
-    { content: composed.content, review: isReview },
-    { commit: opts.commit },
-  );
-
-  ctx.stdout.write(
-    `${isReview ? "Reviewed" : "Commented on"} #${entity.id}  ${at.navDir}/${path}  (#${id})\n`,
-  );
-  reportMove(ctx, movedTo);
-  if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
 }
 
 /**
- * The entity a verb writes into, and the context to write it in.
+ * Run a write against the entity it names, in the checkout it belongs in.
  *
- * A pull request that only another branch holds cannot be written to from
- * here. When a clean worktree already has that branch and there is somebody to
- * ask, the write moves there; otherwise this is core's refusal naming where it
- * lives, rather than a report that it does not exist.
+ * An issue is written here. A pull request that only another branch holds
+ * cannot be: the write moves to a worktree on that branch when somebody agrees
+ * to it, and otherwise this is core's refusal naming where it lives, rather
+ * than a report that it does not exist.
  */
-function writeTarget(
+function withWriteTarget(
   ctx: Ctx,
   kind: EntityKind,
   prefix: string,
   opts: PrWriteOptions,
-): PrWriteSite {
-  if (kind !== "pr") return { ctx, entity: findEntity(ctx, kind, prefix), movedTo: null };
-  const site = prWriteSite(ctx, prefix, opts);
-  // Declined, or never offerable: core says where it is and why not here.
-  if (site.movedTo === null) return { ctx, entity: findPrToWrite(ctx, prefix), movedTo: null };
-  return site;
+  write: (at: Ctx, entity: EntityRecord) => void,
+): void {
+  if (kind === "pr") withPrWriteSite(ctx, prefix, opts, write);
+  else write(ctx, findEntity(ctx, kind, prefix));
 }
 
 /* ------------------------------------------------------------ close/reopen */

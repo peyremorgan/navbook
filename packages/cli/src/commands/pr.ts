@@ -17,7 +17,6 @@ import {
   type EntityRecord,
   entityJson,
   executePrMerge,
-  findPrToWrite,
   isMergeMethod,
   listEntities,
   listPrsAcrossRefs,
@@ -66,7 +65,7 @@ import {
   warnMergePolicyProblems,
   warnPolicyProblems,
 } from "./policy.ts";
-import { type PrWriteOptions, prWriteSite, reportMove } from "./pr-elsewhere.ts";
+import { type PrWriteOptions, withPrWriteSite } from "./pr-elsewhere.ts";
 
 /* --------------------------------------------------------------------- open */
 
@@ -125,15 +124,15 @@ export interface PrUpdateOptions extends GlobalFlags, PrWriteOptions {}
 
 export function cmdPrUpdate(ctx: Ctx, prefix: string, opts: PrUpdateOptions): void {
   // The revision pinned is the HEAD of wherever this runs, so moving the write
-  // to the worktree that has the source branch is what pins the right one —
-  // this checkout's HEAD was never the head under review.
-  const { ctx: at, movedTo } = prWriteSite(ctx, prefix, opts);
-  const { entity, head, revisionCount, run } = updatePr(at, prefix, { commit: opts.commit });
-  ctx.stdout.write(
-    `Recorded revision ${revisionCount} of #${entity.id}  head ${head.slice(0, 12)}\n`,
-  );
-  reportMove(ctx, movedTo);
-  if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
+  // to a worktree on the source branch is what pins the right one — this
+  // checkout's HEAD was never the head under review.
+  withPrWriteSite(ctx, prefix, opts, (at) => {
+    const { entity, head, revisionCount, run } = updatePr(at, prefix, { commit: opts.commit });
+    ctx.stdout.write(
+      `Recorded revision ${revisionCount} of #${entity.id}  head ${head.slice(0, 12)}\n`,
+    );
+    if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
+  });
 }
 
 /* ------------------------------------------------------------------ request */
@@ -148,23 +147,23 @@ export function cmdPrRequest(
   people: string[],
   opts: RequestOptions,
 ): void {
-  const { ctx: at, movedTo } = prWriteSite(ctx, prefix, opts);
-  const { entity, changed, unchanged, run } = requestReview(at, prefix, people, {
-    commit: opts.commit,
-    remove: opts.remove,
-  });
+  withPrWriteSite(ctx, prefix, opts, (at) => {
+    const { entity, changed, unchanged, run } = requestReview(at, prefix, people, {
+      commit: opts.commit,
+      remove: opts.remove,
+    });
 
-  const verb = opts.remove ? "No longer reviewing" : "Asked to review";
-  ctx.stdout.write(`${verb} #${entity.id}: ${changed.join(", ")}\n`);
-  // Naming who was already there matters most when only some of a list moved:
-  // the count alone would leave the caller counting names themselves.
-  for (const person of unchanged) {
-    ctx.stdout.write(
-      `${ctx.colors.dim(opts.remove ? "not listed:" : "already listed:")} ${person}\n`,
-    );
-  }
-  reportMove(ctx, movedTo);
-  if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
+    const verb = opts.remove ? "No longer reviewing" : "Asked to review";
+    ctx.stdout.write(`${verb} #${entity.id}: ${changed.join(", ")}\n`);
+    // Naming who was already there matters most when only some of a list moved:
+    // the count alone would leave the caller counting names themselves.
+    for (const person of unchanged) {
+      ctx.stdout.write(
+        `${ctx.colors.dim(opts.remove ? "not listed:" : "already listed:")} ${person}\n`,
+      );
+    }
+    if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
+  });
 }
 
 /* ------------------------------------------------------------------- review */
@@ -180,62 +179,62 @@ export interface ReviewOptions extends GlobalFlags, PrWriteOptions {
 }
 
 export function cmdPrReview(ctx: Ctx, prefix: string, opts: ReviewOptions): void {
-  const site = prWriteSite(ctx, prefix, opts);
-  const at = site.ctx;
-  const entity = site.movedTo === null ? findPrToWrite(ctx, prefix) : site.entity;
+  // Checked before anything is resolved, so a mistyped flag never costs a
+  // temporary checkout.
   const chosen = [opts.approve, opts.requestChanges, opts.comment].filter(Boolean).length;
   if (chosen > 1) {
     fail("choose one of --approve, --request-changes or --comment, not several");
   }
-
-  const revision = bindReviewRevision(entity, opts.revision);
   if (opts.line && !opts.file) fail("--line needs --file");
 
-  // This verb files reviews, so with no flag the verdict is the one that judges
-  // nothing (spec 04 §4.3). The exception is an inline anchor: a note about one
-  // line is discussion, and recording it as a review would say its author had
-  // read the whole revision. `nav pr comment` remains the unbound comment.
-  const verdict: Verdict | undefined = opts.approve
-    ? "approve"
-    : opts.requestChanges
-      ? "request-changes"
-      : opts.file === undefined || opts.comment
-        ? "comment"
-        : undefined;
-  const isReview = verdict !== undefined || opts.file !== undefined;
+  withPrWriteSite(ctx, prefix, opts, (at, entity) => {
+    const revision = bindReviewRevision(entity, opts.revision);
 
-  const base: NewCommentInput = {
-    author: currentAuthor(at),
-    body: "",
-    ...(verdict ? { verdict } : {}),
-    ...(isReview ? { revision } : {}),
-    ...(opts.file ? { file: opts.file } : {}),
-    ...(opts.line ? { line: opts.line } : {}),
-  };
+    // This verb files reviews, so with no flag the verdict is the one that judges
+    // nothing (spec 04 §4.3). The exception is an inline anchor: a note about one
+    // line is discussion, and recording it as a review would say its author had
+    // read the whole revision. `nav pr comment` remains the unbound comment.
+    const verdict: Verdict | undefined = opts.approve
+      ? "approve"
+      : opts.requestChanges
+        ? "request-changes"
+        : opts.file === undefined || opts.comment
+          ? "comment"
+          : undefined;
+    const isReview = verdict !== undefined || opts.file !== undefined;
 
-  const composed = composeFile(ctx, {
-    message: opts.message,
-    bufferName: "NAVBOOK_REVIEW.md",
-    noun: verdict ? "review" : "comment",
-    render: (body) => newCommentFile({ ...base, body }),
-    validate: (parsed) => validateComment(parsed, { onPr: true }),
+    const base: NewCommentInput = {
+      author: currentAuthor(at),
+      body: "",
+      ...(verdict ? { verdict } : {}),
+      ...(isReview ? { revision } : {}),
+      ...(opts.file ? { file: opts.file } : {}),
+      ...(opts.line ? { line: opts.line } : {}),
+    };
+
+    const composed = composeFile(ctx, {
+      message: opts.message,
+      bufferName: "NAVBOOK_REVIEW.md",
+      noun: verdict ? "review" : "comment",
+      render: (body) => newCommentFile({ ...base, body }),
+      validate: (parsed) => validateComment(parsed, { onPr: true }),
+    });
+
+    const { id, path, run } = applyComment(
+      at,
+      entity,
+      { content: composed.content, review: isReview },
+      { commit: opts.commit },
+    );
+
+    const label = verdict ? `Reviewed (${verdict})` : "Commented on";
+    ctx.stdout.write(`${label} #${entity.id}  ${at.navDir}/${path}  (#${id})\n`);
+    if (isReview) ctx.stdout.write(`Bound to revision ${revision.slice(0, 12)}\n`);
+    if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
+    // The policy that decides whether a verdict counts is the one in the tree
+    // the review was written into.
+    warnIfOwnVerdict(at, entity, verdict);
   });
-
-  const { id, path, run } = applyComment(
-    at,
-    entity,
-    { content: composed.content, review: isReview },
-    { commit: opts.commit },
-  );
-
-  const label = verdict ? `Reviewed (${verdict})` : "Commented on";
-  ctx.stdout.write(`${label} #${entity.id}  ${at.navDir}/${path}  (#${id})\n`);
-  reportMove(ctx, site.movedTo);
-  if (isReview) ctx.stdout.write(`Bound to revision ${revision.slice(0, 12)}\n`);
-  if (opts.commit) ctx.stdout.write(`${commitReport(run)}\n`);
-  // The policy that decides whether a verdict counts is the one in the tree
-  // the review was written into.
-  warnIfOwnVerdict(at, entity, verdict);
 }
 
 /**
