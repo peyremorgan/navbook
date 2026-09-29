@@ -98,6 +98,20 @@ describe("form fields", () => {
   });
 });
 
+describe("overlays", () => {
+  it("are returned in `order`, then in the order they were registered", () => {
+    const slots = useNavbookSlots();
+    const Late = defineComponent({ template: "<div />" });
+    const Early = defineComponent({ template: "<span />" });
+    slots.register({ overlays: [{ component: Stub }, { component: Late, order: 200 }] });
+    slots.register({ overlays: [{ component: Early, order: 1 }] });
+    assert.deepEqual(
+      slots.overlays().map((overlay) => overlay.component),
+      [Early, Stub, Late],
+    );
+  });
+});
+
 describe("listings", () => {
   it("collects names without repeating one two plugins both claim", () => {
     const slots = useNavbookSlots();
@@ -330,9 +344,11 @@ describe("resetting", () => {
       entityFields: [{ field: "x", label: "X", read: () => [] }],
       inboxGroups: [{ key: "x", label: "X", icon: "i", values: () => [], matches: () => false }],
       cache: { typePolicies: { X: { keyFields: ["id"] } } },
+      overlays: [{ component: Stub }],
     });
     resetNavbookSlots();
     assert.deepEqual(slots.navLinks(), []);
+    assert.deepEqual(slots.overlays(), []);
     assert.deepEqual(slots.entityFields(), []);
     assert.deepEqual(slots.inboxGroups(), []);
     assert.deepEqual(slots.typePolicies(), {});

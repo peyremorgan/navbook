@@ -136,6 +136,19 @@ export interface InboxGroupSlot {
 }
 
 /**
+ * Something drawn over every page, rather than in one: a floating button and
+ * the panel it opens, say.
+ *
+ * Rendered by the default layout after the page, so it is absent from the
+ * pages that sit outside it — signing in, signed out, not allowed — where there
+ * is nobody to use it yet. Positioning is the component's own.
+ */
+export interface OverlaySlot {
+  component: Component;
+  order?: number;
+}
+
+/**
  * How Apollo should cache the types and root fields this plugin's SDL added.
  *
  * The host's cache configuration names the types it knows about, and a type it
@@ -162,6 +175,7 @@ export interface SlotRegistration {
   filters?: FilterSlot[];
   rowBadges?: RowBadgeSlot[];
   inboxGroups?: InboxGroupSlot[];
+  overlays?: OverlaySlot[];
   cache?: CacheSlot;
   /**
    * Apollo cache fields to evict when a listing should be refetched.
@@ -181,6 +195,7 @@ interface Slots {
   filters: FilterSlot[];
   rowBadges: RowBadgeSlot[];
   inboxGroups: InboxGroupSlot[];
+  overlays: OverlaySlot[];
   cache: CacheSlot[];
   listings: string[];
 }
@@ -193,6 +208,7 @@ const slots: Slots = {
   filters: [],
   rowBadges: [],
   inboxGroups: [],
+  overlays: [],
   cache: [],
   listings: [],
 };
@@ -212,6 +228,7 @@ export function useNavbookSlots() {
     filters: (noun: "issue" | "pr") => slots.filters.filter((slot) => slot.nouns.includes(noun)),
     rowBadges: () => byOrder(slots.rowBadges),
     inboxGroups: () => [...slots.inboxGroups],
+    overlays: () => byOrder(slots.overlays),
     /** Every registered type policy, merged into one map for Apollo. */
     typePolicies: () =>
       Object.assign({}, ...slots.cache.map((entry) => entry.typePolicies ?? {})) as Record<
@@ -248,6 +265,7 @@ export function useNavbookSlots() {
         slots.inboxGroups.push(group);
         registerInboxGrouping(group);
       }
+      for (const overlay of registration.overlays ?? []) slots.overlays.push(overlay);
       if (registration.cache !== undefined) slots.cache.push(registration.cache);
       for (const listing of registration.listings ?? []) {
         if (!slots.listings.includes(listing)) slots.listings.push(listing);
@@ -268,6 +286,7 @@ export function resetNavbookSlots(): void {
   slots.filters.length = 0;
   slots.rowBadges.length = 0;
   slots.inboxGroups.length = 0;
+  slots.overlays.length = 0;
   slots.cache.length = 0;
   slots.listings.length = 0;
 }

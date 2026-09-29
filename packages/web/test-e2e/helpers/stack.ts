@@ -56,6 +56,13 @@ export interface StackOptions {
    * it being broken is an hour into somebody's afternoon.
    */
   tokenLifetimeSeconds?: number;
+  /**
+   * Plugin directories to load beside the knowledge base, which the fixture
+   * tree needs whatever else is loaded. A plugin's own suite names itself here.
+   */
+  pluginPaths?: readonly string[];
+  /** More environment for the API server: a plugin's `NAV_SERVER_<SHORT>_*`, say. */
+  env?: NodeJS.ProcessEnv;
 }
 
 export async function startStack(options: StackOptions = {}): Promise<Stack> {
@@ -99,10 +106,11 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       env: {
         ...repo.env,
         PATH: process.env.PATH,
+        ...options.env,
         // The fixture repository has features and test plans in it, so the
         // server this suite talks to needs the plugins that define them —
         // exactly as the deployment it stands in for does.
-        NAVBOOK_PLUGIN_PATH: PLUGINS,
+        NAVBOOK_PLUGIN_PATH: [PLUGINS, ...(options.pluginPaths ?? [])].join(delimiter),
       },
       stdio: ["ignore", "pipe", "pipe"],
     },

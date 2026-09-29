@@ -18,6 +18,7 @@ const viewer = computed(() => result.value?.viewer ?? null);
 // Whatever plugin layers registered joins the built-in tabs, ordered rather
 // than appended: a plugin may belong beside Issues rather than after them.
 const slots = useNavbookSlots();
+const overlays = slots.overlays();
 const links = [
   { label: "Issues", to: "/issues", icon: "i-lucide-circle-dot", testid: "nav-issues" },
   { label: "Pull requests", to: "/prs", icon: "i-lucide-git-pull-request", testid: "nav-prs" },
@@ -120,5 +121,7 @@ watch(
     <main class="mx-auto max-w-6xl px-4 py-6">
       <slot />
     </main>
+    <!-- Whatever a plugin draws over every page: positioned by itself. -->
+    <component :is="overlay.component" v-for="(overlay, index) in overlays" :key="index" />
   </div>
 </template>
