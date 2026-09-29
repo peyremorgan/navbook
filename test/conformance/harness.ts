@@ -52,11 +52,13 @@ export interface CaseManifest {
    * Plugins the case needs, by package name (spec 02 §2.12).
    *
    * A case exercising an extension's data or verbs names the extension that
-   * defines it. The harness puts those packages on `NAVBOOK_PLUGIN_PATH` and
-   * declares them in the fixture's marker, which is what the same repository
-   * would do. Under `$NAV_BIN` — another implementation, tested by the same
-   * suite — a case naming a plugin is skipped rather than failed: a Rust `nav`
-   * cannot load a JavaScript plugin, and its own extensions are its business.
+   * defines it. The harness puts those packages on `NAVBOOK_PLUGIN_PATH`, where
+   * `nav` loads them as it loads an installed plugin, declared or not. An
+   * implementation that cannot load a JavaScript plugin — a Rust `nav` — sets
+   * `NAV_SKIP_PLUGINS` and such a case is skipped rather than failed: its own
+   * extensions are its business. `$NAV_BIN` alone does not skip them, since
+   * CI runs this suite through it against the built and the packed CLI, and
+   * those must load the plugin as a user's would.
    */
   plugins?: string[];
   init?: { from?: string; message?: string; date?: string };
@@ -111,16 +113,16 @@ const PLUGIN_DIRS: Record<string, string> = {
 };
 
 /**
- * True when this run tests another implementation through `$NAV_BIN`.
+ * True when the implementation under test cannot load this suite's plugins.
  *
- * A case naming a plugin is skipped there: this suite's plugins are
- * JavaScript, and how another implementation provides the same format is its
- * own affair. The *format* cases still run, which is the point — a tree with
- * `specs/` in it is conforming whoever wrote it.
+ * Said by `NAV_SKIP_PLUGINS`, not inferred from `$NAV_BIN`: the plugins here
+ * are JavaScript, and how another implementation provides the same format is
+ * its own affair, but a JavaScript `nav` run through `$NAV_BIN` must still
+ * pass them. The *format* cases run either way.
  */
 export function skipsPlugins(): boolean {
-  const bin = process.env.NAV_BIN;
-  return bin !== undefined && bin.trim() !== "";
+  const skip = process.env.NAV_SKIP_PLUGINS;
+  return skip !== undefined && skip.trim() !== "";
 }
 
 /** The environment that puts a case's plugins where `nav` will find them. */
