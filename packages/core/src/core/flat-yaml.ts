@@ -73,7 +73,10 @@ export function parseFlatYaml(text: string): FlatFrontmatter | null {
     const end = text.indexOf("\n", start);
     const line = end === -1 ? text.slice(start) : text.slice(start, end);
     start = end === -1 ? text.length : end + 1;
-    if (line.trim() === "" && !line.includes("\t")) continue;
+    // YAML's whitespace is the space and the tab, not JavaScript's `trim`:
+    // a line of NBSP or U+2028 is content (or an error) to it, so it goes on
+    // to `unsafe` and the key match, which fall back.
+    if (/^ *$/.test(line)) continue;
     if (unsafe(line)) return null;
 
     const match = KEY.exec(line);
@@ -81,7 +84,7 @@ export function parseFlatYaml(text: string): FlatFrontmatter | null {
     const key = match[1] as string;
     // A key that is not a plain string would come back as another type.
     if (NULL.test(key) || BOOL.test(key) || nodes.has(key)) return null;
-    const node = readValue((match[2] ?? "").trimEnd());
+    const node = readValue((match[2] ?? "").replace(/ +$/, ""));
     if (node === null) return null;
     keys.push(key);
     nodes.set(key, node);
@@ -175,7 +178,7 @@ function readFlowList(text: string): FlatList | null {
     } else {
       let end = i;
       while (end < text.length && text[end] !== "," && text[end] !== "]") end++;
-      const item = readPlain(text.slice(i, end).trimEnd(), true);
+      const item = readPlain(text.slice(i, end).replace(/ +$/, ""), true);
       if (!item) return null;
       items.push(item);
       i = end;
