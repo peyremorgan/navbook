@@ -13,6 +13,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -395,6 +396,78 @@ describe("ops: the seams a plugin writes and reads through", () => {
         cwd: dir,
       });
       assert.deepEqual([...committed], [...bytes]);
+    });
+  });
+
+  it("will not write through a symbolic link a push could have put in the tree", () => {
+    inWorkspace((ws, dir) => {
+      const outside = mkdtempSync(join(tmpdir(), "navbook-outside-"));
+      try {
+        mkdirSync(join(dir, ".navbook/rep"), { recursive: true });
+        symlinkSync(outside, join(dir, ".navbook/rep/linked"));
+        symlinkSync(join(outside, "file"), join(dir, ".navbook/rep/file.png"));
+        const refused = (path: string, name: string) =>
+          assert.throws(
+            () =>
+              runPlan(
+                ws,
+                {
+                  ops: [{ op: "write-bytes", path, bytes: Uint8Array.from([1]) }],
+                  message: "x",
+                  trailers: [],
+                },
+                {},
+              ),
+            (error: unknown) =>
+              error instanceof WorkspaceError &&
+              error.code === "precondition" &&
+              error.message === `will not write through .navbook/${name}, which is a symbolic link`,
+          );
+        refused("rep/linked/config", "rep/linked");
+        refused("rep/linked/deeper/config", "rep/linked");
+        refused("rep/file.png", "rep/file.png");
+        assert.throws(
+          () =>
+            runPlan(
+              ws,
+              {
+                ops: [{ op: "write", path: "rep/linked/a.md", content: "x" }],
+                message: "x",
+                trailers: [],
+              },
+              {},
+            ),
+          /which is a symbolic link/,
+        );
+        writeFileSync(join(dir, ".navbook/rep/real.md"), "x");
+        assert.throws(
+          () =>
+            runPlan(
+              ws,
+              {
+                ops: [{ op: "move", from: "rep/real.md", to: "rep/linked/real.md" }],
+                message: "x",
+                trailers: [],
+              },
+              {},
+            ),
+          /which is a symbolic link/,
+        );
+        assert.deepEqual(readdirSync(outside), []);
+        // A path that does not exist yet is not a link, however deep.
+        runPlan(
+          ws,
+          {
+            ops: [{ op: "write-bytes", path: "rep/new/dir/x.bin", bytes: Uint8Array.from([2]) }],
+            message: "x",
+            trailers: [],
+          },
+          {},
+        );
+        assert.deepEqual([...readFileSync(join(dir, ".navbook/rep/new/dir/x.bin"))], [2]);
+      } finally {
+        rmSync(outside, { recursive: true, force: true });
+      }
     });
   });
 

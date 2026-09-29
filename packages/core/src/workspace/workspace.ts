@@ -9,6 +9,7 @@
 import {
   type Dirent,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -296,6 +297,7 @@ export function applyOps(ws: WsCtx, ops: readonly FileOp[]): ApplyResult {
   for (const op of ops) {
     if (op.op === "write" || op.op === "write-bytes") {
       const target = absPath(ws, op.path);
+      refuseLinks(ws, op.path);
       mkdirSync(dirname(target), { recursive: true });
       if (op.op === "write") writeFileSync(target, op.content, "utf8");
       else writeFileSync(target, op.bytes);
@@ -323,6 +325,7 @@ export function applyOps(ws: WsCtx, ops: readonly FileOp[]): ApplyResult {
         `cannot move ${repoPath(ws.navDir, op.from)}: ${repoPath(ws.navDir, op.to)} already exists`,
       );
     }
+    refuseLinks(ws, op.to);
     mkdirSync(dirname(to), { recursive: true });
     renameSync(from, to);
     pruneEmptyParents(ws, dirname(from));
@@ -331,6 +334,34 @@ export function applyOps(ws: WsCtx, ops: readonly FileOp[]): ApplyResult {
   }
   stage(ws, [...touched]);
   return { touched: [...touched].sort() };
+}
+
+/**
+ * Refuse a write that would pass through a symbolic link below the Navbook
+ * root. The tree is whatever was pushed, and the tree walker never follows a
+ * link, so none belongs there; one committed where a write lands would carry
+ * the bytes out of the repository — into `.git/config`, say, on a server that
+ * writes what a client sent. Checked from the root down, stopping at the first
+ * part that does not exist yet, below which nothing can be a link.
+ */
+function refuseLinks(ws: WsCtx, navRelative: string): void {
+  let path = ws.navRoot;
+  const parts = navRelative.split("/").filter((part) => part !== "");
+  for (const [index, part] of parts.entries()) {
+    path = join(path, part);
+    let link: boolean;
+    try {
+      link = lstatSync(path).isSymbolicLink();
+    } catch {
+      return;
+    }
+    if (link) {
+      wsFail(
+        "precondition",
+        `will not write through ${repoPath(ws.navDir, parts.slice(0, index + 1).join("/"))}, which is a symbolic link`,
+      );
+    }
+  }
 }
 
 /**
