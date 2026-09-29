@@ -10,6 +10,7 @@
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -241,6 +242,35 @@ describe("what the server refuses to start without", () => {
         return true;
       },
     );
+  });
+
+  it("stops what it started when the port is taken, and says why", async () => {
+    // Somebody else's socket on the port the server is told to use.
+    const squatter = createServer();
+    await new Promise<void>((resolve) => squatter.listen(0, resolve));
+    const address = squatter.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    const log = logFile("porttaken");
+    try {
+      await assert.rejects(
+        // A background pull as well, so there is one running to stop.
+        () => startHarness({ env: probeEnv(log.path), port, pullIntervalMs: 60_000 }),
+        (error: Error) => {
+          assert.match(error.message, new RegExp(`could not listen on port ${port}: .*EADDRINUSE`));
+          // Said as a startup fault, not thrown from the event loop.
+          assert.doesNotMatch(error.message, /Unhandled 'error' event|\n\s+at /);
+          return true;
+        },
+      );
+      // The service was up before the port was tried, and went down with it.
+      assert.deepEqual(
+        log.lines().filter((line) => line.startsWith("service:")),
+        ["service:start", "service:stop"],
+      );
+    } finally {
+      await new Promise<void>((resolve) => squatter.close(() => resolve()));
+      log.clear();
+    }
   });
 
   it("starts with an optional key left unset", async () => {

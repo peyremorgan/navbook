@@ -5,7 +5,7 @@
  * port, without going near `process.argv` or `process.exit`.
  */
 
-import { createServer } from "node:http";
+import { createServer, type Server } from "node:http";
 import {
   currentBranch,
   hasRemote,
@@ -227,8 +227,36 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
   trees.start();
   sync.start();
 
+  /**
+   * Stop everything started above, once nothing can reach it any more.
+   *
+   * Services stop before the clone settles: one of them may still be holding
+   * a socket that would deliver a message nothing is left to handle. Then the
+   * clone is never cut off mid-operation: a mutation between its commit and
+   * its push is the one moment the clone's state depends on finishing.
+   * `housekeeping` is maintenance already told to stop, whose budget runs
+   * beside everything here rather than after it.
+   */
+  const release = async (housekeeping: Promise<void>): Promise<void> => {
+    await loaded.runtime.stop();
+    await sync.stop();
+    await trees.stop();
+    await Promise.all([sync.drain(), housekeeping]);
+  };
+
   const server = createServer(yoga);
-  await new Promise<void>((resolve) => server.listen(config.port, resolve));
+  try {
+    await listen(server, config.port);
+  } catch (error) {
+    // A port already taken, or one this process may not bind, is a deployment
+    // fault like any other above, and is said the same way. Left to itself it
+    // was an uncaught exception, after the services, the background pull and
+    // the watchdog had all started, with nothing to stop them on the way out.
+    await release(maintenance.stop());
+    throw new StartupError(
+      `could not listen on port ${config.port}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : config.port;
 
@@ -244,15 +272,25 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
       // send anything again.
       server.closeIdleConnections();
       await closed;
-      // Services stop before the clone settles: one of them may still be
-      // holding a socket that would deliver a message nothing is left to
-      // handle.
-      await loaded.runtime.stop();
-      await sync.stop();
-      await trees.stop();
-      // Never cut an operation in half: a mutation between its commit and its
-      // push is the one moment the clone's state depends on finishing.
-      await Promise.all([sync.drain(), housekeeping]);
+      await release(housekeeping);
     },
   };
+}
+
+/**
+ * Open the port, or reject with why not.
+ *
+ * `listen` reports a failure as an 'error' event rather than to its callback,
+ * and an 'error' nobody listens for is thrown from wherever the event loop
+ * happens to be. Only the first attempt's failure is this function's: once
+ * listening, the handler goes, and whatever the server says later is its own.
+ */
+function listen(server: Server, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
 }
