@@ -926,6 +926,52 @@ describe("nav plugin", () => {
     }
   });
 
+  it("keeps a version on the name it was typed with", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      const asked = repo.nav(["plugin", "install", "probe@^1"], npm.env, "n\n");
+      assert.match(
+        asked.stdout,
+        /npm install .*@navbook\/plugin-probe@\^1, or npm install .*navbook-plugin-probe@\^1/,
+      );
+      // And a full name with a version is still a plugin's name.
+      const full = repo.nav(["plugin", "install", "@navbook/plugin-probe@^1"], npm.env, "n\n");
+      assert.match(full.stdout, /npm install .* @navbook\/plugin-probe@\^1\n/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("passes a URL to npm as typed, never as a path", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      const url = "https://example.invalid/navbook-plugin-x-1.0.0.tgz";
+      const asked = repo.nav(["plugin", "install", url], npm.env, "n\n");
+      assert.match(asked.stdout, new RegExp(`npm install .* ${url.replace(/[.]/g, "\\.")}\\n`));
+      assert.doesNotMatch(asked.stdout, /https:\/example/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("reports only what this run installed, not the fallback it never ran", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      npm.publish("1.0.0");
+      npm.publish("1.0.0", "navbook-plugin-probe");
+      assert.equal(repo.nav(["plugin", "install", "navbook-plugin-probe", "-y"], npm.env).code, 0);
+      const result = repo.nav(["plugin", "install", "probe", "-y"], npm.env);
+      assert.equal(result.code, 0, `${result.stdout}${result.stderr}`);
+      assert.match(result.stdout, /Installed @navbook\/plugin-probe@1\.0\.0/);
+      assert.doesNotMatch(result.stdout, /Installed navbook-plugin-probe/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("prefers @navbook/plugin-<name> when the registry has it", () => {
     const repo = probeRepo({ declare: false });
     const npm = fakeNpm(repo);

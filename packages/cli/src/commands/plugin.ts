@@ -67,9 +67,13 @@ export function cmdPluginInstall(ctx: Ctx, names: string[], opts: PluginInstallO
   // is not a directory name (`@navbook/plugin-kb@2.0.0`, a tarball, a folder),
   // and a new version of a plugin already installed adds no new name.
   const before = storeDependencies(ctx.env);
+  // The specs npm was actually given: a short name's fallback only when the
+  // first name was not found, so a plugin installed long ago under the other
+  // name is not reported as installed by this run.
+  const ran: string[] = [];
   const agreed = confirmAndPerform(ctx, {
     title: "nav plugin install will:",
-    actions: installActions(ctx, choices),
+    actions: installActions(ctx, choices, ran),
     assumeYes: opts.yes,
   });
   if (!agreed) return;
@@ -86,7 +90,7 @@ export function cmdPluginInstall(ctx: Ctx, names: string[], opts: PluginInstallO
     Object.entries(after)
       .filter(
         ([name, saved]) =>
-          before[name] !== saved || wanted.some((spec) => asksFor(ctx, spec, name, saved)),
+          before[name] !== saved || ran.some((spec) => asksFor(ctx, spec, name, saved)),
       )
       .map(([name]) => name),
   );
@@ -134,13 +138,14 @@ export function cmdPluginInstall(ctx: Ctx, names: string[], opts: PluginInstallO
  * fallback happens inside the agreed action — and the confirmation says so,
  * naming both commands, so what runs is still what was shown.
  */
-function installActions(ctx: Ctx, choices: readonly string[][]): Action[] {
+function installActions(ctx: Ctx, choices: readonly string[][], ran: string[]): Action[] {
   const exact = choices.filter((specs) => specs.length === 1).flat();
   const actions: Action[] = [];
   if (exact.length > 0) {
     actions.push({
       description: `run ${installCommand(exact)}`,
       perform: () => {
+        ran.push(...exact);
         const result = npmInstall(ctx.env, exact);
         if (!result.ok) fail("npm could not install the plugin", result.output.split("\n"));
       },
@@ -152,6 +157,7 @@ function installActions(ctx: Ctx, choices: readonly string[][]): Action[] {
     actions.push({
       description: `run ${installCommand([primary])}, or ${installCommand([fallback])} if npm has no ${packageNameOf(primary)}`,
       perform: () => {
+        ran.push(primary);
         const tried = npmInstall(ctx.env, [primary]);
         if (tried.ok) return;
         // Only a package that does not exist sends npm to the other name: any
@@ -160,6 +166,7 @@ function installActions(ctx: Ctx, choices: readonly string[][]): Action[] {
         if (!isNotFound(tried.output, packageNameOf(primary))) {
           fail("npm could not install the plugin", tried.output.split("\n"));
         }
+        ran.push(fallback);
         const result = npmInstall(ctx.env, [fallback]);
         if (!result.ok) {
           fail(`npm has neither ${packageNameOf(primary)} nor ${packageNameOf(fallback)}`, [
@@ -177,7 +184,13 @@ function installActions(ctx: Ctx, choices: readonly string[][]): Action[] {
  * because the package exists and one of its own dependencies does not.
  */
 function isNotFound(output: string, name: string): boolean {
-  return /\bE404\b|\b404 Not Found\b/.test(output) && output.includes(name);
+  if (!/\bE404\b|\b404 Not Found\b/.test(output)) return false;
+  // The name itself, as npm writes it — `'@scope/name@*'`, or URL-encoded in
+  // the GET line — and not merely a dependency whose name begins with it.
+  const literal = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [name, name.replace("/", "%2f"), name.replace("/", "%2F")].some((form) =>
+    new RegExp(`(^|[/'\\s])${literal(form)}(?=[@'\\s]|$)`, "m").test(output),
+  );
 }
 
 /** Check what npm fetched, and record it in the index. Returns a fault, or null. */
@@ -212,7 +225,7 @@ function hasKeyword(dir: string): boolean {
  */
 function asksFor(ctx: Ctx, spec: string, name: string, saved: string): boolean {
   if (!looksLocal(spec)) return packageNameOf(spec) === name;
-  if (!saved.startsWith("file:")) return saved === spec;
+  if (hasScheme(spec) || !saved.startsWith("file:")) return saved === spec;
   const typed = spec.startsWith("file:") ? spec.slice("file:".length) : spec;
   return resolve(storeDir(ctx.env), saved.slice("file:".length)) === resolve(ctx.cwd, typed);
 }
@@ -230,23 +243,38 @@ function packageNameOf(spec: string): string {
 function resolveName(ctx: Ctx, name: string): string[] {
   // npm runs in the store, so a relative path must be made absolute here or
   // npm would look for it there rather than where the user typed it.
-  if (looksLocal(name) && !name.startsWith("git+")) {
+  if (looksLocal(name) && !hasScheme(name)) {
     const path = name.startsWith("file:") ? name.slice("file:".length) : name;
     return [resolve(ctx.cwd, path)];
   }
-  const candidates = expandPluginName(name);
+  // A URL is npm's to fetch as typed; what it turns out to be is checked by
+  // name and keyword once it is in the store, as a folder or a tarball is.
+  if (hasScheme(name)) return [name];
+  // The name is checked without its version or tag, which npm takes as typed:
+  // `kb@^2` is `@navbook/plugin-kb@^2`, then `navbook-plugin-kb@^2`.
+  const base = packageNameOf(name);
+  const version = name.slice(base.length);
+  const candidates = expandPluginName(base);
   const only = candidates[0] as string;
   if (candidates.length === 1) {
-    if (!isPluginPackageName(only) && !looksLocal(only)) {
+    if (!isPluginPackageName(only)) {
       fail(`${only} is not named as a plugin`, [
         "a plugin is @navbook/plugin-<name>, navbook-plugin-<name>, or @scope/navbook-plugin-<name>",
       ]);
     }
-    return [only];
+    return [`${only}${version}`];
   }
   // A short name: which of the candidates exists is npm's to find out, inside
   // the action the user agreed to (see `installActions`).
-  return candidates;
+  return candidates.map((candidate) => `${candidate}${version}`);
+}
+
+/**
+ * True for a URL — `https:`, `git+ssh:` — which npm fetches as typed. `file:`
+ * is the one scheme that names a path here, and is made absolute like one.
+ */
+function hasScheme(spec: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:/i.test(spec) && !spec.startsWith("file:");
 }
 
 /** True for a specifier npm reads as a path or a URL rather than a package name. */
