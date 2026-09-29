@@ -57,6 +57,10 @@ services:
       NAV_SERVER_MAINTENANCE_INTERVAL_MS: ${NAVBOOK_MAINTENANCE_INTERVAL_MS:-300000}
       NAV_SERVER_GRAPHIQL: ${NAVBOOK_GRAPHIQL:-false}
       NAV_ROOT: ${NAVBOOK_ROOT:-}
+      # The assistant, when `@navbook/plugin-chat` is among the plugins.
+      NAV_SERVER_CHAT_BASE_URL: ${NAVBOOK_CHAT_BASE_URL:-}
+      NAV_SERVER_CHAT_MODEL: ${NAVBOOK_CHAT_MODEL:-}
+      NAV_SERVER_CHAT_API_KEY: ${NAVBOOK_CHAT_API_KEY:-}
       # What the entrypoint needs to make the clone in the first place.
       NAVBOOK_REPO_URL: ${NAVBOOK_REPO_URL:?set NAVBOOK_REPO_URL in .env}
       NAVBOOK_BRANCH: ${NAVBOOK_BRANCH:-}

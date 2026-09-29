@@ -23,6 +23,7 @@ COPY packages/core/package.json packages/core/
 COPY packages/server/package.json packages/server/
 COPY packages/plugin-kb packages/plugin-kb
 COPY packages/plugin-tests packages/plugin-tests
+COPY packages/plugin-chat packages/plugin-chat
 
 # The whole package, before the install rather than after it: `postinstall` runs
 # `nuxi prepare`, which reads this configuration and writes the .nuxt/ the build

@@ -1,0 +1,108 @@
+extend type Query {
+  """
+  The assistant this server offers, or null when none is configured — a client
+  shows its way in only when this is not null.
+  """
+  chat: ChatStatus
+}
+
+"What the assistant is, as it is safe for anybody signed in to see."
+type ChatStatus {
+  model: String!
+  "Where the model is served from: scheme and host, never a path or a key."
+  endpoint: String!
+  tools: [ChatTool!]!
+}
+
+type ChatTool {
+  name: String!
+  "WRITE tools wait for the person's approval unless `autoApprove` is set."
+  kind: ChatToolKind!
+}
+
+enum ChatToolKind {
+  READ
+  WRITE
+}
+
+"""
+One turn of the conversation, streamed as it happens.
+
+Served as `text/event-stream`. The server keeps nothing between turns: the
+client sends back the `transcript` the previous turn ended with, plus either
+the person's next `message` or its decisions on the writes that turn left
+waiting. The system prompt is the server's, prepended to every turn.
+"""
+type Subscription {
+  chat(input: ChatInput!): ChatEvent!
+}
+
+input ChatInput {
+  """
+  The `transcript` the last DONE or ERROR carried, as it came; `"[]"` to start.
+  A string of JSON the client never needs to read: the host's `JSON` scalar is
+  output-only.
+  """
+  transcript: String!
+  "What the person just said. Omitted when this turn only answers approvals."
+  message: String
+  "A decision for each write the transcript leaves waiting."
+  approvals: [ChatApproval!]
+  "Run writes without waiting for approval: the client's “Allow all”."
+  autoApprove: Boolean = false
+}
+
+input ChatApproval {
+  callId: String!
+  approved: Boolean!
+}
+
+enum ChatEventType {
+  "More of the reply: `delta`."
+  TEXT
+  "The model called a tool: `callId`, `tool`, `arguments`."
+  TOOL_CALL
+  "A write waits for the person: `callId`, `tool`, `arguments`, `summary`."
+  APPROVAL_REQUEST
+  "A tool ran, or was declined: `callId`, `tool`, `ok`, `summary`, and `commit` and `record` for a write."
+  TOOL_RESULT
+  "The turn is over: `reason`, and the `transcript` to send back next."
+  DONE
+  "The turn failed: `message`, `code`, and the `transcript` as far as it got."
+  ERROR
+}
+
+enum ChatDoneReason {
+  "The assistant answered."
+  STOP
+  "Writes wait for approval; send the decisions to continue."
+  APPROVAL
+  "The reply reached the model's length limit."
+  LENGTH
+  "The assistant made as many tool calls as a turn allows, and was stopped."
+  LIMIT
+}
+
+type ChatEvent {
+  type: ChatEventType!
+  delta: String
+  callId: String
+  tool: String
+  arguments: JSON
+  summary: String
+  ok: Boolean
+  "The commit a write made."
+  commit: CommitInfo
+  "The record a write made or changed."
+  record: ChatRecord
+  reason: ChatDoneReason
+  "The whole conversation after this turn, system prompt excluded: opaque, to send back."
+  transcript: String
+  message: String
+  code: String
+}
+
+type ChatRecord {
+  kind: Kind!
+  id: ID!
+}

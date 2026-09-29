@@ -30,6 +30,7 @@ COPY packages/core/package.json packages/core/
 COPY packages/server/package.json packages/server/
 COPY packages/plugin-kb/package.json packages/plugin-kb/
 COPY packages/plugin-tests/package.json packages/plugin-tests/
+COPY packages/plugin-chat/package.json packages/plugin-chat/
 
 # The root project is not scenery: `typescript` is a devDependency of the
 # workspace rather than of any package packed here, and `prepack` runs `tsc`.
@@ -40,7 +41,7 @@ COPY packages/plugin-tests/package.json packages/plugin-tests/
 # pull it in is not something the server's own build should rest on.
 RUN pnpm install --frozen-lockfile --filter navbook-workspace \
       --filter "@navbook/server..." --filter "@navbook/plugin-kb..." \
-      --filter "@navbook/plugin-tests..."
+      --filter "@navbook/plugin-tests..." --filter "@navbook/plugin-chat..."
 
 # Sources, for every workspace package a packed one compiles against. The
 # plugins import `@navbook/cli/plugin`, which resolves to cli's TypeScript
@@ -53,6 +54,7 @@ COPY packages/core packages/core
 COPY packages/server packages/server
 COPY packages/plugin-kb packages/plugin-kb
 COPY packages/plugin-tests packages/plugin-tests
+COPY packages/plugin-chat packages/plugin-chat
 
 # `pack` runs each package's `prepack`, which builds `dist/` and refuses to run
 # under npm — the check that keeps the exports rewrite honest.
@@ -65,7 +67,8 @@ RUN mkdir -p /out \
  && pnpm --filter @navbook/core pack --pack-destination /out \
  && pnpm --filter @navbook/server pack --pack-destination /out \
  && pnpm --filter @navbook/plugin-kb pack --pack-destination /out \
- && pnpm --filter @navbook/plugin-tests pack --pack-destination /out
+ && pnpm --filter @navbook/plugin-tests pack --pack-destination /out \
+ && pnpm --filter @navbook/plugin-chat pack --pack-destination /out
 
 
 FROM node:24-alpine
