@@ -235,6 +235,10 @@ A run MAY keep files — screenshots, logs — in a directory beside it named li
 the run file without `.md`. Their content is never interpreted and MUST be
 preserved. An attachment directory with no run file beside it is a fault.
 
+A tool MAY add attachments to a finished run, and link them from its notes or
+from a recorded step's actual result: neither changes a status, so the
+outcome of §6 stays what it was.
+
 ## 6. The outcome of a run
 
 Derived from the run's recorded steps, in this order, and never stored:

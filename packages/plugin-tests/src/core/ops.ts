@@ -432,6 +432,10 @@ export function attachmentName(core: Core, original: string): string {
  * Attach files to a run (§5), and link them from the run: under the step's
  * actual result when one is named, which must already be recorded, or at the
  * end of the notes. One commit for the files and the link.
+ *
+ * Unlike recording, attaching is open on a finished run: a screenshot or a log
+ * often turns up after the tester has said they are done, and a link beside
+ * the actual result changes no status, so no conclusion moves.
  */
 export function attachToRun(
   core: Core,

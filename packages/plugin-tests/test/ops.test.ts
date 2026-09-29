@@ -507,6 +507,35 @@ describe("attachments", () => {
       );
     });
   });
+
+  it("may still be added once a run is finished, and change none of its conclusions", () => {
+    inRepo((ws) => {
+      withPlan(ws);
+      const plan = resolvePlan(core, loadTree(core, ws), "login");
+      startRun(core, ws, { plan, pr: null, version: "1.0" }, {});
+      const run = () => resolveRun(core, allRuns(loadTree(core, ws)), "aaaa1111");
+      saveRun(
+        core,
+        ws,
+        run(),
+        null,
+        { results: [{ number: 1, status: "failed", actual: "Broken." }], finish: true },
+        {},
+      );
+      const finished = run();
+      assert.notEqual(finished.finished, null);
+      const bytes = new TextEncoder().encode("trace\n");
+      attachToRun(core, ws, finished, [{ name: "trace.txt", bytes }], { step: 1 });
+      const after = run();
+      assert.equal(after.finished, finished.finished);
+      assert.deepEqual(
+        after.records.map((r) => [r.number, r.status]),
+        [[1, "failed"]],
+      );
+      assert.match(after.records[0]?.actual ?? "", /^Broken\.\n\n\[trace\.txt\]/);
+      assert.deepEqual(after.problems, []);
+    });
+  });
 });
 
 describe("resolving a run", () => {
