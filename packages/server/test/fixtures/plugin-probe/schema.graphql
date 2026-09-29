@@ -23,4 +23,26 @@ type SrvProbe {
   Tags read through the frontmatter key this plugin registered.
   """
   tags: [String!]!
+  """
+  Issue titles, read by running an operation against the served schema.
+  """
+  issueTitles: [String!]!
+  """
+  What running an operation the schema does not have answers.
+  """
+  invalid: [String!]!
+}
+
+extend type Mutation {
+  """
+  Comment on an entity where it lives, through the host's write site.
+  """
+  srvprobeNote(kind: Kind!, ref: ID!, text: String!): SrvProbeNote!
+}
+
+type SrvProbeNote {
+  subject: String!
+  pushed: Boolean!
+  "The branch it was written on, when that was not the served one."
+  branch: String
 }

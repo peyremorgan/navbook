@@ -8,6 +8,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { GraphQLObjectType, GraphQLSchema, GraphQLString } from "graphql";
+import type { GraphQLCtx } from "../../src/context.ts";
 import type { PluginService } from "../../src/plugins/host.ts";
 import { PluginRuntime } from "../../src/plugins/runtime.ts";
 
@@ -78,5 +80,64 @@ describe("plugin services", () => {
     await runtime.stop();
     assert.deepEqual(log, ["start a", "start b", "stop b", "stop a"]);
     assert.ok(reported.some((line) => /'b' did not stop cleanly: b cannot stop/.test(line)));
+  });
+});
+
+describe("running an operation for a plugin", () => {
+  /** A schema of one field, answering who the context says is asking. */
+  function whoSchema(): { schema: GraphQLSchema; resolved: () => number } {
+    let count = 0;
+    const schema = new GraphQLSchema({
+      query: new GraphQLObjectType({
+        name: "Query",
+        fields: {
+          who: {
+            type: GraphQLString,
+            args: { greeting: { type: GraphQLString } },
+            resolve: (_root, args: { greeting?: string }, ctx: GraphQLCtx) => {
+              count += 1;
+              return `${args.greeting ?? "hi"} ${ctx.viewer.email}`;
+            },
+          },
+        },
+      }),
+    });
+    return { schema, resolved: () => count };
+  }
+
+  const ctx = { viewer: { email: "person@example.invalid" } } as unknown as GraphQLCtx;
+
+  it("has no schema until the server built one", async () => {
+    const { runtime } = runtimeWith();
+    assert.throws(() => runtime.schema(), /once every plugin has activated/);
+    await assert.rejects(runtime.execute(ctx, "{ who }"), /once every plugin has activated/);
+  });
+
+  it("resolves with the context it is given, and the variables", async () => {
+    const { runtime } = runtimeWith();
+    const { schema } = whoSchema();
+    runtime.setSchema(schema);
+    assert.equal(runtime.schema(), schema);
+    const plain = await runtime.execute(ctx, "{ who }");
+    assert.equal(plain.errors, undefined);
+    assert.equal(plain.data?.who, "hi person@example.invalid");
+    const greeted = await runtime.execute(ctx, "query Q($g: String) { who(greeting: $g) }", {
+      g: "hello",
+    });
+    assert.equal(greeted.data?.who, "hello person@example.invalid");
+  });
+
+  it("answers a document that does not parse or validate with its errors, running nothing", async () => {
+    const { runtime } = runtimeWith();
+    const { schema, resolved } = whoSchema();
+    runtime.setSchema(schema);
+    const unparsable = await runtime.execute(ctx, "{ who");
+    assert.equal(unparsable.data, undefined);
+    assert.match(unparsable.errors?.[0]?.message ?? "", /Syntax Error/);
+    const invalid = await runtime.execute(ctx, "{ nobody }");
+    assert.match(invalid.errors?.[0]?.message ?? "", /Cannot query field "nobody"/);
+    // Asked again, the same answer, from what it remembered.
+    assert.deepEqual(await runtime.execute(ctx, "{ nobody }"), invalid);
+    assert.equal(resolved(), 0);
   });
 });

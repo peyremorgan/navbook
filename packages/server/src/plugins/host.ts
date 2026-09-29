@@ -15,12 +15,21 @@
  */
 
 import type * as NavbookCore from "@navbook/core";
-import type { EntityKind, EntityRecord, Identity, PluginManifest } from "@navbook/core";
+import type {
+  EntityKind,
+  EntityRecord,
+  Identity,
+  PluginManifest,
+  RunPlanResult,
+  WsCtx,
+} from "@navbook/core";
+import type { ExecutionResult, GraphQLSchema } from "graphql";
 import type { Config } from "../config.ts";
 import type { GraphQLCtx } from "../context.ts";
 import type { AuthorCache } from "../people.ts";
 import type { PluginResolvers } from "../schema.ts";
-import type { RepoSync } from "../sync.ts";
+import type { RepoSync, WriteResult } from "../sync.ts";
+import type { WriteSite } from "../write-site.ts";
 
 /** What every server entry exports. */
 export interface ServerPluginEntry {
@@ -172,15 +181,45 @@ export interface ServerPluginHost {
      * Refuses a pull request this checkout does not hold with `PRECONDITION`
      * and the `sourceRef` that carries it: a pull request's files live on the
      * branch it proposes to merge, so anything a plugin keeps beside `pr.md`
-     * is written there or nowhere.
+     * is written there or nowhere. `writeEntity` writes there instead.
      */
     writeTarget(ctx: GraphQLCtx, kind: EntityKind, ref: string): EntityRecord;
     /** Report a commit to the client, and emit the mutation event. */
     commitInfo(
       ctx: GraphQLCtx,
-      result: import("@navbook/core").RunPlanResult,
+      result: RunPlanResult,
       pushed: boolean,
     ): { committed: boolean; subject: string; pushed: boolean };
+    /**
+     * Write beside an entity, where it lives, the way `addComment` does.
+     *
+     * An issue is written in the clone. A pull request is written on its own
+     * branch — in a temporary worktree when the clone does not hold it — and
+     * that branch is pushed. `body` runs synchronously under the lock, with a
+     * workspace rooted at that site and the entity as read there, and must
+     * commit what it writes: the push follows when `result.run` committed.
+     */
+    writeEntity<T extends { run: RunPlanResult }>(
+      ctx: GraphQLCtx,
+      kind: EntityKind,
+      ref: string,
+      body: (at: WsCtx, entity: EntityRecord, site: WriteSite) => T,
+    ): Promise<WriteResult<T>>;
+    /**
+     * Run an operation against the schema this server serves, as `ctx`'s viewer.
+     *
+     * The same resolvers, transactions, error codes and mutation event as a
+     * request from a client, so a plugin acting for somebody — an assistant, a
+     * bridge — needs no copy of any of them. Available from a resolver or a
+     * service, once the schema is built; not during `activate`.
+     */
+    execute(
+      ctx: GraphQLCtx,
+      source: string,
+      variables?: Record<string, unknown>,
+    ): Promise<ExecutionResult>;
+    /** The schema this server serves, for checking a document in a service's `start`. */
+    schema(): GraphQLSchema;
   };
 }
 
@@ -189,3 +228,5 @@ export interface ServerPluginHost {
 // the whole surface a plugin types against, rather than one of three imports.
 export type { GraphQLCtx } from "../context.ts";
 export { apiError, invalidInput } from "../errors.ts";
+export type { WriteResult } from "../sync.ts";
+export type { WriteSite } from "../write-site.ts";

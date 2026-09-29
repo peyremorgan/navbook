@@ -14,7 +14,7 @@ import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { errorCode, startHarness } from "../helpers/harness.ts";
+import { errorCode, originSubjects, startHarness } from "../helpers/harness.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PROBE = join(HERE, "..", "fixtures", "plugin-probe");
@@ -167,6 +167,93 @@ describe("a plugin's service", () => {
     const harness = await startHarness({ env: probeEnv(log.path) });
     try {
       assert.ok(log.lines().some((line) => line === "activate token=s3cret"));
+    } finally {
+      await harness.stop();
+    }
+  });
+});
+
+describe("what a plugin runs through the host", () => {
+  it("has no schema while activating, and the served one once a service starts", async () => {
+    const log = logFile("schema-timing");
+    const harness = await startHarness({ env: probeEnv(log.path) });
+    try {
+      const lines = log.lines();
+      assert.ok(lines.includes("schema during activate: unavailable"), lines.join(", "));
+      assert.ok(lines.includes("schema at start: has srvprobe"), lines.join(", "));
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("runs an operation as the person asking, through the built-in resolvers", async () => {
+    const log = logFile("execute");
+    const harness = await startHarness({ env: probeEnv(log.path) });
+    try {
+      harness.fixture.peer.fileIssue("Filed at a terminal", "Body.", "iiii1111");
+      assert.equal(harness.fixture.peer.git(["push", "--quiet", "origin", "main"]).code, 0);
+      await harness.gql(
+        `mutation { openIssue(input: { title: "Filed over the API", body: "Body." }) { issue { id } } }`,
+      );
+      const result = await harness.gql<{ srvprobe: { issueTitles: string[] } }>(
+        "{ srvprobe { issueTitles } }",
+      );
+      assert.deepEqual(result.errors, [], JSON.stringify(result.errors));
+      // The fetch the built-in resolver makes brought the peer's issue in too.
+      assert.deepEqual(result.data?.srvprobe.issueTitles, [
+        "Filed at a terminal",
+        "Filed over the API",
+      ]);
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("answers an operation the schema does not have with its errors, as a client is", async () => {
+    const log = logFile("invalid");
+    const harness = await startHarness({ env: probeEnv(log.path) });
+    try {
+      const result = await harness.gql<{ srvprobe: { invalid: string[] } }>(
+        "{ srvprobe { invalid } }",
+      );
+      assert.deepEqual(result.errors, [], JSON.stringify(result.errors));
+      assert.match(result.data?.srvprobe.invalid[0] ?? "", /Cannot query field "nothingLikeThis"/);
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("writes beside a pull request on its own branch, and beside an issue in the clone", async () => {
+    const log = logFile("write-entity");
+    const harness = await startHarness({ env: probeEnv(log.path) });
+    try {
+      const { peer, origin } = harness.fixture;
+      peer.filePr("Elsewhere", "On its branch.", "pppp1111", "elsewhere");
+      assert.equal(peer.git(["push", "--quiet", "origin", "elsewhere:elsewhere"]).code, 0);
+
+      const onPr = await harness.gql<{
+        srvprobeNote: { subject: string; pushed: boolean; branch: string | null };
+      }>(
+        `mutation { srvprobeNote(kind: PR, ref: "pppp1111", text: "From a plugin.") { subject pushed branch } }`,
+      );
+      assert.deepEqual(onPr.errors, [], JSON.stringify(onPr.errors));
+      assert.deepEqual(onPr.data?.srvprobeNote, {
+        subject: "docs(pr): comment on #pppp1111",
+        pushed: true,
+        branch: "elsewhere",
+      });
+      assert.equal(originSubjects(origin, "elsewhere")[0], "docs(pr): comment on #pppp1111");
+
+      const opened = await harness.gql<{ openIssue: { issue: { id: string } } }>(
+        `mutation { openIssue(input: { title: "Here", body: "Body." }) { issue { id } } }`,
+      );
+      const id = opened.data?.openIssue.issue.id as string;
+      const onIssue = await harness.gql<{ srvprobeNote: { branch: string | null } }>(
+        `mutation N($ref: ID!) { srvprobeNote(kind: ISSUE, ref: $ref, text: "Also.") { branch } }`,
+        { ref: id },
+      );
+      assert.deepEqual(onIssue.data?.srvprobeNote, { branch: null });
+      assert.equal(originSubjects(origin, "main")[0], `docs(issue): comment on #${id}`);
     } finally {
       await harness.stop();
     }

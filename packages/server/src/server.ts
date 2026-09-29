@@ -197,8 +197,11 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     throw new StartupError(error instanceof Error ? error.message : String(error));
   }
 
+  const schema = makeSchema({ typeDefs: loaded.typeDefs, resolvers: loaded.runtime.resolvers });
+  // Before any service starts: one may check the documents it will run.
+  loaded.runtime.setSchema(schema);
   const yoga = createYoga({
-    schema: makeSchema({ typeDefs: loaded.typeDefs, resolvers: loaded.runtime.resolvers }),
+    schema,
     graphiql: config.graphiql,
     // Authentication runs here rather than in a resolver, so an unusable token
     // is refused before any operation is planned — and so every field is

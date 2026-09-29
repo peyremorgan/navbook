@@ -26,10 +26,21 @@ export function activate(host) {
     log(`mutation ${event.subject} pushed=${event.pushed} by=${event.viewer.email}`);
   });
 
+  // The schema is built from every plugin's SDL, so it cannot exist yet.
+  try {
+    host.api.schema();
+    log("schema during activate: available");
+  } catch {
+    log("schema during activate: unavailable");
+  }
+
   host.service({
     name: "srvprobe",
     async start() {
       log("service:start");
+      log(
+        `schema at start: ${host.api.schema().getQueryType()?.getFields().srvprobe ? "has srvprobe" : "lacks srvprobe"}`,
+      );
     },
     async stop() {
       log("service:stop");
@@ -59,6 +70,34 @@ export function activate(host) {
         }
         return [...tags].sort();
       },
+      issueTitles: async (_parent, _args, ctx) => {
+        const result = await host.api.execute(
+          ctx,
+          "query { issues(filter: { status: [OPEN, CLOSED] }) { title } }",
+        );
+        return result.data.issues.map((issue) => issue.title).sort();
+      },
+      invalid: async (_parent, _args, ctx) => {
+        const result = await host.api.execute(ctx, "query { nothingLikeThis }");
+        return result.errors.map((error) => error.message);
+      },
+    },
+    Mutation: {
+      srvprobeNote: (_parent, { kind, ref, text }, ctx) =>
+        host.api.run(async () => {
+          const core = host.core;
+          const { result, pushed } = await host.api.writeEntity(
+            ctx,
+            kind === "PR" ? "pr" : "issue",
+            ref,
+            (at, entity, site) => {
+              const content = core.newCommentFile({ author: core.currentAuthor(at), body: text });
+              const added = core.applyComment(at, entity, { content }, { commit: true });
+              return { run: added.run, branch: site.worktree === null ? null : site.branch };
+            },
+          );
+          return { subject: result.run.subject, pushed, branch: result.branch };
+        }),
     },
   });
 }

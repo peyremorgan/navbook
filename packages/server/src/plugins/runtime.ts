@@ -9,6 +9,16 @@
  */
 
 import type { EntityRecord } from "@navbook/core";
+import {
+  type DocumentNode,
+  type ExecutionResult,
+  execute,
+  GraphQLError,
+  type GraphQLSchema,
+  parse,
+  validate,
+} from "graphql";
+import type { GraphQLCtx } from "../context.ts";
 import type { PluginField } from "../patch.ts";
 import type { PluginResolvers } from "../schema.ts";
 import type { EntityInputBridge, MutationEvent, PluginService } from "./host.ts";
@@ -19,6 +29,9 @@ interface ExtReader {
   read: (entity: EntityRecord) => unknown;
 }
 
+/** How many parsed operations {@link PluginRuntime.execute} remembers. */
+const DOCUMENT_CACHE_LIMIT = 256;
+
 export class PluginRuntime {
   readonly resolvers: PluginResolvers[] = [];
   readonly services: PluginService[] = [];
@@ -28,9 +41,66 @@ export class PluginRuntime {
   /** The services running now, in the order they started. */
   #started: PluginService[] = [];
   #report: (line: string) => void;
+  /** The schema the server serves, once it is built from every plugin's SDL. */
+  #schema: GraphQLSchema | null = null;
+  /** Each operation a plugin runs, parsed and validated once: plugins run the same few. */
+  readonly #documents = new Map<string, DocumentNode | readonly GraphQLError[]>();
 
   constructor(report: (line: string) => void) {
     this.#report = report;
+  }
+
+  /** Called once the schema is built, which is after every plugin activated. */
+  setSchema(schema: GraphQLSchema): void {
+    this.#schema = schema;
+    this.#documents.clear();
+  }
+
+  /** The schema the server serves; not available while plugins are activating. */
+  schema(): GraphQLSchema {
+    if (this.#schema === null) {
+      throw new Error(
+        "the schema is built once every plugin has activated; use it from a resolver or a service",
+      );
+    }
+    return this.#schema;
+  }
+
+  /**
+   * Run an operation against the served schema, as the viewer `ctx` names.
+   *
+   * The same resolvers, transactions, error codes and mutation event as a
+   * request from a client, because it *is* one, minus the HTTP. A document
+   * that does not parse or validate answers with its errors, as Yoga would.
+   */
+  async execute(
+    ctx: GraphQLCtx,
+    source: string,
+    variables?: Record<string, unknown>,
+  ): Promise<ExecutionResult> {
+    const schema = this.schema();
+    let document = this.#documents.get(source);
+    if (document === undefined) {
+      try {
+        const parsed = parse(source);
+        const errors = validate(schema, parsed);
+        document = errors.length === 0 ? parsed : errors;
+      } catch (error) {
+        if (!(error instanceof GraphQLError)) throw error;
+        document = [error];
+      }
+      // A plugin runs a fixed handful of documents; one that builds them on the
+      // fly would otherwise grow this without end.
+      if (this.#documents.size >= DOCUMENT_CACHE_LIMIT) this.#documents.clear();
+      this.#documents.set(source, document);
+    }
+    if (Array.isArray(document)) return { errors: document as readonly GraphQLError[] };
+    return await execute({
+      schema,
+      document: document as DocumentNode,
+      contextValue: ctx,
+      ...(variables === undefined ? {} : { variableValues: variables }),
+    });
   }
 
   addResolvers(map: PluginResolvers): void {

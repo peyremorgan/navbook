@@ -579,7 +579,7 @@ export function writeTarget(ctx: GraphQLCtx, kind: EntityKind, ref: string): Ent
  * entity the body is given is read at the site, after that site was brought up
  * to date: it is the copy the write lands beside.
  */
-function writeEntity<T extends { run: RunPlanResult }>(
+export function writeEntity<T extends { run: RunPlanResult }>(
   ctx: GraphQLCtx,
   kind: EntityKind,
   ref: string,
