@@ -929,6 +929,25 @@ describe("nav plugin", () => {
     }
   });
 
+  it("updates and removes a plugin by its short name", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      npm.publish("1.0.0");
+      assert.equal(repo.nav(["plugin", "install", "probe", "-y"], npm.env).code, 0);
+      npm.publish("1.1.0");
+      const updated = repo.nav(["plugin", "update", "probe", "-y"], npm.env);
+      assert.equal(updated.code, 0, updated.stderr);
+      assert.match(updated.stdout, /Updated @navbook\/plugin-probe 1\.0\.0 → 1\.1\.0/);
+      const removed = repo.nav(["plugin", "remove", "probe", "-y"], npm.env);
+      assert.equal(removed.code, 0, removed.stderr);
+      assert.match(removed.stdout, /Removed @navbook\/plugin-probe/);
+      assert.deepEqual(listed(repo, npm.env), []);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("prints the npm command it would run, and asks", () => {
     const repo = probeRepo();
     try {

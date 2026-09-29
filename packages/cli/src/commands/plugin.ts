@@ -272,8 +272,8 @@ function isDeclared(ctx: Ctx, name: string): boolean {
 
 export function cmdPluginRemove(ctx: Ctx, names: string[], opts: PluginInstallOptions): void {
   const index = readIndex(ctx.env);
-  const known = names.filter((name) => index?.plugins[name] !== undefined);
-  const unknown = names.filter((name) => index?.plugins[name] === undefined);
+  const known = [...new Set(names.flatMap((name) => installedAs(index, name) ?? []))];
+  const unknown = names.filter((name) => installedAs(index, name) === null);
   for (const name of unknown) ctx.stderr.write(`nav: ${name} is not installed\n`);
   if (known.length === 0) fail("nothing to remove");
 
@@ -301,13 +301,16 @@ export function cmdPluginRemove(ctx: Ctx, names: string[], opts: PluginInstallOp
 export function cmdPluginUpdate(ctx: Ctx, names: string[], opts: PluginInstallOptions): void {
   const index = readIndex(ctx.env);
   const installed = Object.keys(index?.plugins ?? {});
-  const wanted = names.length > 0 ? names : installed;
+  const unknown = names.filter((name) => installedAs(index, name) === null);
+  if (unknown.length > 0) fail(`not installed: ${unknown.join(", ")}`);
+  const wanted =
+    names.length > 0
+      ? [...new Set(names.map((name) => installedAs(index, name) as string))]
+      : installed;
   if (wanted.length === 0) {
     ctx.stdout.write("Nothing to do: no plugins are installed.\n");
     return;
   }
-  const unknown = wanted.filter((name) => !installed.includes(name));
-  if (unknown.length > 0) fail(`not installed: ${unknown.join(", ")}`);
 
   const updated = confirmAndPerform(ctx, {
     title: "nav plugin update will:",
@@ -340,6 +343,19 @@ export function cmdPluginUpdate(ctx: Ctx, names: string[], opts: PluginInstallOp
     );
   }
   writeIndex(ctx.env, index);
+}
+
+/**
+ * The installed plugin a name means, or null when none is.
+ *
+ * The short name `install` accepts is accepted here too, and expanded the
+ * same way, so `nav plugin remove kb` undoes `nav plugin install kb`. Of its
+ * two expansions, the one the index holds is the one meant.
+ */
+function installedAs(index: PluginIndex | null, name: string): string | null {
+  return (
+    expandPluginName(name).find((candidate) => index?.plugins[candidate] !== undefined) ?? null
+  );
 }
 
 export function cmdPluginList(ctx: Ctx, opts: PluginListOptions): void {
