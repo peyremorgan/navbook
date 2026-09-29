@@ -80,6 +80,25 @@ export function resetPatchFields(): void {
   PATCH_EXTENSIONS.length = 0;
 }
 
+/**
+ * A mutation's input with plugin fields added, the format's own winning.
+ *
+ * A form's plugin fields (the new-issue page's) arrive as an open map, since
+ * the host cannot know what a layer will add. A key in it that names one of
+ * the format's own fields — a plugin's `parent`, say — is dropped rather than
+ * sent: it is either a mistake or a plugin quietly replacing what the person
+ * set in the host's own field, and neither should reach the server. The rest
+ * go in before the format's fields, so even a key missed here could not win.
+ */
+export function withPluginFields<T extends object>(
+  core: T,
+  extra: Record<string, unknown>,
+): T & Record<string, unknown> {
+  const own = new Set(Object.keys(core));
+  const added = Object.fromEntries(Object.entries(extra).filter(([key]) => !own.has(key)));
+  return { ...added, ...core };
+}
+
 export class PatchError extends Error {}
 
 /**

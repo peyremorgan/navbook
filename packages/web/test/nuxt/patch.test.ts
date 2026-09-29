@@ -22,6 +22,7 @@ import {
   parseRankInput,
   registerPatchField,
   resetPatchFields,
+  withPluginFields,
 } from "../../app/utils/patch";
 
 const BEFORE: EntityEdit = {
@@ -319,5 +320,23 @@ describe("describeWrite", () => {
       describeWrite({ labels: [], assignees: [], milestone: null }),
       "Labels, assignees and milestone updated",
     );
+  });
+});
+
+describe("withPluginFields", () => {
+  it("adds what a plugin's form field set", () => {
+    assert.deepEqual(withPluginFields({ title: "Mine" }, { features: ["auth"] }), {
+      title: "Mine",
+      features: ["auth"],
+    });
+  });
+
+  it("never lets a plugin key replace one of the format's own", () => {
+    // Including one the person left empty: null is what they chose.
+    const input = withPluginFields(
+      { title: "Mine", parent: null },
+      { title: "Theirs", parent: "abcd1234", features: ["auth"] },
+    );
+    assert.deepEqual(input, { title: "Mine", parent: null, features: ["auth"] });
   });
 });
