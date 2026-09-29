@@ -5,6 +5,7 @@ created: 2026-09-29T01:23:21Z
 labels: [plugin]
 assignee: Claude <noreply@anthropic.com>
 parent: c43a2w7e
+resolution: fixed
 ---
 
 - Server: `host.api.execute(ctx, document, variables)` and `host.api.schema()`, so a server plugin runs the same resolvers a client does.
