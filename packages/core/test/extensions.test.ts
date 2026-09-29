@@ -244,7 +244,7 @@ describe("query keys", () => {
     const query = parseQuery(["rep:flaky"], "issue");
     assert.ok(!("message" in query));
     assert.deepEqual(query.text, ["rep:flaky"]);
-    assert.deepEqual(query.ext, {});
+    assert.deepEqual(Object.keys(query.ext), []);
   });
 
   it("matches an entity carrying the value", () => {
@@ -486,6 +486,57 @@ describe("mergeExtensions", () => {
     clash({ queryKeys: [{ key: "x", kinds: ["issue"], matches: () => true }] });
     clash({ frontmatterKeys: [{ key: "x-y", kinds: ["issue"], shape: "string" }] });
     clash({ doctorChecks: [{ id: "X-a-1", level: "error", run: () => [] }] });
+  });
+
+  it("refuses a name the format already means something by", () => {
+    // The built-in reading runs first, so such a claim would be shadowed and
+    // the plugin's own code run on the format's data.
+    const refused = (part: Partial<CoreExtensions>, pattern: RegExp): void => {
+      assert.throws(
+        () => mergeExtensions([part]),
+        (error: unknown) => error instanceof ExtensionConflictError && pattern.test(error.message),
+      );
+    };
+    for (const dir of ["issues", "prs", "archive", "../x", "a/b", ".hidden", ""]) {
+      refused({ treeLocations: [{ ...reportsLocation, dir }] }, /not a directory a plugin may/);
+    }
+    for (const key of ["status", "title", "labels", "__proto__", "Bad Key"]) {
+      refused(
+        { frontmatterKeys: [{ key, kinds: ["issue"], shape: "string" }] },
+        /not a frontmatter key/,
+      );
+    }
+    for (const key of ["label", "status", "constructor ", "__proto__"]) {
+      refused({ queryKeys: [{ key, kinds: ["issue"], matches: () => true }] }, /not a query term/);
+    }
+    refused({ doctorChecks: [{ id: "D1", level: "error", run: () => [] }] }, /not a check id/);
+    // The one grandfathered pair of §2.12 stays claimable, with its checks.
+    mergeExtensions([
+      { treeLocations: [{ ...reportsLocation, dir: "specs" }] },
+      { frontmatterKeys: [{ key: "feature", kinds: ["issue"], shape: "string" }] },
+      { doctorChecks: [{ id: "D13", level: "error", run: () => [] }] },
+    ]);
+  });
+
+  it("reports a registry that is not a list, rather than throwing a TypeError", () => {
+    assert.throws(
+      () =>
+        mergeExtensions([
+          { treeLocations: { dir: "kb" } as unknown as CoreExtensions["treeLocations"] },
+        ]),
+      (error: unknown) =>
+        error instanceof ExtensionConflictError &&
+        /'treeLocations' was registered as something other than a list/.test(error.message),
+    );
+  });
+
+  it("keeps plugin terms where an Object member cannot answer for one", () => {
+    // `constructor` is refused as a registration above; the terms themselves
+    // sit in an object with no prototype, so no key can reach `Object`'s own.
+    const query = parseQuery(["constructor:x"], "issue");
+    assert.ok(!("message" in query));
+    assert.equal(Object.getPrototypeOf(query.ext), null);
+    assert.equal(query.ext.constructor, undefined);
   });
 
   it("does not repeat a commit scope two plugins both declare", () => {

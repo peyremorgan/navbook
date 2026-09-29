@@ -130,7 +130,9 @@ export function emptyQuery(): Query {
     deadline: [],
     today: null,
     text: [],
-    ext: {},
+    // No prototype: a term's key indexes it, and `constructor:x` must find
+    // nothing here rather than `Object`'s own member.
+    ext: Object.create(null) as Record<string, string[]>,
   };
 }
 
