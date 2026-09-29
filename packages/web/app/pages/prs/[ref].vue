@@ -38,7 +38,7 @@ import {
 import { buildCommentTree, countComments } from "~/utils/comments";
 import { distinctValues, newestFirst, shortSha } from "~/utils/entities";
 import { describeApiError, unservedBranch } from "~/utils/errors";
-import { buildEntityPatch, type EntityEdit, fieldLabel, PatchError } from "~/utils/patch";
+import { buildEntityPatch, describeWrite, type EntityEdit, PatchError } from "~/utils/patch";
 import { entityTitle } from "~/utils/title";
 import type { Verdict } from "~~/src/generated/gql/graphql";
 
@@ -301,13 +301,6 @@ const reviewsShown = computed(() => {
   ];
 });
 
-/** What the toast calls a save of these fields: "Title updated". */
-function wroteOf(change: Partial<EntityEdit>): string {
-  const [first] = Object.keys(change);
-  const label = fieldLabel(first ?? "field");
-  return `${label.charAt(0).toUpperCase()}${label.slice(1)} updated`;
-}
-
 /**
  * Patch one field, and say which one was written.
  *
@@ -339,6 +332,7 @@ async function save(change: Partial<EntityEdit>): Promise<void> {
   }
 
   const { id, baseSha } = pr.value;
+  const wrote = describeWrite(built);
   // Three things a refusal can be. Stale: kept by `staleEdits`, beside what
   // the file says now. Not from here: the branch is named beside the form and
   // every editor withdraws, so the edit is let go. Anything else: kept by
@@ -349,7 +343,7 @@ async function save(change: Partial<EntityEdit>): Promise<void> {
         const written = await patch({ input: { ref: id, ...built, baseSha } });
         const payload = written?.data?.updatePr;
         if (!payload) return false;
-        commitToast.report(payload.commit, wroteOf(change));
+        commitToast.report(payload.commit, wrote);
         refreshListings();
         refusedOn.value = null;
         return true;

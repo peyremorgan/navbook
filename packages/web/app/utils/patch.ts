@@ -244,6 +244,25 @@ export function fieldLabel(field: string): string {
 }
 
 /**
+ * What the toast calls a save: "Title updated", "Features updated".
+ *
+ * Read off the patch that went out rather than the edit that asked for it. A
+ * plugin's panel hands over its whole `ext` map, so the edit's own keys would
+ * say "Ext updated" — a name nobody on the page has seen — and its `ext`
+ * would name every plugin field, changed or not. The patch names exactly the
+ * fields that moved, a plugin's under the input field its SDL added, which
+ * `fieldLabel` turns into what its layer registered.
+ */
+export function describeWrite(patch: EntityPatch): string {
+  const labels = Object.keys(patch).map(fieldLabel);
+  const said =
+    labels.length <= 1
+      ? (labels[0] ?? "field")
+      : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+  return `${said.charAt(0).toUpperCase()}${said.slice(1)} updated`;
+}
+
+/**
  * An edit as a person would read it back: one line per field it names.
  *
  * For the alert that shows a refused edit beside what the file says now. A
