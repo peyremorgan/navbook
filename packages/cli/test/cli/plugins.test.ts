@@ -686,6 +686,31 @@ describe("a plugin that cannot be used", () => {
   });
 });
 
+describe("a plugin whose code is not where the index says", () => {
+  it("says it could not be loaded, not that it lacks the command", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      npm.publish("1.0.0");
+      assert.equal(repo.nav(["plugin", "install", "probe", "-y"], npm.env).code, 0);
+      const store = join(repo.home, ".local", "share", "navbook", "plugins");
+      rmSync(join(store, "node_modules", "@navbook", "plugin-probe"), {
+        recursive: true,
+        force: true,
+      });
+      const result = repo.nav(["probe", "hello"], npm.env);
+      assert.equal(result.code, 1);
+      assert.match(
+        result.stderr,
+        /plugin @navbook\/plugin-probe could not be loaded: its package is not at .*nav plugin install @navbook\/plugin-probe/,
+      );
+      assert.doesNotMatch(result.stderr, /does not implement/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
 describe("nav plugin", () => {
   it("lists nothing, and says where the store is", () => {
     const repo = probeRepo({ declare: false });
