@@ -235,16 +235,16 @@ describe("the deployment descriptor", () => {
     assert.equal(compose.services.api?.entrypoint, undefined);
   });
 
-  it("gives the API longer to stop than a mutation's push may take", () => {
-    // A stop waits for the mutation in flight; killing it mid-push is what the
-    // grace period is there to avoid.
+  it("gives the API longer to stop than a mutation's fetch and push may take", () => {
+    // A stop waits for the mutation in flight, which fetches and then pushes;
+    // killing it mid-push is what the grace period is there to avoid.
     const grace = /^(\d+)s$/.exec(compose.services.api?.stop_grace_period ?? "")?.[1];
     assert.ok(grace !== undefined, "the API has no stop_grace_period in whole seconds");
     const timeoutMs = Number(documentedKeys().get("NAVBOOK_GIT_TIMEOUT_MS"));
     assert.ok(timeoutMs > 0, "NAVBOOK_GIT_TIMEOUT_MS has no documented default");
     assert.ok(
-      Number(grace) * 1000 > timeoutMs,
-      `a ${grace} s grace period is shorter than a ${timeoutMs} ms push`,
+      Number(grace) * 1000 > 2 * timeoutMs,
+      `a ${grace} s grace period is shorter than a fetch and a push of ${timeoutMs} ms each`,
     );
   });
 
