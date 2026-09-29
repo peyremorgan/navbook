@@ -14,8 +14,9 @@
 -->
 <script setup lang="ts">
 import { useApolloClient } from "@vue/apollo-composable";
+import type { SaidFailure } from "~/utils/errors";
 import type { TestRunDetailFragment } from "../../src/generated/gql/graphql";
-import { refusedBranch, staleContent } from "../composables/useTestMutations";
+import { otherRefusal, refusedBranch, staleContent } from "../composables/useTestMutations";
 import { TEST_RUN_QUERY } from "../graphql/queries";
 import {
   base64Of,
@@ -49,6 +50,7 @@ function restore(): RunDraft {
 const draft = ref<RunDraft>(restore());
 const stale = ref<string | null>(null);
 const refused = ref<string | null>(null);
+const other = ref<SaidFailure | null>(null);
 const confirming = ref(false);
 const dirty = computed(() => draftDiffers(draft.value, saved.value));
 
@@ -98,6 +100,7 @@ function setActual(number: number, text: string): void {
 async function save(finish: boolean, over = false): Promise<void> {
   confirming.value = false;
   refused.value = null;
+  other.value = null;
   stale.value = null;
   try {
     const payload = await mutations.saveRun({
@@ -109,12 +112,7 @@ async function save(finish: boolean, over = false): Promise<void> {
     });
     if (payload) draft.value = draftFromRun(payload.run);
   } catch (error) {
-    const branch = refusedBranch(error);
-    if (branch !== null) {
-      refused.value = branch;
-      return;
-    }
-    await refusedAsStale(error);
+    await refusal(error);
   }
 }
 
@@ -124,6 +122,17 @@ function finish(): void {
     return;
   }
   void save(true);
+}
+
+/** Answer a refused save or attach: on another branch, stale, or anything else. */
+async function refusal(error: unknown): Promise<void> {
+  const branch = refusedBranch(error);
+  if (branch !== null) {
+    refused.value = branch;
+    return;
+  }
+  other.value = otherRefusal(error);
+  await refusedAsStale(error);
 }
 
 /**
@@ -164,6 +173,7 @@ async function attach(number: number | null, event: Event): Promise<void> {
     ),
   );
   refused.value = null;
+  other.value = null;
   stale.value = null;
   try {
     const payload = await mutations.attach({
@@ -174,9 +184,7 @@ async function attach(number: number | null, event: Event): Promise<void> {
     });
     if (payload) draft.value = draftFromRun(payload.run);
   } catch (error) {
-    const branch = refusedBranch(error);
-    if (branch !== null) refused.value = branch;
-    else await refusedAsStale(error);
+    await refusal(error);
   }
 }
 
@@ -207,6 +215,15 @@ const STATUSES: {
         Serve a checkout of that branch, or record it from a terminal there with <code>nav test resume {{ props.run.id }}</code>.
       </template>
     </UAlert>
+    <UAlert
+      v-if="other"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-circle-x"
+      :title="other.heading"
+      :description="other.message"
+      data-testid="runner-refused"
+    />
     <UAlert
       v-if="stale"
       color="warning"

@@ -20,6 +20,7 @@ import {
   validateRepo,
 } from "@navbook/core";
 import { activate } from "../src/core/index.ts";
+import { planJson, resultRows, runJson } from "../src/core/json.ts";
 import { deriveOutcome, latestRunFor, runOutcome, testedOf } from "../src/core/outcome.ts";
 import type { StepRecord } from "../src/core/steps.ts";
 import { allRuns, prRunsOf, runsOfPlan, testsOf } from "../src/core/tree.ts";
@@ -283,6 +284,70 @@ describe("a run's outcome", () => {
     assert.equal(runOutcome(only as never), "in-progress");
     assert.equal(runOutcome(only as never, 2), "passed");
     assert.equal(runOutcome(only as never, 3), "in-progress");
+  });
+});
+
+describe("the JSON projection", () => {
+  it("lists every step, the plan's and any the run recorded past them", () => {
+    const repo = parseTree(
+      tree({
+        "tests/login/plan.md": plan(),
+        [`tests/login/runs/${runName("2026-09-20T101500Z", "r7k2m9x1")}.md`]: run({
+          steps: 3,
+          results: [
+            [1, "passed"],
+            [3, "failed", "Broke."],
+          ],
+        }),
+      }),
+      { ext },
+    );
+    const [only] = allRuns(repo);
+    const steps = testsOf(repo).planBySlug.get("login")?.steps ?? null;
+    assert.equal(steps?.length, 2);
+    assert.deepEqual(
+      resultRows(steps, only?.records ?? []).map((row) => [
+        row.number,
+        row.title,
+        row.record?.status,
+      ]),
+      [
+        [1, steps?.[0]?.title, "passed"],
+        [2, steps?.[1]?.title, undefined],
+        [3, "Step 3", "failed"],
+      ],
+    );
+    assert.deepEqual(
+      resultRows(null, only?.records ?? []).map((row) => [row.number, row.actions]),
+      [
+        [1, null],
+        [3, null],
+      ],
+    );
+  });
+
+  it("puts identity first, and lets no frontmatter key overwrite it", () => {
+    const repo = parseTree(
+      tree({
+        "tests/login/plan.md": plan().replace("---\n\n", "slug: other\npath: /etc\n---\n\n"),
+        [`tests/login/runs/${runName("2026-09-20T101500Z", "r7k2m9x1")}.md`]: run({
+          raw: "pr: zzzz9999\nid: nope\noutcome: passed",
+        }),
+      }),
+      { ext },
+    );
+    const [only] = allRuns(repo);
+    const json = runJson(".navbook", only as never, "in-progress", null);
+    assert.equal(json.id, "r7k2m9x1");
+    assert.equal(json.pr, null);
+    assert.equal(json.outcome, "in-progress");
+    assert.deepEqual(Object.keys(json).slice(0, 4), ["id", "path", "pr", "plan"]);
+    const planned = planJson(".navbook", testsOf(repo).plans[0] as never, {
+      count: 1,
+      latest: null,
+    });
+    assert.equal(planned.slug, "login");
+    assert.equal(planned.path, ".navbook/tests/login");
   });
 });
 

@@ -57,12 +57,16 @@ export function indent(text: string, by: string): string {
 /**
  * Ask about each step in `pending`, recording each answer as it is given —
  * so a tester who closes the terminal halfway has lost nothing they answered.
+ *
+ * `record` returns why it refused an answer, or null: an actual result whose
+ * first line reads as a heading, say. The walk says so and asks again, rather
+ * than ending a session over something the tester typed.
  */
 export function walkSteps(
   io: Console,
   steps: readonly PlanStep[],
   pending: readonly number[],
-  record: (answer: Answer) => void,
+  record: (answer: Answer) => string | null,
 ): WalkEnd {
   const total = steps.length;
   for (const number of pending) {
@@ -85,16 +89,27 @@ export function walkSteps(
     }
     if (choice === "quit") return "stopped";
 
-    let actual: string | null = null;
-    if (choice !== "passed") {
+    if (choice === "passed") {
+      const refused = record({ number, status: choice, actual: null });
+      if (refused !== null) {
+        io.write(`${refused}\n`);
+        return "stopped";
+      }
+      continue;
+    }
+    let draft = "";
+    for (;;) {
       const text = io.ask("What happened? (Enter to skip, 'e' for $EDITOR) > ");
       if (text === null) {
         record({ number, status: choice, actual: null });
         return "stopped";
       }
-      actual = text.trim() === "e" ? io.edit("") : text;
+      const actual = text.trim() === "e" ? io.edit(draft) : text;
+      const refused = record({ number, status: choice, actual: actual.trim() || null });
+      if (refused === null) break;
+      draft = actual;
+      io.write(`${refused}\n`);
     }
-    record({ number, status: choice, actual: actual?.trim() || null });
   }
 
   const done = io.ask("Every step is recorded. Finish the run? [Y/n] ");

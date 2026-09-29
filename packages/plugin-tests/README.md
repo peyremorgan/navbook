@@ -109,9 +109,9 @@ NAVBOOK_PLUGINS="@navbook/plugin-tests" docker compose build
 That one value sets both images: the API installs the plugin, and the client
 merges the layer.
 
-A run recorded in the browser is committed twice at most: once when it is
-saved partway, once when it is finished. Its answers are kept in that browser
-in between, so a reload loses nothing, but another device does not see them.
+In the browser, starting a run is a commit, and so is each **Save progress**,
+**Finish** and attachment. Answers not yet saved are kept in that browser, so a
+reload loses nothing, but another device does not see them.
 
 ## Without it installed
 

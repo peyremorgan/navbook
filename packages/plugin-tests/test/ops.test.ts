@@ -203,6 +203,22 @@ describe("starting a run", () => {
     });
   });
 
+  it("names the blob a commit of the plan holds, whatever the checkout's line endings", () => {
+    inRepo((ws, dir) => {
+      withPlan(ws);
+      git(dir, "config", "core.autocrlf", "true");
+      const path = join(dir, ".navbook/tests/login/plan.md");
+      writeFileSync(path, readFileSync(path, "utf8").replace(/\n/g, "\r\n"));
+      const committed = git(dir, "rev-parse", "HEAD:.navbook/tests/login/plan.md");
+      const plan = resolvePlan(core, loadTree(core, ws), "login");
+      assert.notEqual(plan.blobSha, committed);
+      startRun(core, ws, { plan, pr: null, version: "1.0" }, {});
+      const run = resolveRun(core, allRuns(loadTree(core, ws)), "aaaa1111");
+      assert.equal(run.planSha, committed);
+      assert.equal(stepsAtRun(core, ws, run, plan).source, "plan-sha");
+    });
+  });
+
   it("refuses a plan with nothing to run, a plan with faults, and a run that says nothing about what was tested", () => {
     inRepo((ws, dir) => {
       withPlan(ws);

@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import type * as NavbookCore from "@navbook/core";
 import type { EntityRecord, Plan, Repo, RunPlanResult, Trailer, WsCtx } from "@navbook/core";
 import {
+  isImageName,
   newRunFile,
   PLAN_FILE,
   RUNS_DIR,
@@ -23,9 +24,10 @@ import {
   TESTS_DIR,
   validatePlan,
 } from "./files.ts";
+import { latestHead, type Outcome, runOutcome } from "./outcome.ts";
 import { type PlanStep, planSteps, type StepRecord, type StepStatus, textFaults } from "./steps.ts";
 import type { PlanRecord, RunRecord } from "./tree.ts";
-import { testsOf } from "./tree.ts";
+import { allRuns, prRunsOf, testsOf } from "./tree.ts";
 
 /** The core this plugin runs against: the host's copy, handed to `activate`. */
 export type Core = typeof NavbookCore;
@@ -98,6 +100,99 @@ export function resolveRun(core: Core, runs: readonly RunRecord[], ref: string):
     default:
       core.wsFail("ambiguous", `'${ref}' matches more than one test run`, resolution.matches);
   }
+}
+
+/**
+ * A run by reference, in this tree or, failing that, in a pull request only
+ * another fetched branch carries — which is where a pull request's runs
+ * usually are. `refs` names the branches it was read from, or is null for a
+ * run in this tree: only a read may come from elsewhere.
+ */
+export function findRun(
+  core: Core,
+  ws: WsCtx,
+  repo: Repo,
+  ref: string,
+): { run: RunRecord; refs: string[] | null } {
+  try {
+    return { run: resolveRun(core, allRuns(repo), ref), refs: null };
+  } catch (error) {
+    if (!(error instanceof core.WorkspaceError) || error.code !== "not-found") throw error;
+    const elsewhere = runsElsewhere(core, ws, repo);
+    let run: RunRecord;
+    try {
+      run = resolveRun(
+        core,
+        elsewhere.map((entry) => entry.run),
+        ref,
+      );
+    } catch {
+      throw error;
+    }
+    return { run, refs: elsewhere.find((entry) => entry.run === run)?.refs ?? [] };
+  }
+}
+
+/** Runs in pull requests that only other fetched branches carry, with the refs that carry them. */
+export function runsElsewhere(
+  core: Core,
+  ws: WsCtx,
+  repo: Repo,
+): { run: RunRecord; refs: string[] }[] {
+  const here = new Set(repo.prs.map((pr) => pr.id));
+  return core
+    .scanRefsForOpenPrs(ws)
+    .filter((found) => !here.has(found.entity.id))
+    .flatMap((found) =>
+      prRunsOf(found.entity).map((run) => ({ run, refs: found.refs.map((r) => r.short) })),
+    );
+}
+
+/**
+ * A run's outcome (§6): its step count from the run itself, else from the plan
+ * `plan-sha` names, else from the plan in the tree. Only a run without `steps`
+ * costs a look at git.
+ */
+export function outcomeAt(
+  core: Core,
+  ws: WsCtx,
+  run: RunRecord,
+  plan: PlanRecord | undefined,
+): Outcome {
+  if (run.steps !== null) return runOutcome(run);
+  return runOutcome(run, stepsAtRun(core, ws, run, plan).steps?.length ?? null);
+}
+
+/**
+ * A revision as a person names one — a hash, a branch, a tag, `HEAD~1` — and
+ * nothing git would read as an option or a search: no leading `-`, no `:`.
+ */
+const REVISION = /^[A-Za-z0-9][A-Za-z0-9._/@~^-]*$/;
+
+/**
+ * The commit a new run tests: the one named, else the pull request's latest
+ * revision, else `HEAD` unless a version says what was tested instead (§4).
+ */
+export function testedCommit(
+  core: Core,
+  ws: WsCtx,
+  given: { at?: string | null; pr: EntityRecord | null; version: string | null },
+): string | null {
+  const at = given.at?.trim() || null;
+  if (at !== null) {
+    const sha = REVISION.test(at) ? core.resolveSha(ws.repoRoot, at) : null;
+    if (sha === null) core.wsFail("invalid-input", `'${at}' names no commit in this repository`);
+    return sha;
+  }
+  if (given.pr !== null) return latestHead(given.pr);
+  if (given.version !== null) return null;
+  const head = core.resolveSha(ws.repoRoot, "HEAD");
+  if (head === null)
+    core.wsFail(
+      "invalid-input",
+      "this repository has no commit to test yet; name the version you tested instead",
+    );
+  return head;
 }
 
 /**
@@ -278,7 +373,7 @@ export function startRun(
   }
   if (input.notes !== undefined) failOn(core, textFaults(input.notes, "the notes", 2));
 
-  keepPlanBlob(core, ws, plan);
+  const planSha = keepPlanBlob(core, ws, plan);
   const id = ws.mintId(core.scanAllIds(ws.navRoot));
   const date = ws.now();
   const fileName = core.commentFileName(date, id);
@@ -286,7 +381,7 @@ export function startRun(
   const path = `${dir}/${fileName}`;
   const content = newRunFile({
     plan: plan.slug,
-    planSha: plan.blobSha,
+    planSha,
     steps: plan.steps.length,
     author: core.currentAuthor(ws),
     started: core.toIsoSeconds(date),
@@ -309,16 +404,26 @@ export function startRun(
 }
 
 /**
- * Put the plan's text in the object store, so the blob `plan-sha` names exists
- * even when the plan was edited and not yet committed: the run then records
- * the exact steps the tester followed, whatever happens to the file next.
- * Written and not staged — the index is the author's, and only the run's own
- * file belongs in this change.
+ * Put the plan's text in the object store, and return the hash `plan-sha`
+ * records: the blob exists even when the plan was edited and not yet
+ * committed, so the run names the exact steps the tester followed, whatever
+ * happens to the file next. Written and not staged — the index is the
+ * author's, and only the run's own file belongs in this change.
+ *
+ * Hashed as `git add` would store the file, through the path's filters: with
+ * `core.autocrlf` the working copy has CRLF and the committed blob does not,
+ * and a hash of the working copy would name a blob no other clone ever gets.
+ * Such a blob still lives only in this clone until the plan is committed.
  */
-function keepPlanBlob(core: Core, ws: WsCtx, plan: PlanRecord): void {
+function keepPlanBlob(core: Core, ws: WsCtx, plan: PlanRecord): string {
   const text = readFileSync(core.absPath(ws, plan.filePath), "utf8");
-  if (core.blobSha(text) !== plan.blobSha) return;
-  core.git(["hash-object", "-w", "--no-filters", "--stdin"], { cwd: ws.repoRoot, input: text });
+  if (core.blobSha(text) !== plan.blobSha) return plan.blobSha;
+  return core
+    .git(["hash-object", "-w", "--stdin", `--path=${ws.navDir}/${plan.filePath}`], {
+      cwd: ws.repoRoot,
+      input: text,
+    })
+    .trim();
 }
 
 /** One step's result, as a front end gathers it. */
@@ -409,9 +514,6 @@ export interface Attachment {
   bytes: Uint8Array;
 }
 
-/** Image types a link embeds rather than names, so a forge shows the picture. */
-const IMAGE = /\.(png|jpe?g|gif|webp|svg|avif)$/i;
-
 /**
  * The name a file gets beside a run: letters, digits, `.`, `_` and `-`, so a
  * Markdown link to it needs no escaping and every file system accepts it.
@@ -457,7 +559,7 @@ export function attachToRun(
   }
   const base = run.fileName.slice(0, -".md".length);
   const links = names
-    .map((name) => `${IMAGE.test(name) ? "!" : ""}[${name}](${base}/${name})`)
+    .map((name) => `${isImageName(name) ? "!" : ""}[${name}](${base}/${name})`)
     .join("\n");
 
   const text = readFileSync(core.absPath(ws, run.path), "utf8");

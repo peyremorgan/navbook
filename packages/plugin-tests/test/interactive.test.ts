@@ -12,9 +12,15 @@ const STEPS: PlanStep[] = [
   { number: 2, title: "Two", actions: "Do two.", expected: null },
 ];
 
-function walk(answers: (string | null)[], pending = [1, 2], edited = "") {
+function walk(
+  answers: (string | null)[],
+  pending = [1, 2],
+  edited = "",
+  refuse: (answer: Answer) => string | null = () => null,
+) {
   const queue = [...answers];
   const recorded: Answer[] = [];
+  const editorSaw: string[] = [];
   let output = "";
   const end = walkSteps(
     {
@@ -25,13 +31,20 @@ function walk(answers: (string | null)[], pending = [1, 2], edited = "") {
         output += question;
         return queue.length === 0 ? null : (queue.shift() ?? null);
       },
-      edit: () => edited,
+      edit: (initial) => {
+        editorSaw.push(initial);
+        return edited;
+      },
     },
     STEPS,
     pending,
-    (answer) => void recorded.push(answer),
+    (answer) => {
+      const refused = refuse(answer);
+      if (refused === null) recorded.push(answer);
+      return refused;
+    },
   );
-  return { end, recorded, output, left: queue };
+  return { end, recorded, output, left: queue, editorSaw };
 }
 
 describe("walking the steps", () => {
@@ -48,6 +61,30 @@ describe("walking the steps", () => {
     const { end, recorded } = walk(["f", null]);
     assert.equal(end, "stopped");
     assert.deepEqual(recorded, [{ number: 1, status: "failed", actual: null }]);
+  });
+
+  it("asks again for an actual result that was refused, and keeps it for the editor", () => {
+    const heading = (answer: Answer) =>
+      answer.actual?.startsWith("#") ? "nav: that reads as a heading" : null;
+    const { end, recorded, output, editorSaw } = walk(
+      ["f", "# of retries exceeded", "e", "p", "y"],
+      [1, 2],
+      "`#` of retries exceeded",
+      heading,
+    );
+    assert.equal(end, "finished");
+    assert.match(output, /nav: that reads as a heading\nWhat happened\?/);
+    assert.deepEqual(editorSaw, ["# of retries exceeded"]);
+    assert.deepEqual(recorded, [
+      { number: 1, status: "failed", actual: "`#` of retries exceeded" },
+      { number: 2, status: "passed", actual: null },
+    ]);
+  });
+
+  it("stops when a status alone is refused, rather than asking the same thing forever", () => {
+    const { end, output } = walk(["p"], [1], "", () => "nav: refused");
+    assert.equal(end, "stopped");
+    assert.match(output, /nav: refused\n$/);
   });
 
   it("asks again after an answer it does not know, and stops on quit", () => {

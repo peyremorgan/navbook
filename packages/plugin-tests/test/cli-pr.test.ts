@@ -139,6 +139,38 @@ describe("a run attached to a pull request", () => {
   });
 });
 
+describe("a run written without its step count", () => {
+  it("concludes from its plan on its own, and from its own file for the tested state", () => {
+    const { repo, pr, dir } = withPr();
+    try {
+      const result = repo.nav(
+        ["test", "run", "login", "--pr", pr, "--interactive"],
+        {},
+        "p\np\np\n\n",
+      );
+      assert.equal(result.code, 0, result.stderr);
+      const id = result.stdout.match(/^Started run ([a-z0-9]{8})/)?.[1] as string;
+      const file = join(repo.dir, dir, "tests", runFiles(repo, `${dir}/tests`)[0] as string);
+      writeFileSync(file, readFileSync(file, "utf8").replace(/^steps: .*\n/m, ""));
+
+      const shown = repo.nav(["pr", "show", pr]);
+      assert.equal(shown.code, 0, shown.stderr);
+      // §6: the tested state reads the pull request's files alone.
+      assert.match(shown.stdout, /^test runs \(1\), tested: incomplete$/m);
+      assert.match(shown.stdout, new RegExp(`^ {2}${id} {2}passed +login `, "m"));
+      const json = JSON.parse(repo.nav(["pr", "show", pr, "--json"]).stdout);
+      assert.equal(json.tests.tested, "incomplete");
+      assert.equal(json.tests.runs[0].outcome, "passed");
+      assert.match(
+        repo.nav(["test", "show", id]).stdout,
+        new RegExp(`^${id} {2}login {2}passed$`, "m"),
+      );
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
 describe("the plugin, when it is not needed", () => {
   let repo: TempRepo;
   const log = (): string[] => {

@@ -130,9 +130,9 @@ is never a heading.
 - Section names are matched without regard to case or surrounding space. A tool
   writes them as spelled here.
 - Inside a section, deeper headings (`#####`, `######`) are text.
-- These are faults: a `####` heading before the first step; any other `####`
-  section in a step, or one appearing twice; a `#` or `##` heading after the
-  first step.
+- These are faults: a `####` heading before the first step; text between a
+  step's heading and its first section; any other `####` section in a step, or
+  one appearing twice; a `#` or `##` heading after the first step.
 
 A plan MAY have no steps yet. Nothing can be run against it until it has one.
 
@@ -219,8 +219,9 @@ The grammar of §3.1, with different sections.
   link the run's attachments by relative path.
 - A step of the plan with no section is **not run**.
 - These are faults: a missing or malformed number; a number repeated; a missing
-  or unknown status; any other `####` section, or one appearing twice; a
-  `####` heading before the first step; a `#` or `##` heading after it.
+  or unknown status; text between a step's heading and its first section; any
+  other `####` section, or one appearing twice; a `####` heading before the
+  first step; a `#` or `##` heading after it.
 
 | Status | Meaning |
 |---|---|
@@ -260,6 +261,12 @@ name, which is the order a listing shows them in — whose `commit` is the head 
 the pull request's latest revision (02 §2.7), or **none** when it has no such
 run. Like a review decision, it is a reading of the files: nothing gates on it,
 and a new revision returns it to `none`.
+
+The tested state is read from the pull request's own files alone, since a
+listing may be reading them out of another branch, where no plan of this tree
+applies. For it, a run without `steps` is judged with no plan: it can be
+failed, blocked, incomplete or in progress, but not passed or skipped. The
+same run shown on its own MAY conclude more, from the plan it followed.
 
 ## 7. What a tool without this plugin does
 

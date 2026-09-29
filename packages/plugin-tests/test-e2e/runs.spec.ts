@@ -6,7 +6,7 @@
  * read first, as the fixture left it, and only then is a run recorded on it.
  */
 
-import { expect, test, toasts } from "../../web/test-e2e/helpers/fixtures.ts";
+import { expect, signIn, test, toasts } from "../../web/test-e2e/helpers/fixtures.ts";
 
 test("marks a tested pull request on the listing, and filters by it", async ({
   signedIn,
@@ -117,4 +117,28 @@ test("attaches a screenshot to a step, and shows it", async ({ signedIn, stack }
   const attachments = signedIn.getByTestId("test-run-attachments");
   await expect(attachments.getByTestId("test-attachment-image-down-page.png")).toBeVisible();
   await expect(signedIn.getByTestId("runner-step-2-actual")).toHaveValue(/down-page\.png/);
+});
+
+// Last: it finishes the fixture's open run.
+test("says why a save was refused, when the run was finished in another tab", async ({
+  signedIn,
+  stack,
+}) => {
+  await signedIn.goto(`${stack.appUrl}/tests/runs/dddd0002`);
+  await expect(signedIn.getByTestId("runner-save")).toBeVisible();
+
+  const other = await signedIn.context().newPage();
+  await signIn(other, stack);
+  await other.goto(`${stack.appUrl}/tests/runs/dddd0002`);
+  await other.getByTestId("runner-finish").click();
+  await other.getByTestId("runner-finish-confirm").click();
+  await expect(toasts(other)).toContainText("Run finished");
+  await other.close();
+
+  await signedIn.getByTestId("runner-step-3-passed").click();
+  await signedIn.getByTestId("runner-save").click();
+  await expect(signedIn.getByTestId("runner-refused")).toContainText(
+    "test run dddd0002 is finished; nothing more can be recorded",
+  );
+  await expect(signedIn.getByTestId("runner-unserved")).toHaveCount(0);
 });

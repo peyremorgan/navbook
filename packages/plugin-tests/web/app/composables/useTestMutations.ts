@@ -10,7 +10,13 @@
  */
 
 import { useMutation } from "@vue/apollo-composable";
-import { describeApiError, staleEdit, unservedBranch } from "~/utils/errors";
+import {
+  describeApiError,
+  type SaidFailure,
+  sayFailure,
+  staleEdit,
+  unservedBranch,
+} from "~/utils/errors";
 import type {
   AttachToTestRunInput,
   CreateTestPlanInput,
@@ -37,6 +43,20 @@ export function staleContent(error: unknown): string | null {
 /** The branch a refused write belongs on, or null for any other failure. */
 export function refusedBranch(error: unknown): string | null {
   return unservedBranch(describeApiError(error));
+}
+
+/**
+ * What to say about a refusal the shared toast left to the page but that is
+ * neither stale nor on another branch — a run finished elsewhere, a plan with
+ * faults to fix by hand. Null when one of those two applies, or when the
+ * toast has already spoken, so nothing is said twice or not at all.
+ */
+export function otherRefusal(error: unknown): SaidFailure | null {
+  const failure = describeApiError(error);
+  if (failure.code === null || !(ASKED.handledCodes as readonly string[]).includes(failure.code))
+    return null;
+  if (staleEdit(failure) !== null || unservedBranch(failure) !== null) return null;
+  return sayFailure(failure);
 }
 
 export function useTestMutations() {

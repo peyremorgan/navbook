@@ -8,7 +8,8 @@
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
-import { refusedBranch } from "../composables/useTestMutations";
+import type { SaidFailure } from "~/utils/errors";
+import { otherRefusal, refusedBranch } from "../composables/useTestMutations";
 import { TEST_PLANS_QUERY } from "../graphql/queries";
 
 const open = defineModel<boolean>("open", { required: true });
@@ -34,6 +35,7 @@ const commit = ref("");
 const version = ref("");
 const environment = ref("");
 const refused = ref<string | null>(null);
+const other = ref<SaidFailure | null>(null);
 
 watch(open, (value) => {
   if (!value) return;
@@ -42,11 +44,13 @@ watch(open, (value) => {
   version.value = "";
   environment.value = "";
   refused.value = null;
+  other.value = null;
 });
 
 async function start(): Promise<void> {
   if (!chosen.value) return;
   refused.value = null;
+  other.value = null;
   try {
     const payload = await mutations.startRun({
       plan: chosen.value,
@@ -60,6 +64,7 @@ async function start(): Promise<void> {
     await navigateTo(`/tests/runs/${payload.run.id}`);
   } catch (error) {
     refused.value = refusedBranch(error);
+    other.value = otherRefusal(error);
   }
 }
 </script>
@@ -76,6 +81,15 @@ async function start(): Promise<void> {
           title="Not from this server"
           :description="`The pull request lives on ${refused}, which this server does not have checked out.`"
           data-testid="test-run-start-unserved"
+        />
+        <UAlert
+          v-if="other"
+          color="error"
+          variant="subtle"
+          icon="i-lucide-circle-x"
+          :title="other.heading"
+          :description="other.message"
+          data-testid="test-run-start-refused"
         />
         <UFormField v-if="props.plan === undefined" label="Plan" required>
           <USelect

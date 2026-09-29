@@ -13,23 +13,32 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import type { EntityRecord } from "@navbook/core";
 import type { GraphQLCtx, ServerPluginHost } from "@navbook/server/plugin";
-import { newPlanFile, useCore, validatePlan } from "../core/files.ts";
+import { mediaType, newPlanFile, useCore, validatePlan } from "../core/files.ts";
+import { resultRows } from "../core/json.ts";
 import {
   type Attachment,
   attachToRun,
   createPlan,
   editPlan,
+  findRun as findRunAnywhere,
   resolvePlan,
   resolveRun,
   saveRun,
   startRun,
   stepsAtRun,
+  testedCommit,
 } from "../core/ops.ts";
-import { latestHead, type Outcome, runOutcome, TESTED, testedOf } from "../core/outcome.ts";
-import { type PlanStep, renderPlanBody, type StepStatus, textFaults } from "../core/steps.ts";
+import { type Outcome, runOutcome, TESTED, testedOf } from "../core/outcome.ts";
+import {
+  type PlanStep,
+  planSteps,
+  renderPlanBody,
+  type StepStatus,
+  textFaults,
+} from "../core/steps.ts";
 import {
   allRuns,
   type PlanRecord,
@@ -43,6 +52,12 @@ import {
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
 /** The most one attach request may carry, decoded. */
 export const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
+/**
+ * The largest attachment the API hands back. A run recorded at a terminal can
+ * carry anything; served as base64 inside a JSON response it costs a third
+ * again, in memory on both ends, so past this it is read from a clone.
+ */
+export const MAX_SERVED_BYTES = 20 * 1024 * 1024;
 
 const COMMIT = { commit: true } as const;
 
@@ -51,33 +66,6 @@ const toEnum = (state: string): string => state.toUpperCase().replace("-", "_");
 
 /** A status from the SDL's enum, as the format spells it. */
 const fromStatus = (value: string): StepStatus => value.toLowerCase() as StepStatus;
-
-/** Media types for the files a tester most often attaches; anything else is bytes. */
-const MEDIA_TYPES: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  avif: "image/avif",
-  svg: "image/svg+xml",
-  txt: "text/plain",
-  log: "text/plain",
-  md: "text/markdown",
-  json: "application/json",
-  html: "text/html",
-  pdf: "application/pdf",
-  mp4: "video/mp4",
-  webm: "video/webm",
-  zip: "application/zip",
-};
-
-export function mediaType(name: string): string {
-  const extension = name.split(".").pop()?.toLowerCase() ?? "";
-  return name.includes(".")
-    ? (MEDIA_TYPES[extension] ?? "application/octet-stream")
-    : "application/octet-stream";
-}
 
 interface StepInput {
   title: string;
@@ -121,30 +109,9 @@ export function activate(host: ServerPluginHost): void {
     return runOutcome(run, (await stepsOf(ctx, run)).steps?.length ?? null);
   }
 
-  /**
-   * Runs in pull requests that only other fetched branches carry: readable
-   * here, writable only on their branch.
-   */
-  function runsElsewhere(ctx: GraphQLCtx): RunRecord[] {
-    const here = new Set(ctx.loadRepo("none").prs.map((pr) => pr.id));
-    return core
-      .scanRefsForOpenPrs(ctx.ws)
-      .filter((found) => !here.has(found.entity.id))
-      .flatMap((found) => prRunsOf(found.entity));
-  }
-
   /** A run by reference: in the served tree, else in a pull request on another branch. */
   function findRun(ctx: GraphQLCtx, ref: string): RunRecord {
-    try {
-      return resolveRun(core, allRuns(ctx.loadRepo("none")), ref);
-    } catch (error) {
-      if (!(error instanceof core.WorkspaceError) || error.code !== "not-found") throw error;
-      try {
-        return resolveRun(core, runsElsewhere(ctx), ref);
-      } catch {
-        throw error;
-      }
-    }
+    return findRunAnywhere(core, ctx.ws, ctx.loadRepo("none"), ref).run;
   }
 
   /**
@@ -268,7 +235,7 @@ export function activate(host: ServerPluginHost): void {
         };
         for (const run of runsOfPlan(await ctx.repo(), plan.slug)) {
           stats.runs++;
-          const outcome = runOutcome(run, plan.steps.length);
+          const outcome = await outcomeOf(ctx, run);
           stats[outcome === "in-progress" ? "inProgress" : outcome]++;
         }
         return stats;
@@ -284,26 +251,14 @@ export function activate(host: ServerPluginHost): void {
         toEnum(await outcomeOf(ctx, run)),
       results: async (run: RunRecord, _args: unknown, ctx: GraphQLCtx) => {
         const { steps } = await stepsOf(ctx, run);
-        const byNumber = new Map(run.records.map((record) => [record.number, record]));
-        const rows =
-          steps ??
-          run.records.map((record) => ({
-            number: record.number,
-            title: record.title,
-            actions: "",
-            expected: null,
-          }));
-        return rows.map((step) => {
-          const record = byNumber.get(step.number);
-          return {
-            number: step.number,
-            title: step.title,
-            actions: step.actions,
-            expected: step.expected,
-            status: record === undefined ? null : toEnum(record.status),
-            actual: record?.actual ?? null,
-          };
-        });
+        return resultRows(steps, run.records).map((row) => ({
+          number: row.number,
+          title: row.title,
+          actions: row.actions ?? "",
+          expected: row.expected,
+          status: row.record === undefined ? null : toEnum(row.record.status),
+          actual: row.record?.actual ?? null,
+        }));
       },
       stepsFrom: async (run: RunRecord, _args: unknown, ctx: GraphQLCtx) =>
         toEnum((await stepsOf(ctx, run)).source),
@@ -397,8 +352,20 @@ export function activate(host: ServerPluginHost): void {
           const { result, pushed } = await ctx.sync.write(
             () => {
               const plan = resolvePlan(core, ctx.loadRepo("none"), input.slug);
+              const text = readFileSync(core.absPath(ctx.ws, plan.filePath), "utf8");
+              // The body is composed from fields, so whatever the grammar could
+              // not read — a stray section, text before a step's first one —
+              // would be dropped without anyone having seen it (§3.1).
+              const faults = planSteps(core.parseFile(text).body).faults;
+              if (faults.length > 0) {
+                core.wsFail(
+                  "precondition",
+                  `test plan '${plan.slug}' has text its editor cannot show; fix ${ctx.ws.navDir}/${plan.filePath} by hand, or with 'nav test edit ${plan.slug}'`,
+                  faults.map((fault) => fault.message),
+                );
+              }
               // The file as it is, so a key a later revision of the format adds survives.
-              const nav = core.parseDoc(readFileSync(core.absPath(ctx.ws, plan.filePath), "utf8"));
+              const nav = core.parseDoc(text);
               if (input.title != null) core.patchDoc(nav, { title: input.title.trim() });
               const steps = input.steps ?? plan.steps;
               const description = input.description ?? plan.description;
@@ -437,16 +404,7 @@ export function activate(host: ServerPluginHost): void {
               const plan = resolvePlan(core, ctx.loadRepo("none"), input.plan);
               const pr = input.pr ? api.writeTarget(ctx, "pr", input.pr) : null;
               const version = input.version?.trim() || null;
-              let commit: string | null = null;
-              if (input.commit) {
-                commit = core.resolveSha(ctx.ws.repoRoot, input.commit.trim());
-                if (commit === null)
-                  throw api.invalidInput(`'${input.commit}' names no commit this server holds`);
-              } else if (pr !== null) {
-                commit = latestHead(pr);
-              } else if (version === null) {
-                commit = core.resolveSha(ctx.ws.repoRoot, "HEAD");
-              }
+              const commit = testedCommit(core, ctx.ws, { at: input.commit, pr, version });
               const started = startRun(
                 core,
                 ctx.ws,
@@ -591,19 +549,30 @@ export function activate(host: ServerPluginHost): void {
    */
   function readAttachment(ctx: GraphQLCtx, run: RunRecord, path: string): Buffer {
     const here = run.pr === null || ctx.loadRepo("none").prs.some((pr) => pr.id === run.pr?.id);
-    if (here) return readFileSync(core.absPath(ctx.ws, path));
+    if (here) {
+      const absolute = core.absPath(ctx.ws, path);
+      servable(statSync(absolute).size, path);
+      return readFileSync(absolute);
+    }
     const found = core.scanRefsForOpenPrs(ctx.ws).find((entry) => entry.entity.id === run.pr?.id);
     const ref = found?.refs[0]?.full;
     if (ref === undefined)
       return core.wsFail("not-found", `test run ${run.id}'s pull request is on no fetched branch`);
+    const object = `${ref}:${core.repoPath(ctx.ws.navDir, path)}`;
+    servable(Number(core.git(["cat-file", "-s", object], { cwd: ctx.ws.repoRoot }).trim()), path);
     // Bytes, not text: the core's git runner decodes UTF-8, which a picture is not.
-    return execFileSync(
-      "git",
-      ["cat-file", "blob", `${ref}:${core.repoPath(ctx.ws.navDir, path)}`],
-      {
-        cwd: ctx.ws.repoRoot,
-        maxBuffer: 2 * MAX_FILE_BYTES,
-      },
+    return execFileSync("git", ["cat-file", "blob", object], {
+      cwd: ctx.ws.repoRoot,
+      maxBuffer: MAX_SERVED_BYTES + 1,
+    });
+  }
+
+  /** Refuse, before reading it, an attachment too large to hand back (see MAX_SERVED_BYTES). */
+  function servable(size: number, path: string): void {
+    if (size <= MAX_SERVED_BYTES) return;
+    core.wsFail(
+      "precondition",
+      `${path.split("/").pop()} is larger than the ${MAX_SERVED_BYTES / 1024 / 1024} MiB the API serves; read it from a clone`,
     );
   }
 }

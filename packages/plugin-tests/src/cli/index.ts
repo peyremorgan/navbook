@@ -17,13 +17,17 @@ import {
   applyPlanEdit,
   attachToRun,
   createPlan,
+  findRun as findRunAnywhere,
   loadTree,
+  outcomeAt,
   resolvePlan,
   resolveRun,
   revalidatePlanFile,
+  runsElsewhere,
   saveRun,
   startRun,
   stepsAtRun,
+  testedCommit,
 } from "../core/ops.ts";
 import {
   latestHead,
@@ -75,9 +79,9 @@ export function activate(host: CliPluginHost): void {
   const c = ctx.colors;
   const write = (text: string): void => void ctx.stdout.write(text);
 
-  /** A run's outcome, its step count from the run, else the plan in the tree (§6). */
+  /** A run's outcome (§6), its step count from the run, else the plan it followed. */
   const outcomeOf = (repo: Repo, run: RunRecord): Outcome =>
-    runOutcome(run, testsOf(repo).planBySlug.get(run.plan)?.steps.length ?? null);
+    outcomeAt(core, ctx, run, testsOf(repo).planBySlug.get(run.plan));
 
   /* ------------------------------------------------------------------ open */
 
@@ -205,14 +209,17 @@ export function activate(host: CliPluginHost): void {
     write(`${lines.join("\n")}\n`);
   }
 
+  /** What a front end says when the plan a run followed is not to be had (§6). */
+  function fellBack(run: RunRecord): string {
+    return `nav: the plan this run followed (${run.planSha?.slice(0, 12) ?? "no plan-sha"}) is not in this repository; its steps are shown as the plan has them now`;
+  }
+
   function showRun(repo: Repo, ref: string, json: boolean): void {
     const run = findRun(repo, ref);
     const plan = testsOf(repo).planBySlug.get(run.plan);
     const { steps, source } = stepsAtRun(core, ctx, run, plan);
     if (source === "tree") {
-      ctx.stderr.write(
-        `nav: the plan this run followed (${run.planSha?.slice(0, 12) ?? "no plan-sha"}) is not in this repository; its steps are shown as the plan has them now\n`,
-      );
+      ctx.stderr.write(`${fellBack(run)}\n`);
     } else if (source === "none") {
       ctx.stderr.write(
         `nav: no test plan '${run.plan}' in this tree; showing only what the run recorded\n`,
@@ -251,46 +258,28 @@ export function activate(host: CliPluginHost): void {
   }
 
   /**
-   * A run by reference, in this tree or, failing that, in a pull request on
-   * another fetched branch — which is where a pull request's runs usually
-   * are. Only a read may come from elsewhere, and it says where.
+   * A run by reference, here or in a pull request on another fetched branch,
+   * saying where when it is not here; and naming the plans when nothing
+   * matches, since a mistyped slug is the likelier mistake.
    */
   function findRun(repo: Repo, ref: string): RunRecord {
     try {
-      return resolveRun(core, allRuns(repo), ref);
-    } catch (error) {
-      if (!(error instanceof core.WorkspaceError) || error.code !== "not-found") throw error;
-      const elsewhere = runsElsewhere(repo);
-      try {
-        const run = resolveRun(
-          core,
-          elsewhere.map((entry) => entry.run),
-          ref,
+      const found = findRunAnywhere(core, ctx, repo, ref);
+      if (found.refs !== null)
+        ctx.stderr.write(
+          `nav: #${found.run.pr?.id} is not in this tree; read from ${found.refs.join(", ")}\n`,
         );
-        const refs = elsewhere.find((entry) => entry.run === run)?.refs ?? [];
-        ctx.stderr.write(`nav: #${run.pr?.id} is not in this tree; read from ${refs.join(", ")}\n`);
-        return run;
-      } catch {
-        if (testsOf(repo).plans.length > 0 && !core.isId(ref.replace(/^#/, ""))) {
-          ui.fail(
-            `no test plan or run matches '${ref}'`,
-            testsOf(repo).plans.map((plan) => `  ${plan.slug}`),
-          );
-        }
-        throw error;
+      return found.run;
+    } catch (error) {
+      const notFound = error instanceof core.WorkspaceError && error.code === "not-found";
+      if (notFound && testsOf(repo).plans.length > 0 && !core.isId(ref.replace(/^#/, ""))) {
+        ui.fail(
+          `no test plan or run matches '${ref}'`,
+          testsOf(repo).plans.map((plan) => `  ${plan.slug}`),
+        );
       }
+      throw error;
     }
-  }
-
-  /** Runs in pull requests that only other fetched branches carry, with the refs that carry them. */
-  function runsElsewhere(repo: Repo): { run: RunRecord; refs: string[] }[] {
-    const here = new Set(repo.prs.map((pr) => pr.id));
-    return core
-      .scanRefsForOpenPrs(ctx)
-      .filter((found) => !here.has(found.entity.id))
-      .flatMap((found) =>
-        prRunsOf(found.entity).map((run) => ({ run, refs: found.refs.map((r) => r.short) })),
-      );
   }
 
   /** One run, on one line: ID, outcome, when, who, where, against what. */
@@ -330,19 +319,11 @@ export function activate(host: CliPluginHost): void {
       pr = target.entity;
     }
     const version = opts.version === undefined ? null : String(opts.version);
-    let commit: string | null = null;
-    if (opts.at !== undefined) {
-      commit = core.resolveSha(ctx.repoRoot, String(opts.at));
-      if (commit === null) ui.fail(`'${String(opts.at)}' names no commit in this repository`);
-    } else if (pr !== null) {
-      commit = latestHead(pr);
-    } else if (version === null) {
-      commit = core.resolveSha(ctx.repoRoot, "HEAD");
-      if (commit === null)
-        ui.fail(
-          "this repository has no commit to test yet; pass --version to name what you tested",
-        );
-    }
+    const commit = testedCommit(core, ctx, {
+      at: opts.at === undefined ? null : String(opts.at),
+      pr,
+      version,
+    });
 
     const interactive =
       opts.interactive === undefined ? ui.isInteractive() : opts.interactive === true;
@@ -380,14 +361,21 @@ export function activate(host: CliPluginHost): void {
    * session that started the run is a `run`, one that continued it records.
    */
   function walk(id: string, action: "run" | "record", commit: boolean): void {
-    const current = (): { run: RunRecord; steps: readonly PlanStep[] } => {
+    const current = (): {
+      run: RunRecord;
+      steps: readonly PlanStep[];
+      source: "plan-sha" | "tree";
+    } => {
       const repo = loadTree(core, ctx);
       const run = resolveRun(core, allRuns(repo), id);
-      const { steps } = stepsAtRun(core, ctx, run, testsOf(repo).planBySlug.get(run.plan));
-      if (steps === null) return ui.fail(`no test plan '${run.plan}' to walk through`);
-      return { run, steps };
+      const { steps, source } = stepsAtRun(core, ctx, run, testsOf(repo).planBySlug.get(run.plan));
+      if (steps === null || source === "none")
+        return ui.fail(`no test plan '${run.plan}' to walk through`);
+      // Never past the steps the run followed, whatever the plan has now.
+      return { run, steps: steps.slice(0, run.steps ?? steps.length), source };
     };
-    const { run, steps } = current();
+    const { run, steps, source } = current();
+    if (source === "tree") ctx.stderr.write(`${fellBack(run)}\n`);
     const recorded = new Set(run.records.map((record) => record.number));
     const pending = steps.map((step) => step.number).filter((number) => !recorded.has(number));
     write(
@@ -404,7 +392,21 @@ export function activate(host: CliPluginHost): void {
       pending,
       (answer: Answer) => {
         const now = current();
-        saveRun(core, ctx, now.run, now.steps, { results: [answer] }, { baseSha: now.run.blobSha });
+        try {
+          saveRun(
+            core,
+            ctx,
+            now.run,
+            now.steps,
+            { results: [answer] },
+            { baseSha: now.run.blobSha },
+          );
+          return null;
+        } catch (error) {
+          if (error instanceof core.WorkspaceError && error.code === "invalid-input")
+            return `nav: ${error.message}`;
+          throw error;
+        }
       },
     );
 
@@ -486,7 +488,7 @@ export function activate(host: CliPluginHost): void {
     const repo = loadTree(core, ctx);
     const runs = [
       ...allRuns(repo),
-      ...(opts.allRefs ? runsElsewhere(repo).map((entry) => entry.run) : []),
+      ...(opts.allRefs ? runsElsewhere(core, ctx, repo).map((entry) => entry.run) : []),
     ]
       .filter((run) => query.plans.length === 0 || query.plans.includes(run.plan))
       .filter((run) => query.prs.every((prefix) => run.pr?.id.startsWith(prefix) === true))
@@ -573,19 +575,32 @@ export function activate(host: CliPluginHost): void {
 
   /* ---------------------------------------------------- pull requests */
 
+  /**
+   * A pull request's runs with their outcomes (§6). The tree is read only when
+   * a run lacks `steps`, which a run written by a tool never does.
+   */
+  function prRuns(entity: EntityRecord): { run: RunRecord; outcome: Outcome }[] {
+    let repo: Repo | undefined;
+    return prRunsOf(entity).map((run) => {
+      if (run.steps !== null) return { run, outcome: runOutcome(run) };
+      repo ??= loadTree(core, ctx);
+      return { run, outcome: outcomeOf(repo, run) };
+    });
+  }
+
   host.contribute("pr show", {
     showSection: (entity) => {
-      const runs = prRunsOf(entity);
+      const runs = prRuns(entity);
       if (runs.length === 0) return [];
       const head = latestHead(entity);
       const lines = [
         c.dim(`test runs (${runs.length}), tested: `) + paintState(testedOf(entity), c),
       ];
-      for (const run of [...runs].reverse()) {
+      for (const { run, outcome } of [...runs].reverse()) {
         const older =
           run.commit !== null && run.commit !== head ? c.dim("  (an earlier revision)") : "";
         lines.push(
-          `  ${run.id}  ${ui.pad(paintState(runOutcome(run), c), 11)}  ${run.plan}  ${run.started}  ${personName(run.author)}  ${tested(run)}${older}`,
+          `  ${run.id}  ${ui.pad(paintState(outcome, c), 11)}  ${run.plan}  ${run.started}  ${personName(run.author)}  ${tested(run)}${older}`,
         );
       }
       return lines;
@@ -593,7 +608,7 @@ export function activate(host: CliPluginHost): void {
     jsonExtra: (entity) => ({
       tests: {
         tested: testedOf(entity),
-        runs: prRunsOf(entity).map((run) => runJson(ctx.navDir, run, runOutcome(run))),
+        runs: prRuns(entity).map(({ run, outcome }) => runJson(ctx.navDir, run, outcome)),
       },
     }),
   });

@@ -288,3 +288,36 @@ export function recordFor(
     actual: actual !== null && actual.trim() !== "" ? actual.trim() : null,
   };
 }
+
+/** Media types for the files a tester most often attaches; anything else is bytes. */
+const MEDIA_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  avif: "image/avif",
+  svg: "image/svg+xml",
+  txt: "text/plain",
+  log: "text/plain",
+  md: "text/markdown",
+  json: "application/json",
+  html: "text/html",
+  pdf: "application/pdf",
+  mp4: "video/mp4",
+  webm: "video/webm",
+  zip: "application/zip",
+};
+
+/** The media type an attachment is served as, by its name. */
+export function mediaType(name: string): string {
+  const extension = name.split(".").pop()?.toLowerCase() ?? "";
+  return name.includes(".")
+    ? (MEDIA_TYPES[extension] ?? "application/octet-stream")
+    : "application/octet-stream";
+}
+
+/** True for an attachment a link embeds rather than names, so a forge shows the picture. */
+export function isImageName(name: string): boolean {
+  return mediaType(name).startsWith("image/");
+}

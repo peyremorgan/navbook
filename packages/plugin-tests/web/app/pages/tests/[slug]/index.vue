@@ -3,8 +3,9 @@
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
+import type { SaidFailure } from "~/utils/errors";
 import { pageTitle } from "~/utils/title";
-import { staleContent } from "../../../composables/useTestMutations";
+import { otherRefusal, staleContent } from "../../../composables/useTestMutations";
 import { TEST_PLAN_QUERY } from "../../../graphql/queries";
 import { passRate } from "../../../utils/tests";
 
@@ -24,6 +25,28 @@ useHead({ title: computed(() => pageTitle(plan.value?.title || slug.value, "Test
 
 const editing = ref(false);
 const stale = ref<string | null>(null);
+const other = ref<SaidFailure | null>(null);
+/**
+ * The version the editor was opened on, so a save is judged against what the
+ * author started from, not against whatever a background refetch brought in
+ * since. After a stale refusal it moves to the version now shown beside the
+ * draft: saving again is then a choice made with both in view.
+ */
+const editBase = ref<string | null>(null);
+
+function startEditing(): void {
+  if (!plan.value) return;
+  editBase.value = plan.value.baseSha;
+  stale.value = null;
+  other.value = null;
+  editing.value = true;
+}
+
+function stopEditing(): void {
+  editing.value = false;
+  stale.value = null;
+  other.value = null;
+}
 const starting = ref(false);
 const rate = computed(() => (plan.value ? passRate(plan.value.stats) : null));
 
@@ -34,21 +57,24 @@ async function save(change: {
 }): Promise<void> {
   if (!plan.value) return;
   stale.value = null;
+  other.value = null;
   try {
     const payload = await mutations.updatePlan({
       slug: plan.value.slug,
       title: change.title,
       description: change.description,
       steps: change.steps,
-      baseSha: plan.value.baseSha,
+      baseSha: editBase.value ?? plan.value.baseSha,
     });
-    if (payload) editing.value = false;
+    if (payload) stopEditing();
   } catch (failure) {
+    other.value = otherRefusal(failure);
     const message = staleContent(failure);
     if (message === null) return;
     // Said before the refetch, so the editor stays open on the draft.
     stale.value = message;
     await refetch();
+    editBase.value = plan.value?.baseSha ?? null;
   }
 }
 </script>
@@ -78,7 +104,7 @@ async function save(change: {
             color="neutral"
             variant="subtle"
             data-testid="edit-test-plan"
-            @click="editing = true; stale = null"
+            @click="startEditing"
           >
             Edit
           </UButton>
@@ -90,13 +116,22 @@ async function save(change: {
         <PersonLabel :person="plan.author" />; kept at <code>{{ plan.path }}</code>.
       </p>
 
+      <UAlert
+        v-if="other"
+        color="error"
+        variant="subtle"
+        icon="i-lucide-circle-x"
+        :title="other.heading"
+        :description="other.message"
+        data-testid="test-plan-refused"
+      />
       <TestPlanEditor
         v-if="editing"
         :plan="plan"
         :saving="mutations.busy.value"
         :stale="stale"
         @save="save"
-        @cancel="editing = false; stale = null"
+        @cancel="stopEditing"
       />
 
       <template v-if="!editing || stale">

@@ -165,6 +165,50 @@ describe("walking a run", () => {
     assert.doesNotMatch(text, /^finished:/m);
     assert.match(result.stdout, /Left in progress/);
   });
+
+  it("asks again for an actual result that reads as a heading, and still commits the session", () => {
+    repo.commitAll("chore: the runs so far");
+    const result = repo.nav(
+      ["test", "run", "login", "--interactive", "--commit"],
+      {},
+      "p\nf\n# of retries exceeded\nRetries ran out.\ns\n\n",
+    );
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(
+      result.stdout,
+      /nav: the actual result of step 2 contains a heading.*\nWhat happened\?/,
+    );
+    const id = result.stdout.match(/^Started run ([a-z0-9]{8})/)?.[1] as string;
+    assert.match(result.stdout, new RegExp(`Committed docs\\(tests\\): run login ${id}\n$`));
+    assert.match(runText(repo, id), /#### Actual\n\nRetries ran out\.\n/);
+  });
+
+  // Last here: it leaves the plan with a fourth step.
+  it("walks only the steps the run followed, and says when it reads them from today's plan", () => {
+    const id = started(repo, "--commit");
+    const name = runFiles(repo).find((file) => idOf(file) === id) as string;
+    const path = join(repo.dir, RUNS, name);
+    writeFileSync(
+      path,
+      readFileSync(path, "utf8").replace(/^plan-sha: .*$/m, `plan-sha: ${"e".repeat(40)}`),
+    );
+    const grow = repo.script(
+      "grow.sh",
+      `printf '\\n### Four\\n\\n#### Actions\\n\\nDo four.\\n' >> "$1"`,
+    );
+    assert.equal(repo.nav(["test", "edit", "login"], { EDITOR: grow }).code, 0);
+
+    const result = repo.nav(["test", "resume", id], {}, "p\np\np\ny\n");
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(
+      result.stderr,
+      /the plan this run followed \(eeeeeeeeeeee\) is not in this repository/,
+    );
+    assert.match(result.stdout, /login: 3 steps, 3 to go/);
+    assert.doesNotMatch(result.stdout, /Step 4/);
+    assert.match(result.stdout, /3 of 3 steps recorded: passed/);
+    assert.match(runText(repo, id), /^finished: /m);
+  });
 });
 
 describe("recording and finishing", () => {

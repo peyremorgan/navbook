@@ -474,4 +474,53 @@ describe("test plans and runs over the API", () => {
     );
     await refuse([{ name: "a.txt", base64: "" }], /step 2 of test run .* is not recorded yet/, 2);
   });
+
+  it("will not compose over a plan whose text the grammar cannot read, nor test a search", async () => {
+    // A plan written by hand, with a section the format does not have.
+    const peer = h.fixture.peer;
+    assert.equal(peer.git(["checkout", "--quiet", "served"]).code, 0);
+    assert.equal(peer.git(["pull", "--quiet", "--rebase", "origin", "main"]).code, 0);
+    const dir = join(peer.dir, ".navbook/tests/by-hand");
+    // And a run with a recording too large to hand back through the API.
+    const run = "2026-09-21T090000Z-bigg1111";
+    mkdirSync(join(dir, "runs", run), { recursive: true });
+    writeFileSync(
+      join(dir, "runs", `${run}.md`),
+      "---\nplan: by-hand\nsteps: 1\nauthor: Bob <bob@example.com>\nstarted: 2026-09-21T09:00:00Z\nversion: '1'\n---\n",
+    );
+    writeFileSync(join(dir, "runs", run, "screen.webm"), Buffer.alloc(20 * 1024 * 1024 + 1));
+    writeFileSync(
+      join(dir, "plan.md"),
+      "---\ntitle: By hand\nauthor: Bob <bob@example.com>\ncreated: 2026-09-21T09:00:00Z\n---\n\n### One\n\n#### Actions\n\nDo it.\n\n#### Notes\n\nKeep me.\n",
+    );
+    peer.commitAll("docs(tests): create by-hand");
+    const pushed = peer.git(["push", "--quiet", "origin", "HEAD:main"]);
+    assert.equal(pushed.code, 0, pushed.stderr);
+
+    const plan = ok<Payload>(await h.gql(`{ testPlan(slug: "by-hand") { baseSha } }`)).testPlan;
+    const response = await h.gql(UPDATE, {
+      input: { slug: "by-hand", title: "Renamed", baseSha: plan.baseSha },
+    });
+    assert.equal(errorCode(response), "PRECONDITION", JSON.stringify(response.errors));
+    assert.match(response.errors[0]?.message ?? "", /has text its editor cannot show/);
+    assert.deepEqual(response.errors[0]?.extensions?.details, [
+      "step 1 'One' has a '#### Notes' section; a step holds Actions and Expected",
+    ]);
+    assert.equal(response.errors[0]?.extensions?.sourceRef, undefined);
+    const file = h.fixture.server.git(["show", "HEAD:.navbook/tests/by-hand/plan.md"]).stdout;
+    assert.match(file, /#### Notes\n\nKeep me\./);
+
+    const big = await h.gql(ATTACHMENT, { run: "bigg1111", name: "screen.webm" });
+    assert.equal(errorCode(big), "PRECONDITION", JSON.stringify(big.errors));
+    assert.equal(
+      big.errors[0]?.message,
+      "screen.webm is larger than the 20 MiB the API serves; read it from a clone",
+    );
+
+    for (const commit of [":/Served", "-q", "HEAD HEAD"]) {
+      const started = await h.gql(START, { input: { plan: "login", commit } });
+      assert.equal(errorCode(started), "INVALID_INPUT", commit);
+      assert.match(started.errors[0]?.message ?? "", /names no commit in this repository/);
+    }
+  });
 });

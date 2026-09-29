@@ -4,6 +4,7 @@
  * bolted on.
  */
 
+import { resultRows } from "../core/json.ts";
 import type { Outcome } from "../core/outcome.ts";
 import type { PlanStep, StepRecord } from "../core/steps.ts";
 import type { PlanRecord, RunRecord } from "../core/tree.ts";
@@ -84,18 +85,9 @@ export function renderResults(
   records: readonly StepRecord[],
   c: Paint,
 ): string[] {
-  const byNumber = new Map(records.map((record) => [record.number, record]));
-  const rows =
-    steps === null
-      ? records.map((record) => ({
-          number: record.number,
-          title: record.title,
-          expected: null as string | null,
-        }))
-      : steps.map((step) => ({ number: step.number, title: step.title, expected: step.expected }));
   const lines: string[] = [];
-  for (const row of rows) {
-    const record = byNumber.get(row.number);
+  for (const row of resultRows(steps, records)) {
+    const { record } = row;
     lines.push(
       `${c.bold(`${row.number}.`)} ${row.title}  ${paintState(record?.status ?? "not run", c)}`,
     );
