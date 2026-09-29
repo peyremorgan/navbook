@@ -429,6 +429,26 @@ describe("contributions to a built-in verb", () => {
     }
   });
 
+  it("never lets a plugin's JSON key replace one of the entity's own", () => {
+    const repo = probeRepo();
+    try {
+      const env = prListProbe(repo, { title: "plugin", status: "hijacked", id: "nope" });
+      openPrElsewhere(repo, env);
+      repo.git(["checkout", "--quiet", "feat/x"]);
+      for (const args of [["--json"], ["--all-refs", "--json"]]) {
+        const result = repo.nav(["pr", "list", ...args], env);
+        const row = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
+        assert.equal(row.title, "X");
+        assert.equal(row.status, "open");
+        assert.match(String(row.id), /^[0-9a-z]{8}$/);
+        // Its own keys still arrive.
+        assert.equal(row.probeSeen, true);
+      }
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("appends a section to show", () => {
     const repo = probeRepo();
     try {

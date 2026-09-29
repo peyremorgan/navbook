@@ -9,6 +9,7 @@ import {
   DEADLINE_TERMS,
   type EntityKind,
   type EntityRecord,
+  entityJson,
   MERGE_METHODS,
   QUERY_STATUSES,
   type QueryKey,
@@ -550,14 +551,28 @@ async function verbHandlers(
   return shared.plugins.handlersFor(ctx, `${shared.verbPrefix} ${verb}`);
 }
 
-/** One `jsonExtra` from several, or undefined when no plugin contributed one. */
+/**
+ * One `jsonExtra` from several, or undefined when no plugin contributed one.
+ *
+ * A key the entity's own JSON already has is dropped: `title`, `status` and
+ * every frontmatter key are the format's answer, and the one a reader of
+ * `nav --json` is entitled to (spec 04 §4.2). A plugin adds keys; it does not
+ * get to quietly replace the built-in ones.
+ */
 function mergedJsonExtra(
   handlers: readonly VerbHandlers[],
 ): ((entity: EntityRecord) => Record<string, unknown>) | undefined {
   const contributors = handlers.filter((handler) => handler.jsonExtra !== undefined);
   if (contributors.length === 0) return undefined;
-  return (entity) =>
-    Object.assign({}, ...contributors.map((handler) => handler.jsonExtra?.(entity) ?? {}));
+  return (entity) => {
+    const merged: Record<string, unknown> = Object.assign(
+      {},
+      ...contributors.map((handler) => handler.jsonExtra?.(entity) ?? {}),
+    );
+    // Which keys exist does not depend on the Navbook directory's name.
+    for (const key of Object.keys(entityJson("", entity))) delete merged[key];
+    return merged;
+  };
 }
 
 /** Register the verbs both nouns share, so their behavior can never drift. */

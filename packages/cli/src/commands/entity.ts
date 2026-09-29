@@ -199,6 +199,10 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
     ctx.stdout.write(
       `${JSON.stringify(
         entityJson(ctx.navDir, entity, {
+          // A plugin's keys first, so the ones `show` adds below win over
+          // them. The entity's own keys it cannot name at all: those are
+          // dropped where the contributions are merged (`mergedJsonExtra`).
+          ...(opts.jsonExtra?.(entity) ?? {}),
           ...(kind === "pr"
             ? {
                 ...(ref === null ? {} : { refs: [ref] }),
@@ -210,10 +214,6 @@ export function cmdShow(ctx: Ctx, kind: EntityKind, prefix: string, opts: ShowOp
                 },
               }
             : {}),
-          // A plugin's keys last, so one that names a key this format defines
-          // cannot quietly replace it — the format's answer is the one a
-          // reader of `nav --json` is entitled to (spec 04 §4.2).
-          ...(opts.jsonExtra?.(entity) ?? {}),
           comments: entity.comments.map((comment) => commentJson(ctx.navDir, comment)),
         }),
       )}\n`,
