@@ -120,8 +120,26 @@ export default defineNuxtPlugin((nuxtApp) => {
     // The token was refused rather than merely missing, so the stored one is
     // no use to anybody. Dropping it means the next attempt signs in again
     // instead of retrying with the same rejected credential.
-    await auth.forget();
-    await auth.login();
+    try {
+      await auth.forget();
+      await auth.login();
+    } catch (error) {
+      // The redirect never happened — the provider's discovery document could
+      // not be read, most often — so the page and its drafts are still here.
+      // The agreement was for a way out that did not come, and left standing
+      // it would let the next navigation discard the draft without asking;
+      // and the next refusal should try again rather than find this one
+      // still in progress.
+      unsaved.takeAgreement();
+      signingIn = false;
+      useToast().add({
+        title: "Could not sign in again",
+        description: `${error instanceof Error ? error.message : String(error)} — copy anything you wrote, then try again.`,
+        color: "error",
+        icon: "i-lucide-triangle-alert",
+        duration: 8000,
+      });
+    }
   }
 
   const errorLink = onError(({ graphQLErrors, networkError, operation }) => {
