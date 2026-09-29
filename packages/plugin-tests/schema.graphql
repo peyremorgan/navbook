@@ -1,0 +1,297 @@
+# Test plans and runs: the API half — `doc/spec.md`.
+#
+# Merged into the schema `nav-server` serves. Writes go through the same
+# transaction the built-in mutations use; a run attached to a pull request is
+# written beside its `pr.md`, so a pull request this server does not have
+# checked out is refused with PRECONDITION and the branch that carries it, as
+# a comment on it is.
+
+extend type Query {
+  "Every plan in the served tree, in slug order."
+  testPlans: [TestPlan!]!
+  "`slug` is exact: a plan is named by a word somebody chose, not a prefix."
+  testPlan(slug: String!): TestPlan!
+  """
+  A run by ID or unambiguous prefix: beside its plan, in a pull request in the
+  served tree, or in one only another fetched branch carries (read-only there).
+  """
+  testRun(id: ID!): TestRun!
+  """
+  One of a run's attachments, its bytes as base64. The name is looked up among
+  the files beside the run, never joined onto a path.
+  """
+  testAttachment(run: ID!, name: String!): TestAttachmentContent!
+}
+
+extend type Mutation {
+  createTestPlan(input: CreateTestPlanInput!): TestPlanPayload!
+  updateTestPlan(input: UpdateTestPlanInput!): TestPlanPayload!
+  startTestRun(input: StartTestRunInput!): TestRunPayload!
+  "Record steps, change the notes, or finish a run: one commit."
+  saveTestRun(input: SaveTestRunInput!): TestRunPayload!
+  "Copy files beside a run, and link them from it: one commit."
+  attachToTestRun(input: AttachToTestRunInput!): TestAttachPayload!
+}
+
+extend type Pr {
+  "The runs attached to this pull request, newest first."
+  testRuns: [TestRun!]!
+  """
+  The outcome of its newest run against its latest revision, or NONE
+  (`doc/spec.md` §6). A reading of the files, never a gate.
+  """
+  tested: TestedState!
+}
+
+extend input PrFilter {
+  """
+  Tested states, lowercase as the CLI's `tested:` term takes them: passed,
+  failed, blocked, skipped, incomplete, in-progress or none. A pull request
+  matches any one of them.
+  """
+  tested: [String!]
+}
+
+"A recorded step's status (`doc/spec.md` §4.1)."
+enum TestStatus {
+  PASSED
+  FAILED
+  BLOCKED
+  SKIPPED
+}
+
+"What a run concluded, derived from its steps (`doc/spec.md` §6)."
+enum TestOutcome {
+  PASSED
+  FAILED
+  BLOCKED
+  SKIPPED
+  INCOMPLETE
+  IN_PROGRESS
+}
+
+"A pull request's tested state: its latest revision's outcome, or none."
+enum TestedState {
+  PASSED
+  FAILED
+  BLOCKED
+  SKIPPED
+  INCOMPLETE
+  IN_PROGRESS
+  NONE
+}
+
+"""
+A test plan: a description, then ordered steps (`doc/spec.md` §3). It has no
+ID and no status; its slug is its directory.
+"""
+type TestPlan {
+  slug: String!
+  title: String!
+  "RFC 5322 address as stored in frontmatter: `Name <email>`."
+  author: String!
+  created: String!
+  "Markdown before the first step: scope, preconditions. May be empty."
+  description: String!
+  steps: [TestStep!]!
+  "Path from the repository root, e.g. `.navbook/tests/login`."
+  path: String!
+  """
+  A token for the version of `plan.md` this was read from. Hand it back as
+  `baseSha` when editing: an edit made against an older version is refused.
+  """
+  baseSha: String!
+  "Its runs in the served tree — standalone and attached — newest first."
+  runs: [TestRun!]!
+  "How many of those runs came to each outcome."
+  stats: TestPlanStats!
+}
+
+type TestStep {
+  "Its position in the plan, from 1."
+  number: Int!
+  title: String!
+  "Markdown."
+  actions: String!
+  "Markdown; null for a setup step, which checks nothing."
+  expected: String
+}
+
+type TestPlanStats {
+  runs: Int!
+  passed: Int!
+  failed: Int!
+  blocked: Int!
+  skipped: Int!
+  incomplete: Int!
+  inProgress: Int!
+}
+
+"""
+One execution of a plan (`doc/spec.md` §4), standalone or attached to a pull
+request.
+"""
+type TestRun {
+  id: ID!
+  "Path from the repository root."
+  path: String!
+  "The plan's slug, as the run names it."
+  planSlug: String!
+  "The plan in the served tree, or null when it has none by that slug."
+  plan: TestPlan
+  "The blob of `plan.md` the run followed, or null for a hand-written run without one."
+  planSha: String
+  author: String!
+  started: String!
+  "Null while the run is in progress."
+  finished: String
+  "The commit tested, 40 hex."
+  commit: String
+  "The version tested, by name."
+  version: String
+  environment: String
+  "Markdown notes before the first step."
+  notes: String!
+  outcome: TestOutcome!
+  """
+  Every step of the plan the run followed, recorded or not — the plan
+  `planSha` names when this clone holds it, else the plan in the tree, else
+  only what the run recorded.
+  """
+  results: [TestStepResult!]!
+  "Where `results` took the plan's steps from: PLAN_SHA, TREE, or NONE."
+  stepsFrom: TestStepsSource!
+  "The pull request whose directory holds it, or null for a standalone run."
+  pr: Pr
+  "Files beside the run, in name order."
+  attachments: [TestAttachment!]!
+  "A token for the version of the run file this was read from; see `TestPlan.baseSha`."
+  baseSha: String!
+}
+
+enum TestStepsSource {
+  PLAN_SHA
+  TREE
+  NONE
+}
+
+"One step of a plan, beside what a run recorded for it."
+type TestStepResult {
+  number: Int!
+  title: String!
+  "The plan's actions for the step; empty when the plan is not in hand."
+  actions: String!
+  expected: String
+  "Null when the run did not record the step: not run."
+  status: TestStatus
+  "What the tester observed, Markdown."
+  actual: String
+}
+
+type TestAttachment {
+  name: String!
+  "Path from the repository root."
+  path: String!
+}
+
+type TestAttachmentContent {
+  name: String!
+  "A media type guessed from the file name, `application/octet-stream` otherwise."
+  contentType: String!
+  size: Int!
+  base64: String!
+}
+
+input TestStepInput {
+  title: String!
+  "Markdown; no heading of level 1 to 4."
+  actions: String!
+  "Markdown; absent or empty for a setup step."
+  expected: String
+}
+
+input CreateTestPlanInput {
+  title: String!
+  "Directory to file it under; derived from the title when absent."
+  slug: String
+  "Markdown; headings of level 1 and 2 only."
+  description: String
+  steps: [TestStepInput!]!
+}
+
+"Fields to change on a plan; `steps`, when given, replaces them all."
+input UpdateTestPlanInput {
+  slug: String!
+  title: String
+  description: String
+  steps: [TestStepInput!]
+  "The `baseSha` the editor started from; see `TestPlan.baseSha`."
+  baseSha: String!
+}
+
+type TestPlanPayload {
+  plan: TestPlan!
+  commit: CommitInfo!
+}
+
+input StartTestRunInput {
+  "The plan's slug."
+  plan: String!
+  "Attach it to this pull request, in the served tree."
+  pr: ID
+  """
+  The commit tested: a revision name or hash. Absent, it is the pull
+  request's latest revision, else the served branch's head unless a
+  `version` is given.
+  """
+  commit: String
+  version: String
+  environment: String
+}
+
+input TestStepResultInput {
+  "The step's number in the plan."
+  number: Int!
+  status: TestStatus!
+  "What was observed, Markdown; no heading of level 1 to 4."
+  actual: String
+}
+
+input SaveTestRunInput {
+  id: ID!
+  "Steps to record, each replacing what the run said about it."
+  results: [TestStepResultInput!]! = []
+  "Replace the notes."
+  notes: String
+  "Say the run is done."
+  finish: Boolean! = false
+  "The `baseSha` the runner started from; a run changed since is refused with STALE_CONTENT."
+  baseSha: String!
+}
+
+type TestRunPayload {
+  run: TestRun!
+  commit: CommitInfo!
+}
+
+input TestFileInput {
+  "The file's name; anything but letters, digits, `.`, `_` and `-` becomes `-`."
+  name: String!
+  "The bytes, base64, without a `data:` prefix."
+  base64: String!
+}
+
+input AttachToTestRunInput {
+  id: ID!
+  files: [TestFileInput!]!
+  "Link them under this recorded step's actual result; absent, in the notes."
+  step: Int
+  baseSha: String!
+}
+
+type TestAttachPayload {
+  run: TestRun!
+  "The names the files were stored under."
+  names: [String!]!
+  commit: CommitInfo!
+}
