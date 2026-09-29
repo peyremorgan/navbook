@@ -40,6 +40,54 @@ function withProbe(repo: TempRepo): NodeJS.ProcessEnv {
   return { NAVBOOK_PLUGIN_PATH: PROBE, PROBE_LOG: join(repo.home, "probe.log") };
 }
 
+/**
+ * An npm stand-in on the PATH, with a registry that is a directory.
+ *
+ * `publish` puts a copy of the probe in it under another version (and, when
+ * given, another name). The real npm cannot be used for these: it needs a
+ * registry, and what the store records must not depend on the network.
+ */
+function fakeNpm(repo: TempRepo): {
+  env: NodeJS.ProcessEnv;
+  publish(version: string, name?: string): string;
+  copy(version: string, dir: string): string;
+  log(): string[];
+} {
+  const registry = join(repo.home, "registry");
+  const logPath = join(repo.home, "npm.log");
+  const copy = (version: string, dir: string, name?: string): string => {
+    cpSync(PROBE, dir, { recursive: true });
+    const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+    manifest.version = version;
+    if (name !== undefined) manifest.name = name;
+    writeFileSync(join(dir, "package.json"), JSON.stringify(manifest, null, 2));
+    return dir;
+  };
+  return {
+    env: {
+      PATH: `${join(PACKAGE_ROOT, "test", "fixtures", "fake-npm")}:${process.env.PATH}`,
+      FAKE_NPM_REGISTRY: registry,
+      FAKE_NPM_LOG: logPath,
+      PROBE_LOG: join(repo.home, "probe.log"),
+    },
+    publish: (version, name = "@navbook/plugin-probe") =>
+      copy(version, join(registry, name, version), name),
+    copy: (version, dir) => copy(version, dir),
+    log: () =>
+      existsSync(logPath) ? readFileSync(logPath, "utf8").split("\n").filter(Boolean) : [],
+  };
+}
+
+/** What `nav plugin list --json` says is installed, by name and version. */
+function listed(repo: TempRepo, env: NodeJS.ProcessEnv): string[] {
+  return repo
+    .nav(["plugin", "list", "--json"], env)
+    .stdout.split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { name: string; version: string })
+    .map((row) => `${row.name}@${row.version}`);
+}
+
 /** Forget what was logged, so one repository can make several assertions. */
 function clearLog(repo: TempRepo): void {
   rmSync(join(repo.home, "probe.log"), { force: true });
@@ -616,6 +664,52 @@ describe("nav plugin", () => {
         assert.ok(!existsSync(join(modules, peer)), `${peer} was installed into the store`);
       }
       assert.match(repo.nav(["plugin", "list"]).stdout, /@navbook\/plugin-probe\s+1\.0\.0/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("records the version npm installed over an older one", () => {
+    // The spec typed is not a directory in node_modules: the index must follow
+    // what npm wrote into the store, or 2.0.0 runs while `list` says 1.0.0.
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      npm.publish("1.0.0");
+      npm.publish("2.0.0");
+      const first = repo.nav(["plugin", "install", "@navbook/plugin-probe@1.0.0", "-y"], npm.env);
+      assert.equal(first.code, 0, first.stderr);
+      assert.match(first.stdout, /Installed @navbook\/plugin-probe@1\.0\.0/);
+
+      const second = repo.nav(["plugin", "install", "@navbook/plugin-probe@2.0.0", "-y"], npm.env);
+      assert.equal(second.code, 0, second.stderr);
+      assert.match(second.stdout, /Installed @navbook\/plugin-probe@2\.0\.0/);
+      assert.deepEqual(listed(repo, npm.env), ["@navbook/plugin-probe@2.0.0"]);
+      // Nothing was mistaken for a package that is not a plugin and removed.
+      assert.ok(!npm.log().some((line) => line.startsWith("uninstall")), npm.log().join("\n"));
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("records a folder installed over the plugin it replaces", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      const v1 = npm.copy("1.0.0", join(repo.home, "probe-v1"));
+      const v2 = npm.copy("2.0.0", join(repo.home, "probe-v2"));
+      assert.equal(repo.nav(["plugin", "install", v1, "-y"], npm.env).code, 0);
+      const result = repo.nav(["plugin", "install", v2, "-y"], npm.env);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /Installed @navbook\/plugin-probe@2\.0\.0/);
+      assert.deepEqual(listed(repo, npm.env), ["@navbook/plugin-probe@2.0.0"]);
+
+      // The same folder, rebuilt in place: npm saves the same path, and the
+      // index still has to follow the version now in it.
+      npm.copy("3.0.0", v2);
+      const rebuilt = repo.nav(["plugin", "install", v2, "-y"], npm.env);
+      assert.equal(rebuilt.code, 0, rebuilt.stderr);
+      assert.deepEqual(listed(repo, npm.env), ["@navbook/plugin-probe@3.0.0"]);
     } finally {
       repo.cleanup();
     }

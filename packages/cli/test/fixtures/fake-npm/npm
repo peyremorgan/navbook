@@ -1,0 +1,63 @@
+#!/usr/bin/env node
+// A stand-in for npm, for the tests of `nav plugin`. It does what the store
+// relies on and nothing more: `install` copies a package into `node_modules`
+// and records it in `package.json` the way `npm install --save-exact` does (a
+// version for a registry spec, `file:<relative path>` for a local one), and
+// `uninstall` takes it out again. The "registry" is a directory,
+// `$FAKE_NPM_REGISTRY/<name>/<version>/`, and a name it lacks is a 404 in
+// npm's own words. Every invocation is appended to `$FAKE_NPM_LOG`.
+import fs from "node:fs";
+import path from "node:path";
+
+const args = process.argv.slice(2);
+if (process.env.FAKE_NPM_LOG) fs.appendFileSync(process.env.FAKE_NPM_LOG, `${args.join(" ")}\n`);
+const [command, ...rest] = args;
+const specs = rest.filter((arg) => !arg.startsWith("--"));
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+pkg.dependencies ??= {};
+
+function split(spec) {
+  const at = spec.indexOf("@", spec.startsWith("@") ? 1 : 0);
+  return at === -1 ? [spec, null] : [spec.slice(0, at), spec.slice(at + 1)];
+}
+
+function local(spec) {
+  return spec.startsWith("/") || spec.startsWith(".") || spec.startsWith("file:");
+}
+
+if (command === "install") {
+  for (const spec of specs) {
+    let source;
+    let saved;
+    if (local(spec)) {
+      source = path.resolve(spec.replace(/^file:/, ""));
+      saved = `file:${path.relative(process.cwd(), source)}`;
+    } else {
+      const [name, version] = split(spec);
+      const versions = path.join(process.env.FAKE_NPM_REGISTRY ?? "/nonexistent", name);
+      const available = fs.existsSync(versions) ? fs.readdirSync(versions).sort() : [];
+      const chosen = version === null || version === "latest" ? available.at(-1) : version;
+      if (chosen === undefined || !available.includes(chosen)) {
+        process.stderr.write(`npm error code E404\nnpm error 404 Not Found - GET ${spec}\n`);
+        process.exit(1);
+      }
+      source = path.join(versions, chosen);
+      saved = chosen;
+    }
+    const manifest = JSON.parse(fs.readFileSync(path.join(source, "package.json"), "utf8"));
+    const target = path.join("node_modules", ...manifest.name.split("/"));
+    fs.rmSync(target, { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.cpSync(source, target, { recursive: true });
+    pkg.dependencies[manifest.name] = saved;
+  }
+} else if (command === "uninstall") {
+  for (const name of specs) {
+    fs.rmSync(path.join("node_modules", ...name.split("/")), { recursive: true, force: true });
+    delete pkg.dependencies[name];
+  }
+} else {
+  process.stderr.write(`fake npm: '${command}' is not faked\n`);
+  process.exit(1);
+}
+fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
