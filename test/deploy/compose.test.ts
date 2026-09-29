@@ -123,6 +123,33 @@ describe("the deployment descriptor", () => {
     assert.equal(compose.services.web?.build?.args?.NAVBOOK_WEB_PLUGINS, fromEnv);
   });
 
+  it("lets the build argument reach the web build, even when it is empty", () => {
+    // The image sets NAVBOOK_WEB_PLUGINS and runs the package's own `build`
+    // script. A script that assigns the variable outright would replace it, and
+    // every bundle would carry whatever the script names, whatever `.env` says.
+    const web = JSON.parse(readFileSync(join(REPO_ROOT, "packages/web/package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    for (const [name, script] of Object.entries(web.scripts)) {
+      const assignment = /^(NAVBOOK_WEB_PLUGINS=\S+)\s/.exec(script)?.[1];
+      if (assignment === undefined) {
+        assert.doesNotMatch(script, /NAVBOOK_WEB_PLUGINS=/, `${name} sets it mid-command`);
+        continue;
+      }
+      for (const value of ["", "@navbook/plugin-kb other-plugin"]) {
+        const run = spawnSync("sh", ["-c", `${assignment} printenv NAVBOOK_WEB_PLUGINS`], {
+          encoding: "utf8",
+          env: { ...process.env, NAVBOOK_WEB_PLUGINS: value },
+        });
+        assert.equal(
+          run.stdout,
+          `${value}\n`,
+          `${name} replaces NAVBOOK_WEB_PLUGINS=${JSON.stringify(value)}`,
+        );
+      }
+    }
+  });
+
   it("gives every required key a value, so the example renders as it stands", () => {
     const documented = documentedKeys();
     const empty = [...referencedKeys()]
