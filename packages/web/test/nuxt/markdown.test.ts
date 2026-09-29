@@ -169,6 +169,17 @@ describe("renderMarkdown", () => {
       "a literal \\#bqlybac0 and #mz4kq1rv",
       "run `nav pr show '#bqlybac0'` now #mz4kq1rv",
       "``a ` #bqlybac0`` and `x`#mz4kq1rv",
+      "para\n\n    $ nav log\n    open #bqlybac0\n\nafter #mz4kq1rv",
+      "- a\n\n      code #bqlybac0\n\n#mz4kq1rv",
+      "```md\n> ```\n> code #bqlybac0\n```\n\nprose #mz4kq1rv",
+      "```md\n- ```js\n  code #bqlybac0\n- ```\n```\n\nprose #mz4kq1rv",
+      "    ```\n    #bqlybac0\n#mz4kq1rv\n    ```",
+      "\t```\n#mz4kq1rv",
+      "1.\n   ```\n   #bqlybac0\n\n#mz4kq1rv",
+      "- ```\n  #bqlybac0\n\n>  #mz4kq1rv",
+      "text\n2) ``` #mz4kq1rv",
+      "a `b\n***\n#mz4kq1rv and `c`",
+      "Use `foo\n===\nprose #mz4kq1rv `x",
     ]) {
       assert.deepEqual(linked(source).sort(), extractProseRefs(source).sort(), source);
       assert.ok(linked(source).includes("mz4kq1rv"), source);
