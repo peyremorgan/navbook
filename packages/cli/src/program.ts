@@ -9,6 +9,7 @@ import {
   DEADLINE_TERMS,
   type EntityKind,
   type EntityRecord,
+  entityJson,
   MERGE_METHODS,
   QUERY_STATUSES,
   type QueryKey,
@@ -52,7 +53,7 @@ import {
   cmdPrUpdate,
 } from "./commands/pr.ts";
 import { YES_HELP } from "./commands/pr-elsewhere.ts";
-import type { Ctx } from "./context.ts";
+import type { Ctx, GetCtx } from "./context.ts";
 import {
   applyOption,
   buildPluginCommand as buildDeclaredCommand,
@@ -224,7 +225,7 @@ function readsTheTree(action: Command): boolean {
   return !FORMAT_INDEPENDENT.has(top.name());
 }
 
-export function buildProgram(getCtx: () => Ctx, plugins?: PluginRuntime): Command {
+export function buildProgram(getCtx: GetCtx, plugins?: PluginRuntime): Command {
   const program = withoutHelpVerb(new Command());
   program
     .name("nav")
@@ -307,11 +308,61 @@ export function buildProgram(getCtx: () => Ctx, plugins?: PluginRuntime): Comman
       ),
     );
   }
+  warnUnknownContributions(program, getCtx, plugins);
   return program;
 }
 
-/** `nav plugin` — the store verbs of spec 04 §4.3. */
-function buildPluginCommand(getCtx: () => Ctx): Command {
+/**
+ * Say which contributions name a command that does not exist.
+ *
+ * Checked once the whole tree is built, so every noun — built-in, shared verb
+ * or another plugin's — has had its chance to be the target. A contribution
+ * that matches nothing does nothing, and a plugin author who typed
+ * `issue lsit` deserves to hear that rather than wonder where their option went.
+ */
+function warnUnknownContributions(
+  program: Command,
+  getCtx: () => Ctx,
+  plugins: PluginRuntime | undefined,
+): void {
+  for (const [on, entries] of plugins?.commands.contributions ?? []) {
+    let command: Command | undefined = program;
+    for (const word of on.split(" ").filter(Boolean)) {
+      command = command?.commands.find((candidate) => candidate.name() === word);
+    }
+    if (command !== undefined && command !== program) continue;
+    for (const { plugin } of entries) {
+      stderrOf(getCtx).write(
+        `nav: plugin ${plugin.name} contributes to '${on}', which is not a nav command\n`,
+      );
+    }
+  }
+}
+
+/**
+ * Where to warn while the command tree is being built.
+ *
+ * The context's stream when there is one; the process's otherwise, because
+ * building a context needs a repository and `nav id` outside one must not fail
+ * over a warning about a plugin.
+ */
+function stderrOf(getCtx: () => Ctx): NodeJS.WritableStream {
+  try {
+    return getCtx().stderr;
+  } catch {
+    return process.stderr;
+  }
+}
+
+/**
+ * `nav plugin` — the store verbs of spec 04 §4.3.
+ *
+ * The store is per user, not per repository, so none of these needs one:
+ * installing a plugin from a home directory is as ordinary as installing it
+ * from a checkout. Inside a repository they still read its declaration.
+ */
+function buildPluginCommand(getRepoCtx: GetCtx): Command {
+  const getCtx = () => getRepoCtx({ requireRepo: false });
   const plugin = withoutHelpVerb(new Command("plugin")).description("install and manage plugins");
 
   plugin
@@ -401,7 +452,6 @@ function buildPrCommand(getCtx: () => Ctx, plugins?: PluginRuntime): Command {
     .option("--no-sync-source", "leave the source branch behind instead of fast-forwarding it")
     .action((id: string | undefined, opts) => cmdPrMerge(getCtx(), id, opts));
 
-  applyContributedOptions(pr, "pr", plugins, getCtx);
   addSharedVerbs(pr, "pr", getCtx, {
     ...(plugins ? { plugins, verbPrefix: "pr" } : {}),
     // No extra columns here: `cmdPrList` owns the PR listing's columns, because
@@ -413,6 +463,9 @@ function buildPrCommand(getCtx: () => Ctx, plugins?: PluginRuntime): Command {
     },
     runList: (ctx, terms, options) => cmdPrList(ctx, terms, options),
   });
+  // After the shared verbs, which are as much this noun's commands as `open`:
+  // an option contributed to `pr list` has to find `list` already there.
+  applyContributedOptions(pr, "pr", plugins, getCtx);
   return pr;
 }
 
@@ -454,7 +507,6 @@ function buildIssueCommand(getCtx: () => Ctx, plugins?: PluginRuntime): Command 
     .option("--commit", commitHelp("issue"))
     .action((id: string, opts) => cmdIssueUnlink(getCtx(), id, opts));
 
-  applyContributedOptions(issue, "issue", plugins, getCtx);
   addSharedVerbs(issue, "issue", getCtx, {
     ...(plugins ? { plugins, verbPrefix: "issue" } : {}),
     extraColumns: [],
@@ -473,6 +525,8 @@ function buildIssueCommand(getCtx: () => Ctx, plugins?: PluginRuntime): Command 
     configureDelete: (command) =>
       command.option("-r, --recursive", "delete its subtasks too, to any depth"),
   });
+  // After the shared verbs, for the reason `buildPrCommand` gives.
+  applyContributedOptions(issue, "issue", plugins, getCtx);
   return issue;
 }
 
@@ -504,14 +558,28 @@ async function verbHandlers(
   return shared.plugins.handlersFor(ctx, `${shared.verbPrefix} ${verb}`);
 }
 
-/** One `jsonExtra` from several, or undefined when no plugin contributed one. */
+/**
+ * One `jsonExtra` from several, or undefined when no plugin contributed one.
+ *
+ * A key the entity's own JSON already has is dropped: `title`, `status` and
+ * every frontmatter key are the format's answer, and the one a reader of
+ * `nav --json` is entitled to (spec 04 §4.2). A plugin adds keys; it does not
+ * get to quietly replace the built-in ones.
+ */
 function mergedJsonExtra(
   handlers: readonly VerbHandlers[],
 ): ((entity: EntityRecord) => Record<string, unknown>) | undefined {
   const contributors = handlers.filter((handler) => handler.jsonExtra !== undefined);
   if (contributors.length === 0) return undefined;
-  return (entity) =>
-    Object.assign({}, ...contributors.map((handler) => handler.jsonExtra?.(entity) ?? {}));
+  return (entity) => {
+    const merged: Record<string, unknown> = Object.assign(
+      {},
+      ...contributors.map((handler) => handler.jsonExtra?.(entity) ?? {}),
+    );
+    // Which keys exist does not depend on the Navbook directory's name.
+    for (const key of Object.keys(entityJson("", entity))) delete merged[key];
+    return merged;
+  };
 }
 
 /** Register the verbs both nouns share, so their behavior can never drift. */
@@ -640,7 +708,7 @@ function applyContributedOptions(
         if (problem !== null) {
           // Before `.option()`, which throws on a duplicate flag: the plugin
           // loses its option and says so, rather than taking the CLI down.
-          getCtx().stderr.write(
+          stderrOf(getCtx).write(
             `nav: plugin ${plugin.name} option skipped on '${on}': ${problem}\n`,
           );
           continue;

@@ -156,7 +156,10 @@ export class PluginRuntime {
     opts: Record<string, unknown>,
   ): Promise<void> {
     const activated = await this.#activate(ctx, plugin);
-    const run = activated?.commands.get(path);
+    // Why it did not load is already on stderr; saying it does not implement
+    // the command would blame the plugin for what may be a missing package.
+    if (activated === null) fail(`cannot run '${path}': plugin ${plugin.name} did not load`);
+    const run = activated.commands.get(path);
     if (run === undefined) {
       fail(`plugin ${plugin.name} declares '${path}' but does not implement it`);
     }
@@ -183,7 +186,14 @@ export class PluginRuntime {
       ctx.stderr.write(`nav: plugin ${plugin.name} could not be loaded: ${message(error)}\n`);
       return null;
     });
-    if (entry === null || typeof entry.activate !== "function") return null;
+    if (entry === null) {
+      ctx.stderr.write(`nav: plugin ${plugin.name} has no './cli' entry\n`);
+      return null;
+    }
+    if (typeof entry.activate !== "function") {
+      ctx.stderr.write(`nav: plugin ${plugin.name} exports no activate() from './cli'\n`);
+      return null;
+    }
 
     const activated: ActivatedCli = {
       commands: new Map(),

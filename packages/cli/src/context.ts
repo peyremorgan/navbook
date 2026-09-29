@@ -34,6 +34,14 @@ export interface MakeContextOptions {
   ext?: CoreExtensions;
 }
 
+/**
+ * How the program asks for its context: built on first use, and memoised.
+ *
+ * `requireRepo: false` is for a command that works outside a repository; the
+ * default refuses to build one there, which is the error most commands want.
+ */
+export type GetCtx = (opts?: { requireRepo?: boolean }) => Ctx;
+
 export function makeContext(opts: MakeContextOptions = {}): Ctx {
   const env = opts.env ?? process.env;
   const stdout = opts.stdout ?? process.stdout;

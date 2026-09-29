@@ -40,19 +40,29 @@ const loaded = new Map<string, Promise<unknown>>();
  * whole point of `exports` is that a package decides its own layout — and a
  * published plugin's `./cli` points into `dist/` while the same plugin in a
  * checkout points into `src/`.
+ *
+ * Null only when the plugin has no such part, which is a plugin's choice. A
+ * package that is gone, or an entry it declares that is not on disk, throws:
+ * the index still lists the plugin, and "declares a command but does not
+ * implement it" would send its author looking for a bug that is not theirs.
  */
 export function entryPath(plugin: LoadedPlugin, part: PluginPart): string | null {
   let pkg: { exports?: Record<string, unknown> };
   try {
     pkg = JSON.parse(readFileSync(join(plugin.dir, "package.json"), "utf8"));
-  } catch {
-    return null;
+  } catch (error) {
+    throw new Error(
+      existsSync(plugin.dir)
+        ? `its package.json cannot be read: ${message(error)}`
+        : `its package is not at ${plugin.dir}; reinstall it with 'nav plugin install ${plugin.name}'`,
+    );
   }
   const entry = pkg.exports?.[`./${part}`];
   const file = typeof entry === "string" ? entry : resolveConditions(entry);
   if (file === null) return null;
   const path = join(plugin.dir, file);
-  return existsSync(path) ? path : null;
+  if (!existsSync(path)) throw new Error(`its './${part}' entry ${path} does not exist`);
+  return path;
 }
 
 /** Pick a file out of a conditional exports object, preferring what Node runs. */
@@ -79,6 +89,7 @@ export async function importEntry<H>(
   const existing = loaded.get(key);
   if (existing !== undefined) return (await existing) as PluginEntry<H> | null;
 
+  // Outside the memo, so a throw here is reported by each caller that asks.
   const path = entryPath(plugin, part);
   if (path === null) {
     loaded.set(key, Promise.resolve(null));
@@ -150,11 +161,15 @@ export async function loadCoreExtensions(plugins: readonly LoadedPlugin[]): Prom
       mergeExtensions([...kept, ...part.registered]);
       kept.push(...part.registered);
     } catch (error) {
-      if (error instanceof ExtensionConflictError) {
-        problems.push(`nav: plugin ${part.name} skipped: ${error.message}`);
-        continue;
-      }
-      throw error;
+      // Any fault, not only a collision: a registration of the wrong shape
+      // (`treeLocations` as an object, say) throws a TypeError from deep in
+      // the merge, and rethrowing it would take down every command over one
+      // plugin — the outcome this function exists to prevent.
+      const why =
+        error instanceof ExtensionConflictError
+          ? error.message
+          : `what it registered could not be used: ${message(error)}`;
+      problems.push(`nav: plugin ${part.name} skipped: ${why}`);
     }
   }
 
