@@ -321,14 +321,15 @@ boot — are in [`packages/server`](packages/server/README.md#deploying-it) and
 ## Plugins
 
 Navbook's core is issues, pull requests and the format they live in. Anything a
-project might not want — test reports on a pull request, a bridge to a chat
-platform, the knowledge base above — is a plugin: an npm package the repository
+project might not want — test plans and their runs on a pull request, a bridge
+to a chat platform, the knowledge base above — is a plugin: an npm package the repository
 names in `navbook.json` and each machine installs.
 
 ```console
 $ nav plugin install          # install what this repository declares
 $ nav plugin list
 @navbook/plugin-kb  0.5.0  declared
+@navbook/plugin-tests  0.5.0  declared
 ```
 
 A repository naming a plugin never causes anything to be fetched or run:
@@ -356,7 +357,7 @@ pnpm check         # lint and type-check
 pnpm bench         # the performance budget, on its own machine
 ```
 
-The repository is a pnpm workspace of five packages. `packages/core`
+The repository is a pnpm workspace of six packages. `packages/core`
 (`@navbook/core`) is the whole implementation — format logic, git plumbing,
 workspace I/O, and the operations behind each verb — and knows nothing about
 terminals. `packages/cli` (`@navbook/cli`) adds argument parsing, `$EDITOR`,
@@ -371,7 +372,9 @@ files, so nothing about the format ships to a browser
 ([`@navbook/plugin-kb`](packages/plugin-kb/README.md)) is the knowledge base,
 and the first plugin: features, `specs/` and the `feature:` key are implemented
 there rather than in the core, and it is what proves the plugin surface is
-enough to build on — it uses every part of it.
+enough to build on — it uses every part of it. `packages/plugin-tests`
+([`@navbook/plugin-tests`](packages/plugin-tests/README.md)) is the second:
+manual test plans, and runs of them kept beside a pull request.
 Development needs no build step outside the web client: a library's entry point
 is its TypeScript source, and Node runs it directly.
 

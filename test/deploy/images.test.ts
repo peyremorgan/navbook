@@ -316,6 +316,34 @@ describe("the Dockerfiles", () => {
     );
   });
 
+  // A workspace plugin the web package depends on has to be in the context
+  // before `pnpm install --frozen-lockfile`, or the install fails; one the API
+  // image does not pack cannot be named in NAVBOOK_PLUGINS at all.
+  it("carries every first-party plugin in both images, and packs each for the API", () => {
+    const plugins = readdirSync(join(REPO_ROOT, "packages")).filter((dir) =>
+      dir.startsWith("plugin-"),
+    );
+    assert.ok(plugins.length > 0);
+    for (const plugin of plugins) {
+      const path = `packages/${plugin}`;
+      for (const [image, dockerfile] of Object.entries(DOCKERFILES)) {
+        assert.ok(
+          copiedFromContext(dockerfile).includes(path),
+          `the ${image} image does not copy ${path}`,
+        );
+      }
+      assert.ok(
+        copiedFromContext(DOCKERFILES.api).includes(`${path}/package.json`),
+        `the API image does not copy ${path}/package.json before its install`,
+      );
+      assert.match(
+        instructions(DOCKERFILES.api).join("\n"),
+        new RegExp(`pnpm --filter @navbook/${plugin} pack `),
+        `the API image does not pack @navbook/${plugin}`,
+      );
+    }
+  });
+
   it("serves the directory nuxi generate actually writes", () => {
     assert.match(read(DOCKERFILES.web), /\.output\/public/);
     assert.match(read("packages/web/nuxt.config.ts"), /preset:\s*"static"/);

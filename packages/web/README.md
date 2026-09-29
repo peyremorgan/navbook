@@ -162,13 +162,15 @@ compiled in, so they cannot be. Changing which plugins the client has is
 therefore `docker compose build`, not a restart, and `compose.yaml` passes
 `NAVBOOK_PLUGINS` through as a build argument for exactly that reason.
 
-This package's own scripts default `NAVBOOK_WEB_PLUGINS` to
-`@navbook/plugin-kb` when it is unset, because this repository uses the
-knowledge base — `.navbook/navbook.json` declares it, and `specs/` is where
-these documents live. A value that is set wins, even an empty one: that is how
-the image builds exactly the plugins `NAVBOOK_PLUGINS` names, and how
-`NAVBOOK_WEB_PLUGINS= pnpm dev` shows a client without any. Nothing here needs
-the knowledge base to build.
+This package's own scripts default `NAVBOOK_WEB_PLUGINS` to both first-party
+plugins, `@navbook/plugin-kb` and `@navbook/plugin-tests`, when it is unset.
+The knowledge base is there because this repository uses it:
+`.navbook/navbook.json` declares it, and `specs/` is where these documents
+live. The test plans are there so that every build and every end-to-end run
+proves their layer too, and the fixture the e2e stack serves has plans in it.
+A value that is set wins, even an empty one: that is how the image builds
+exactly the plugins `NAVBOOK_PLUGINS` names, and how `NAVBOOK_WEB_PLUGINS= pnpm
+dev` shows a client without any. Nothing here needs either plugin to build.
 
 A layer's own pages are reachable as soon as it is merged. To appear anywhere
 the host already draws — a tab in the header, a panel on an issue, a field on

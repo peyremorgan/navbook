@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { REPO_ROOT } from "../../packages/cli/test/helpers/temprepo.ts";
@@ -37,8 +37,12 @@ describe("the released packages", () => {
   const root = manifest(".").version;
   const released = releasedPackages();
 
-  it("include the knowledge base", () => {
-    assert.ok(released.includes("plugin-kb"), released.join(", "));
+  it("include every first-party plugin", () => {
+    const plugins = readdirSync(join(REPO_ROOT, "packages")).filter((dir) =>
+      dir.startsWith("plugin-"),
+    );
+    assert.ok(plugins.includes("plugin-kb"), plugins.join(", "));
+    for (const plugin of plugins) assert.ok(released.includes(plugin), `${plugin} is not released`);
   });
 
   for (const pkg of released) {

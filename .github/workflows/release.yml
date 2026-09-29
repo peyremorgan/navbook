@@ -24,7 +24,7 @@ jobs:
       - name: the tag must match every package version
         run: |
           tagged="${GITHUB_REF_NAME#v}"
-          for pkg in core cli server plugin-kb; do
+          for pkg in core cli server plugin-kb plugin-tests; do
             packaged="$(node -p "require('./packages/$pkg/package.json').version")"
             if [ "$tagged" != "$packaged" ]; then
               echo "tag $GITHUB_REF_NAME does not match @navbook/$pkg version $packaged" >&2
@@ -55,6 +55,7 @@ jobs:
           pnpm --filter @navbook/cli pack --pack-destination "$RUNNER_TEMP"
           pnpm --filter @navbook/server pack --pack-destination "$RUNNER_TEMP"
           pnpm --filter @navbook/plugin-kb pack --pack-destination "$RUNNER_TEMP"
+          pnpm --filter @navbook/plugin-tests pack --pack-destination "$RUNNER_TEMP"
 
       - name: install every tarball and run the CLI, as a consumer would
         run: |
@@ -92,10 +93,14 @@ jobs:
         run: npm publish "$RUNNER_TEMP"/navbook-server-*.tgz --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      # Last, because it is the only one that depends on the others being
-      # published: its `@navbook/core` peer range has to resolve for anyone
-      # installing it from the registry rather than from a tarball.
+      # Last, because they are the only ones that depend on the others being
+      # published: their `@navbook/core` peer range has to resolve for anyone
+      # installing them from the registry rather than from a tarball.
       - name: publish @navbook/plugin-kb
         run: npm publish "$RUNNER_TEMP"/navbook-plugin-kb-*.tgz --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: publish @navbook/plugin-tests
+        run: npm publish "$RUNNER_TEMP"/navbook-plugin-tests-*.tgz --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

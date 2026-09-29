@@ -89,6 +89,30 @@ has test plans in it:
 }
 ```
 
+## What it adds
+
+| Where | What |
+|---|---|
+| Format | `tests/<slug>/plan.md`, runs under `tests/<slug>/runs/` and inside pull request directories, their attachments; checks X-tests-1 to X-tests-3 |
+| CLI | `nav test {open,list,show,edit,run,record,resume,finish,runs,attach}`, a "test runs" section and `tests` JSON on `nav pr show`, the `tested:` term on `nav pr list` |
+| API | `TestPlan`, `TestRun`, five mutations, `testRuns` and `tested` on `Pr`, a `tested` pull request filter, and `ext.tests` on pull request rows |
+| Web | a Nuxt layer: the `/tests` pages, a structured plan editor, a runner that keeps its answers in the browser until **Save progress** or **Finish**, a test runs panel on each pull request, a badge on its row and a `tested` chip in the filter bar |
+| Commits | the `docs(tests): …` scope, with a `Refs:` trailer on a pull request's runs |
+
+The web half is compiled into the client rather than loaded by it, so a
+deployment that wants the test pages builds with this package named:
+
+```sh
+NAVBOOK_PLUGINS="@navbook/plugin-tests" docker compose build
+```
+
+That one value sets both images: the API installs the plugin, and the client
+merges the layer.
+
+A run recorded in the browser is committed twice at most: once when it is
+saved partway, once when it is finished. Its answers are kept in that browser
+in between, so a reload loses nothing, but another device does not see them.
+
 ## Without it installed
 
 A `nav` without this plugin preserves `tests/` and the runs inside pull request
