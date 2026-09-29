@@ -64,8 +64,8 @@ describe("toIssueQuery and toPrQuery", () => {
 
   it("is an empty query but for the day, when no filter was given", () => {
     for (const toQuery of [toIssueQuery, toPrQuery]) {
-      assert.deepEqual(toQuery(null, TODAY), { ...emptyQuery(), today: TODAY });
-      assert.deepEqual(toQuery(undefined, TODAY), { ...emptyQuery(), today: TODAY });
+      assert.deepEqual(toQuery(null, TODAY), { ...emptyQuery(), today: TODAY, ext: {} });
+      assert.deepEqual(toQuery(undefined, TODAY), { ...emptyQuery(), today: TODAY, ext: {} });
     }
   });
 
