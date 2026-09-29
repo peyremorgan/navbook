@@ -12,6 +12,9 @@ revisions:
   - head: b16ad77c38bbf2b79478d836bf7e77bada2cf3d4
     base: 152d55f1f8e63b50e04e4241f1191cfe180c2d70
     date: 2026-09-29T21:54:10Z
+  - head: 3ff82fc773d7c47324757ddee941ab465967804c
+    base: 152d55f1f8e63b50e04e4241f1191cfe180c2d70
+    date: 2026-09-29T21:55:45Z
 ---
 
 Fixes #uniyh2hy: `docker build -f packages/server/Dockerfile .` failed on `dev` since the plugin merge, so neither `docker compose build`, the CI `docker` job nor the deploy recipe could produce an API image.
