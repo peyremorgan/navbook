@@ -4,7 +4,7 @@ author: Claude <noreply@anthropic.com>
 created: 2026-09-29T01:13:47Z
 labels: [enhancement, plugin]
 assignee: Claude <noreply@anthropic.com>
-subtasks: [w5zohlcn, wv21u9ru, m9m23hga]
+subtasks: [w5zohlcn, wv21u9ru, m9m23hga, kcgj6ugm]
 ---
 
 A new plugin, `@navbook/plugin-tests` (short `tests`, CLI noun `nav test`), for manual test plans and the runs that record executing one.
