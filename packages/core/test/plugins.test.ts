@@ -165,6 +165,19 @@ describe("parsePluginPackage", () => {
     assert.equal(result.plugin.manifest.format?.grandfathered, true);
   });
 
+  it("lifts the namespace for the grandfathered pair only", () => {
+    // Setting the flag is a claim to be the plugin §2.12 names, not a licence
+    // to take any name at all.
+    for (const format of [
+      { root: ["issues"], grandfathered: true },
+      { frontmatterKeys: ["status"], grandfathered: true },
+      { entityDirs: ["specs"], grandfathered: true },
+    ]) {
+      const error = read(pkg({ short: "kb", spec: "doc/spec.md", format }));
+      assert.match(error as string, /is outside the 'kb' namespace/, JSON.stringify(format));
+    }
+  });
+
   it("refuses an engines range that is not a string", () => {
     const error = read(pkg({ short: "kb" }, { engines: { navbook: 1 } }));
     assert.match(error as string, /engines\.navbook/);
@@ -206,7 +219,28 @@ describe("satisfiesRange", () => {
       // Below 1.0.0 the minor is the compatibility boundary, which is the
       // whole reason a 0.x plugin pins one.
       ["^0.3.0", "0.4.0", false],
-      ["^0.0.3", "0.0.4", true],
+      // And below 0.1.0 the patch is, as npm reads it.
+      ["^0.0.3", "0.0.4", false],
+      ["^0.0.3", "0.0.3", true],
+      ["^0", "0.5.0", true],
+      ["^0.x", "1.0.0", false],
+      ["^1.2", "1.9.0", true],
+      // Space-separated comparators must all hold: the common way to write a
+      // bounded range, which once refused the very version it names.
+      [">=1.0.0 <2.0.0", "1.0.0", true],
+      [">=1.0.0 <2.0.0", "2.0.0", false],
+      [">= 1.0.0", "1.0.0", true],
+      ["1.0.0 - 2.0.0", "2.0.0", true],
+      ["1.0.0 - 2.0.0", "2.0.1", false],
+      ["1.0.0 - 2", "2.9.9", true],
+      // A partial version under an operator is the whole range it names.
+      [">1.0", "1.0.5", false],
+      [">1.0", "1.1.0", true],
+      ["<=1.0", "1.0.5", true],
+      ["<1.0", "1.0.0", false],
+      // A prerelease satisfies no plain range, as in npm.
+      ["^0.4.0", "0.4.0-rc.1", false],
+      ["*", "1.0.0-beta", false],
       ["~1.2.3", "1.2.9", true],
       ["~1.2.3", "1.3.0", false],
       ["~1.2", "1.2.7", true],
@@ -233,7 +267,13 @@ describe("satisfiesRange", () => {
 
   it("refuses a range it cannot read rather than guessing", () => {
     // A range nobody can parse is not evidence that a plugin is compatible.
-    for (const range of ["latest", ">=1.0.0 <2", "1.0.0-beta || nonsense", "~>1.2"]) {
+    for (const range of [
+      "latest",
+      "1.0.0.9",
+      ">=1.0.0 garbage",
+      "1.0.0-beta || nonsense",
+      "~>1.2",
+    ]) {
       assert.equal(satisfiesRange(range, "1.5.0"), false, `accepted ${range}`);
     }
   });

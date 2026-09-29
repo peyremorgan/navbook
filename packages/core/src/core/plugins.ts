@@ -157,13 +157,20 @@ export interface FormatDeclaration {
   /**
    * Set only by a plugin implementing something this specification defines.
    *
-   * It lifts the `<short>`-prefix requirement, and nothing else. There is
-   * exactly one such name pair in the format — `specs/` and `feature:` — and
-   * §2.12 lists them, so a plugin setting this is claiming to be that plugin
-   * and a reviewer can check the claim against the specification.
+   * It lifts the `<short>`-prefix requirement for exactly the one name pair
+   * the format grandfathers — `specs/` and `feature:`, which §2.12 lists —
+   * and nothing else: a plugin setting it claims to be that plugin, and may
+   * still claim no other name outside its own namespace.
    */
   grandfathered?: boolean;
 }
+
+/** The names §2.12 grandfathers, by the format key that claims them. */
+const GRANDFATHERED: Record<"root" | "entityDirs" | "frontmatterKeys", readonly string[]> = {
+  root: ["specs"],
+  entityDirs: [],
+  frontmatterKeys: ["feature"],
+};
 
 /** The `navbook` key of a plugin's `package.json`. */
 export interface PluginManifest {
@@ -295,13 +302,17 @@ export function parsePluginPackage(pkg: unknown): PluginPackageReading {
       if (!isStringArray(value)) return bad(`${name}: 'navbook.format.${key}' must be strings`);
       // The namespace rule of §2.12, enforced where it can still be reported
       // against a name rather than discovered as a silently ignored directory.
-      if (!grandfathered) {
-        const wrong = value.find((entry) => !ownsName(short, entry, key === "frontmatterKeys"));
-        if (wrong !== undefined) {
-          return bad(
-            `${name}: 'navbook.format.${key}' entry '${wrong}' is outside the '${short}' namespace`,
-          );
-        }
+      // Grandfathering lifts it for the one pair §2.12 lists and nothing else:
+      // a plugin setting the flag may claim `specs/` and `feature:` besides its
+      // own names, never any other name outside them.
+      const exempt = grandfathered ? GRANDFATHERED[key] : [];
+      const wrong = value.find(
+        (entry) => !exempt.includes(entry) && !ownsName(short, entry, key === "frontmatterKeys"),
+      );
+      if (wrong !== undefined) {
+        return bad(
+          `${name}: 'navbook.format.${key}' entry '${wrong}' is outside the '${short}' namespace`,
+        );
       }
       format[key] = value;
     }
@@ -360,38 +371,58 @@ export function hasPluginKeyword(pkg: unknown): boolean {
  *
  * Written here rather than taken from `semver` because `core` pays for every
  * dependency twice: once in the startup budget (spec 05 §5.2) and once in the
- * Rust rewrite, which must reproduce whatever this does. The supported
- * grammar is what `engines` fields actually contain — `^1.2.3`, `~1.2`,
- * `>=1.0.0`, `1.x`, `1.2.3`, `*`, and `||` between any of them — and anything
- * outside it is refused rather than guessed at, because a range nobody can
- * read is not evidence that a plugin is compatible.
+ * Rust rewrite, which must reproduce whatever this does. What it must agree
+ * with is npm, since the same range sits in `peerDependencies` where npm reads
+ * it: `^1.2.3`, `~1.2`, `>=1.0.0 <2.0.0`, `1.2.3 - 2.x`, `1.x`, `*`, and `||`
+ * between any of them, each desugared into plain comparisons the way npm's
+ * `semver` does. A version with a prerelease tag satisfies none of them, as
+ * it satisfies none in npm unless the range names that prerelease. Anything
+ * outside this grammar is refused rather than guessed at, because a range
+ * nobody can read is not evidence that a plugin is compatible.
  */
 export function satisfiesRange(range: string, version: string): boolean {
   const target = parseVersion(version);
-  if (target === null) return false;
-  return range.split("||").some((alternative) => satisfiesSimple(alternative.trim(), target));
+  if (target === null || target.prerelease) return false;
+  return range.split("||").some((alternative) => {
+    const comparators = desugar(alternative);
+    return comparators?.every((test) => test(target.parts)) === true;
+  });
 }
 
 type Version = [number, number, number];
+type Comparator = (version: Version) => boolean;
 
-function parseVersion(value: string): Version | null {
-  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(value.trim());
+function parseVersion(value: string): { parts: Version; prerelease: boolean } | null {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/.exec(value.trim());
   if (match === null) return null;
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
+  return {
+    parts: [Number(match[1]), Number(match[2]), Number(match[3])],
+    prerelease: match[4] !== undefined,
+  };
 }
 
-/** A range's version part, where `x` and a missing part both mean "any". */
-function parsePartial(value: string): { parts: (number | null)[] } | null {
-  const trimmed = value.trim();
-  if (trimmed === "" || trimmed === "*") return { parts: [null, null, null] };
+/**
+ * A range's version part: up to three numbers, where `x`, `*` or a missing
+ * part means "any". `null` for anything else, a fourth part included.
+ */
+function parsePartial(value: string): (number | null)[] | null {
+  const trimmed = value.replace(/^v/, "");
+  if (trimmed === "" || trimmed === "*" || trimmed === "x" || trimmed === "X") {
+    return [null, null, null];
+  }
+  const segments = trimmed.split(".");
+  if (segments.length > 3) return null;
   const parts: (number | null)[] = [];
-  for (const segment of trimmed.split(".")) {
+  for (const segment of segments) {
     if (segment === "x" || segment === "X" || segment === "*") parts.push(null);
     else if (/^\d+$/.test(segment)) parts.push(Number(segment));
     else return null;
   }
+  // A wildcard makes everything after it one too: `1.x.3` is `1.x`.
+  const firstAny = parts.indexOf(null);
   while (parts.length < 3) parts.push(null);
-  return { parts: parts.slice(0, 3) };
+  if (firstAny !== -1) parts.fill(null, firstAny);
+  return parts;
 }
 
 function compare(a: Version, b: Version): number {
@@ -403,51 +434,106 @@ function compare(a: Version, b: Version): number {
   return 0;
 }
 
-function satisfiesSimple(range: string, target: Version): boolean {
-  if (range === "" || range === "*") return true;
+const atLeast =
+  (floor: Version): Comparator =>
+  (v) =>
+    compare(v, floor) >= 0;
+const below =
+  (ceiling: Version): Comparator =>
+  (v) =>
+    compare(v, ceiling) < 0;
+const NOTHING: Comparator = () => false;
 
-  const operator = /^(>=|<=|>|<|\^|~|=)?\s*(.*)$/.exec(range);
-  if (operator === null) return false;
-  const [, sign = "", rest = ""] = operator;
-  const partial = parsePartial(rest);
-  if (partial === null) return false;
+/** How many leading parts a partial version gives, before its first wildcard. */
+function given(parts: (number | null)[]): number {
+  const index = parts.indexOf(null);
+  return index === -1 ? 3 : index;
+}
 
-  // A bare partial version is a range in itself: `1.x` is every 1.
-  const floor: Version = [partial.parts[0] ?? 0, partial.parts[1] ?? 0, partial.parts[2] ?? 0];
+/** The partial version's floor, wildcards as zero. */
+function floorOf(parts: (number | null)[]): Version {
+  return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+}
+
+/** The first version past everything the partial version covers. */
+function pastOf(parts: (number | null)[]): Version | null {
+  const count = given(parts);
+  const [major = 0, minor = 0, patch = 0] = floorOf(parts);
+  if (count === 0) return null;
+  if (count === 1) return [major + 1, 0, 0];
+  if (count === 2) return [major, minor + 1, 0];
+  return [major, minor, patch + 1];
+}
+
+/** One alternative of a range — no `||` — as the comparisons it stands for. */
+function desugar(alternative: string): Comparator[] | null {
+  // `>= 1.2.3` is `>=1.2.3`: npm allows the space, so it is not a separator.
+  const text = alternative.trim().replace(/(>=|<=|>|<|=|\^|~)\s+/g, "$1");
+  if (text === "") return [];
+
+  const hyphen = /^(\S+)\s+-\s+(\S+)$/.exec(text);
+  if (hyphen !== null) {
+    const low = parsePartial(hyphen[1] as string);
+    const high = parsePartial(hyphen[2] as string);
+    if (low === null || high === null) return null;
+    const out: Comparator[] = [atLeast(floorOf(low))];
+    const past = pastOf(high);
+    if (past !== null) out.push(below(past));
+    return out;
+  }
+
+  const out: Comparator[] = [];
+  for (const word of text.split(/\s+/)) {
+    const comparators = desugarOne(word);
+    if (comparators === null) return null;
+    out.push(...comparators);
+  }
+  return out;
+}
+
+function desugarOne(word: string): Comparator[] | null {
+  const match = /^(>=|<=|>|<|\^|~|=)?(.*)$/.exec(word);
+  if (match === null) return null;
+  const [, sign = "", rest = ""] = match;
+  const parts = parsePartial(rest);
+  if (parts === null) return null;
+  const count = given(parts);
+  const floor = floorOf(parts);
+  const past = pastOf(parts);
 
   switch (sign) {
+    case "":
+    case "=":
+      return past === null ? [] : [atLeast(floor), below(past)];
     case ">=":
-      return compare(target, floor) >= 0;
-    case ">":
-      return compare(target, floor) > 0;
-    case "<=":
-      return compare(target, floor) <= 0;
+      return [atLeast(floor)];
     case "<":
-      return compare(target, floor) < 0;
-    case "^": {
-      // Caret allows changes that do not modify the left-most non-zero part,
-      // which for 0.x means the minor is the compatibility boundary.
-      if (compare(target, floor) < 0) return false;
-      const major = floor[0];
-      if (major > 0) return target[0] === major;
-      const minor = floor[1];
-      if (minor > 0) return target[0] === 0 && target[1] === minor;
-      return target[0] === 0 && target[1] === 0;
-    }
+      return count === 0 ? [NOTHING] : [below(floor)];
+    case ">":
+      // Past everything the partial covers: `>1.2` is `>=1.3.0`.
+      return past === null ? [NOTHING] : [atLeast(past)];
+    case "<=":
+      return past === null ? [] : [below(past)];
     case "~": {
-      if (compare(target, floor) < 0) return false;
-      // `~1.2.3` and `~1.2` both pin the minor; `~1` pins only the major.
-      if (partial.parts[1] === null) return target[0] === floor[0];
-      return target[0] === floor[0] && target[1] === floor[1];
+      // `~1.2.3` and `~1.2` pin the minor; `~1` pins only the major.
+      if (count === 0) return [];
+      const [major, minor] = floor;
+      const ceiling: Version = count === 1 ? [major + 1, 0, 0] : [major, minor + 1, 0];
+      return [atLeast(floor), below(ceiling)];
     }
-    default: {
-      // An exact version, or a partial one standing for everything under it.
-      for (let i = 0; i < 3; i++) {
-        const want = partial.parts[i];
-        if (want !== null && target[i] !== want) return false;
-      }
-      return true;
+    case "^": {
+      // Changes that leave the left-most non-zero part given alone: below
+      // 1.0.0 the minor is the boundary, and below 0.1.0 the patch is.
+      if (count === 0) return [];
+      const [major, minor, patch] = floor;
+      let ceiling: Version;
+      if (major > 0 || count === 1) ceiling = [major + 1, 0, 0];
+      else if (minor > 0 || count === 2) ceiling = [0, minor + 1, 0];
+      else ceiling = [0, 0, patch + 1];
+      return [atLeast(floor), below(ceiling)];
     }
+    default:
+      return null;
   }
 }
 
