@@ -693,13 +693,18 @@ describe("a plugin whose registration is malformed", () => {
       const env = variantProbe(repo, (_manifest, dir) => {
         writeFileSync(
           join(dir, "core.js"),
-          'export function activate(host) { host.register({ treeLocations: { dir: "probe" } }); }\n',
+          // Not a shape core refuses by name (that is core's test) but a
+          // registration that throws when read: what the loader must catch.
+          'export function activate(host) { host.register({ treeLocations: [{ get dir() { throw new Error("boom"); } }] }); }\n',
         );
       });
       repo.nav(["issue", "open", "One", "-m", "Body."]);
       const result = repo.nav(["issue", "list"], env);
       assert.equal(result.code, 0, result.stderr);
-      assert.match(result.stderr, /plugin @navbook\/plugin-probe skipped: what it registered/);
+      assert.match(
+        result.stderr,
+        /plugin @navbook\/plugin-probe skipped: what it registered could not be used: boom/,
+      );
       assert.match(result.stdout, /One/);
     } finally {
       repo.cleanup();
