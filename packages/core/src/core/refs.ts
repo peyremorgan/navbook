@@ -42,8 +42,9 @@ export function extractProseRefs(markdown: string): string[] {
  * Known to differ: text inside a link is counted, where the web client leaves
  * it alone rather than nest one link in another, and so is a link reference
  * definition, which it does not show. Neither is code. And where a tab
- * follows a list marker inside a quote inside another, markdown-it counts its
- * columns from the inner quote rather than the start of the line.
+ * follows the markers of a quote inside another — with a list marker after
+ * them or not — markdown-it counts its columns from the inner quote rather
+ * than the start of the line.
  */
 
 /** Past this many quotes and list items inside one another, a marker is text. */
