@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -161,6 +161,34 @@ describe("the mutation event", () => {
       assert.match(events[0] as string, /docs\(issue\): open #\w{8}/);
       // The person, not the machine account — the gateway rule of §6.2.
       assert.match(events[0] as string, /by=\S+@\S+/);
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("is not emitted for a commit whose push failed, which its author was told", async () => {
+    const log = logFile("unpushed");
+    const harness = await startHarness({
+      env: probeEnv(log.path),
+      // An origin that turns every push away, for a reason no retry mends.
+      prepare: (fixture) => {
+        const hook = join(fixture.origin, "hooks", "pre-receive");
+        writeFileSync(hook, "#!/bin/sh\necho 'no pushes today' >&2\nexit 1\n", "utf8");
+        chmodSync(hook, 0o755);
+      },
+    });
+    try {
+      const result = await harness.gql(
+        `mutation { openIssue(input: { title: "Stranded", body: "Body." }) { issue { id } } }`,
+      );
+      assert.ok((result.errors ?? []).length > 0, "the push failed, so the mutation must");
+      // Committed in the clone all the same, and heard about by nobody.
+      const subject = harness.fixture.server.git(["log", "-1", "--format=%s"]).stdout.trim();
+      assert.match(subject, /docs\(issue\): open #\w{8}/);
+      assert.deepEqual(
+        log.lines().filter((line) => line.startsWith("mutation ")),
+        [],
+      );
     } finally {
       await harness.stop();
     }
