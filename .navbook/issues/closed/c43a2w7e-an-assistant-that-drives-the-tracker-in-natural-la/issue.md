@@ -5,6 +5,7 @@ created: 2026-09-29T01:23:09Z
 labels: [enhancement, plugin]
 assignee: Claude <noreply@anthropic.com>
 subtasks: [yp56dc43, kw6afa4a, s86nic83]
+resolution: fixed
 ---
 
 A new plugin, `@navbook/plugin-chat` (short `chat`), that lets a person drive the tracker through an LLM: "are there open issues assigned to me?", "show me the overdue issues", "file an issue for …", "approve this pull request".
