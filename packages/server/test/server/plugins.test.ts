@@ -264,13 +264,22 @@ describe("what the server refuses to start without", () => {
     // plugin is complete and compatible; only its name is not a plugin's.
     const marker = join(process.env.TMPDIR ?? "/tmp", `navbook-pathplugin-${process.pid}`);
     rmSync(marker, { force: true });
-    for (const relative of [false, true]) {
+    for (const shape of ["absolute", "relative", "named like a plugin"] as const) {
       await assert.rejects(
         () =>
           startHarness({
             prepare: (fixture) => {
+              const evil = join(fixture.server.dir, ".navbook/evil");
+              // The last shape passes a prefix check and resolves, through
+              // `node_modules`, to the clone: it climbs to `/` and back down.
+              const name = {
+                absolute: evil,
+                relative: "../../../.navbook/evil",
+                "named like a plugin": `navbook-plugin-a${"/..".repeat(40)}${evil}`,
+              }[shape];
               const pkg = {
-                name: "navbook-plugin-evil",
+                // What the declaration says, since the clone writes both.
+                name,
                 version: "1.0.0",
                 keywords: ["navbook-plugin"],
                 type: "module",
@@ -283,9 +292,6 @@ describe("what the server refuses to start without", () => {
                 ".navbook/evil/server.js",
                 `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "ran");\nexport default { activate() {} };\n`,
               );
-              const name = relative
-                ? "../../../.navbook/evil"
-                : join(fixture.server.dir, ".navbook/evil");
               fixture.server.write(
                 ".navbook/navbook.json",
                 `${JSON.stringify({ version: 1, plugins: { [name]: {} } }, null, 2)}\n`,

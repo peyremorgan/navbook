@@ -232,16 +232,24 @@ function isStringArray(value: unknown): value is string[] {
  * would simply satisfy both.
  */
 export function isPluginPackageName(name: string): boolean {
+  // The whole of npm's name grammar, not just the prefix: the server resolves
+  // a declared name through `node_modules`, and `navbook-plugin-x/../../srv`
+  // would otherwise pass as a name and resolve as a path.
+  if (name.length > 214) return false;
   if (name.startsWith("@")) {
-    const slash = name.indexOf("/");
-    if (slash === -1) return false;
-    const scope = name.slice(0, slash);
-    const rest = name.slice(slash + 1);
-    if (scope === "@navbook") return rest.startsWith("plugin-") && rest.length > "plugin-".length;
+    const parts = name.slice(1).split("/");
+    if (parts.length !== 2) return false;
+    const [scope = "", rest = ""] = parts;
+    if (!NPM_NAME_PART.test(scope) || !NPM_NAME_PART.test(rest)) return false;
+    if (scope === "navbook") return rest.startsWith("plugin-") && rest.length > "plugin-".length;
     return rest.startsWith("navbook-plugin-") && rest.length > "navbook-plugin-".length;
   }
+  if (!NPM_NAME_PART.test(name)) return false;
   return name.startsWith("navbook-plugin-") && name.length > "navbook-plugin-".length;
 }
+
+/** One segment of an npm package name: lowercase, URL-safe, never a dot-name. */
+const NPM_NAME_PART = /^[a-z0-9~-][a-z0-9._~-]*$/;
 
 /**
  * The package names a short name could mean, in the order to try them.

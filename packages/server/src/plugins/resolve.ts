@@ -134,6 +134,12 @@ function installedPlugin(name: string): Found | null {
       const resolved = require.resolve(specifier);
       const dir = specifier.endsWith("package.json") ? dirname(resolved) : packageRootOf(resolved);
       if (dir === null) continue;
+      // Where a package name resolves, and nowhere else: its own directory
+      // under a `node_modules`. The name was checked, and this checks it
+      // again against what Node actually did with it.
+      if (!dir.endsWith(join("node_modules", ...name.split("/")))) {
+        return { error: `it resolved to ${dir}, which is not where a package named ${name} lives` };
+      }
       const found = readPlugin(dir);
       if ("error" in found) return found;
       if (found.name !== name) {

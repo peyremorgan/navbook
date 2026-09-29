@@ -52,6 +52,22 @@ describe("isPluginPackageName", () => {
     assert.equal(isPluginPackageName("lodash"), false);
   });
 
+  it("refuses a name that is a path once it is resolved", () => {
+    // The server resolves a declared name under `node_modules`; one that
+    // climbs out of it would load whatever the clone put where it lands.
+    for (const name of [
+      "navbook-plugin-a/../../../../srv/clone/.navbook/evil",
+      "@navbook/plugin-x/../../evil",
+      "@acme/navbook-plugin-x/sub",
+      "navbook-plugin-x@1.0.0",
+      "navbook-plugin-X",
+      "@navbook/../plugin-x",
+      "navbook-plugin-%2e%2e",
+    ]) {
+      assert.equal(isPluginPackageName(name), false, name);
+    }
+  });
+
   it("refuses a prefix with nothing after it", () => {
     assert.equal(isPluginPackageName("navbook-plugin-"), false);
     assert.equal(isPluginPackageName("@navbook/plugin-"), false);
