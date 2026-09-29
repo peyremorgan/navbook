@@ -308,6 +308,61 @@ describe("features", () => {
     );
   });
 
+  it("lands two quick saves of different fields made from the same rendering", async () => {
+    // The feature page saves one field at a time with the hash it rendered,
+    // so a second save sent before the first one's answer is re-read carries
+    // the first one's base. It must not be refused over the person's own
+    // edit; only a field somebody changed since is a conflict.
+    const card = await feature("auth");
+    ok(
+      await h.gql(UPDATE_FEATURE, {
+        input: { slug: "auth", title: "Auth and sessions", baseSha: card.baseSha },
+      }),
+    );
+    const second = ok<Payload>(
+      await h.gql(UPDATE_FEATURE, {
+        input: { slug: "auth", summary: "Signing in, quickly.", baseSha: card.baseSha },
+      }),
+    ).updateFeature;
+    assert.equal(second.feature.title, "Auth and sessions");
+    assert.equal(second.feature.summary, "Signing in, quickly.");
+
+    // And the field that did move is named, as the host names an entity's.
+    const refused = await h.gql(UPDATE_FEATURE, {
+      input: { slug: "auth", title: "Mine", baseSha: card.baseSha },
+    });
+    assert.equal(errorCode(refused), "STALE_CONTENT");
+    assert.deepEqual(refused.errors[0]?.extensions?.moved, ["title"]);
+
+    // A document the same way: its title, then its body, from one rendering.
+    const doc = (await feature("auth")).specs.find((s: Payload) => s.fileName === "login-flow.md");
+    ok(
+      await h.gql(UPDATE_SPEC, {
+        input: { feature: "auth", fileName: "login-flow.md", title: "Login", baseSha: doc.baseSha },
+      }),
+    );
+    const body = ok<Payload>(
+      await h.gql(UPDATE_SPEC, {
+        input: {
+          feature: "auth",
+          fileName: "login-flow.md",
+          body: "Both land.",
+          baseSha: doc.baseSha,
+        },
+      }),
+    ).updateSpec;
+    assert.equal(body.spec.title, "Login");
+    assert.match(body.spec.body, /Both land\./);
+
+    // Put the card back as the later cases expect it.
+    const now = await feature("auth");
+    ok(
+      await h.gql(UPDATE_FEATURE, {
+        input: { slug: "auth", title: "Authentication", baseSha: now.baseSha },
+      }),
+    );
+  });
+
   it("refuses an empty baseSha as naming no version, rather than skipping the check", async () => {
     const before = ok<Payload>(await h.gql(`{ feature(slug: "auth") { summary } }`)).feature;
     assert.equal(
@@ -379,6 +434,20 @@ describe("features", () => {
     ).openIssue;
     assert.deepEqual(opened.issue.features, []);
 
+    const twice = ok<Payload>(
+      await h.gql(OPEN_ISSUE, {
+        input: {
+          title: "Twice",
+          body: "Body.",
+          features: ["billing-invoices", "billing-invoices"],
+        },
+      }),
+    ).openIssue;
+    assert.match(
+      fileOf(`.navbook/issues/open/${twice.issue.id}-twice/issue.md`),
+      /^feature: billing-invoices$/m,
+    );
+
     const attached = ok<Payload>(
       await h.gql(UPDATE_ISSUE, {
         input: { ref: opened.issue.id, features: ["auth", "billing-invoices"] },
@@ -386,8 +455,16 @@ describe("features", () => {
     ).updateIssue;
     assert.deepEqual(attached.issue.features, ["auth", "billing-invoices"]);
 
+    // A slug named twice is one feature, and is written once.
+    const repeated = ok<Payload>(
+      await h.gql(UPDATE_ISSUE, {
+        input: { ref: opened.issue.id, features: ["auth", "billing-invoices", "auth"] },
+      }),
+    ).updateIssue;
+    assert.deepEqual(repeated.issue.features, ["auth", "billing-invoices"]);
+
     const narrowed = ok<Payload>(
-      await h.gql(UPDATE_ISSUE, { input: { ref: opened.issue.id, features: ["auth"] } }),
+      await h.gql(UPDATE_ISSUE, { input: { ref: opened.issue.id, features: ["auth", "auth"] } }),
     ).updateIssue;
     assert.deepEqual(narrowed.issue.features, ["auth"]);
     assert.match(
@@ -554,6 +631,10 @@ describe("a document a tool would not have created", () => {
           ".navbook/specs/auth/Session Policy.md",
           "---\ntitle: Session policy\nsome-tool-state: {phase: draft}\n---\n\nThirty days.\n",
         );
+        // Two files that do not parse at all, which build no record and so
+        // look, to the records alone, like names nobody has taken.
+        fixture.peer.write(".navbook/specs/auth/draft.md", "Half-written, no frontmatter.\n");
+        fixture.peer.write(".navbook/specs/billing/feature.md", "Billing, in my own words.\n");
         fixture.peer.commitAll("docs(feature): hand-write a feature");
         fixture.peer.git(["push", "--quiet"]);
       },
@@ -609,6 +690,21 @@ describe("a document a tool would not have created", () => {
       ),
       "INVALID_INPUT",
     );
+  });
+
+  it("refuses to create over a file that does not parse, and leaves it and origin alone", async () => {
+    const head = originSubjects(h.fixture.origin)[0];
+    assert.equal(
+      errorCode(
+        await h.gql(ADD_SPEC, { input: { feature: "auth", title: "Draft", body: "New." } }),
+      ),
+      "ALREADY_EXISTS",
+    );
+    assert.equal(errorCode(await h.gql(CREATE, { input: { title: "Billing" } })), "ALREADY_EXISTS");
+    const fileOf = (path: string): string => readFileSync(join(h.fixture.server.dir, path), "utf8");
+    assert.equal(fileOf(".navbook/specs/auth/draft.md"), "Half-written, no frontmatter.\n");
+    assert.equal(fileOf(".navbook/specs/billing/feature.md"), "Billing, in my own words.\n");
+    assert.equal(originSubjects(h.fixture.origin)[0], head);
   });
 });
 

@@ -29,7 +29,7 @@ import {
   type Shell,
   uninstallCompletions,
 } from "../install/completions.ts";
-import { hookPath, installHook, isInstalled, uninstallHook } from "../install/hook.ts";
+import { hookPath, hookState, installHook, isInstalled, uninstallHook } from "../install/hook.ts";
 import { type Action, confirmAndPerform } from "../prompt.ts";
 
 export interface InstallOptions {
@@ -102,11 +102,15 @@ export function cmdInstall(ctx: Ctx, opts: InstallOptions): void {
   }
 
   if (!selective || opts.hooks !== undefined) {
-    if (isInstalled(ctx.repoRoot)) {
+    const state = hookState(ctx.repoRoot);
+    if (state === "current") {
       notes.push("the pre-commit hook is already installed");
     } else {
       actions.push({
-        description: `append the navbook block to ${hookPath(ctx.repoRoot)}`,
+        description:
+          state === "outdated"
+            ? `update the navbook block in ${hookPath(ctx.repoRoot)} to this nav's`
+            : `append the navbook block to ${hookPath(ctx.repoRoot)}`,
         perform: () => installHook(ctx.repoRoot),
       });
     }

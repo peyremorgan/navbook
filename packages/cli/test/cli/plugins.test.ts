@@ -11,9 +11,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { makeTempRepo, PACKAGE_ROOT, type TempRepo } from "../helpers/temprepo.ts";
+import {
+  deterministicEnv,
+  makeTempRepo,
+  navCommand,
+  PACKAGE_ROOT,
+  type RunResult,
+  type TempRepo,
+} from "../helpers/temprepo.ts";
 
 const PROBE = join(PACKAGE_ROOT, "test", "fixtures", "plugin-probe");
 
@@ -38,6 +45,112 @@ function probeRepo(opts: { declare?: boolean } = {}): TempRepo & { log(): string
 /** Environment that puts the probe on the path and points the log at `home`. */
 function withProbe(repo: TempRepo): NodeJS.ProcessEnv {
   return { NAVBOOK_PLUGIN_PATH: PROBE, PROBE_LOG: join(repo.home, "probe.log") };
+}
+
+/**
+ * An npm stand-in on the PATH, with a registry that is a directory.
+ *
+ * `publish` puts a copy of the probe in it under another version (and, when
+ * given, another name). The real npm cannot be used for these: it needs a
+ * registry, and what the store records must not depend on the network.
+ */
+function fakeNpm(repo: TempRepo): {
+  env: NodeJS.ProcessEnv;
+  publish(version: string, name?: string): string;
+  copy(version: string, dir: string): string;
+  log(): string[];
+} {
+  const registry = join(repo.home, "registry");
+  const logPath = join(repo.home, "npm.log");
+  const copy = (version: string, dir: string, name?: string): string => {
+    cpSync(PROBE, dir, { recursive: true });
+    const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+    manifest.version = version;
+    if (name !== undefined) manifest.name = name;
+    writeFileSync(join(dir, "package.json"), JSON.stringify(manifest, null, 2));
+    return dir;
+  };
+  return {
+    env: {
+      PATH: `${join(PACKAGE_ROOT, "test", "fixtures", "fake-npm")}:${process.env.PATH}`,
+      FAKE_NPM_REGISTRY: registry,
+      FAKE_NPM_LOG: logPath,
+      PROBE_LOG: join(repo.home, "probe.log"),
+    },
+    publish: (version, name = "@navbook/plugin-probe") =>
+      copy(version, join(registry, name, version), name),
+    copy: (version, dir) => copy(version, dir),
+    log: () =>
+      existsSync(logPath) ? readFileSync(logPath, "utf8").split("\n").filter(Boolean) : [],
+  };
+}
+
+/** What `nav plugin list --json` says is installed, by name and version. */
+function listed(repo: TempRepo, env: NodeJS.ProcessEnv): string[] {
+  return repo
+    .nav(["plugin", "list", "--json"], env)
+    .stdout.split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { name: string; version: string })
+    .map((row) => `${row.name}@${row.version}`);
+}
+
+/** The parts of the probe's `package.json` a variant edits. */
+interface ProbePackage {
+  exports: Record<string, string>;
+  navbook: { cli: { contributions: object[] } };
+}
+
+/**
+ * A copy of the probe with its manifest edited, on the plugin path.
+ *
+ * For the cases one fixture cannot cover without changing what every other
+ * test sees: an extra contribution, a broken entry.
+ */
+function variantProbe(
+  repo: TempRepo,
+  edit: (manifest: ProbePackage, dir: string) => void,
+): NodeJS.ProcessEnv {
+  const dir = join(repo.home, "probe-variant");
+  cpSync(PROBE, dir, { recursive: true });
+  const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+  edit(manifest, dir);
+  writeFileSync(join(dir, "package.json"), JSON.stringify(manifest, null, 2));
+  return { NAVBOOK_PLUGIN_PATH: dir, PROBE_LOG: join(repo.home, "probe.log") };
+}
+
+/**
+ * A probe that also contributes to `pr list`: a `probe` column and a
+ * `probeSeen` key, whose JSON also tries `extraJson` on for size.
+ */
+function prListProbe(repo: TempRepo, extraJson: Record<string, unknown> = {}): NodeJS.ProcessEnv {
+  return variantProbe(repo, (manifest, dir) => {
+    manifest.navbook.cli.contributions.push({ on: "pr list", columns: true, jsonExtra: true });
+    manifest.exports["./cli"] = "./cli-pr.js";
+    writeFileSync(
+      join(dir, "cli-pr.js"),
+      `import { activate as probe } from "./cli.js";
+export function activate(host) {
+  probe(host);
+  host.contribute("pr list", {
+    columns: [{ header: "probe", value: () => "seen" }],
+    jsonExtra: () => ({ probeSeen: true, ...${JSON.stringify(extraJson)} }),
+  });
+}
+`,
+    );
+  });
+}
+
+/** A pull request opened on `feat/x`, with `main` checked out again. */
+function openPrElsewhere(repo: TempRepo, env: NodeJS.ProcessEnv): void {
+  repo.commitAll("chore: init");
+  repo.git(["checkout", "--quiet", "-b", "feat/x"]);
+  repo.write("x.txt", "x\n");
+  repo.commitAll("feat: x");
+  const opened = repo.nav(["pr", "open", "--title", "X", "-m", "Body.", "--commit"], env);
+  assert.equal(opened.code, 0, opened.stderr);
+  repo.git(["checkout", "--quiet", "main"]);
 }
 
 /** Forget what was logged, so one repository can make several assertions. */
@@ -227,6 +340,33 @@ describe("contributions to a built-in verb", () => {
     }
   });
 
+  it("adds a declared option to a shared verb, and names a verb that does not exist", () => {
+    // `list`, `show`, `close` and the rest are added by the shared-verb
+    // builder; a contribution to one of them must find it there.
+    const repo = probeRepo();
+    try {
+      const env = variantProbe(repo, (manifest) => {
+        manifest.navbook.cli.contributions.push(
+          { on: "issue list", options: [{ flags: "--probe-only", description: "probe rows" }] },
+          { on: "pr close", options: [{ flags: "--probe-why <w>", description: "probe why" }] },
+          { on: "issue lsit", options: [{ flags: "--probe-typo", description: "never seen" }] },
+        );
+      });
+      const list = repo.nav(["issue", "list", "--help"], env);
+      assert.equal(list.code, 0, list.stderr);
+      assert.match(list.stdout, /--probe-only\s+probe rows/);
+      const close = repo.nav(["pr", "close", "--help"], env);
+      assert.match(close.stdout, /--probe-why <w>\s+probe why/);
+      assert.match(
+        list.stderr,
+        /plugin @navbook\/plugin-probe contributes to 'issue lsit', which is not a nav command/,
+      );
+      assert.doesNotMatch(list.stderr, /'issue list'|'pr close'/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("shows the declared option in the verb's help, with no plugin loaded", () => {
     // Help is free however many plugins contribute to the verb: it is built
     // from manifests, and `--help` runs no command that could need more.
@@ -265,6 +405,52 @@ describe("contributions to a built-in verb", () => {
       assert.deepEqual(row.probeTags, ["flaky"]);
       // The format's own keys are still there and still the format's.
       assert.equal(row.title, "One");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("adds a column and JSON keys to 'pr list', across refs too", () => {
+    // `pr list` builds columns of its own (target, reviews, refs), and those
+    // must be added to what plugins contributed rather than replace it.
+    const repo = probeRepo();
+    try {
+      const env = prListProbe(repo);
+      openPrElsewhere(repo, env);
+      repo.git(["checkout", "--quiet", "feat/x"]);
+      const here = repo.nav(["pr", "list"], env);
+      assert.equal(here.code, 0, here.stderr);
+      assert.match(here.stdout, /PROBE/);
+      assert.match(here.stdout, /TARGET/);
+      repo.git(["checkout", "--quiet", "main"]);
+
+      const across = repo.nav(["pr", "list", "--all-refs"], env);
+      assert.match(across.stdout, /PROBE/);
+      assert.match(across.stdout, /REFS/);
+      const json = repo.nav(["pr", "list", "--all-refs", "--json"], env);
+      const row = JSON.parse(json.stdout.trim()) as { probeSeen?: boolean; refs: string[] };
+      assert.equal(row.probeSeen, true);
+      assert.deepEqual(row.refs, ["feat/x"]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("never lets a plugin's JSON key replace one of the entity's own", () => {
+    const repo = probeRepo();
+    try {
+      const env = prListProbe(repo, { title: "plugin", status: "hijacked", id: "nope" });
+      openPrElsewhere(repo, env);
+      repo.git(["checkout", "--quiet", "feat/x"]);
+      for (const args of [["--json"], ["--all-refs", "--json"]]) {
+        const result = repo.nav(["pr", "list", ...args], env);
+        const row = JSON.parse(result.stdout.trim()) as Record<string, unknown>;
+        assert.equal(row.title, "X");
+        assert.equal(row.status, "open");
+        assert.match(String(row.id), /^[0-9a-z]{8}$/);
+        // Its own keys still arrive.
+        assert.equal(row.probeSeen, true);
+      }
     } finally {
       repo.cleanup();
     }
@@ -500,6 +686,57 @@ describe("a plugin that cannot be used", () => {
   });
 });
 
+describe("a plugin whose registration is malformed", () => {
+  it("is skipped and named, and the command still runs", () => {
+    const repo = probeRepo();
+    try {
+      const env = variantProbe(repo, (_manifest, dir) => {
+        writeFileSync(
+          join(dir, "core.js"),
+          // Not a shape core refuses by name (that is core's test) but a
+          // registration that throws when read: what the loader must catch.
+          'export function activate(host) { host.register({ treeLocations: [{ get dir() { throw new Error("boom"); } }] }); }\n',
+        );
+      });
+      repo.nav(["issue", "open", "One", "-m", "Body."]);
+      const result = repo.nav(["issue", "list"], env);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(
+        result.stderr,
+        /plugin @navbook\/plugin-probe skipped: what it registered could not be used: boom/,
+      );
+      assert.match(result.stdout, /One/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+describe("a plugin whose code is not where the index says", () => {
+  it("says it could not be loaded, not that it lacks the command", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      npm.publish("1.0.0");
+      assert.equal(repo.nav(["plugin", "install", "probe", "-y"], npm.env).code, 0);
+      const store = join(repo.home, ".local", "share", "navbook", "plugins");
+      rmSync(join(store, "node_modules", "@navbook", "plugin-probe"), {
+        recursive: true,
+        force: true,
+      });
+      const result = repo.nav(["probe", "hello"], npm.env);
+      assert.equal(result.code, 1);
+      assert.match(
+        result.stderr,
+        /plugin @navbook\/plugin-probe could not be loaded: its package is not at .*nav plugin install @navbook\/plugin-probe/,
+      );
+      assert.doesNotMatch(result.stderr, /does not implement/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
 describe("nav plugin", () => {
   it("lists nothing, and says where the store is", () => {
     const repo = probeRepo({ declare: false });
@@ -616,6 +853,193 @@ describe("nav plugin", () => {
         assert.ok(!existsSync(join(modules, peer)), `${peer} was installed into the store`);
       }
       assert.match(repo.nav(["plugin", "list"]).stdout, /@navbook\/plugin-probe\s+1\.0\.0/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("records the version npm installed over an older one", () => {
+    // The spec typed is not a directory in node_modules: the index must follow
+    // what npm wrote into the store, or 2.0.0 runs while `list` says 1.0.0.
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      npm.publish("1.0.0");
+      npm.publish("2.0.0");
+      const first = repo.nav(["plugin", "install", "@navbook/plugin-probe@1.0.0", "-y"], npm.env);
+      assert.equal(first.code, 0, first.stderr);
+      assert.match(first.stdout, /Installed @navbook\/plugin-probe@1\.0\.0/);
+
+      const second = repo.nav(["plugin", "install", "@navbook/plugin-probe@2.0.0", "-y"], npm.env);
+      assert.equal(second.code, 0, second.stderr);
+      assert.match(second.stdout, /Installed @navbook\/plugin-probe@2\.0\.0/);
+      assert.deepEqual(listed(repo, npm.env), ["@navbook/plugin-probe@2.0.0"]);
+      // Nothing was mistaken for a package that is not a plugin and removed.
+      assert.ok(!npm.log().some((line) => line.startsWith("uninstall")), npm.log().join("\n"));
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("records a folder installed over the plugin it replaces", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      const v1 = npm.copy("1.0.0", join(repo.home, "probe-v1"));
+      const v2 = npm.copy("2.0.0", join(repo.home, "probe-v2"));
+      assert.equal(repo.nav(["plugin", "install", v1, "-y"], npm.env).code, 0);
+      const result = repo.nav(["plugin", "install", v2, "-y"], npm.env);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /Installed @navbook\/plugin-probe@2\.0\.0/);
+      assert.deepEqual(listed(repo, npm.env), ["@navbook/plugin-probe@2.0.0"]);
+
+      // The same folder, rebuilt in place: npm saves the same path, and the
+      // index still has to follow the version now in it.
+      npm.copy("3.0.0", v2);
+      const rebuilt = repo.nav(["plugin", "install", v2, "-y"], npm.env);
+      assert.equal(rebuilt.code, 0, rebuilt.stderr);
+      assert.deepEqual(listed(repo, npm.env), ["@navbook/plugin-probe@3.0.0"]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("falls back from @navbook/plugin-<name> to navbook-plugin-<name> for a short name", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      npm.publish("1.0.0", "navbook-plugin-probe");
+      // Both candidates are named before anything runs.
+      const asked = repo.nav(["plugin", "install", "probe"], npm.env, "n\n");
+      assert.match(
+        asked.stdout,
+        /npm install .*@navbook\/plugin-probe, or npm install .*navbook-plugin-probe/,
+      );
+      assert.deepEqual(npm.log(), []);
+
+      const result = repo.nav(["plugin", "install", "probe", "-y"], npm.env);
+      assert.equal(result.code, 0, `${result.stdout}${result.stderr}`);
+      assert.match(result.stdout, /Installed navbook-plugin-probe@1\.0\.0/);
+      assert.deepEqual(listed(repo, npm.env), ["navbook-plugin-probe@1.0.0"]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("keeps a version on the name it was typed with", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      const asked = repo.nav(["plugin", "install", "probe@^1"], npm.env, "n\n");
+      assert.match(
+        asked.stdout,
+        /npm install .*@navbook\/plugin-probe@\^1, or npm install .*navbook-plugin-probe@\^1/,
+      );
+      // And a full name with a version is still a plugin's name.
+      const full = repo.nav(["plugin", "install", "@navbook/plugin-probe@^1"], npm.env, "n\n");
+      assert.match(full.stdout, /npm install .* @navbook\/plugin-probe@\^1\n/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("passes a URL to npm as typed, never as a path", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      const url = "https://example.invalid/navbook-plugin-x-1.0.0.tgz";
+      const asked = repo.nav(["plugin", "install", url], npm.env, "n\n");
+      assert.match(asked.stdout, new RegExp(`npm install .* ${url.replace(/[.]/g, "\\.")}\\n`));
+      assert.doesNotMatch(asked.stdout, /https:\/example/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("reports only what this run installed, not the fallback it never ran", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      npm.publish("1.0.0");
+      npm.publish("1.0.0", "navbook-plugin-probe");
+      assert.equal(repo.nav(["plugin", "install", "navbook-plugin-probe", "-y"], npm.env).code, 0);
+      const result = repo.nav(["plugin", "install", "probe", "-y"], npm.env);
+      assert.equal(result.code, 0, `${result.stdout}${result.stderr}`);
+      assert.match(result.stdout, /Installed @navbook\/plugin-probe@1\.0\.0/);
+      assert.doesNotMatch(result.stdout, /Installed navbook-plugin-probe/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("prefers @navbook/plugin-<name> when the registry has it", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      npm.publish("1.0.0");
+      npm.publish("1.0.0", "navbook-plugin-probe");
+      const result = repo.nav(["plugin", "install", "probe", "-y"], npm.env);
+      assert.equal(result.code, 0, `${result.stdout}${result.stderr}`);
+      assert.deepEqual(listed(repo, npm.env), ["@navbook/plugin-probe@1.0.0"]);
+      assert.equal(npm.log().length, 1);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("works outside a repository, since the store is the user's", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    // The home directory is beside the repository, not in it; the ceiling
+    // keeps git from finding any repository the test directory sits in.
+    const outside = (args: string[]): RunResult => {
+      const command = navCommand();
+      const result = spawnSync(command[0] as string, [...command.slice(1), ...args], {
+        cwd: repo.home,
+        encoding: "utf8",
+        env: {
+          ...deterministicEnv(repo.home),
+          ...npm.env,
+          GIT_CEILING_DIRECTORIES: dirname(repo.home),
+        },
+      });
+      return { code: result.status ?? 1, stdout: result.stdout, stderr: result.stderr };
+    };
+    try {
+      npm.publish("1.0.0");
+      const installed = outside(["plugin", "install", "@navbook/plugin-probe", "-y"]);
+      assert.equal(installed.code, 0, installed.stderr);
+      assert.match(installed.stdout, /Installed @navbook\/plugin-probe@1\.0\.0/);
+      const list = outside(["plugin", "list"]);
+      assert.equal(list.code, 0, list.stderr);
+      assert.match(list.stdout, /@navbook\/plugin-probe\s+1\.0\.0/);
+
+      npm.publish("1.1.0");
+      const updated = outside(["plugin", "update", "@navbook/plugin-probe", "-y"]);
+      assert.equal(updated.code, 0, updated.stderr);
+      assert.match(updated.stdout, /Updated @navbook\/plugin-probe 1\.0\.0 → 1\.1\.0/);
+      const removed = outside(["plugin", "remove", "@navbook/plugin-probe", "-y"]);
+      assert.equal(removed.code, 0, removed.stderr);
+      assert.match(removed.stdout, /Removed @navbook\/plugin-probe/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("updates and removes a plugin by its short name", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      npm.publish("1.0.0");
+      assert.equal(repo.nav(["plugin", "install", "probe", "-y"], npm.env).code, 0);
+      npm.publish("1.1.0");
+      const updated = repo.nav(["plugin", "update", "probe", "-y"], npm.env);
+      assert.equal(updated.code, 0, updated.stderr);
+      assert.match(updated.stdout, /Updated @navbook\/plugin-probe 1\.0\.0 → 1\.1\.0/);
+      const removed = repo.nav(["plugin", "remove", "probe", "-y"], npm.env);
+      assert.equal(removed.code, 0, removed.stderr);
+      assert.match(removed.stdout, /Removed @navbook\/plugin-probe/);
+      assert.deepEqual(listed(repo, npm.env), []);
     } finally {
       repo.cleanup();
     }

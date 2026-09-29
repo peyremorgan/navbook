@@ -40,8 +40,12 @@ export type UpdateFeatureInput = {
   /**
    * The `baseSha` the editor started from.
    *
-   * A save whose file has moved on since is refused with `STALE_CONTENT` rather
-   * than landed on top of the change that moved it (spec 06 §6.3).
+   * A save is refused with `STALE_CONTENT` when a field it names has changed
+   * since, rather than landed on top of the change that moved it (spec 06 §6.3)
+   * — and only then, so a summary saved just after the same page saved the
+   * title still lands. As on `UpdateIssueInput`, the refusal lists the fields
+   * that moved in `extensions.moved`, and a token this server cannot resolve is
+   * stale by definition.
    */
   baseSha: string;
   slug: string;

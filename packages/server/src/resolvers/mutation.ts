@@ -81,6 +81,17 @@ const COMMIT = { commit: true } as const;
  * remembering to. It runs after the write transaction has released, so a
  * listener sees a settled tree and cannot deadlock reading it, and after the
  * push has been attempted, so `pushed` is the truth rather than a hope.
+ *
+ * A write whose push failed never gets here: it throws — `SYNC_CONFLICT`,
+ * `SYNC_PUSH_REJECTED` or `SYNC_FAILED`, each saying the commit was kept in
+ * the clone — and so no event is emitted for it. That is deliberate. The
+ * person who asked was told the change did not go through, and spec 06 §6.3
+ * says a client reporting such a change as saved would be lying about where
+ * the work went; a bridge announcing it to a channel would be telling the
+ * same lie to more people. The commit may yet reach the remote with the next
+ * push, or be thrown away by the operator reconciling the clone, and which of
+ * the two is not known here. So `pushed: false` on an event means what it
+ * means on {@link CommitInfo}: a server with no remote, or nothing committed.
  */
 export function commitInfo(ctx: GraphQLCtx, result: RunPlanResult, pushed: boolean): CommitInfo {
   ctx.plugins.emit({
@@ -160,7 +171,7 @@ export const Mutation: MutationResolvers = {
             ...(input.deadline ? { deadline: input.deadline } : {}),
             ...(parent ? { parent: parent.id } : {}),
           });
-          checkComposed(content, validateIssue, "issue");
+          checkComposed(content, (parsed) => validateIssue(parsed, ctx.ws.ext), "issue");
 
           const opened = openIssue(ctx.ws, { content, fallbackTitle: input.title }, COMMIT);
           const repo = afterWrite(ctx);
@@ -431,7 +442,14 @@ async function patchEntity(
       );
       // Validated before the file is touched, so a rejected patch leaves the
       // tree exactly as it was.
-      checkComposed(patched, kind === "issue" ? validateIssue : validatePr, kind);
+      // With the plugins' keys: a field a plugin owns is validated by it, and a
+      // value it refuses must not reach the file, where doctor would find it.
+      checkComposed(
+        patched,
+        (parsed) =>
+          kind === "issue" ? validateIssue(parsed, ctx.ws.ext) : validatePr(parsed, ctx.ws.ext),
+        kind,
+      );
 
       // Editing in place is what `applyEntityEdit` records — it reads the file
       // back, which is what puts the edit in the plan and so under the --commit

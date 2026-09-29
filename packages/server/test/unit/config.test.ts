@@ -87,13 +87,33 @@ describe("loadConfig", () => {
     );
   });
 
-  it("defaults the port, remote, staleness window, git timeout and explorer", () => {
+  it("defaults the port, remote, staleness window, git timeout, maintenance and explorer", () => {
     const config = loadConfig({}, [...REQUIRED]);
     assert.equal(config.port, 4000);
     assert.equal(config.remote, "origin");
     assert.equal(config.pullIntervalMs, 10_000);
     assert.equal(config.gitTimeoutMs, 30_000);
+    assert.equal(config.maintenanceIntervalMs, 300_000);
     assert.equal(config.graphiql, true);
+  });
+
+  it("reads the maintenance interval from a flag or the environment, 0 meaning none", () => {
+    const flag = ["--maintenance-interval-ms", "60000"];
+    assert.equal(loadConfig({}, [...REQUIRED, ...flag]).maintenanceIntervalMs, 60_000);
+    const env = { NAV_SERVER_MAINTENANCE_INTERVAL_MS: "0" };
+    assert.equal(loadConfig(env, [...REQUIRED]).maintenanceIntervalMs, 0);
+    // The flag wins over the environment, as every other setting's does.
+    assert.equal(loadConfig(env, [...REQUIRED, ...flag]).maintenanceIntervalMs, 60_000);
+    for (const bad of ["soon", "-1", "1.5"]) {
+      assert.throws(
+        () => loadConfig({ NAV_SERVER_MAINTENANCE_INTERVAL_MS: bad }, [...REQUIRED]),
+        /--maintenance-interval-ms takes a whole number, got '/,
+      );
+    }
+    assert.throws(
+      () => loadConfig({}, [...REQUIRED, "--maintenance-interval-ms", "soon"]),
+      ConfigError,
+    );
   });
 
   it("reads the git timeout from a flag or the environment, 0 meaning none", () => {

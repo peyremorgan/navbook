@@ -70,7 +70,7 @@ export function cmdIssueOpen(ctx: Ctx, title: string, opts: IssueOpenOptions): v
         deadline: opts.deadline,
         parent: parent?.id,
       }),
-    validate: validateIssue,
+    validate: (parsed) => validateIssue(parsed, ctx.ext),
   });
 
   const result = openIssue(

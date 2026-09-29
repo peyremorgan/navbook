@@ -9,7 +9,7 @@
 import { useQuery } from "@vue/apollo-composable";
 import { ISSUES_QUERY } from "~/graphql/queries";
 import { distinctValues } from "~/utils/entities";
-import { normalizeList, normalizeOptional, parseRankInput } from "~/utils/patch";
+import { normalizeList, normalizeOptional, parseRankInput, withPluginFields } from "~/utils/patch";
 import { pageTitle } from "~/utils/title";
 
 useHead({ title: pageTitle("New issue") });
@@ -90,21 +90,25 @@ async function submit(): Promise<void> {
     toast.add({ title: "That will not do", description: "A rank is a number.", color: "error" });
     return;
   }
-  const payload = await mutations.openIssue({
-    title: title.value.trim(),
-    body: body.value.trim(),
-    labels: normalizeList(labels.value),
-    assignees: normalizeList(assignees.value),
-    milestone: normalizeOptional(milestone.value),
-    rank: placed,
-    deadline: normalizeOptional(deadline.value),
-    parent: normalizeOptional(parent.value),
-    // A plugin's fields last, and cast because they are fields its own SDL
-    // added: the generated input type describes the core schema and cannot
-    // know about them. Last also means a plugin cannot quietly replace one of
-    // the format's own values with its own.
-    ...(extra.value as Record<string, unknown>),
-  });
+  // A plugin's fields go in alongside, as fields its own SDL added: the
+  // generated input type describes the core schema and cannot know about
+  // them. One that names a field of the format's own is dropped, so a plugin
+  // cannot quietly replace a value the person set here.
+  const payload = await mutations.openIssue(
+    withPluginFields(
+      {
+        title: title.value.trim(),
+        body: body.value.trim(),
+        labels: normalizeList(labels.value),
+        assignees: normalizeList(assignees.value),
+        milestone: normalizeOptional(milestone.value),
+        rank: placed,
+        deadline: normalizeOptional(deadline.value),
+        parent: normalizeOptional(parent.value),
+      },
+      extra.value,
+    ),
+  );
   if (payload) {
     filed.value = true;
     await navigateTo(`/issues/${payload.issue.id}`);

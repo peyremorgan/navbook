@@ -9,7 +9,8 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -165,6 +166,34 @@ describe("the mutation event", () => {
     }
   });
 
+  it("is not emitted for a commit whose push failed, which its author was told", async () => {
+    const log = logFile("unpushed");
+    const harness = await startHarness({
+      env: probeEnv(log.path),
+      // An origin that turns every push away, for a reason no retry mends.
+      prepare: (fixture) => {
+        const hook = join(fixture.origin, "hooks", "pre-receive");
+        writeFileSync(hook, "#!/bin/sh\necho 'no pushes today' >&2\nexit 1\n", "utf8");
+        chmodSync(hook, 0o755);
+      },
+    });
+    try {
+      const result = await harness.gql(
+        `mutation { openIssue(input: { title: "Stranded", body: "Body." }) { issue { id } } }`,
+      );
+      assert.ok((result.errors ?? []).length > 0, "the push failed, so the mutation must");
+      // Committed in the clone all the same, and heard about by nobody.
+      const subject = harness.fixture.server.git(["log", "-1", "--format=%s"]).stdout.trim();
+      assert.match(subject, /docs\(issue\): open #\w{8}/);
+      assert.deepEqual(
+        log.lines().filter((line) => line.startsWith("mutation ")),
+        [],
+      );
+    } finally {
+      await harness.stop();
+    }
+  });
+
   it("is emitted once per mutation, and readable back through the schema", async () => {
     const log = logFile("seen");
     const harness = await startHarness({ env: probeEnv(log.path) });
@@ -229,6 +258,56 @@ describe("what the server refuses to start without", () => {
     );
   });
 
+  it("never loads a declared name that is a path, even into the clone", async () => {
+    // Anybody who can push to the served branch writes the declaration, so a
+    // path there would be a way to make the server import their code. The
+    // plugin is complete and compatible; only its name is not a plugin's.
+    const marker = join(process.env.TMPDIR ?? "/tmp", `navbook-pathplugin-${process.pid}`);
+    rmSync(marker, { force: true });
+    for (const shape of ["absolute", "relative", "named like a plugin"] as const) {
+      await assert.rejects(
+        () =>
+          startHarness({
+            prepare: (fixture) => {
+              const evil = join(fixture.server.dir, ".navbook/evil");
+              // The last shape passes a prefix check and resolves, through
+              // `node_modules`, to the clone: it climbs to `/` and back down.
+              const name = {
+                absolute: evil,
+                relative: "../../../.navbook/evil",
+                "named like a plugin": `navbook-plugin-a${"/..".repeat(40)}${evil}`,
+              }[shape];
+              const pkg = {
+                // What the declaration says, since the clone writes both.
+                name,
+                version: "1.0.0",
+                keywords: ["navbook-plugin"],
+                type: "module",
+                engines: { navbook: "^1.0.0" },
+                exports: { "./server": "./server.js" },
+                navbook: { short: "evil", server: {} },
+              };
+              fixture.server.write(".navbook/evil/package.json", JSON.stringify(pkg));
+              fixture.server.write(
+                ".navbook/evil/server.js",
+                `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "ran");\nexport default { activate() {} };\n`,
+              );
+              fixture.server.write(
+                ".navbook/navbook.json",
+                `${JSON.stringify({ version: 1, plugins: { [name]: {} } }, null, 2)}\n`,
+              );
+              fixture.server.commitAll("declare a plugin by its path");
+            },
+          }),
+        (error: Error) => {
+          assert.match(error.message, /is not named as a plugin/);
+          return true;
+        },
+      );
+      assert.equal(existsSync(marker), false, "the clone's code ran");
+    }
+  });
+
   it("stops when a plugin's required configuration is absent", async () => {
     const log = logFile("noconfig");
     await assert.rejects(
@@ -241,6 +320,35 @@ describe("what the server refuses to start without", () => {
         return true;
       },
     );
+  });
+
+  it("stops what it started when the port is taken, and says why", async () => {
+    // Somebody else's socket on the port the server is told to use.
+    const squatter = createServer();
+    await new Promise<void>((resolve) => squatter.listen(0, resolve));
+    const address = squatter.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    const log = logFile("porttaken");
+    try {
+      await assert.rejects(
+        // A background pull as well, so there is one running to stop.
+        () => startHarness({ env: probeEnv(log.path), port, pullIntervalMs: 60_000 }),
+        (error: Error) => {
+          assert.match(error.message, new RegExp(`could not listen on port ${port}: .*EADDRINUSE`));
+          // Said as a startup fault, not thrown from the event loop.
+          assert.doesNotMatch(error.message, /Unhandled 'error' event|\n\s+at /);
+          return true;
+        },
+      );
+      // The service was up before the port was tried, and went down with it.
+      assert.deepEqual(
+        log.lines().filter((line) => line.startsWith("service:")),
+        ["service:start", "service:stop"],
+      );
+    } finally {
+      await new Promise<void>((resolve) => squatter.close(() => resolve()));
+      log.clear();
+    }
   });
 
   it("starts with an optional key left unset", async () => {

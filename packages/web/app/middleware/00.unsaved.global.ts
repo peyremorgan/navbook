@@ -21,6 +21,16 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
   // was asked for, so that one's dialog must not stay up to answer nothing.
   if (work.asking.value) work.answer(false);
   if (work.takeAgreement()) return;
+  // Signing out asked already, before it dropped the token, and spent its
+  // agreement on the redirect to the provider's end-session endpoint. When
+  // the page comes back without having left — Back from the provider,
+  // restored from the back-forward cache — it goes on to `/signed-out`
+  // through here, and asking again would offer to keep editing on a page
+  // whose token is already gone.
+  if (useAuth().signingOut()) return;
   if (to.path === from.path || !work.dirty()) return;
   if (!(await work.confirmLeave())) return abortNavigation();
+  // Held until this navigation settles, since `auth.global` may yet turn it
+  // into the redirect to the provider, and the browser would ask again.
+  work.agreeToNavigation();
 });

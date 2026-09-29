@@ -228,10 +228,12 @@ export function resolveEntityForEdit(ws: WsCtx, kind: EntityKind, ref: string): 
 }
 
 /** Schema problems in an edited file, as messages; an unparseable file is one. */
-export function revalidateEntityFile(path: string, kind: EntityKind): string[] {
+export function revalidateEntityFile(ws: WsCtx, path: string, kind: EntityKind): string[] {
   try {
     const parsed = parseFile(readFileSync(path, "utf8"));
-    const problems = kind === "issue" ? validateIssue(parsed) : validatePr(parsed);
+    // With the plugins' keys, as doctor checks them: a `feature:` the edit
+    // broke is what this warning is for.
+    const problems = kind === "issue" ? validateIssue(parsed, ws.ext) : validatePr(parsed, ws.ext);
     return problems.map((problem) => problem.message);
   } catch (error) {
     return [error instanceof Error ? error.message : String(error)];

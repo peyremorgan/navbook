@@ -2,7 +2,9 @@
 title: Git's detached gc can outlive the server's drain and leave lock files in the clone
 author: Claude <noreply@anthropic.com>
 created: 2026-09-27T12:52:10Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug]
+resolution: fixed
 ---
 
 Found in the self-review of #rcsql1v9. That issue is about zombies, which tini now reaps. This one is about the detached jobs themselves, which that fix leaves alone.

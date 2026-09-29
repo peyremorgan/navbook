@@ -17,10 +17,11 @@ const TRAILER_LINE = /^(Refs|Closes|Deletes):[ \t]*(.+?)[ \t]*$/gim;
 /** Extract `#id` references from Markdown prose, ignoring English words. */
 export function extractProseRefs(markdown: string): string[] {
   const out = new Set<string>();
-  const prose = withoutCodeSpans(withoutFences(markdown.replace(/\r\n?/g, "\n")));
-  for (const match of prose.matchAll(PROSE_REF)) {
-    const id = match[2] as string;
-    if (isId(id)) out.add(id);
+  for (const paragraph of paragraphs(markdown.replace(/\r\n?/g, "\n"))) {
+    for (const match of withoutCodeSpans(paragraph).matchAll(PROSE_REF)) {
+      const id = match[2] as string;
+      if (isId(id)) out.add(id);
+    }
   }
   return [...out];
 }
@@ -32,128 +33,381 @@ export function extractProseRefs(markdown: string): string[] {
  * decides where code is, and no more: spec 05 keeps the core to one dependency,
  * and `packages/web/test/nuxt/markdown.test.ts` holds this to markdown-it.
  *
- * Known to differ, both rare: a fence indented two or three spaces at the top
- * level of a list item's continuation is closed by the item's end rather than
- * its own, and a code span does not continue onto the next `>` line of a quote.
+ * It reads as markdown-it does, a line at a time. Each line first gets past
+ * the quotes and list items it is still inside, then may open new ones, and
+ * what is left is code, a fence, a heading, a rule, a table row or prose.
+ * Only prose, which is what paragraphs, headings and table cells hold, can
+ * name a reference.
+ *
+ * Known to differ: text inside a link is counted, where the web client leaves
+ * it alone rather than nest one link in another, and so is a link reference
+ * definition, which it does not show. Neither is code. And where a tab
+ * follows the markers of a quote inside another — with a list marker after
+ * them or not — markdown-it counts its columns from the inner quote rather
+ * than the start of the line.
  */
 
-/**
- * A line that opens or closes a fenced code block (CommonMark §4.5): what may
- * stand before the run on the same line — indentation, `>` markers, a list
- * marker — then a run of three or more backticks or tildes, then the info
- * string.
- */
-const FENCE_LINE = /^((?:[ \t]|>|[-*+][ \t]|\d{1,9}[.)][ \t])*)(`{3,}|~{3,})(.*)$/;
+/** Past this many quotes and list items inside one another, a marker is text. */
+const MAX_NESTING = 64;
 
-/** A line that opens a list item; group 1 runs to where its content starts. */
-const LIST_ITEM = /^((?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+)\S/;
+/** A run that opens a fence, and its info string (CommonMark §4.5). */
+const FENCE = /^(`{3,}|~{3,})(.*)$/;
 
 /** An ATX heading, which is a block of one line. */
-const HEADING = /^(?:[ \t]*>)*[ \t]*#{1,6}(?:[ \t]|$)/;
+const HEADING = /^#{1,6}(?: |$)/;
 
-/** A line that begins a block of its own, so no paragraph runs onto it. */
-const BLOCK_START = /^[ \t]*(?:$|>|#{1,6}(?:[ \t]|$)|[-*+][ \t]|\d{1,9}[.)][ \t]|`{3,}|~{3,})/;
+/** A thematic break: three or more of one of `-`, `*`, `_`, spaced as you like. */
+const THEMATIC_BREAK = /^([-*_])(?: *\1){2,} *$/;
 
-/** What opens a line before its content: `>` markers and the space around them. */
-const QUOTES = /^(?:[ \t]*>)*/;
+/** What turns the paragraph above it into a heading (CommonMark §4.3). */
+const SETEXT_UNDERLINE = /^(?:=+|-+) *$/;
 
-/** How many `>` markers open a line. */
-function quoteDepth(line: string): number {
-  return (QUOTES.exec(line)?.[0].match(/>/g) ?? []).length;
-}
+/** A list marker, which a space or the end of the line follows; group 1 numbers it. */
+const LIST_MARKER = /^(?:[-+*]|(\d{1,9})[.)])(?= |$)/;
 
-/** The indentation of a line once its `>` markers are set aside. */
-function indentAfterQuotes(line: string): number {
-  const rest = line.slice(QUOTES.exec(line)?.[0].length ?? 0);
-  return rest.length - rest.trimStart().length;
+/**
+ * Where a quote or a list item ends, a line has to say so: a quote goes on for
+ * as long as its lines start with `>`, and a list item for as long as they are
+ * indented to where its content starts. `width` is how far that is from where
+ * the item itself starts, `marker` the character that ends its marker, which
+ * the next item in the same list ends with too, and `emptyAt` the line it
+ * began on when nothing followed its marker there, -1 otherwise.
+ */
+type Container =
+  | { kind: "quote" }
+  | { kind: "item"; width: number; emptyAt: number; marker: string };
+
+/**
+ * The prose of `markdown`, a paragraph, heading or table cell at a time, with
+ * the quote markers and indentation of its container taken off each line.
+ *
+ * A fence is a run of three or more backticks or tildes (see {@link opensFence})
+ * indented less than four columns past its container. It closes on a run of
+ * its own character at least as long, indented the same way, with nothing
+ * after, or when its container ends; one never closed runs to the end of the
+ * document. A line indented four or more is code too, unless it carries on a
+ * paragraph, and so are the lines after it for as long as they are blank or
+ * as deeply indented. Tabs count to the next multiple of four columns.
+ */
+function paragraphs(markdown: string): string[] {
+  const out: string[] = [];
+  const stack: Container[] = [];
+  const lines = markdown.split("\n").map(expandTabs);
+  let fence: { char: string; length: number } | null = null;
+  let code = false;
+  let paragraph: string[] | null = null;
+  // How many columns the table being read has; 0 outside one.
+  let columns = 0;
+  const endParagraph = () => {
+    if (paragraph !== null) out.push(paragraph.join("\n"));
+    paragraph = null;
+    columns = 0;
+  };
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index] as string;
+    let { pos, matched } = enter(line, stack, index);
+
+    if (fence !== null || code) {
+      const rest = line.slice(pos);
+      const indent = spaces(rest, 0);
+      if (matched === stack.length) {
+        if (fence !== null) {
+          const run = rest.slice(indent).trimEnd();
+          const closes =
+            indent < 4 && run.length >= fence.length && run.split(fence.char).join("") === "";
+          if (closes) fence = null;
+          continue;
+        }
+        if (indent === rest.length || indent >= 4) continue;
+      }
+      fence = null;
+      code = false;
+    }
+
+    if (columns > 0 && matched === stack.length) {
+      // A table goes on for as long as its lines start no other block. Each
+      // cell is read on its own, and past the head's columns there are none.
+      const indent = spaces(line, pos);
+      const text = line.slice(pos + indent);
+      if (indent < 4 && text !== "" && !startsBlock(text)) {
+        out.push(...cells(text).slice(0, columns));
+        continue;
+      }
+      endParagraph();
+    }
+
+    // The marker of the list item this line has just left.
+    let left: string | null = null;
+    if (matched < stack.length) {
+      // A line that opens no block of its own carries on the paragraph above,
+      // whatever it sits in: CommonMark's lazy continuation.
+      const rest = line.slice(pos);
+      const heads = () => tableHead(rest.trimStart(), lines[index + 1], stack, index + 1) !== null;
+      if (paragraph !== null && !interrupts(rest, stack.slice(matched), heads)) {
+        paragraph.push(rest.trimStart());
+        continue;
+      }
+      endParagraph();
+      const container = stack[matched];
+      if (container?.kind === "item") left = container.marker;
+      stack.length = matched;
+    }
+
+    let table: string[] | null = null;
+    while (table === null) {
+      const indent = spaces(line, pos);
+      const text = line.slice(pos + indent);
+      if (indent > 3) break;
+      const marker = LIST_MARKER.exec(text);
+      // A table comes first, before even a quote or a list item, and can
+      // interrupt a paragraph; its head is whatever this line holds. Only the
+      // next item of a list the line has just left goes before it.
+      if (!(left !== null && marker?.[0].endsWith(left))) {
+        table = tableHead(text, lines[index + 1], stack, index + 1);
+      }
+      left = null;
+      if (table !== null || stack.length >= MAX_NESTING) break;
+      if (text[0] === ">") {
+        endParagraph();
+        stack.push({ kind: "quote" });
+        pos += indent + 1;
+        if (line[pos] === " ") pos++;
+        continue;
+      }
+      if (marker === null || THEMATIC_BREAK.test(text)) break;
+      const after = pos + indent + marker[0].length;
+      const gap = spaces(line, after);
+      const empty = after + gap === line.length;
+      // Only a list that starts at one, with something in it, may interrupt
+      // a paragraph.
+      if (paragraph !== null && (empty || (marker[1] !== undefined && Number(marker[1]) !== 1))) {
+        break;
+      }
+      endParagraph();
+      // The content starts a column past the marker when the item is blank
+      // or when what follows the marker is code, indented four or more.
+      const width = after + (empty || gap > 4 ? 1 : gap) - pos;
+      stack.push({ kind: "item", width, emptyAt: empty ? index : -1, marker: marker[0].slice(-1) });
+      pos = Math.min(pos + width, line.length);
+    }
+    if (table !== null) {
+      endParagraph();
+      out.push(...table);
+      columns = table.length;
+      // The delimiter row under the head says nothing.
+      index++;
+      continue;
+    }
+
+    const rest = line.slice(pos);
+    const indent = spaces(rest, 0);
+    const text = rest.slice(indent);
+    const run = indent < 4 ? opensFence(text) : null;
+    if (text === "") {
+      endParagraph();
+    } else if (indent >= 4) {
+      if (paragraph !== null) paragraph.push(text);
+      else code = true;
+    } else if (run !== null) {
+      endParagraph();
+      fence = { char: run[0] as string, length: run.length };
+    } else if (HEADING.test(text)) {
+      endParagraph();
+      out.push(text);
+    } else if (paragraph !== null && SETEXT_UNDERLINE.test(text)) {
+      endParagraph();
+    } else if (THEMATIC_BREAK.test(text)) {
+      endParagraph();
+    } else {
+      if (paragraph === null) paragraph = [];
+      paragraph.push(text);
+    }
+  }
+  endParagraph();
+  return out;
 }
 
 /**
- * `markdown` with every fenced code block blanked, fences included.
- *
- * A fence closes on a run of its own character at least as long as the one
- * that opened it with nothing after, or when the quote or list item it sits
- * in ends; one never closed runs to the end of the document. A backtick
- * fence's info string cannot hold a backtick, which is what tells ```` ```x```
- * ```` on one line apart from a fence. A run indented four or more past where
- * a fence could open only continues the paragraph above it.
+ * Where `line` gets to past the containers on `stack` it is still inside, and
+ * how many of them that is.
  */
-function withoutFences(markdown: string): string {
-  // The fence being blanked: its run, and the quote and list item it is in.
-  let open: { run: string; quotes: number; column: number } | null = null;
-  // Where the content of the list item the text is in starts, past its `>`
-  // markers, and how many of those it has; null outside a list.
-  let list: { column: number; quotes: number } | null = null;
-  let previousBlank = true;
-  const out: string[] = [];
-
-  for (const line of markdown.split("\n")) {
-    const blank = line.trim() === "";
-    if (open !== null) {
-      const left =
-        quoteDepth(line) < open.quotes ||
-        (!blank && open.column > 0 && indentAfterQuotes(line) < open.column);
-      if (!left) {
-        const fence = FENCE_LINE.exec(line);
-        const run = fence?.[2] ?? "";
-        const closes =
-          fence !== null &&
-          run[0] === open.run[0] &&
-          run.length >= open.run.length &&
-          (fence[3] ?? "").trim() === "";
-        if (closes) open = null;
-        out.push("");
-        previousBlank = true;
-        continue;
-      }
-      // The quote or list item ended, and the fence with it.
-      open = null;
+function enter(line: string, stack: Container[], index: number) {
+  let pos = 0;
+  let matched = 0;
+  for (const container of stack) {
+    const indent = spaces(line, pos);
+    if (container.kind === "quote") {
+      // However far in, as markdown-it has it: only a quote's first `>`
+      // must be indented less than four.
+      if (line[pos + indent] !== ">") break;
+      pos += indent + 1;
+      if (line[pos] === " ") pos++;
+    } else if (pos + indent === line.length) {
+      // A blank line stays in a list item, unless the item began blank:
+      // then it has no content, and this ends it.
+      if (container.emptyAt === index - 1) break;
+    } else if (indent >= container.width) {
+      pos += container.width;
+    } else {
+      break;
     }
+    matched++;
+  }
+  return { pos, matched };
+}
 
-    const item = LIST_ITEM.exec(line);
-    const quotes = quoteDepth(line);
-    if (item) {
-      const markers = QUOTES.exec(line)?.[0].length ?? 0;
-      list = { column: (item[1] ?? "").length - markers, quotes };
-    } else if (
-      !blank &&
-      list !== null &&
-      (quotes !== list.quotes || indentAfterQuotes(line) < list.column)
-    ) {
-      list = null;
-    }
+/**
+ * The cells of `head` when it heads a table, or null. It does when it has a
+ * `|`, and the next line, inside everything this one is, is a delimiter row
+ * like `| --- | :-: |` that marks out as many columns.
+ */
+function tableHead(
+  head: string,
+  next: string | undefined,
+  stack: Container[],
+  index: number,
+): string[] | null {
+  if (next === undefined || !head.includes("|") || !next.includes("-")) return null;
+  const { pos, matched } = enter(next, stack, index);
+  const indent = spaces(next, pos);
+  const delimiter = next.slice(pos + indent);
+  if (matched < stack.length || indent > 3) return null;
+  if (!/^[-:|][-:| ]+$/.test(delimiter) || delimiter.startsWith("- ")) return null;
+  const parts = delimiter.split("|");
+  let count = 0;
+  for (const [i, part] of parts.entries()) {
+    const cell = part.trim();
+    if (cell === "" && (i === 0 || i === parts.length - 1)) continue;
+    if (!/^:?-+:?$/.test(cell)) return null;
+    count++;
+  }
+  const header = cells(head);
+  return header.length > 0 && header.length === count ? header : null;
+}
 
-    const fence = FENCE_LINE.exec(line);
-    const run = fence?.[2] ?? "";
-    const column = indentAfterQuotes(line);
-    const infoHoldsBacktick = run.startsWith("`") && (fence?.[3] ?? "").includes("`");
-    const continuesParagraph = !item && !previousBlank && column >= (list?.column ?? 0) + 4;
-    if (!fence || infoHoldsBacktick || continuesParagraph) {
-      out.push(line);
-      previousBlank = blank;
+/**
+ * Whether `line`, which has `left` the containers the paragraph above it is
+ * in, starts a block and so ends that paragraph rather than carrying it on.
+ *
+ * Each quote it left asks in turn, from inside whatever holds that quote, and
+ * then the paragraph itself, for which the line might also be the head of a
+ * table; `heads` says whether it is. A list marker may start a list there, even one
+ * that could not interrupt a paragraph from inside it, and whether the line
+ * is indented too far to start anything is judged from where the content of
+ * what asks begins, as markdown-it has it: a list item's content begins past
+ * the line's start, and to anything inside a quote the line has already left,
+ * the line is not indented at all.
+ */
+function interrupts(line: string, left: Container[], heads: () => boolean): boolean {
+  const indent = spaces(line, 0);
+  const text = line.slice(indent);
+  if (text === "") return true;
+  const list = LIST_MARKER.test(text);
+  const block = startsBlock(text);
+  // Where the content of what asks begins, and of what holds that.
+  let from = 0;
+  let listFrom = 0;
+  let quoted = false;
+  const asks = () => {
+    if (quoted) return block;
+    if (indent - from >= 4) return false;
+    if (list && indent - listFrom >= 4 && indent < from) return THEMATIC_BREAK.test(text);
+    return block;
+  };
+  for (const container of left) {
+    if (container.kind === "item") {
+      listFrom = from;
+      from += container.width;
       continue;
     }
-    open = { run, quotes, column: list?.column ?? 0 };
-    out.push("");
-    previousBlank = true;
+    if (asks()) return true;
+    quoted = true;
   }
-  return out.join("\n");
+  return !quoted && (asks() || heads());
+}
+
+/**
+ * The cells of a table row: split at each `|` a backslash does not escape,
+ * with the backslash dropped from one it does, and an empty cell before the
+ * first `|` or after the last left out.
+ */
+function cells(row: string): string[] {
+  const out: string[] = [];
+  let cell = "";
+  let escaped = false;
+  for (const char of row.trim()) {
+    if (char !== "|") cell += char;
+    else if (escaped) cell = `${cell.slice(0, -1)}|`;
+    else {
+      out.push(cell);
+      cell = "";
+    }
+    escaped = char === "\\";
+  }
+  out.push(cell);
+  if (out[0] === "") out.shift();
+  if (out[out.length - 1] === "") out.pop();
+  return out;
+}
+
+/** Whether `text`, with its indentation taken off, starts a block other than a paragraph. */
+function startsBlock(text: string): boolean {
+  return (
+    text[0] === ">" ||
+    LIST_MARKER.test(text) ||
+    HEADING.test(text) ||
+    THEMATIC_BREAK.test(text) ||
+    opensFence(text) !== null
+  );
+}
+
+/**
+ * The run that opens a fence at the start of `text`, or null. A backtick
+ * fence's info string cannot hold a backtick, which is what tells
+ * ```` ```x``` ```` on one line apart from a fence.
+ */
+function opensFence(text: string): string | null {
+  const fence = FENCE.exec(text);
+  if (fence === null) return null;
+  const run = fence[1] as string;
+  return run[0] === "`" && (fence[2] as string).includes("`") ? null : run;
+}
+
+/** How many spaces `line` has from `pos` on. */
+function spaces(line: string, pos: number): number {
+  let end = pos;
+  while (line[end] === " ") end++;
+  return end - pos;
+}
+
+/** `line` with each tab replaced by the spaces to the next multiple of four. */
+function expandTabs(line: string): string {
+  if (!line.includes("\t")) return line;
+  let out = "";
+  for (const char of line) {
+    out += char === "\t" ? " ".repeat(4 - (out.length % 4)) : char;
+  }
+  return out;
 }
 
 /** ASCII punctuation, which a backslash escapes (CommonMark §2.4). */
 const ESCAPABLE = /[!-/:-@[-`{-~]/;
 
 /**
- * `text` with every code span blanked (CommonMark §6.1), and every character
- * a backslash escapes: an escaped `` ` `` opens no span, and an escaped `#`
- * is no reference, as the web client already has it.
+ * A paragraph with every code span blanked (CommonMark §6.1), and every
+ * character a backslash escapes: an escaped `` ` `` opens no span, and an
+ * escaped `#` is no reference, as the web client already has it.
  *
- * A span is a run of backticks, then anything up to a run of exactly as many,
- * within the one paragraph: it goes on to the next line only when that line
- * starts no block of its own. A run with no partner is literal text.
+ * A span is a run of backticks, then anything up to a run of exactly as many.
+ * A run with no partner is literal text.
+ *
+ * Linear, because a body is untrusted input: the search for a partner never
+ * looks at a run twice.
  */
 function withoutCodeSpans(text: string): string {
   const out = text.split("");
+  const partners = new Partners(text);
   let i = 0;
   while (i < text.length) {
     const char = text[i] as string;
@@ -168,7 +422,7 @@ function withoutCodeSpans(text: string): string {
     }
     let length = 1;
     while (text[i + length] === "`") length++;
-    const close = closingRun(text, i + length, length, paragraphEnd(text, i));
+    const close = partners.after(i + length, length);
     if (close === -1) {
       i += length;
       continue;
@@ -180,37 +434,33 @@ function withoutCodeSpans(text: string): string {
 }
 
 /**
- * Where the paragraph holding `from` ends: before the next line that starts a
- * block, or with its own line when that is a heading, which is one line long.
+ * The runs of backticks in a text, by length, for finding the partner of one.
+ *
+ * Asked in the order the text is read, so each length's list is walked once:
+ * a run before the one asked about can never be a later run's partner either.
  */
-function paragraphEnd(text: string, from: number): number {
-  let end = text.indexOf("\n", from);
-  const start = text.lastIndexOf("\n", from - 1) + 1;
-  if (HEADING.test(text.slice(start, end === -1 ? undefined : end))) {
-    return end === -1 ? text.length : end;
-  }
-  while (end !== -1) {
-    const next = text.indexOf("\n", end + 1);
-    if (BLOCK_START.test(text.slice(end + 1, next === -1 ? undefined : next))) return end;
-    end = next;
-  }
-  return text.length;
-}
+class Partners {
+  private readonly runs = new Map<number, { starts: number[]; next: number }>();
 
-/** The start of the first run of exactly `length` backticks in `[from, end)`, or -1. */
-function closingRun(text: string, from: number, length: number, end: number): number {
-  let i = from;
-  while (i < end) {
-    if (text[i] !== "`") {
-      i++;
-      continue;
+  constructor(text: string) {
+    let i = text.indexOf("`");
+    while (i !== -1) {
+      let length = 1;
+      while (text[i + length] === "`") length++;
+      const runs = this.runs.get(length) ?? { starts: [], next: 0 };
+      runs.starts.push(i);
+      this.runs.set(length, runs);
+      i = text.indexOf("`", i + length);
     }
-    let run = 1;
-    while (text[i + run] === "`") run++;
-    if (run === length && i + run <= end) return i;
-    i += run;
   }
-  return -1;
+
+  /** The start of the first run of exactly `length` backticks at or after `from`, or -1. */
+  after(from: number, length: number): number {
+    const runs = this.runs.get(length);
+    if (runs === undefined) return -1;
+    while (runs.next < runs.starts.length && (runs.starts[runs.next] as number) < from) runs.next++;
+    return runs.starts[runs.next] ?? -1;
+  }
 }
 
 /**

@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -28,6 +28,7 @@ const compose = parseYaml(composeText) as {
       labels?: Record<string, string>;
       build?: { args?: Record<string, string> };
       entrypoint?: unknown;
+      stop_grace_period?: string;
     }
   >;
   networks: Record<string, { external?: boolean; name?: string }>;
@@ -123,6 +124,37 @@ describe("the deployment descriptor", () => {
     assert.equal(compose.services.web?.build?.args?.NAVBOOK_WEB_PLUGINS, fromEnv);
   });
 
+  it("lets the build argument reach the web build, even when it is empty", () => {
+    // The image sets NAVBOOK_WEB_PLUGINS and runs the package's own `build`
+    // script. A script that assigns the variable outright would replace it, and
+    // every bundle would carry whatever the script names, whatever `.env` says.
+    const web = JSON.parse(readFileSync(join(REPO_ROOT, "packages/web/package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    for (const [name, script] of Object.entries(web.scripts)) {
+      const assignment = /^(NAVBOOK_WEB_PLUGINS=\S+)\s/.exec(script)?.[1];
+      if (assignment === undefined) {
+        assert.doesNotMatch(script, /NAVBOOK_WEB_PLUGINS=/, `${name} sets it mid-command`);
+        continue;
+      }
+      for (const value of ["", "@navbook/plugin-kb other-plugin"]) {
+        const run: SpawnSyncReturns<string> = spawnSync(
+          "sh",
+          ["-c", `${assignment} printenv NAVBOOK_WEB_PLUGINS`],
+          {
+            encoding: "utf8",
+            env: { ...process.env, NAVBOOK_WEB_PLUGINS: value },
+          },
+        );
+        assert.equal(
+          run.stdout,
+          `${value}\n`,
+          `${name} replaces NAVBOOK_WEB_PLUGINS=${JSON.stringify(value)}`,
+        );
+      }
+    }
+  });
+
   it("gives every required key a value, so the example renders as it stands", () => {
     const documented = documentedKeys();
     const empty = [...referencedKeys()]
@@ -177,6 +209,7 @@ describe("the deployment descriptor", () => {
       "NAV_SERVER_REMOTE",
       "NAV_SERVER_PULL_INTERVAL_MS",
       "NAV_SERVER_GIT_TIMEOUT_MS",
+      "NAV_SERVER_MAINTENANCE_INTERVAL_MS",
       "NAV_SERVER_GRAPHIQL",
       "NAV_ROOT",
     ]) {
@@ -200,6 +233,19 @@ describe("the deployment descriptor", () => {
     // An `entrypoint:` here replaces the image's whole ENTRYPOINT, tini included,
     // and the server would be PID 1 again (#rcsql1v9).
     assert.equal(compose.services.api?.entrypoint, undefined);
+  });
+
+  it("gives the API longer to stop than a mutation's fetch and push may take", () => {
+    // A stop waits for the mutation in flight, which fetches and then pushes;
+    // killing it mid-push is what the grace period is there to avoid.
+    const grace = /^(\d+)s$/.exec(compose.services.api?.stop_grace_period ?? "")?.[1];
+    assert.ok(grace !== undefined, "the API has no stop_grace_period in whole seconds");
+    const timeoutMs = Number(documentedKeys().get("NAVBOOK_GIT_TIMEOUT_MS"));
+    assert.ok(timeoutMs > 0, "NAVBOOK_GIT_TIMEOUT_MS has no documented default");
+    assert.ok(
+      Number(grace) * 1000 > 2 * timeoutMs,
+      `a ${grace} s grace period is shorter than a fetch and a push of ${timeoutMs} ms each`,
+    );
   });
 
   it("keeps the clone in a volume, since it is the only durable state there is", () => {

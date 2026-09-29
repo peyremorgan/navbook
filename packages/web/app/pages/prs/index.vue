@@ -29,7 +29,7 @@ useHead({ title: pageTitle("Pull requests") });
 
 const route = useRoute();
 const router = useRouter();
-const filter = useEntityFilter({ statuses: PR_STATUSES, reviewers: true }, toPrFilter);
+const filter = useEntityFilter({ statuses: PR_STATUSES, reviewers: true, noun: "pr" }, toPrFilter);
 
 const allRefs = computed({
   get: () => route.query.refs === "all",

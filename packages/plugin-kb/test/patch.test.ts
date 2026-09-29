@@ -9,9 +9,18 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import * as core from "@navbook/core";
+import * as navbookCore from "@navbook/core";
 import { parseFile } from "@navbook/core";
-import { applyFeaturePatch, applySpecPatch, isEmptySpecPatch } from "../src/server/patch.ts";
+import { apiError, invalidInput } from "@navbook/server/plugin";
+import {
+  applyFeaturePatch,
+  applySpecPatch,
+  isEmptySpecPatch,
+  type PatchHost,
+} from "../src/server/patch.ts";
+
+/** The server's own core and errors, as `activate` is handed them. */
+const host: PatchHost = { core: navbookCore, api: { invalidInput, apiError } };
 
 const FEATURE_PATH = ".navbook/specs/auth/feature.md";
 const SPEC_PATH = ".navbook/specs/auth/login-flow.md";
@@ -37,12 +46,12 @@ imported-from: github:acme/repo#12
 
 describe("applyFeaturePatch", () => {
   it("leaves a file it was asked to change nothing about byte-identical", () => {
-    assert.equal(applyFeaturePatch(core, FEATURE, {}, FEATURE_PATH), FEATURE);
+    assert.equal(applyFeaturePatch(host, FEATURE, {}, FEATURE_PATH), FEATURE);
   });
 
   it("replaces the title, preserving a key the schema does not name", () => {
     const result = applyFeaturePatch(
-      core,
+      host,
       FEATURE,
       { title: "Authentication and sessions" },
       FEATURE_PATH,
@@ -54,13 +63,13 @@ describe("applyFeaturePatch", () => {
   });
 
   it("replaces the summary", () => {
-    const result = applyFeaturePatch(core, FEATURE, { summary: "Signing out." }, FEATURE_PATH);
+    const result = applyFeaturePatch(host, FEATURE, { summary: "Signing out." }, FEATURE_PATH);
     assert.equal(parseFile(result).body.trim(), "Signing out.");
   });
 
   it("clears the summary on an explicit null, leaving no trailing blank line", () => {
     for (const summary of [null, "   "]) {
-      const result = applyFeaturePatch(core, FEATURE, { summary }, FEATURE_PATH);
+      const result = applyFeaturePatch(host, FEATURE, { summary }, FEATURE_PATH);
       assert.equal(parseFile(result).body, "");
       assert.ok(result.endsWith("---\n"));
     }
@@ -68,7 +77,7 @@ describe("applyFeaturePatch", () => {
 
   it("refuses a title emptied rather than replaced", () => {
     assert.throws(
-      () => applyFeaturePatch(core, FEATURE, { title: "  " }, FEATURE_PATH),
+      () => applyFeaturePatch(host, FEATURE, { title: "  " }, FEATURE_PATH),
       /title must not be empty/,
     );
   });
@@ -76,19 +85,20 @@ describe("applyFeaturePatch", () => {
   it("reports a file it cannot round-trip by path, as the file's fault", () => {
     const broken = "---\ntitle: X\nbad: [unclosed\n---\n\nBody.\n";
     assert.throws(
-      () => applyFeaturePatch(core, broken, { title: "Y" }, FEATURE_PATH),
-      (error: Error) => error.message.includes(FEATURE_PATH),
+      () => applyFeaturePatch(host, broken, { title: "Y" }, FEATURE_PATH),
+      (error: Error & { extensions?: { code?: string } }) =>
+        error.message.includes(FEATURE_PATH) && error.extensions?.code === "FRONTMATTER",
     );
   });
 });
 
 describe("applySpecPatch", () => {
   it("leaves a file it was asked to change nothing about byte-identical", () => {
-    assert.equal(applySpecPatch(core, SPEC, {}, SPEC_PATH), SPEC);
+    assert.equal(applySpecPatch(host, SPEC, {}, SPEC_PATH), SPEC);
   });
 
   it("replaces the body, preserving keys the schema does not name", () => {
-    const result = applySpecPatch(core, SPEC, { body: "Rewritten." }, SPEC_PATH);
+    const result = applySpecPatch(host, SPEC, { body: "Rewritten." }, SPEC_PATH);
     const { fm, body } = parseFile(result);
     assert.equal(fm.title, "Login flow");
     assert.equal(fm.author, "A Person <person@example.invalid>");
@@ -97,13 +107,13 @@ describe("applySpecPatch", () => {
   });
 
   it("replaces the title", () => {
-    const result = applySpecPatch(core, SPEC, { title: "Sign-in flow" }, SPEC_PATH);
+    const result = applySpecPatch(host, SPEC, { title: "Sign-in flow" }, SPEC_PATH);
     assert.equal(parseFile(result).fm.title, "Sign-in flow");
   });
 
   it("refuses a title or body emptied rather than replaced", () => {
     for (const input of [{ title: "  " }, { body: "  " }]) {
-      assert.throws(() => applySpecPatch(core, SPEC, input, SPEC_PATH), /must not be empty/);
+      assert.throws(() => applySpecPatch(host, SPEC, input, SPEC_PATH), /must not be empty/);
     }
   });
 

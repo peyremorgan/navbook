@@ -17,6 +17,7 @@
 
 import type { ParsedFile, Problem } from "./files.ts";
 import type { PluginManifest } from "./plugins.ts";
+import { QUERY_TERMS } from "./query.ts";
 import type { EntityKind, EntityRecord, NavTree, Repo, StructuralProblem } from "./tree.ts";
 import type { Level } from "./validate.ts";
 
@@ -159,6 +160,70 @@ export class ExtensionConflictError extends Error {
  * which plugin a registration came from, since a registration deliberately
  * does not carry its author.
  */
+/**
+ * Names the format already means something by, which no registration may take.
+ *
+ * A registration is matched against the tree only after the built-in reading
+ * has had its turn — an entity path is classified before any plugin bucket, a
+ * built-in key is normalised first, a built-in query term is parsed first — so
+ * a plugin claiming one of these would not replace it but be silently
+ * shadowed by it, with its own code run on the format's data.
+ *
+ * `feature` and `specs/` are absent on purpose: they are the one grandfathered
+ * pair of §2.12, the knowledge base's to claim. D13 and D14 are its checks.
+ */
+const RESERVED_DIRS = new Set(["issues", "prs", "archive", "navbook.json"]);
+const RESERVED_KEYS = new Set([
+  "title",
+  "author",
+  "created",
+  "status",
+  "labels",
+  "assignee",
+  "milestone",
+  "rank",
+  "deadline",
+  "resolution",
+  "duplicate-of",
+  "parent",
+  "subtasks",
+  "target",
+  "source",
+  "reviewer",
+  "draft",
+  "revisions",
+  "merged",
+  "superseded-by",
+  "reply-to",
+  "verdict",
+  "revision",
+  "file",
+  "line",
+  "imported-from",
+  "imported-at",
+  "signature",
+]);
+const RESERVED_CHECKS = new Set([
+  "D1",
+  "D2",
+  "D3",
+  "D4",
+  "D5",
+  "D6",
+  "D7",
+  "D8",
+  "D9",
+  "D10",
+  "D11",
+  "D12",
+  "D15",
+  "D16",
+]);
+/** A directory is one plain segment: never a path, a dot-name or a traversal. */
+const PLAIN_SEGMENT = /^[a-z0-9][a-z0-9._-]*$/;
+/** A key or a query term is a word, so it can never name an `Object.prototype` member. */
+const PLAIN_WORD = /^[a-z][a-z0-9-]*$/;
+
 export function mergeExtensions(parts: readonly ExtensionParts[]): CoreExtensions {
   const treeLocations: TreeLocation[] = [];
   const frontmatterKeys: FrontmatterKeyDef[] = [];
@@ -174,38 +239,63 @@ export function mergeExtensions(parts: readonly ExtensionParts[]): CoreExtension
     check: new Set<string>(),
   };
 
+  const builtinTerms = new Set<string>(QUERY_TERMS.map((term) => term.key));
+  // A registration is plugin code's own object, so its shape is checked here
+  // rather than trusted: a registry that is not a list becomes a conflict the
+  // caller reports against that plugin, not a TypeError that stops every
+  // command for everyone.
+  const listOf = <T>(value: readonly T[] | undefined, what: string): readonly T[] => {
+    if (value === undefined) return [];
+    if (Array.isArray(value)) return value;
+    conflicts.push(`'${what}' was registered as something other than a list`);
+    return [];
+  };
+
   for (const part of parts) {
-    for (const location of part.treeLocations ?? []) {
-      if (seen.dir.has(location.dir))
+    for (const location of listOf(part.treeLocations, "treeLocations")) {
+      const dir = location?.dir;
+      if (typeof dir !== "string" || !PLAIN_SEGMENT.test(dir) || RESERVED_DIRS.has(dir))
+        conflicts.push(`'${String(dir)}' is not a directory a plugin may claim`);
+      else if (seen.dir.has(location.dir))
         conflicts.push(`two plugins claim the '${location.dir}/' directory`);
       else {
         seen.dir.add(location.dir);
         treeLocations.push(location);
       }
     }
-    for (const def of part.frontmatterKeys ?? []) {
-      if (seen.key.has(def.key))
+    for (const def of listOf(part.frontmatterKeys, "frontmatterKeys")) {
+      const key = def?.key;
+      if (typeof key !== "string" || !PLAIN_WORD.test(key) || RESERVED_KEYS.has(key))
+        conflicts.push(`'${String(key)}' is not a frontmatter key a plugin may claim`);
+      else if (seen.key.has(def.key))
         conflicts.push(`two plugins claim the '${def.key}' frontmatter key`);
       else {
         seen.key.add(def.key);
         frontmatterKeys.push(def);
       }
     }
-    for (const def of part.queryKeys ?? []) {
-      if (seen.query.has(def.key)) conflicts.push(`two plugins claim the '${def.key}:' query term`);
+    for (const def of listOf(part.queryKeys, "queryKeys")) {
+      const key = def?.key;
+      if (typeof key !== "string" || !PLAIN_WORD.test(key) || builtinTerms.has(key))
+        conflicts.push(`'${String(key)}:' is not a query term a plugin may claim`);
+      else if (seen.query.has(def.key))
+        conflicts.push(`two plugins claim the '${def.key}:' query term`);
       else {
         seen.query.add(def.key);
         queryKeys.push(def);
       }
     }
-    for (const def of part.doctorChecks ?? []) {
-      if (seen.check.has(def.id)) conflicts.push(`two plugins claim the check id '${def.id}'`);
+    for (const def of listOf(part.doctorChecks, "doctorChecks")) {
+      const id = def?.id;
+      if (typeof id !== "string" || id === "" || RESERVED_CHECKS.has(id))
+        conflicts.push(`'${String(id)}' is not a check id a plugin may claim`);
+      else if (seen.check.has(def.id)) conflicts.push(`two plugins claim the check id '${def.id}'`);
       else {
         seen.check.add(def.id);
         doctorChecks.push(def);
       }
     }
-    for (const scope of part.commitScopes ?? []) {
+    for (const scope of listOf(part.commitScopes, "commitScopes")) {
       if (!commitScopes.includes(scope)) commitScopes.push(scope);
     }
   }

@@ -67,12 +67,14 @@ FROM node:24-alpine
 # write shells out to it. Prompts are disabled so a credential that is missing
 # fails the request rather than hanging it.
 #
-# tini, because git does not wait for everything it starts: an auto gc or
-# maintenance run is detached to carry on after the command that started it
-# returns, and is re-parented to PID 1 when it finishes. Node reaps only the
-# children it spawned, so with the server as PID 1 every such leftover stayed a
-# zombie until the container restarted (#rcsql1v9). In the image rather than as
-# Compose's `init: true`, so that a pod gets it too.
+# tini, because git does not always wait for what it starts. Its automatic
+# maintenance used to be detached and re-parented to PID 1, and Node reaps
+# only the children it spawned, so with the server as PID 1 every such
+# leftover stayed a zombie until the container restarted (#rcsql1v9). The
+# server now runs that maintenance itself, in the foreground (#cvb57nhm), but
+# a credential helper or a hook can still leave an orphan behind: tini stays
+# as the backstop. In the image rather than as Compose's `init: true`, so that
+# a pod gets it too.
 RUN apk add --no-cache git ca-certificates tini
 ENV GIT_TERMINAL_PROMPT=0 \
     NODE_ENV=production \

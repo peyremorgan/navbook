@@ -6,11 +6,11 @@
  */
 
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { GitError, GitTimeoutError, git } from "../src/git/exec.ts";
+import { GitError, GitStoppedError, GitTimeoutError, git } from "../src/git/exec.ts";
 import {
   fetchRemote,
   fetchRemoteAsync,
@@ -157,6 +157,16 @@ describe("remotes", () => {
   });
 });
 
+/** Whether a process is still there; signal 0 asks without sending. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 describe("remotes, without blocking", () => {
   it("fetches and pushes as the blocking forms do", async () => {
     await inRemotesAsync(async ({ clone, peer, commit }) => {
@@ -195,6 +205,40 @@ describe("remotes, without blocking", () => {
       assert.equal(
         git(["rev-parse", "main"], { cwd: origin }).trim(),
         git(["rev-parse", "HEAD"], { cwd: clone }).trim(),
+      );
+    });
+  });
+
+  it("stops a fetch on request, and what it started with it", async () => {
+    await inRemotesAsync(async ({ origin, clone }) => {
+      // An upload-pack that never answers, standing in for a slow remote, and
+      // saying where it is so the test can tell whether it was left running.
+      const pidFile = join(clone, "..", "upload-pack.pid");
+      const script = join(clone, "..", "slow-upload-pack");
+      writeFileSync(script, `#!/bin/sh\necho $$ > '${pidFile}'\nexec sleep 30\n`, "utf8");
+      chmodSync(script, 0o755);
+      git(["remote", "add", "slow", origin], { cwd: clone });
+      git(["config", "remote.slow.uploadpack", script], { cwd: clone });
+
+      const stop = new AbortController();
+      const fetching = fetchRemoteAsync(clone, "slow", { signal: stop.signal });
+      let pid = 0;
+      for (let tries = 0; tries < 500 && pid === 0; tries++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        pid = existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8").trim()) || 0 : 0;
+      }
+      assert.ok(pid > 0, "the upload-pack never started");
+
+      const started = Date.now();
+      stop.abort();
+      await assert.rejects(fetching, GitStoppedError);
+      const elapsed = Date.now() - started;
+      assert.ok(elapsed < 1500, `stopping took ${elapsed} ms`);
+      assert.equal(alive(pid), false, "the fetch's upload-pack outlived it");
+      // Stopped before it started: nothing runs at all.
+      await assert.rejects(
+        fetchRemoteAsync(clone, "origin", { signal: AbortSignal.abort() }),
+        GitStoppedError,
       );
     });
   });

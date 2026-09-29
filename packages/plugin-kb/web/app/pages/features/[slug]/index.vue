@@ -231,7 +231,7 @@ async function addSpec(): Promise<void> {
         <div v-if="page.hasMore.value" class="flex items-center gap-3">
           <UButton size="xs" color="neutral" variant="subtle" @click="page.more()">Show more</UButton>
           <span class="text-xs text-muted">
-            Showing {{ page.shown.value }} of {{ page.total.value }}
+            Showing {{ page.shown.value.length }} of {{ page.total.value }}
           </span>
         </div>
       </section>

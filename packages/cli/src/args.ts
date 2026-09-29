@@ -20,13 +20,19 @@ import { InvalidArgumentError } from "commander";
 const DIGITS = /^\s*\d+\s*$/;
 const DECIMAL = /^\s*[-+]?(\d+(\.\d*)?|\.\d+)\s*$/;
 
-/** A count: a whole number no smaller than `min`. */
-export function wholeNumber(unit: string, min = 0): (value: string) => number {
+/**
+ * A count: a whole number no smaller than `min`.
+ *
+ * `unit` is null for a plugin's option, whose manifest says it is a count but
+ * not of what.
+ */
+export function wholeNumber(unit: string | null, min = 0): (value: string) => number {
   return (value) => {
     const parsed = Number(value);
     if (!DIGITS.test(value) || !Number.isSafeInteger(parsed) || parsed < min) {
       const floor = min > 0 ? `, at least ${min}` : "";
-      throw new InvalidArgumentError(`Expected a whole number of ${unit}${floor}.`);
+      const of = unit === null ? "" : ` of ${unit}`;
+      throw new InvalidArgumentError(`Expected a whole number${of}${floor}.`);
     }
     return parsed;
   };

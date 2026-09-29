@@ -35,6 +35,11 @@ export interface Config {
   pullIntervalMs: number;
   /** How long a fetch or push may take before it is stopped, in milliseconds; 0 never stops one. */
   gitTimeoutMs: number;
+  /**
+   * The least time between two runs of git's housekeeping, in milliseconds;
+   * 0 leaves housekeeping to something else (see `maintenance.ts`).
+   */
+  maintenanceIntervalMs: number;
   graphiql: boolean;
 }
 
@@ -53,6 +58,7 @@ const OPTIONS = {
   remote: { type: "string" },
   "pull-interval-ms": { type: "string" },
   "git-timeout-ms": { type: "string" },
+  "maintenance-interval-ms": { type: "string" },
   "no-graphiql": { type: "boolean" },
   help: { type: "boolean" },
 } as const;
@@ -78,6 +84,10 @@ export const USAGE = `Usage: nav-server [options]
   --pull-interval-ms <n>     how stale a read may be (default: 10000)
   --git-timeout-ms <n>       how long a fetch or push may take, 0 for as long
                              as git allows (default: 30000)
+  --maintenance-interval-ms <n>
+                             least time between two runs of git maintenance
+                             on the clone, 0 to leave it to something else
+                             (default: 300000)
   --no-graphiql              do not serve the GraphiQL explorer
 
 Every option can also be given as an environment variable: --oidc-audience is
@@ -134,6 +144,10 @@ export function loadConfig(env: NodeJS.ProcessEnv, argv: readonly string[]): Con
     gitTimeoutMs: wholeNumber(
       read("git-timeout-ms", "NAV_SERVER_GIT_TIMEOUT_MS") ?? "30000",
       "--git-timeout-ms",
+    ),
+    maintenanceIntervalMs: wholeNumber(
+      read("maintenance-interval-ms", "NAV_SERVER_MAINTENANCE_INTERVAL_MS") ?? "300000",
+      "--maintenance-interval-ms",
     ),
     graphiql:
       values["no-graphiql"] !== true && booleanVariable(env, "NAV_SERVER_GRAPHIQL") !== false,

@@ -78,6 +78,9 @@ what keeps the format from acquiring a second implementation by accident:
   operation, push after it. Git remains the single source of truth and the
   only durable state; the clone is a working copy that can be thrown away and
   made again. Nothing index-like is introduced ([§6.6](#66-explicitly-rejected-directions)).
+  Keeping that working copy in shape is the server's too: it runs git's
+  housekeeping itself, where a shutdown can wait for it, rather than leaving
+  git to detach it behind the server's back.
   The client inherits that: with no index there is no cursor, so a listing is
   the whole matching set and paging is the browser's own affair. What the
   server does derive, it derives afresh: the list of people it offers for an

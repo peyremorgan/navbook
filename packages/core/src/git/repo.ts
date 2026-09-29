@@ -331,7 +331,8 @@ export function worktreeHolding(cwd: string, branch: string): string | null {
  * be: two checkouts of one branch each hold an index the other cannot see.
  */
 export function addWorktree(cwd: string, path: string, branch: string): void {
-  git(["worktree", "add", "--quiet", path, branch], { cwd });
+  // After `--`, so a branch named like an option is checked out, not obeyed.
+  git(["worktree", "add", "--quiet", "--", path, branch], { cwd });
 }
 
 /**
@@ -339,7 +340,7 @@ export function addWorktree(cwd: string, path: string, branch: string): void {
  * it still holds, so a caller passes it only for a worktree it created itself.
  */
 export function removeWorktree(cwd: string, path: string, opts: { force?: boolean } = {}): void {
-  git(["worktree", "remove", ...(opts.force ? ["--force"] : []), path], { cwd });
+  git(["worktree", "remove", ...(opts.force ? ["--force"] : []), "--", path], { cwd });
 }
 
 /**

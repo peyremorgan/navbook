@@ -52,13 +52,50 @@ export function isInstalled(repoRoot: string): boolean {
   return existsSync(path) && readFileSync(path, "utf8").includes(MARKER_BEGIN);
 }
 
-/** Append the marked block, creating the hook file if there is none. */
+/**
+ * Whether the hook has the block, and whether it is this `nav`'s.
+ *
+ * `outdated` is a block an older `nav` wrote: the markers are there but what
+ * is between them is not what this one would write — the block before the
+ * `set -e` fix, say. Seeing only the marker would leave every existing
+ * install with the old block for good.
+ */
+export function hookState(repoRoot: string): "absent" | "current" | "outdated" {
+  const path = hookPath(repoRoot);
+  if (!existsSync(path)) return "absent";
+  const block = findBlock(readFileSync(path, "utf8"));
+  if (block === null) return "absent";
+  return block.text === BODY ? "current" : "outdated";
+}
+
+/** The marked block's text and where it sits, or null when there is none. */
+function findBlock(content: string): { start: number; end: number; text: string } | null {
+  const start = content.indexOf(MARKER_BEGIN);
+  if (start === -1) return null;
+  const close = content.indexOf(MARKER_END, start);
+  // An opening marker with no closing one is a block somebody cut short by
+  // hand; it runs to the end of the file, which is what uninstall assumes too.
+  const end = close === -1 ? content.length : close + MARKER_END.length;
+  return { start, end, text: content.slice(start, end) };
+}
+
+/**
+ * Write the marked block: appended, creating the hook file if there is none,
+ * or put in place of an older block, leaving everything around it alone.
+ */
 export function installHook(repoRoot: string): void {
   const path = hookPath(repoRoot);
   mkdirSync(dirname(path), { recursive: true });
   const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
 
-  if (existing.includes(MARKER_BEGIN)) return;
+  const block = findBlock(existing);
+  if (block !== null) {
+    if (block.text === BODY) return;
+    const replaced = `${existing.slice(0, block.start)}${BODY}${existing.slice(block.end)}`;
+    writeFileSync(path, replaced.endsWith("\n") ? replaced : `${replaced}\n`, "utf8");
+    chmodSync(path, statSync(path).mode | 0o111);
+    return;
+  }
   const content =
     existing.trim() === ""
       ? `${SHEBANG}\n${BODY}\n`

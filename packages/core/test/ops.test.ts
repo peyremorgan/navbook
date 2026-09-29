@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { NO_EXTENSIONS } from "../src/core/extensions.ts";
 import {
   newIssueFile,
   parseFile,
@@ -126,7 +127,7 @@ describe("planEntityOpen", () => {
     assert.equal(result.filePath, `${result.dirPath}/issue.md`);
     assert.equal(result.plan.message, "docs(issue): open #bqlybac0");
     assert.deepEqual(result.plan.trailers, [], "opening carries the id in its subject already");
-    assert.deepEqual(validateIssue(parseFile(content)), []);
+    assert.deepEqual(validateIssue(parseFile(content), NO_EXTENSIONS), []);
   });
 
   it("puts pull requests under prs/open with a pr.md", () => {
@@ -307,7 +308,11 @@ describe("planRequest", () => {
   const written = (entity: EntityRecord, people: string[], remove = false): string => {
     const { plan } = planRequest(entity, people, { remove });
     const content = frontmatterOf(plan.ops[0]);
-    assert.deepEqual(validatePr(parseFile(content)), [], "the plan wrote a file doctor rejects");
+    assert.deepEqual(
+      validatePr(parseFile(content), NO_EXTENSIONS),
+      [],
+      "the plan wrote a file doctor rejects",
+    );
     return readReviewers(parseFile(content).fm).join(", ");
   };
 
@@ -372,7 +377,7 @@ describe("planRequest", () => {
       planRequest(pr, ["alice@example.com"], { remove: true }).plan.ops[0],
     );
     assert.equal(content.includes("reviewer"), false);
-    assert.deepEqual(validatePr(parseFile(content)), []);
+    assert.deepEqual(validatePr(parseFile(content), NO_EXTENSIONS), []);
   });
 
   it("reports a removal of somebody who was never there", () => {

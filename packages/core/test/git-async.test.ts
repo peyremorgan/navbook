@@ -8,12 +8,13 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
   GitError,
+  GitStoppedError,
   GitTimeoutError,
   git,
   gitAsync,
@@ -127,6 +128,136 @@ describe("gitRunAsync", () => {
     await inRepo(async (cwd) => {
       const result = await gitRunAsync(["rev-parse", "HEAD"], { cwd, timeoutMs: 10_000 });
       assert.equal(result.code, 0);
+    });
+  });
+});
+
+/**
+ * A git that hangs on something it started: `credential fill` waits for its
+ * helper, and the helper waits for a `sleep` whose pid it writes down — the
+ * shape of `maintenance` waiting on `repack` waiting on `pack-objects`.
+ * `ignoreTerm` makes the helper and its `sleep` deaf to SIGTERM.
+ */
+function hanging(pidFile: string, ignoreTerm = false): string[] {
+  const body = `${ignoreTerm ? "trap '' TERM; " : ""}sleep 30 & echo $! > '${pidFile}'; wait`;
+  return ["-c", `credential.helper=!f() { ${body}; }; f`, "credential", "fill"];
+}
+
+const HANGING_INPUT = {
+  input: "url=https://example.invalid\n\n",
+  env: { GIT_TERMINAL_PROMPT: "0" },
+};
+
+/** Whether a process is still there; signal 0 asks without sending. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The pid the hanging helper wrote, once it has. */
+async function grandchild(pidFile: string): Promise<number> {
+  for (let tries = 0; tries < 500; tries++) {
+    const text = existsSync(pidFile) ? readFileSync(pidFile, "utf8").trim() : "";
+    if (text !== "") return Number(text);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("the helper never started");
+}
+
+async function inScratch(use: (dir: string) => Promise<void>): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), "navbook-stop-"));
+  try {
+    await use(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("stopping a command on request, and everything it started", () => {
+  it("stops a command when its caller aborts, and says it was stopped", async () => {
+    await inScratch(async (dir) => {
+      const pidFile = join(dir, "pid");
+      const args = hanging(pidFile);
+      const stop = new AbortController();
+      const running = gitRunAsync(args, { cwd: dir, ...HANGING_INPUT, signal: stop.signal });
+      const pid = await grandchild(pidFile);
+      const started = Date.now();
+      stop.abort();
+      await assert.rejects(running, (error: unknown) => {
+        assert.ok(error instanceof GitStoppedError);
+        assert.deepEqual(error.args, args);
+        assert.match(error.message, /was stopped before it finished/);
+        return true;
+      });
+      assert.ok(Date.now() - started < 1500, "an abort should not wait for the kill");
+      // Only git was told: without a group, its helper is left to finish.
+      assert.ok(alive(pid), "without a group, what git started is not signalled");
+      process.kill(pid, "SIGKILL");
+    });
+  });
+
+  it("starts nothing when the signal has already aborted", async () => {
+    await inScratch(async (dir) => {
+      const target = join(dir, "repo");
+      await assert.rejects(
+        gitRunAsync(["init", "--quiet", target], { signal: AbortSignal.abort() }),
+        GitStoppedError,
+      );
+      assert.equal(existsSync(target), false);
+    });
+  });
+
+  it("stops what git started too, when it runs in a group of its own", async () => {
+    await inScratch(async (dir) => {
+      const pidFile = join(dir, "pid");
+      const running = gitRunAsync(hanging(pidFile), {
+        cwd: dir,
+        ...HANGING_INPUT,
+        processGroup: true,
+        timeoutMs: 300,
+      });
+      const pid = await grandchild(pidFile);
+      await assert.rejects(running, GitTimeoutError);
+      assert.equal(alive(pid), false, "the group's sleep outlived the stop");
+    });
+  });
+
+  it("kills a group that will not stop when asked, and only then answers", async () => {
+    await inScratch(async (dir) => {
+      const pidFile = join(dir, "pid");
+      const stop = new AbortController();
+      const running = gitRunAsync(hanging(pidFile, true), {
+        cwd: dir,
+        ...HANGING_INPUT,
+        processGroup: true,
+        signal: stop.signal,
+      });
+      const pid = await grandchild(pidFile);
+      const started = Date.now();
+      stop.abort();
+      await assert.rejects(running, GitStoppedError);
+      const elapsed = Date.now() - started;
+      assert.ok(elapsed >= 1900, `answered after ${elapsed} ms, before the kill was due`);
+      assert.ok(elapsed < 5000, `answered after ${elapsed} ms`);
+      assert.equal(alive(pid), false, "a sleep deaf to SIGTERM survived the kill");
+    });
+  });
+
+  it("answers as usual when a grouped command finishes on its own", async () => {
+    await inRepo(async (cwd) => {
+      const stop = new AbortController();
+      const grouped = await gitRunAsync(["rev-parse", "HEAD"], {
+        cwd,
+        processGroup: true,
+        signal: stop.signal,
+      });
+      assert.deepEqual(grouped, gitRun(["rev-parse", "HEAD"], { cwd }));
+      // Aborting once it is over changes nothing, and throws nothing.
+      stop.abort();
     });
   });
 });

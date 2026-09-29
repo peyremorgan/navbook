@@ -104,7 +104,7 @@ column is CLI-only.
 {
   "name": "@navbook/plugin-kb",
   "keywords": ["navbook-plugin"],
-  "peerDependencies": { "@navbook/core": "^0.4.0" },
+  "peerDependencies": { "@navbook/core": "^0.5.0" },
   "engines": { "node": ">=24", "navbook": "^1.0.0" },
   "exports": {
     "./core": "./src/core/index.ts",

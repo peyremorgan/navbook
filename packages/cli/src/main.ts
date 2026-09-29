@@ -7,7 +7,7 @@ import { realpathSync } from "node:fs";
 import type { CoreExtensions } from "@navbook/core";
 import { WorkspaceError } from "@navbook/core";
 import { CommanderError } from "commander";
-import { type Ctx, makeContext } from "./context.ts";
+import { type Ctx, type GetCtx, makeContext } from "./context.ts";
 import { type ExitCode, NavError } from "./errors.ts";
 import { hintUndeclared } from "./plugins/hint.ts";
 import {
@@ -52,7 +52,21 @@ export async function run(opts: RunOptions = {}): Promise<ExitCode> {
   // runs, when and only when the words typed call for it.
   let ctx: Ctx | null = null;
   let ext: CoreExtensions | undefined;
-  const getCtx = (): Ctx => {
+  // A second context, for the commands that work outside a repository (the
+  // plugin store's verbs), which a missing repository must not fail. Kept
+  // apart so a command that does need one still gets the complaint.
+  let looseCtx: Ctx | null = null;
+  const getCtx: GetCtx = (want = {}) => {
+    if (want.requireRepo === false) {
+      looseCtx ??= makeContext({
+        cwd: opts.cwd,
+        env: opts.env,
+        stdout,
+        stderr,
+        requireRepo: false,
+      });
+      return looseCtx;
+    }
     ctx ??= makeContext({ cwd: opts.cwd, env: opts.env, stdout, stderr, ...(ext ? { ext } : {}) });
     return ctx;
   };

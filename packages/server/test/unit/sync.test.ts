@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { GitTimeoutError } from "@navbook/core";
+import { GitStoppedError, GitTimeoutError } from "@navbook/core";
 import { RepoSync, type SyncGit } from "../../src/sync.ts";
 
 const ROOT = "/clone";
@@ -63,7 +63,23 @@ function recorder(script: Scripted = {}): Recorder {
   const git: SyncGit = {
     fetchRemote: async (_cwd, remote, opts) => {
       timeouts.push(opts?.timeoutMs);
-      await script.fetchGate;
+      // As the real one does: an aborted signal stops the fetch where it stands.
+      const signal = opts?.signal;
+      const stopped = (): GitStoppedError => {
+        calls.push(`fetch ${remote} -> stopped`);
+        return new GitStoppedError(["fetch", remote]);
+      };
+      if (signal?.aborted) throw stopped();
+      if (script.fetchGate) {
+        await new Promise<void>((resolve, reject) => {
+          const onAbort = (): void => reject(stopped());
+          signal?.addEventListener("abort", onAbort, { once: true });
+          script.fetchGate?.then(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+          });
+        });
+      }
       calls.push(`fetch ${remote}`);
       if (script.fetchThrows) throw script.fetchThrows;
     },
@@ -110,6 +126,7 @@ function makeSync(
     ttl?: number;
     timeout?: number;
     onWrite?: () => void;
+    afterSync?: () => void;
   } = {},
 ) {
   const rec = recorder(script);
@@ -121,6 +138,7 @@ function makeSync(
     pullIntervalMs: opts.ttl ?? 0,
     ...(opts.timeout === undefined ? {} : { gitTimeoutMs: opts.timeout }),
     ...(opts.onWrite === undefined ? {} : { onWrite: opts.onWrite }),
+    ...(opts.afterSync === undefined ? {} : { afterSync: opts.afterSync }),
     git: rec.git,
     now: () => clock,
     report: (line) => {
@@ -369,23 +387,51 @@ describe("RepoSync background pull", () => {
     assert.deepEqual(calls, ["fetch origin"]);
   });
 
-  it("stops, waiting for a pull in flight and starting no other", async () => {
+  it("stops a fetch in flight rather than waiting for it, quietly, and starts no other", async () => {
+    // A fetch that would never finish on its own: a remote that has stopped answering.
     const fetch = gate();
-    const { sync, calls } = makeSync({ fetchGate: fetch.closed }, { ttl: 5 });
+    const { sync, calls, reported } = makeSync({ fetchGate: fetch.closed }, { ttl: 5 });
     sync.start();
     await settle();
 
-    let stopped = false;
-    const stopping = sync.stop().then(() => {
-      stopped = true;
-    });
+    await sync.stop();
     await settle();
-    assert.equal(stopped, false);
+    assert.deepEqual(calls, ["fetch origin -> stopped"]);
+    // Stopped on request is not a failure, so the log says nothing of it.
+    assert.deepEqual(reported, []);
+  });
 
-    fetch.open();
-    await stopping;
+  it("merges nothing once stopped, even a merge queued behind a write", async () => {
+    // The background fetch lands while a write holds the clone, so its merge
+    // waits for the clone; the stop arrives while it waits.
+    const fetch = gate();
+    const push = gate();
+    const { sync, calls } = makeSync(
+      { fetchGate: fetch.closed, pushGate: push.closed, behind: [true] },
+      { ttl: 5 },
+    );
+    sync.start();
     await settle();
-    assert.deepEqual(calls, ["fetch origin"]);
+    const write = sync.write(
+      () => undefined,
+      () => true,
+    );
+    fetch.open();
+    await settle();
+
+    const stopping = sync.stop();
+    await settle();
+    push.open();
+    await Promise.all([write, stopping]);
+    await settle();
+    // Both fetches, and the write's merge and push: but no merge of the background's.
+    assert.deepEqual(calls, [
+      "fetch origin",
+      "fetch origin",
+      "merge -> staged",
+      "commit-merge",
+      "push origin main -> ok",
+    ]);
   });
 });
 
@@ -661,5 +707,150 @@ describe("RepoSync timeouts", () => {
     await assert.rejects(sync.read(() => undefined));
     // Offline work is unaffected by a remote that stopped answering.
     assert.equal(await sync.locked(() => "still here"), "still here");
+  });
+});
+
+describe("RepoSync after git has written", () => {
+  const stoppedPush = new GitTimeoutError(["push", "--quiet", "origin", "main:main"], 500);
+
+  /** A sync whose `afterSync` counts, and the count. */
+  function counted(script: Scripted = {}, opts: { remote?: string | null } = {}) {
+    const told = { count: 0 };
+    const made = makeSync(script, {
+      ...opts,
+      ttl: 10_000,
+      afterSync: () => {
+        told.count++;
+      },
+    });
+    return { ...made, told };
+  }
+
+  it("says so after a background pull, and not after one whose fetch failed", async () => {
+    const script: Scripted = {};
+    const { sync, told } = counted(script);
+    await sync.refresh();
+    assert.equal(told.count, 1);
+    script.fetchThrows = new Error("remote unreachable");
+    await sync.refresh();
+    assert.equal(told.count, 1);
+  });
+
+  it("says so after a fetch whose merge then conflicted: the objects came all the same", async () => {
+    const { sync, told } = counted({ behind: [true], merges: ["conflict"] });
+    await sync.refresh();
+    assert.equal(told.count, 1);
+  });
+
+  it("says so after a read that pulled for itself, and not after one that did not", async () => {
+    // Before the background pull has succeeded, a read fetches — and with the
+    // background pull off, or failing, that is the only fetch there is.
+    const { sync, told } = counted();
+    await sync.read(() => undefined);
+    assert.equal(told.count, 1);
+    await sync.refresh();
+    assert.equal(told.count, 2);
+    await sync.read(() => undefined);
+    assert.equal(told.count, 2, "a read the background pull kept fresh fetched nothing");
+  });
+
+  it("says so after a write's pull, and again once it committed, pushed or not", async () => {
+    const { sync, told } = counted();
+    await sync.write(
+      () => undefined,
+      () => true,
+    );
+    assert.equal(told.count, 2);
+
+    // The push was stopped, but the commit is in the clone all the same.
+    const stopped = counted({ pushThrows: stoppedPush });
+    await assert.rejects(
+      stopped.sync.write(
+        () => undefined,
+        () => true,
+      ),
+    );
+    assert.equal(stopped.told.count, 2);
+
+    // Nothing to fetch or push without a remote, and still a commit.
+    const offline = counted({}, { remote: null });
+    await offline.sync.write(
+      () => undefined,
+      () => true,
+    );
+    assert.equal(offline.told.count, 1);
+  });
+
+  it("says nothing more for a write that committed nothing, or one that threw", async () => {
+    const { sync, told } = counted();
+    await sync.write(
+      () => undefined,
+      () => false,
+    );
+    assert.equal(told.count, 1, "its pull, and nothing else");
+    await assert.rejects(
+      sync.write(
+        () => {
+          throw new Error("refused");
+        },
+        () => true,
+      ),
+    );
+    assert.equal(told.count, 2, "its pull, and nothing else");
+  });
+});
+
+describe("RepoSync.exclusive", () => {
+  it("waits for a write on the network, and runs before what queued after it", async () => {
+    const push = gate();
+    const { sync } = makeSync({ pushGate: push.closed });
+    const order: string[] = [];
+    const write = sync.write(
+      () => order.push("write"),
+      () => true,
+    );
+    await settle();
+    const alone = sync.exclusive(() => order.push("exclusive"));
+    const read = sync.read(() => order.push("read"));
+    await settle();
+    assert.deepEqual(order, ["write"]);
+    push.open();
+    await Promise.all([write, alone, read]);
+    assert.deepEqual(order, ["write", "exclusive", "read"]);
+  });
+
+  it("waits for a background fetch, which holds only the network", async () => {
+    const script: Scripted = {};
+    const { sync } = makeSync(script, { ttl: 10_000 });
+    const fetch = gate();
+    script.fetchGate = fetch.closed;
+    let ran = false;
+    const refreshed = sync.refresh();
+    await settle();
+    const alone = sync.exclusive(() => {
+      ran = true;
+    });
+    await settle();
+    assert.equal(ran, false, "ran while a fetch was on the network");
+    fetch.open();
+    await Promise.all([refreshed, alone]);
+    assert.equal(ran, true);
+  });
+
+  it("never waits on a write that waits on it", async () => {
+    // The write holds the clone and then wants the network; `exclusive` takes
+    // them in that same order, so whichever comes first finishes first.
+    const inside = gate();
+    const { sync, calls } = makeSync();
+    const alone = sync.exclusive(() => inside.closed);
+    const write = sync.write(
+      () => undefined,
+      () => true,
+    );
+    await settle();
+    assert.deepEqual(calls, []);
+    inside.open();
+    await Promise.all([alone, write]);
+    assert.deepEqual(calls, ["fetch origin", "push origin main -> ok"]);
   });
 });

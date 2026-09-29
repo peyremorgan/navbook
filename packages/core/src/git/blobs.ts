@@ -173,6 +173,12 @@ export function catObjects(
     // path — with one word after it, and no body.
     if (header === `${spec} missing` || header === `${spec} ambiguous`) continue;
 
+    // A path naming a gitlink resolves to the submodule's commit, which this
+    // repository does not hold: `<name> submodule`, no size and no body. It
+    // names something other than a blob, so it is absent like one.
+    const [gitlink, kind, ...more] = header.split(" ");
+    if (kind === "submodule" && more.length === 0 && OBJECT_NAME.test(gitlink ?? "")) continue;
+
     // Otherwise `<name> <type> <size>`, with no spaces in any of them, then
     // that many bytes and a newline. Asked by name, the name must be the one
     // asked for.

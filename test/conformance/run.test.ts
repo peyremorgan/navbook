@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { REPO_ROOT } from "../../packages/cli/test/helpers/temprepo.ts";
-import { discoverCases, readManifest, runCase } from "./harness.ts";
+import { discoverCases, readManifest, runCase, skipsPlugins } from "./harness.ts";
 
 const FIXTURE_ROOT = join(REPO_ROOT, "doc", "spec", "fixtures");
 
@@ -22,8 +22,9 @@ describe("conformance fixtures", () => {
       .slice(FIXTURE_ROOT.length + 1)
       .split(/[\\/]/)
       .join("/");
-    it(name, () => {
-      const manifest = readManifest(caseDir);
+    const manifest = readManifest(caseDir);
+    const skip = skipsPlugins() && (manifest.plugins?.length ?? 0) > 0;
+    it(name, { skip }, () => {
       const result = runCase(caseDir);
       assert.deepEqual(
         result.failures,

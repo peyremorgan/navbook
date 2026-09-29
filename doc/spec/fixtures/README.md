@@ -33,13 +33,12 @@ names the extension in its manifest:
 plugins: ["@navbook/plugin-kb"]
 ```
 
-The harness makes that package available to the command under test, and the
-case's own `navbook.json` declares it as a real repository would. Under
-`$NAV_BIN` — another implementation, validated by this same suite — such a case
-is skipped rather than failed: this suite's plugins are JavaScript, and how
-another implementation provides the same format is its own business. The
-*format* cases still run, which is the point, because a tree with `specs/` in it
-is conforming whoever wrote it.
+The harness puts that package on `NAVBOOK_PLUGIN_PATH`, where `nav` loads it as
+it would an installed plugin. An implementation that cannot load a JavaScript
+plugin sets `NAV_SKIP_PLUGINS=1` when it runs this suite through `$NAV_BIN`, and
+such a case is skipped rather than failed: this suite's plugins are JavaScript,
+and how another implementation provides the same format is its own business.
+The other cases still run, which is the point.
 
 Features are the only such extension today, and their checks are still D13 and
 D14 — grandfathered along with their names, so one suite validates an

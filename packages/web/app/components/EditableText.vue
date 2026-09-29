@@ -34,8 +34,12 @@ const emit = defineEmits<{ save: [string] }>();
 const editing = ref(false);
 const draft = ref(props.value);
 const problem = ref<string | null>(null);
+// What the editor opened on. The draft is unsaved work only if it differs
+// from this, not from `props.value`: a refetch can change the value under an
+// open editor nobody has typed in, and that is not something to ask about.
+const opened = ref(props.value);
 
-useUnsavedWork(() => editing.value && draft.value !== props.value);
+useUnsavedWork(() => editing.value && draft.value !== opened.value);
 
 watch(
   () => props.value,
@@ -45,6 +49,7 @@ watch(
 );
 
 function open(): void {
+  opened.value = props.value;
   draft.value = props.value;
   problem.value = null;
   editing.value = true;

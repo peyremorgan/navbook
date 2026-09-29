@@ -50,6 +50,12 @@ git_config() {
 
 git_config user.name "$NAVBOOK_GIT_NAME"
 git_config user.email "$NAVBOOK_GIT_EMAIL"
+# The server runs git's housekeeping itself, where a shutdown can wait for it
+# (#cvb57nhm), and turns off git's own for everything it starts. This is for
+# the fetch below: git would follow it with a maintenance run in the
+# background, still going when the server starts and clears away the lock
+# files an interrupted run left — its own among them.
+git_config maintenance.auto false
 
 if [ -n "${NAVBOOK_GIT_TOKEN:-}" ]; then
   # The helper names the variables rather than holding their values, so the

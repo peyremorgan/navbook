@@ -7,7 +7,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { type Fixture, makeFixture } from "./helpers.ts";
@@ -179,6 +179,30 @@ describe("the API container's entrypoint", () => {
     assert.equal(result.handover?.gitConfig["core.abbrev"], "12");
     assert.equal(result.handover?.gitConfig["user.email"], "navbook@test.invalid");
     assert.equal(result.handover?.identity.email, "navbook@test.invalid");
+  });
+
+  it("starts no git maintenance of its own before the server takes over", () => {
+    const fx = fixture();
+    const trace = join(fx.dir, "trace.json");
+    const result = fx.run({ GIT_TRACE2_EVENT: trace });
+
+    assert.equal(result.code, 0, result.stderr);
+    // A fetch would otherwise be followed by `maintenance run --auto
+    // --detach`, running on when the server starts and clears the clone of
+    // what an interrupted run left.
+    const started = readFileSync(trace, "utf8")
+      .split("\n")
+      .filter((line) => line.includes('"event":"start"'));
+    assert.ok(
+      started.some((line) => line.includes('"fetch"')),
+      "the seed never fetched, so this proves nothing",
+    );
+    assert.deepEqual(
+      started.filter((line) => line.includes('"maintenance"')),
+      [],
+      "the entrypoint's own git started maintenance",
+    );
+    assert.equal(result.handover?.gitConfig["maintenance.auto"], "false");
   });
 
   for (const missing of ["NAVBOOK_REPO_URL", "NAVBOOK_GIT_NAME", "NAVBOOK_GIT_EMAIL"]) {

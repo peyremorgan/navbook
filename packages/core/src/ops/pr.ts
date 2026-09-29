@@ -390,6 +390,7 @@ export function scanRefsForOpenPrs(ws: WsCtx): FoundPr[] {
   const treeOf = batchResolve(
     cwd,
     refs.map((ref) => `${ref.full}:${dir}`),
+    "tree",
   );
 
   // A pull request's directory is the unit, not the whole `prs/open`: every
@@ -539,6 +540,7 @@ function settledPrIds(ws: WsCtx, refs: readonly string[]): Set<string> {
   const trees = batchResolve(
     cwd,
     refs.flatMap((ref) => PR_SETTLED_DIRS.map((dir) => `${ref}:${ws.navDir}/${dir}`)),
+    "tree",
   );
 
   const ids = new Set<string>();
@@ -580,7 +582,11 @@ export function countOpenPrsOnOtherRefs(ws: WsCtx): number {
 
   // HEAD rather than the branch's name: a detached HEAD has no name, and its
   // tree still holds whatever pull requests it holds.
-  const trees = batchResolve(cwd, [`HEAD:${dir}`, ...refs.map((ref) => `${ref.full}:${dir}`)]);
+  const trees = batchResolve(
+    cwd,
+    [`HEAD:${dir}`, ...refs.map((ref) => `${ref.full}:${dir}`)],
+    "tree",
+  );
   const listed = new Map<string, string[]>();
   const namesOf = (tree: string): string[] => {
     const cached = listed.get(tree);
