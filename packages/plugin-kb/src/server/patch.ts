@@ -106,3 +106,92 @@ function serialize(host: PatchHost, nav: NavbookCore.NavDoc, path: string): stri
     });
   }
 }
+
+/* ------------------------------------------------------------ stale check */
+
+/** How to read one patchable field off a parsed file, for comparison. */
+type Reading = (parsed: NavbookCore.ParsedFile) => unknown;
+
+const titleOf: Reading = (parsed) => parsed.fm.title;
+const bodyOf: Reading = (parsed) => parsed.body.trim();
+
+/**
+ * The fields a document patch would write, and how each reads. A null title
+ * or body is left alone rather than cleared (`applySpecPatch`), so it is not a
+ * field the patch names and must not be one it is refused over.
+ */
+export function specReadings(input: SpecPatch): Record<string, Reading> {
+  return {
+    ...(input.title !== undefined && input.title !== null ? { title: titleOf } : {}),
+    ...(input.body !== undefined && input.body !== null ? { body: bodyOf } : {}),
+  };
+}
+
+/** The same for an identity card, where a null summary does clear it. */
+export function featureReadings(input: FeaturePatch): Record<string, Reading> {
+  return {
+    ...(input.title !== undefined && input.title !== null ? { title: titleOf } : {}),
+    ...(input.summary !== undefined ? { summary: bodyOf } : {}),
+  };
+}
+
+/**
+ * Refuse a patch to a field that has changed since the client read the file.
+ *
+ * The host's `assertFieldsUnmoved` for an entity, applied to this plugin's
+ * files, and for the same reason. The page saves one field at a time with the
+ * hash it rendered, so a whole-file check refuses somebody's second quick edit
+ * as stale against their own first one — the summary refused because the
+ * title they had just saved moved the hash. Compared per field instead, a
+ * patch is refused only over a field it writes that somebody else changed.
+ *
+ * A hash of the file as it is now settles it without git. Otherwise the hash
+ * names the version the client saw, which every write here committed, so the
+ * clone still has it; one it does not have — never fetched, not a hash, or
+ * not a file this plugin can parse — is refused as stale over every field the
+ * patch names, since there is no telling what the client was looking at. As
+ * on the host, the lookup is best-effort: under a clean filter or CRLF
+ * conversion the text's hash is not git's name for it, and a concurrent edit
+ * is refused whole rather than per field.
+ *
+ * Checked before anything is written, so a refusal leaves the tree as it was.
+ */
+export function assertFieldsUnmoved(
+  host: PatchHost,
+  repoRoot: string,
+  describe: string,
+  current: string,
+  baseSha: string,
+  readings: Record<string, Reading>,
+): void {
+  const { core, api } = host;
+  if (core.blobSha(current) === baseSha) return;
+
+  const stale = (message: string, moved: string[]): Error =>
+    api.apiError(message, "STALE_CONTENT", {
+      moved,
+      details: ["reload it and apply your change to what it says now"],
+    });
+  const named = Object.keys(readings);
+  const unknown = (): Error =>
+    stale(`${describe} was read from a version this server does not have`, named);
+
+  const base = core.blobContent(repoRoot, baseSha);
+  if (base === null) throw unknown();
+  let before: NavbookCore.ParsedFile;
+  let after: NavbookCore.ParsedFile;
+  try {
+    before = core.parseFile(base);
+    after = core.parseFile(current);
+  } catch (error) {
+    if (!(error instanceof core.FrontmatterError)) throw error;
+    throw unknown();
+  }
+
+  const moved = named.filter((field) => {
+    const read = readings[field] as Reading;
+    return JSON.stringify(read(before)) !== JSON.stringify(read(after));
+  });
+  if (moved.length === 0) return;
+  throw stale(`${moved.join(", ")} of ${describe} changed since you opened it`, moved);
+}

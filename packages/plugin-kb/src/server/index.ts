@@ -22,6 +22,7 @@ import { readFileSync } from "node:fs";
 import type { EntityRecord } from "@navbook/core";
 import type { GraphQLCtx, ServerPluginHost } from "@navbook/server/plugin";
 import {
+  FEATURE_FILE,
   newFeatureFile,
   newSpecFile,
   readFeatures,
@@ -43,7 +44,14 @@ import {
 } from "../core/ops.ts";
 import type { FeatureRecord, SpecRecord } from "../core/tree.ts";
 import { kbOf } from "../core/tree.ts";
-import { applyFeaturePatch, applySpecPatch, isEmptySpecPatch } from "./patch.ts";
+import {
+  applyFeaturePatch,
+  applySpecPatch,
+  assertFieldsUnmoved,
+  featureReadings,
+  isEmptySpecPatch,
+  specReadings,
+} from "./patch.ts";
 
 /** What a `Spec` resolver is handed: the document and the feature holding it. */
 interface SpecParent {
@@ -235,6 +243,18 @@ export function activate(host: ServerPluginHost): void {
             () => {
               const feature = findFeature(core, ctx.ws, input.slug);
               const before = readFileSync(core.absPath(ctx.ws, feature.filePath), "utf8");
+              // Per field, as the host guards an entity, and after the pull
+              // and before anything is composed or written. The hash as
+              // given, empty included: the schema requires it, and a token
+              // naming no version is stale rather than a pass.
+              assertFieldsUnmoved(
+                host,
+                ctx.ws.repoRoot,
+                `${feature.slug}/${FEATURE_FILE}`,
+                before,
+                input.baseSha,
+                featureReadings(input),
+              );
               const patched = applyFeaturePatch(
                 host,
                 before,
@@ -243,15 +263,11 @@ export function activate(host: ServerPluginHost): void {
               );
               api.checkComposed(patched, validateFeature, "feature");
 
-              // Nothing is written before the operation runs: `editFeature`
-              // takes the finished text, so its guards — the stale check among
-              // them — all run before any file is touched.
-              const edited = editFeature(core, ctx.ws, feature.slug, patched, {
-                commit: true,
-                // As given, empty included: the schema requires it, and a
-                // token naming no version is stale rather than a pass.
-                baseSha: input.baseSha,
-              });
+              // So no whole-file hash for `editFeature`: it would refuse the
+              // very edit the check above let through — somebody's second
+              // quick save, refused over the first one's hash. The write lock
+              // is held from the read above to the write.
+              const edited = editFeature(core, ctx.ws, feature.slug, patched, COMMIT);
               return { run: edited.run, feature: featureAfter(ctx, feature.slug) };
             },
             (edited) => edited.run.committed,
@@ -313,6 +329,15 @@ export function activate(host: ServerPluginHost): void {
               const feature = findFeature(core, ctx.ws, input.feature);
               const spec = resolveSpec(core, feature, input.fileName);
               const before = readFileSync(core.absPath(ctx.ws, spec.path), "utf8");
+              // Per field, as `updateFeature` above.
+              assertFieldsUnmoved(
+                host,
+                ctx.ws.repoRoot,
+                `${feature.slug}/${spec.fileName}`,
+                before,
+                input.baseSha,
+                specReadings(input),
+              );
               const patched = applySpecPatch(
                 host,
                 before,
@@ -320,10 +345,7 @@ export function activate(host: ServerPluginHost): void {
                 core.repoPath(ctx.ws.navDir, spec.path),
               );
               api.checkComposed(patched, validateSpec, "specification document");
-              const edited = editSpec(core, ctx.ws, feature.slug, spec.fileName, patched, {
-                commit: true,
-                baseSha: input.baseSha,
-              });
+              const edited = editSpec(core, ctx.ws, feature.slug, spec.fileName, patched, COMMIT);
               return { run: edited.run, ...specAfter(ctx, feature.slug, spec.fileName) };
             },
             (edited) => edited.run.committed,

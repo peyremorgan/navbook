@@ -115,8 +115,14 @@ describe("a plugin's mutation", () => {
       const result = await harness.gql(
         `mutation { updateFeature(input: { slug: "auth", title: "Renamed", baseSha: "0000000000000000000000000000000000000000" }) { feature { title } } }`,
       );
-      assert.ok(result.errors.length > 0);
-      assert.match(result.errors[0]?.message ?? "", /changed since you opened it/);
+      // A hash this clone has never seen: the host's own words for an entity
+      // read from an unknown version, and every field the patch named.
+      assert.equal(result.errors[0]?.extensions?.code, "STALE_CONTENT");
+      assert.match(
+        result.errors[0]?.message ?? "",
+        /read from a version this server does not have/,
+      );
+      assert.deepEqual(result.errors[0]?.extensions?.moved, ["title"]);
     } finally {
       await harness.stop();
     }
