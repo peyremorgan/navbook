@@ -33,7 +33,7 @@ import {
   storeDir,
   writeIndex,
 } from "../plugins/store.ts";
-import { confirmAndPerform } from "../prompt.ts";
+import { type Action, confirmAndPerform } from "../prompt.ts";
 
 export interface PluginInstallOptions {
   yes?: boolean;
@@ -50,7 +50,9 @@ export interface PluginListOptions {
  * command rather than a summary of it — the `nav install` rule (spec 04 §4.3).
  */
 export function cmdPluginInstall(ctx: Ctx, names: string[], opts: PluginInstallOptions): void {
-  const wanted = names.length > 0 ? names.map((name) => resolveName(ctx, name)) : declared(ctx);
+  const choices =
+    names.length > 0 ? names.map((name) => resolveName(ctx, name)) : declared(ctx).map((n) => [n]);
+  const wanted = choices.flat();
   if (wanted.length === 0) {
     ctx.stdout.write(
       ctx.hasNavbook
@@ -67,15 +69,7 @@ export function cmdPluginInstall(ctx: Ctx, names: string[], opts: PluginInstallO
   const before = storeDependencies(ctx.env);
   const agreed = confirmAndPerform(ctx, {
     title: "nav plugin install will:",
-    actions: [
-      {
-        description: `run ${installCommand(wanted)}`,
-        perform: () => {
-          const result = npmInstall(ctx.env, wanted);
-          if (!result.ok) fail("npm could not install the plugin", result.output.split("\n"));
-        },
-      },
-    ],
+    actions: installActions(ctx, choices),
     assumeYes: opts.yes,
   });
   if (!agreed) return;
@@ -130,6 +124,62 @@ export function cmdPluginInstall(ctx: Ctx, names: string[], opts: PluginInstallO
   if (kept.length === 0) fail("nothing was installed");
 }
 
+/**
+ * The npm runs an install takes: one for every spec that means exactly one
+ * package, and one per short name, which falls back to its second expansion.
+ *
+ * A short name means `@navbook/plugin-<name>` or else `navbook-plugin-<name>`
+ * (spec 04 §4.3), and only the registry knows which exists. Asking it before
+ * the user has agreed would be a network call nobody consented to, so the
+ * fallback happens inside the agreed action — and the confirmation says so,
+ * naming both commands, so what runs is still what was shown.
+ */
+function installActions(ctx: Ctx, choices: readonly string[][]): Action[] {
+  const exact = choices.filter((specs) => specs.length === 1).flat();
+  const actions: Action[] = [];
+  if (exact.length > 0) {
+    actions.push({
+      description: `run ${installCommand(exact)}`,
+      perform: () => {
+        const result = npmInstall(ctx.env, exact);
+        if (!result.ok) fail("npm could not install the plugin", result.output.split("\n"));
+      },
+    });
+  }
+  for (const [first, second] of choices.filter((specs) => specs.length > 1)) {
+    const primary = first as string;
+    const fallback = second as string;
+    actions.push({
+      description: `run ${installCommand([primary])}, or ${installCommand([fallback])} if npm has no ${packageNameOf(primary)}`,
+      perform: () => {
+        const tried = npmInstall(ctx.env, [primary]);
+        if (tried.ok) return;
+        // Only a package that does not exist sends npm to the other name: any
+        // other failure (the network, a broken tarball) would fail the same
+        // way twice, and hiding the first behind the second helps nobody.
+        if (!isNotFound(tried.output, packageNameOf(primary))) {
+          fail("npm could not install the plugin", tried.output.split("\n"));
+        }
+        const result = npmInstall(ctx.env, [fallback]);
+        if (!result.ok) {
+          fail(`npm has neither ${packageNameOf(primary)} nor ${packageNameOf(fallback)}`, [
+            ...result.output.split("\n"),
+          ]);
+        }
+      },
+    });
+  }
+  return actions;
+}
+
+/**
+ * Whether npm failed because the registry has no package by this name — not
+ * because the package exists and one of its own dependencies does not.
+ */
+function isNotFound(output: string, name: string): boolean {
+  return /\bE404\b|\b404 Not Found\b/.test(output) && output.includes(name);
+}
+
 /** Check what npm fetched, and record it in the index. Returns a fault, or null. */
 function record(ctx: Ctx, index: PluginIndex, name: string): string | null {
   const dir = packageDir(ctx.env, name);
@@ -173,13 +223,16 @@ function packageNameOf(spec: string): string {
   return at === -1 ? spec : spec.slice(0, at);
 }
 
-/** Expand a short name to the package it means, refusing one that is not a plugin's. */
-function resolveName(ctx: Ctx, name: string): string {
+/**
+ * Expand what was typed to the specs it may mean, in the order to try them,
+ * refusing a name that is not a plugin's.
+ */
+function resolveName(ctx: Ctx, name: string): string[] {
   // npm runs in the store, so a relative path must be made absolute here or
   // npm would look for it there rather than where the user typed it.
   if (looksLocal(name) && !name.startsWith("git+")) {
     const path = name.startsWith("file:") ? name.slice("file:".length) : name;
-    return resolve(ctx.cwd, path);
+    return [resolve(ctx.cwd, path)];
   }
   const candidates = expandPluginName(name);
   const only = candidates[0] as string;
@@ -189,12 +242,11 @@ function resolveName(ctx: Ctx, name: string): string {
         "a plugin is @navbook/plugin-<name>, navbook-plugin-<name>, or @scope/navbook-plugin-<name>",
       ]);
     }
-    return only;
+    return [only];
   }
-  // A short name: npm decides which of the candidates exists, and the install
-  // reports whichever it could not find. Trying them here would mean a network
-  // call before the user has agreed to anything.
-  return only;
+  // A short name: which of the candidates exists is npm's to find out, inside
+  // the action the user agreed to (see `installActions`).
+  return candidates;
 }
 
 /** True for a specifier npm reads as a path or a URL rather than a package name. */

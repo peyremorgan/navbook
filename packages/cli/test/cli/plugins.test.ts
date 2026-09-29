@@ -715,6 +715,43 @@ describe("nav plugin", () => {
     }
   });
 
+  it("falls back from @navbook/plugin-<name> to navbook-plugin-<name> for a short name", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      npm.publish("1.0.0", "navbook-plugin-probe");
+      // Both candidates are named before anything runs.
+      const asked = repo.nav(["plugin", "install", "probe"], npm.env, "n\n");
+      assert.match(
+        asked.stdout,
+        /npm install .*@navbook\/plugin-probe, or npm install .*navbook-plugin-probe/,
+      );
+      assert.deepEqual(npm.log(), []);
+
+      const result = repo.nav(["plugin", "install", "probe", "-y"], npm.env);
+      assert.equal(result.code, 0, `${result.stdout}${result.stderr}`);
+      assert.match(result.stdout, /Installed navbook-plugin-probe@1\.0\.0/);
+      assert.deepEqual(listed(repo, npm.env), ["navbook-plugin-probe@1.0.0"]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("prefers @navbook/plugin-<name> when the registry has it", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      npm.publish("1.0.0");
+      npm.publish("1.0.0", "navbook-plugin-probe");
+      const result = repo.nav(["plugin", "install", "probe", "-y"], npm.env);
+      assert.equal(result.code, 0, `${result.stdout}${result.stderr}`);
+      assert.deepEqual(listed(repo, npm.env), ["@navbook/plugin-probe@1.0.0"]);
+      assert.equal(npm.log().length, 1);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("prints the npm command it would run, and asks", () => {
     const repo = probeRepo();
     try {
