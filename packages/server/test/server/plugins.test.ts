@@ -14,7 +14,7 @@ import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { startHarness } from "../helpers/harness.ts";
+import { errorCode, startHarness } from "../helpers/harness.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PROBE = join(HERE, "..", "fixtures", "plugin-probe");
@@ -80,6 +80,31 @@ describe("a plugin's schema", () => {
       const result = await harness.gql<{ srvprobe: { tags: string[] } }>("{ srvprobe { tags } }");
       assert.deepEqual(result.errors, [], JSON.stringify(result.errors));
       assert.deepEqual(result.data?.srvprobe.tags, []);
+    } finally {
+      await harness.stop();
+    }
+  });
+});
+
+describe("a plugin's writes", () => {
+  it("go through the host's write target, which refuses a branch it does not serve", async () => {
+    const log = logFile("writes");
+    const harness = await startHarness({ env: probeEnv(log.path), pullIntervalMs: 0 });
+    try {
+      const { peer } = harness.fixture;
+      peer.filePr("Served", "Here.", "pr111111", "served");
+      assert.equal(peer.git(["push", "--quiet", "origin", "served:main"]).code, 0);
+      peer.filePr("Elsewhere", "There.", "pr222222", "elsewhere");
+      assert.equal(peer.git(["push", "--quiet", "origin", "elsewhere:elsewhere"]).code, 0);
+
+      const query = "query T($ref: ID!) { srvprobeWriteTarget(ref: $ref) }";
+      const served = await harness.gql<{ srvprobeWriteTarget: string }>(query, { ref: "pr11" });
+      assert.deepEqual(served.errors, [], JSON.stringify(served.errors));
+      assert.equal(served.data?.srvprobeWriteTarget, "pr111111");
+
+      const elsewhere = await harness.gql(query, { ref: "pr222222" });
+      assert.equal(errorCode(elsewhere), "PRECONDITION");
+      assert.equal(elsewhere.errors[0]?.extensions?.sourceRef, "origin/elsewhere");
     } finally {
       await harness.stop();
     }

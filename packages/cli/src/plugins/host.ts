@@ -95,6 +95,23 @@ export interface CliPluginUi {
   failFormat(message: string, details?: string[]): never;
   /** Ask a yes/no question; anything but yes is a no. */
   askYesNo(question: string): boolean;
+  /**
+   * Ask a question and read one line of answer; null at the end of input.
+   *
+   * The same stdin every built-in question reads, so a plugin's questions can
+   * be answered by a pipe exactly as `nav pr merge`'s can.
+   */
+  ask(question: string): string | null;
+  /** Whether somebody is at a terminal to answer: stdin and stdout both a TTY. */
+  isInteractive(): boolean;
+  /**
+   * Edit text in `$EDITOR` and return what was saved.
+   *
+   * For text that is not yet a file — a note, a paragraph of a record the
+   * plugin is composing. The buffer lives in the git directory and is removed
+   * afterwards; nothing appears in the tree.
+   */
+  editText(bufferName: string, initial: string): string;
   /** Print what will happen, ask once, then do it — the `nav install` shape. */
   confirmAndPerform(opts: {
     title: string;

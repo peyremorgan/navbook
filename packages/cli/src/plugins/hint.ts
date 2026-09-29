@@ -21,12 +21,13 @@ const FORMAT_NAMES = new Set(["issues", "prs", "archive", "sync", "navbook.json"
 /**
  * Namespaces this project knows the plugin for, so the hint can name it.
  *
- * Only the grandfathered pair is listed, and deliberately: a namespace whose
- * plugin nobody here knows about gets the generic line below, which is the
- * honest thing to say about a directory some other project's plugin wrote.
+ * Only this repository's own plugins are listed, and deliberately: a namespace
+ * whose plugin nobody here knows about gets the generic line below, which is
+ * the honest thing to say about a directory some other project's plugin wrote.
  */
 const KNOWN: Record<string, string> = {
   specs: "@navbook/plugin-kb",
+  tests: "@navbook/plugin-tests",
 };
 
 /**

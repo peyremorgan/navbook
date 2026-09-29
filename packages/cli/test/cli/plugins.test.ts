@@ -209,11 +209,28 @@ describe("a plugin's commands", () => {
     }
   });
 
+  it("ask questions that a pipe answers one line each", () => {
+    const repo = probeRepo();
+    try {
+      const both = repo.nav(["probe", "ask"], withProbe(repo), "one\r\ntwo\nthree\n");
+      assert.equal(both.code, 0, both.stderr);
+      assert.match(both.stdout, /^answers: \["one","two"\]$/m);
+      assert.match(both.stdout, /^interactive: false$/m);
+      // The end of input is not an empty answer.
+      const short = repo.nav(["probe", "ask"], withProbe(repo), "\n");
+      assert.match(short.stdout, /^answers: \["",null\]$/m);
+      const unterminated = repo.nav(["probe", "ask"], withProbe(repo), "last");
+      assert.match(unterminated.stdout, /^answers: \["last",null\]$/m);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("subcommands complete from the manifest", () => {
     const repo = probeRepo();
     try {
       const result = repo.nav(["__complete", "probe"], withProbe(repo));
-      assert.deepEqual(result.stdout.split("\n").filter(Boolean).sort(), ["hello", "tags"]);
+      assert.deepEqual(result.stdout.split("\n").filter(Boolean).sort(), ["ask", "hello", "tags"]);
       assert.deepEqual(repo.log(), []);
     } finally {
       repo.cleanup();

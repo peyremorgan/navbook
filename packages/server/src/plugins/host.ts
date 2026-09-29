@@ -15,7 +15,7 @@
  */
 
 import type * as NavbookCore from "@navbook/core";
-import type { EntityRecord, Identity, PluginManifest } from "@navbook/core";
+import type { EntityKind, EntityRecord, Identity, PluginManifest } from "@navbook/core";
 import type { Config } from "../config.ts";
 import type { GraphQLCtx } from "../context.ts";
 import type { AuthorCache } from "../people.ts";
@@ -166,6 +166,15 @@ export interface ServerPluginHost {
       validate: (parsed: import("@navbook/core").ParsedFile) => { message: string }[],
       noun: string,
     ): void;
+    /**
+     * The entity a write is to be made to, in the branch this server serves.
+     *
+     * Refuses a pull request this checkout does not hold with `PRECONDITION`
+     * and the `sourceRef` that carries it, as `addComment` and `updatePr` do:
+     * a pull request's files live on the branch it proposes to merge, so
+     * anything a plugin keeps beside `pr.md` is written there or nowhere.
+     */
+    writeTarget(ctx: GraphQLCtx, kind: EntityKind, ref: string): EntityRecord;
     /** Report a commit to the client, and emit the mutation event. */
     commitInfo(
       ctx: GraphQLCtx,

@@ -177,6 +177,174 @@ describe("tree locations", () => {
   });
 });
 
+/** `rep/` inside a pull request: one entry per `.md` file, beside anything else. */
+interface EntityReportModel {
+  entity: string;
+  reports: string[];
+}
+
+const entityReports = {
+  dir: "rep",
+  kinds: ["pr" as const],
+  reads: (path: string) => path.endsWith(".md"),
+  build(files: NavTree, entity: { id: string; dirPath: string }, paths: readonly string[]) {
+    const reports: string[] = [];
+    const problems: StructuralProblem[] = [];
+    for (const path of paths) {
+      if (!path.endsWith(".md")) continue;
+      if ((files.get(path) ?? "").trim() === "") {
+        problems.push({ path, message: "an empty report" });
+        continue;
+      }
+      reports.push(path.slice(entity.dirPath.length + 1));
+    }
+    return { model: { entity: entity.id, reports } satisfies EntityReportModel, problems };
+  },
+};
+
+const PR = [
+  "---",
+  "title: Auth",
+  "author: alice@example.com",
+  "created: 2026-08-04T16:40:00Z",
+  "target: main",
+  "revisions:",
+  "  - head: 4f2c9d1e8a7b3c5d9e0f1a2b3c4d5e6f7a8b9c0d",
+  "    base: 91d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0",
+  "    date: 2026-08-04T16:40:00Z",
+  "---",
+  "",
+].join("\n");
+
+describe("entity locations", () => {
+  const withEntity = (): CoreExtensions => extensions([{ entityLocations: [entityReports] }]);
+  const prDir = "prs/open/dk3mp2x9-auth";
+
+  it("hands a pull request's own directory to the plugin, and keeps the model on it", () => {
+    const repo = parseTree(
+      tree({
+        ...base,
+        [`${prDir}/pr.md`]: PR,
+        [`${prDir}/rep/a.md`]: "one",
+        [`${prDir}/rep/sub/b.md`]: "two",
+      }),
+      { ext: withEntity() },
+    );
+    const pr = repo.prs[0];
+    assert.deepEqual(pr?.ext.get("rep"), {
+      entity: "dk3mp2x9",
+      reports: ["rep/a.md", "rep/sub/b.md"],
+    });
+    // Routed, so no longer listed as an uninterpreted extra file.
+    assert.deepEqual(pr?.extraFiles, []);
+    assert.deepEqual(repo.problems, []);
+  });
+
+  it("leaves the same name in another kind of entity as an extra file", () => {
+    const repo = parseTree(tree({ ...base, "issues/open/ab12cd34-login/rep/a.md": "one" }), {
+      ext: withEntity(),
+    });
+    const issue = repo.issues[0];
+    assert.equal(issue?.ext.size, 0);
+    assert.deepEqual(issue?.extraFiles, ["issues/open/ab12cd34-login/rep/a.md"]);
+  });
+
+  it("keeps a file merely named like the location as an extra file", () => {
+    const repo = parseTree(
+      tree({ ...base, [`${prDir}/pr.md`]: PR, [`${prDir}/rep`]: "x", [`${prDir}/rep.json`]: "{}" }),
+      {
+        ext: withEntity(),
+      },
+    );
+    assert.deepEqual(repo.prs[0]?.extraFiles, [`${prDir}/rep`, `${prDir}/rep.json`]);
+    assert.deepEqual(repo.prs[0]?.ext.get("rep"), { entity: "dk3mp2x9", reports: [] });
+  });
+
+  it("builds for every entity of its kind, even one with nothing recorded", () => {
+    const repo = parseTree(tree({ ...base, [`${prDir}/pr.md`]: PR }), { ext: withEntity() });
+    assert.deepEqual(repo.prs[0]?.ext.get("rep"), { entity: "dk3mp2x9", reports: [] });
+  });
+
+  it("reads an archived pull request's directory too: it is still that entity's", () => {
+    const archived = "archive/2025/prs/merged/dk3mp2x9-auth";
+    const repo = parseTree(tree({ [`${archived}/pr.md`]: PR, [`${archived}/rep/a.md`]: "one" }), {
+      ext: withEntity(),
+    });
+    assert.deepEqual(repo.prs[0]?.ext.get("rep"), { entity: "dk3mp2x9", reports: ["rep/a.md"] });
+  });
+
+  it("files its faults beside the tree location's of the same name", () => {
+    const repo = parseTree(
+      tree({ ...base, "rep/notes.txt": "hi", [`${prDir}/pr.md`]: PR, [`${prDir}/rep/a.md`]: " " }),
+      { ext: withEntity() },
+    );
+    assert.deepEqual(
+      repo.extProblems.get("rep")?.map((problem) => problem.path),
+      [`${prDir}/rep/a.md`, "rep/notes.txt"],
+    );
+    assert.deepEqual(repo.problems, []);
+  });
+
+  it("is empty and shared when nothing is registered", () => {
+    const repo = parseTree(tree({ ...base, [`${prDir}/pr.md`]: PR, [`${prDir}/rep/a.md`]: "one" }));
+    assert.equal(repo.prs[0]?.ext.size, 0);
+    assert.strictEqual(repo.prs[0]?.ext, repo.issues[0]?.ext);
+    assert.deepEqual(repo.prs[0]?.extraFiles, [`${prDir}/rep/a.md`]);
+  });
+
+  it("refuses two plugins claiming one entity directory", () => {
+    assert.throws(
+      () =>
+        mergeExtensions([
+          { entityLocations: [entityReports] },
+          { entityLocations: [{ ...entityReports }] },
+        ]),
+      /two plugins claim the 'rep\/' entity directory/,
+    );
+  });
+
+  it("refuses a directory the format keeps in an entity, or one that is not a name", () => {
+    for (const dir of ["comments", "pr.md", "../x", "a/b", ".hidden", "", 7]) {
+      assert.throws(
+        () => mergeExtensions([{ entityLocations: [{ ...entityReports, dir } as never] }]),
+        /is not an entity directory a plugin may claim/,
+        String(dir),
+      );
+    }
+    assert.throws(
+      () => mergeExtensions([{ entityLocations: "rep" as never }]),
+      /'entityLocations' was registered as something other than a list/,
+    );
+  });
+});
+
+describe("doctor tools", () => {
+  const seen: unknown[] = [];
+  const ext = mergeExtensions([
+    {
+      doctorChecks: [
+        {
+          id: "X-tools-1",
+          level: "warning",
+          run: (_repo, tools) => {
+            seen.push(tools);
+            return [];
+          },
+        },
+      ],
+    },
+  ]);
+
+  it("hands a check the history it was given, and nothing when there is none", () => {
+    const tools = { readBlob: () => null, commitExists: () => false };
+    seen.length = 0;
+    const repo = parseTree(tree(base), { ext });
+    validateRepo(repo, { ext, tools });
+    validateRepo(repo, { ext });
+    assert.deepEqual(seen, [tools, undefined]);
+  });
+});
+
 describe("frontmatter keys", () => {
   it("coerces a declared key to its shape", () => {
     // YAML reads `4711` as a number; the plugin declared it a string, and a

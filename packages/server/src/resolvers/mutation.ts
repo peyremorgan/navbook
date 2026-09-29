@@ -382,7 +382,7 @@ export const Mutation: MutationResolvers = {
  * see it, so the refusal says where it actually lives instead of repeating that
  * it was not found.
  */
-function writeTarget(ctx: GraphQLCtx, kind: EntityKind, ref: string): EntityRecord {
+export function writeTarget(ctx: GraphQLCtx, kind: EntityKind, ref: string): EntityRecord {
   try {
     return findEntity(ctx.ws, kind, ref);
   } catch (error) {

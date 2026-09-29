@@ -7,7 +7,7 @@
  */
 
 import { parseCommentFileName } from "./comments.ts";
-import { type CoreExtensions, NO_EXTENSIONS } from "./extensions.ts";
+import { type CoreExtensions, type DoctorTools, NO_EXTENSIONS } from "./extensions.ts";
 import {
   type Revision,
   readRevisions,
@@ -128,6 +128,8 @@ export interface ValidateOptions {
   linkRepairs?: LinkRepairOptions;
   /** The registered extensions, whose checks run after this document's. */
   ext?: CoreExtensions;
+  /** The history plugin checks may ask, when there is one ({@link DoctorTools}). */
+  tools?: DoctorTools;
 }
 
 /** Run every tree-decidable check. */
@@ -149,7 +151,7 @@ export function validateRepo(repo: Repo, opts: ValidateOptions = {}): Diagnostic
   out.push(...checkLinks(repo, opts));
   out.push(...checkLinkLoops(repo));
   out.push(...checkMarker(repo));
-  out.push(...checkExtensions(repo, opts.ext));
+  out.push(...checkExtensions(repo, opts.ext, opts.tools));
   return sortDiagnostics(out);
 }
 
@@ -729,12 +731,12 @@ function checkMarker(repo: Repo): Diagnostic[] {
  * the least useful thing it could do. The diagnostic carries the plugin's own
  * check id, which is what names the plugin to whoever has to fix it.
  */
-function checkExtensions(repo: Repo, ext?: CoreExtensions): Diagnostic[] {
+function checkExtensions(repo: Repo, ext?: CoreExtensions, tools?: DoctorTools): Diagnostic[] {
   if (ext === undefined) return [];
   const out: Diagnostic[] = [];
   for (const def of ext.doctorChecks) {
     try {
-      for (const found of def.run(repo)) {
+      for (const found of def.run(repo, tools)) {
         out.push({
           check: found.check as CheckId,
           level: found.level,

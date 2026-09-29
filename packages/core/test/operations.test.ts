@@ -22,7 +22,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { mergeExtensions } from "../src/core/extensions.ts";
 import { newCommentFile, newIssueFile, newPrFile, readRevisions } from "../src/core/files.ts";
+import { blobSha } from "../src/core/hash.ts";
 import type { MergeMethod } from "../src/core/policy.ts";
 import { emptyQuery } from "../src/core/query.ts";
 import type { EntityRecord } from "../src/core/tree.ts";
@@ -51,10 +53,17 @@ import {
   preparePrOpen,
   reopenEntity,
   runDoctor,
+  scanRefsForOpenPrs,
   uncommittedUnder,
   updatePr,
 } from "../src/ops/index.ts";
-import { currentAuthor, makeWsCtx, WorkspaceError, type WsCtx } from "../src/workspace/index.ts";
+import {
+  currentAuthor,
+  makeWsCtx,
+  runPlan,
+  WorkspaceError,
+  type WsCtx,
+} from "../src/workspace/index.ts";
 
 const IDENTITY = { name: "Nav Test", email: "nav@test.invalid" };
 const NOW = "2026-08-04T16:40:00Z";
@@ -363,6 +372,101 @@ describe("ops: doctor and ids", () => {
         () => mintIds(ws, 0),
         (error: unknown) => error instanceof WorkspaceError && error.code === "invalid-input",
       );
+    });
+  });
+});
+
+describe("ops: the seams a plugin writes and reads through", () => {
+  it("writes bytes as they are, and stages them", () => {
+    inWorkspace((ws, dir) => {
+      const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0x0a, 0x0d]);
+      const result = runPlan(
+        ws,
+        {
+          ops: [{ op: "write-bytes", path: "rep/shot.png", bytes }],
+          message: "docs(rep): add shot",
+          trailers: [],
+        },
+        { commit: true },
+      );
+      assert.equal(result.committed, true);
+      assert.deepEqual([...readFileSync(join(dir, ".navbook/rep/shot.png"))], [...bytes]);
+      const committed = execFileSync("git", ["cat-file", "blob", "HEAD:.navbook/rep/shot.png"], {
+        cwd: dir,
+      });
+      assert.deepEqual([...committed], [...bytes]);
+    });
+  });
+
+  it("gives plugin checks the history on a working tree, and none under --staged", () => {
+    inWorkspace((_ws, dir) => {
+      const seen: { readme: string | null; head: boolean }[] = [];
+      const text = "hello\n";
+      writeFileSync(join(dir, "README"), text);
+      git(["add", "README"], { cwd: dir });
+      git(["commit", "-qm", "readme"], { cwd: dir });
+      const head = resolveSha(dir, "HEAD") as string;
+      const ext = mergeExtensions([
+        {
+          doctorChecks: [
+            {
+              id: "X-hist-1",
+              level: "warning",
+              run: (_repo, tools) => {
+                if (tools)
+                  seen.push({
+                    readme: tools.readBlob(blobSha(text)),
+                    head: tools.commitExists(head),
+                  });
+                else seen.push({ readme: null, head: false });
+                return [];
+              },
+            },
+          ],
+        },
+      ]);
+      const withExt = makeWsCtx({ cwd: dir, env: { NAV_NOW: NOW }, ext });
+      runDoctor(withExt);
+      runDoctor(withExt, { staged: true });
+      assert.deepEqual(seen, [
+        { readme: text, head: true },
+        { readme: null, head: false },
+      ]);
+    });
+  });
+
+  it("reads a pull request's entity location off the branch that carries it", () => {
+    const ext = mergeExtensions([
+      {
+        entityLocations: [
+          {
+            dir: "rep",
+            kinds: ["pr"],
+            reads: (path) => path.endsWith(".md"),
+            build: (files, _entity, paths) => ({
+              model: paths.map((path) => [path.split("/").pop(), files.get(path) ?? null]),
+              problems: [],
+            }),
+          },
+        ],
+      },
+    ]);
+    inPrWorkspace((ws, dir) => {
+      const pr = listEntities(ws, "pr", emptyQuery())[0] as EntityRecord;
+      mkdirSync(join(dir, ".navbook", pr.dirPath, "rep"), { recursive: true });
+      writeFileSync(join(dir, ".navbook", pr.dirPath, "rep", "run.md"), "ran\n");
+      writeFileSync(join(dir, ".navbook", pr.dirPath, "rep", "shot.png"), "png");
+      git(["add", "-A"], { cwd: dir });
+      git(["commit", "-qm", "run"], { cwd: dir });
+      git(["checkout", "-q", "main"], { cwd: dir });
+
+      const scanned = scanRefsForOpenPrs(makeWsCtx({ cwd: dir, env: { NAV_NOW: NOW }, ext }));
+      const found = scanned.find((entry) => entry.entity.id === pr.id);
+      // The Markdown is fetched and read; the picture is listed, never fetched.
+      assert.deepEqual(found?.entity.ext.get("rep"), [
+        ["run.md", "ran\n"],
+        ["shot.png", null],
+      ]);
     });
   });
 });

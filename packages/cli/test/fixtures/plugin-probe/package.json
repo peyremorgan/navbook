@@ -9,7 +9,7 @@
   "type": "module",
   "engines": {
     "node": ">=24",
-    "navbook": "^1.0.0"
+    "navbook": "^1.1.0"
   },
   "exports": {
     "./core": "./core.js",
@@ -68,6 +68,11 @@
             {
               "name": "tags",
               "description": "list every probe tag in the tree"
+            },
+            {
+              "name": "ask",
+              "description": "ask two questions and say what was answered",
+              "needsCore": false
             }
           ]
         }

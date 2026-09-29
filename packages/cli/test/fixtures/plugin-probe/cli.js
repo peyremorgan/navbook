@@ -17,6 +17,16 @@ export function activate(host) {
     ctx.stdout.write(`probe says hello to ${who ?? "nobody"}\n`);
   });
 
+  // Two questions in a row, so a pipe answering both proves each question
+  // reads its own line and no more.
+  host.command("probe ask", () => {
+    const { ui } = host;
+    const first = ui.ask("first? ");
+    const second = ui.ask("second? ");
+    ctx.stdout.write(`answers: ${JSON.stringify([first, second])}\n`);
+    ctx.stdout.write(`interactive: ${ui.isInteractive()}\n`);
+  });
+
   // The verb that reads the tree, to prove a plugin gets the same repository
   // the built-in verbs get, with its own directory already parsed.
   host.command("probe tags", () => {

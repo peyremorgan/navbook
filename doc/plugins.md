@@ -198,10 +198,39 @@ export function activate(host: CorePluginHost): void {
 }
 ```
 
+Data that belongs to one issue or pull request — a test run recorded against
+a pull request, say — lives in a `<short>/` directory beside `pr.md`, and an
+**entity location** is how a plugin reads it:
+
+```ts
+host.register({
+  entityLocations: [
+    { dir: "tests", kinds: ["pr"], reads: (path) => path.endsWith(".md"), build: readRuns },
+  ],
+});
+```
+
+`build` is handed every path under that directory and the entity they belong
+to, and what it returns is kept on the entity record, under `entity.ext`. So a
+query term, a `show` section and a listing read out of another branch all hold
+the plugin's reading along with the record — the scan of other branches fetches
+exactly the paths `reads` accepts, and nothing else a plugin keeps there.
+
+A doctor check that needs history — does this blob exist, does that commit —
+is handed `tools` as its second argument when `nav doctor` runs on a working
+tree, and nothing under `--staged` or wherever there is no history to ask, in
+which case it says nothing, as D7, D9 and D10 do.
+
 A mutation returns a `Plan` — the same file-operations-plus-commit-message
 value every built-in verb produces — and hands it to `runPlan`. That is not a
 formality: it is how a plugin's changes get `--commit`, the staged-changes
-guard and the commit message conventions without implementing any of them.
+guard and the commit message conventions without implementing any of them. A
+file the format does not interpret, like a screenshot, is written with a
+`write-bytes` operation.
+
+A command that asks questions — one at a time, as a test run walks through its
+steps — uses `host.ui.ask`, which reads one line from the same stdin every
+built-in question reads, so a pipe answers it the way it answers `nav pr merge`.
 
 On the server, a resolver reads the tree through the request's context rather
 than parsing it itself, so that every field of a request — and every request
@@ -216,6 +245,11 @@ since the tree last changed — shares one parse:
 
 A root field that used `ctx.repo()` alone would answer from whatever the clone
 last fetched, and miss what somebody pushed a moment ago.
+
+A mutation that writes beside a pull request's `pr.md` takes its target from
+`host.api.writeTarget(ctx, "pr", ref)`, which refuses a pull request the served
+checkout does not hold exactly as the built-in writes do: with `PRECONDITION`
+and the branch that carries it.
 
 ### The web half
 

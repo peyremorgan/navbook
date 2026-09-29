@@ -7,10 +7,12 @@
  * checks judge, and applies the repairs they offer.
  */
 
+import type { DoctorTools } from "../core/extensions.ts";
 import type { FileOp } from "../core/ops.ts";
 import { parseTree, type Repo } from "../core/tree.ts";
 import { type Diagnostic, sortDiagnostics, validateRepo } from "../core/validate.ts";
 import { gitMaybe } from "../git/exec.ts";
+import { blobContent, objectExists } from "../git/history.ts";
 import { stagedTree } from "../git/index-ops.ts";
 import {
   applyOps,
@@ -43,6 +45,9 @@ export function runDoctor(ws: WsCtx, opts: DoctorOptions = {}): DoctorReport {
     ...validateRepo(repo, {
       ext: ws.ext,
       commitMessages: recentCommitMessages(ws, opts),
+      // Withheld under --staged for the reason the history checks are skipped:
+      // the commit under test does not exist, so its history is not yet one.
+      ...(opts.staged ? {} : { tools: doctorTools(ws) }),
       // Repairs are planned only for a run that can apply them, and a disputed
       // subtask is settled only where there is history to justify removing
       // somebody's assertion. --staged has neither: the commit under test does
@@ -64,6 +69,14 @@ export function runDoctor(ws: WsCtx, opts: DoctorOptions = {}): DoctorReport {
   };
 }
 
+/** The history a plugin check may ask of this clone (`DoctorTools`). */
+export function doctorTools(ws: WsCtx): DoctorTools {
+  return {
+    readBlob: (sha) => blobContent(ws.repoRoot, sha),
+    commitExists: (sha) => objectExists(ws.repoRoot, sha),
+  };
+}
+
 /**
  * Withdraw a repair that would write file content, as `--staged` requires.
  *
@@ -73,7 +86,8 @@ export function runDoctor(ws: WsCtx, opts: DoctorOptions = {}): DoctorReport {
  * safe, since it carries whatever the working tree holds.
  */
 function withoutRewrites(diagnostic: Diagnostic): Diagnostic {
-  if (!diagnostic.fix?.some((op) => op.op === "write")) return diagnostic;
+  if (!diagnostic.fix?.some((op) => op.op === "write" || op.op === "write-bytes"))
+    return diagnostic;
   const { fix: _withheld, ...rest } = diagnostic;
   return rest;
 }

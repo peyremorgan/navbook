@@ -294,10 +294,11 @@ export interface ApplyResult {
 export function applyOps(ws: WsCtx, ops: readonly FileOp[]): ApplyResult {
   const touched = new Set<string>();
   for (const op of ops) {
-    if (op.op === "write") {
+    if (op.op === "write" || op.op === "write-bytes") {
       const target = absPath(ws, op.path);
       mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, op.content, "utf8");
+      if (op.op === "write") writeFileSync(target, op.content, "utf8");
+      else writeFileSync(target, op.bytes);
       touched.add(repoPath(ws.navDir, op.path));
       continue;
     }

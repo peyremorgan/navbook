@@ -32,8 +32,14 @@ import { dirName as makeDirName, slugify } from "./slug.ts";
 import { type EntityKind, type EntityRecord, NAV_MARKER, type Status, statusDir } from "./tree.ts";
 
 export type FileOp =
-  /** Create or overwrite a file, creating parent directories as needed. */
+  /** Create or overwrite a text file (UTF-8), creating parent directories as needed. */
   | { op: "write"; path: string; content: string }
+  /**
+   * The same for bytes the format never interprets — an attachment a plugin
+   * keeps beside its data (§2.12). A separate operation rather than a wider
+   * `content`, so everything that reads a planned file's text still gets text.
+   */
+  | { op: "write-bytes"; path: string; bytes: Uint8Array }
   /** Rename a file or a whole directory; refuses when the destination exists. */
   | { op: "move"; from: string; to: string }
   /** Delete a file, or a directory and everything under it. */

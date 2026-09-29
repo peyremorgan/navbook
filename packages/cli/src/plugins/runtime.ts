@@ -17,9 +17,9 @@ import type { CoreExtensions, EntityKind, QueryKeySpec } from "@navbook/core";
 import { commitReport } from "@navbook/core";
 import { composeFile } from "../commands/compose.ts";
 import type { Ctx } from "../context.ts";
-import { openInEditor } from "../editor.ts";
+import { editBuffer, openInEditor } from "../editor.ts";
 import { fail, failFormat } from "../errors.ts";
-import { askYesNo, confirmAndPerform } from "../prompt.ts";
+import { askLine, askYesNo, confirmAndPerform, isInteractive } from "../prompt.ts";
 import { pad, renderTable, terminalWidth } from "../render/table.ts";
 import { collectCommands, type PluginCommands } from "./commands.ts";
 import type { CliPluginHost, CliPluginUi, VerbHandlers } from "./host.ts";
@@ -283,6 +283,9 @@ function makeUi(ctx: Ctx): CliPluginUi {
     fail: (message, details) => fail(message, details ?? []),
     failFormat: (message, details) => failFormat(message, details ?? []),
     askYesNo: (question) => askYesNo(ctx, question),
+    ask: (question) => askLine(ctx, question),
+    isInteractive: () => isInteractive(ctx),
+    editText: (bufferName, initial) => editBuffer(ctx, bufferName, initial),
     confirmAndPerform: (opts) => confirmAndPerform(ctx, opts),
     composeFile: (opts) => composeFile(ctx, opts),
     editFile: (path) => openInEditor(ctx, path),

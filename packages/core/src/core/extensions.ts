@@ -45,6 +45,55 @@ export interface TreeLocation {
 }
 
 /**
+ * A directory a plugin owns inside every entity directory of some kinds —
+ * `<short>/` beside `issue.md` or `pr.md`, the second namespace of §2.12.
+ *
+ * The counterpart of {@link TreeLocation} for data that belongs to one entity
+ * and travels with it: moved when the entity is closed or merged, carried by
+ * the branch the entity lives on. `build` is handed every path under
+ * `<entity dir>/<dir>/` and the entity those paths belong to, and its model
+ * lands on the entity record, under `EntityRecord.ext`, so that anything
+ * holding the record — a query term, a `show`, a listing read out of another
+ * branch — holds the plugin's reading of it too.
+ *
+ * `reads` says which of those paths `build` will ask for the content of. A
+ * reader that must fetch in advance, like the scan of other branches, fetches
+ * exactly those; the rest — screenshots beside a test run, say — are listed
+ * and never read. Absent, every path is read.
+ */
+export interface EntityLocation {
+  /** The directory's name inside an entity directory. */
+  dir: string;
+  /** The kinds of entity it may appear in; elsewhere it stays an extra file. */
+  kinds: EntityKind[];
+  reads?(path: string): boolean;
+  build(
+    files: NavTree,
+    entity: Omit<EntityRecord, "ext">,
+    paths: readonly string[],
+  ): { model: unknown; problems: StructuralProblem[] };
+}
+
+/**
+ * What a check may ask of the repository's history, when there is one.
+ *
+ * Handed to plugin checks by `nav doctor` on a working tree, and withheld
+ * where there is no history to ask — under `--staged`, whose commit does not
+ * exist yet, and wherever a tree is validated on its own. A check that needs
+ * it degrades to saying nothing, for the reason D7, D9 and D10 do: an object
+ * this clone does not hold is not evidence of a fault.
+ *
+ * An interface rather than the workspace itself, so the pure layer the checks
+ * run in still knows no git (spec 05 §5.2).
+ */
+export interface DoctorTools {
+  /** The text of a blob by its SHA, or null when this clone does not hold it. */
+  readBlob(sha: string): string | null;
+  /** Whether a commit with this SHA exists in this clone. */
+  commitExists(sha: string): boolean;
+}
+
+/**
  * How a frontmatter key a plugin owns is read and checked.
  *
  * `shape` is what {@link normalizeFrontmatter} needs: the format lets several
@@ -104,13 +153,19 @@ export interface DoctorCheckDef {
    * The return type is deliberately loose about `check`: `Diagnostic` types it
    * as the built-in union plus any `X-` code, and a plugin cannot narrow that
    * to its own id without importing a type it has no use for.
+   *
+   * `tools` is present only where there is history to ask ({@link DoctorTools}).
    */
-  run(repo: Repo): { check: string; level: Level; path: string; message: string }[];
+  run(
+    repo: Repo,
+    tools?: DoctorTools,
+  ): { check: string; level: Level; path: string; message: string }[];
 }
 
 /** Everything the loaded plugins add, merged. */
 export interface CoreExtensions {
   treeLocations: readonly TreeLocation[];
+  entityLocations: readonly EntityLocation[];
   frontmatterKeys: readonly FrontmatterKeyDef[];
   queryKeys: readonly QueryKeyDef[];
   doctorChecks: readonly DoctorCheckDef[];
@@ -127,6 +182,7 @@ export interface CoreExtensions {
  */
 export const NO_EXTENSIONS: CoreExtensions = Object.freeze({
   treeLocations: Object.freeze([]),
+  entityLocations: Object.freeze([]),
   frontmatterKeys: Object.freeze([]),
   queryKeys: Object.freeze([]),
   doctorChecks: Object.freeze([]),
@@ -173,6 +229,8 @@ export class ExtensionConflictError extends Error {
  * pair of §2.12, the knowledge base's to claim. D13 and D14 are its checks.
  */
 const RESERVED_DIRS = new Set(["issues", "prs", "archive", "navbook.json"]);
+/** What the format keeps inside an entity's own directory. */
+const RESERVED_ENTITY_DIRS = new Set(["comments", "issue.md", "pr.md"]);
 const RESERVED_KEYS = new Set([
   "title",
   "author",
@@ -226,6 +284,7 @@ const PLAIN_WORD = /^[a-z][a-z0-9-]*$/;
 
 export function mergeExtensions(parts: readonly ExtensionParts[]): CoreExtensions {
   const treeLocations: TreeLocation[] = [];
+  const entityLocations: EntityLocation[] = [];
   const frontmatterKeys: FrontmatterKeyDef[] = [];
   const queryKeys: QueryKeyDef[] = [];
   const doctorChecks: DoctorCheckDef[] = [];
@@ -234,6 +293,7 @@ export function mergeExtensions(parts: readonly ExtensionParts[]): CoreExtension
 
   const seen = {
     dir: new Set<string>(),
+    entityDir: new Set<string>(),
     key: new Set<string>(),
     query: new Set<string>(),
     check: new Set<string>(),
@@ -261,6 +321,17 @@ export function mergeExtensions(parts: readonly ExtensionParts[]): CoreExtension
       else {
         seen.dir.add(location.dir);
         treeLocations.push(location);
+      }
+    }
+    for (const location of listOf(part.entityLocations, "entityLocations")) {
+      const dir = location?.dir;
+      if (typeof dir !== "string" || !PLAIN_SEGMENT.test(dir) || RESERVED_ENTITY_DIRS.has(dir))
+        conflicts.push(`'${String(dir)}' is not an entity directory a plugin may claim`);
+      else if (seen.entityDir.has(location.dir))
+        conflicts.push(`two plugins claim the '${location.dir}/' entity directory`);
+      else {
+        seen.entityDir.add(location.dir);
+        entityLocations.push(location);
       }
     }
     for (const def of listOf(part.frontmatterKeys, "frontmatterKeys")) {
@@ -301,7 +372,14 @@ export function mergeExtensions(parts: readonly ExtensionParts[]): CoreExtension
   }
 
   if (conflicts.length > 0) throw new ExtensionConflictError(conflicts);
-  return { treeLocations, frontmatterKeys, queryKeys, doctorChecks, commitScopes };
+  return {
+    treeLocations,
+    entityLocations,
+    frontmatterKeys,
+    queryKeys,
+    doctorChecks,
+    commitScopes,
+  };
 }
 
 /**

@@ -44,6 +44,8 @@ export function activate(host) {
   host.resolvers({
     Query: {
       srvprobe: () => ({ note }),
+      srvprobeWriteTarget: (_parent, { ref }, ctx) =>
+        host.api.run(() => ctx.sync.read(() => host.api.writeTarget(ctx, "pr", ref).id)),
     },
     SrvProbe: {
       seen: () => [...seen],

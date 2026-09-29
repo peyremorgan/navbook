@@ -131,7 +131,18 @@ export interface EntityRecord {
   commentsLoaded: boolean;
   /** Extra files inside the entity directory, preserved untouched (§2.1). */
   extraFiles: string[];
+  /**
+   * What each registered entity location built from this entity's directory,
+   * by the location's name (§2.12). Its paths are not in `extraFiles`.
+   *
+   * Opaque here, as `Repo.ext` is: only the plugin that registered the
+   * location knows what is in it. Empty when nothing is registered.
+   */
+  ext: ReadonlyMap<string, unknown>;
 }
+
+/** The `ext` of every entity when no entity location applies: shared, so it costs nothing. */
+const NO_ENTITY_EXT: ReadonlyMap<string, unknown> = new Map();
 
 /** A grammar or layout fault found while walking the tree (check D1). */
 export interface StructuralProblem {
@@ -192,6 +203,8 @@ interface EntityDraft {
   entityFile?: string;
   comments: Map<string, string>;
   extraFiles: string[];
+  /** Paths under a registered entity location, by the location's name. */
+  extPaths: Map<string, string[]>;
 }
 
 /** Build a {@link Repo} from a tree, reading only the files it parses. */
@@ -208,20 +221,20 @@ export function parseTree(
   const byId = new Map<string, EntityRecord>();
 
   const orphans: OrphanDirectory[] = [];
+  const extProblems = new Map<string, StructuralProblem[]>();
   for (const draft of [...drafts.values()].sort((a, b) => (a.dirPath < b.dirPath ? -1 : 1))) {
-    const record = materialize(draft, files, problems, orphans, scope, extensions);
+    const record = materialize(draft, files, problems, orphans, scope, extensions, extProblems);
     if (!record) continue;
     (record.kind === "issue" ? issues : prs).push(record);
     if (!byId.has(record.id)) byId.set(record.id, record);
   }
 
   const ext = new Map<string, unknown>();
-  const extProblems = new Map<string, StructuralProblem[]>();
   for (const location of extensions.treeLocations) {
     const paths = extPaths.get(location.dir) ?? [];
     const built = location.build(files, paths);
     ext.set(location.dir, built.model);
-    if (built.problems.length > 0) extProblems.set(location.dir, built.problems);
+    addProblems(extProblems, location.dir, built.problems);
   }
 
   const markerText = files.get(NAV_MARKER);
@@ -243,22 +256,44 @@ export function parseTree(
 }
 
 /**
+ * Append a location's faults under its name. A plugin may register a tree
+ * location and an entity location of one name, and reports both from one
+ * check, so the two share the key.
+ */
+function addProblems(
+  into: Map<string, StructuralProblem[]>,
+  dir: string,
+  found: readonly StructuralProblem[],
+): void {
+  if (found.length === 0) return;
+  const list = into.get(dir);
+  if (list === undefined) into.set(dir, [...found]);
+  else list.push(...found);
+}
+
+/**
  * The paths whose content {@link parseTree} may ask a tree with these keys for.
  *
  * The marker, each entity's file and comments, and whatever lies under a
- * registered location, whose plugin decides what it opens. Everything else —
- * an entity's extension namespace (§2.12), an unregistered directory — is
- * listed and never read. Worked out by the same classification `parseTree`
+ * registered location, whose plugin decides what it opens — for an entity
+ * location, the paths its `reads` accepts. Everything else — an entity's
+ * extension namespace (§2.12) nobody registered, an unregistered directory —
+ * is listed and never read. Worked out by the same classification `parseTree`
  * runs, so a reader that must fetch in advance, like the scan of other
  * branches, has no second copy of the directory grammar to drift from it.
  */
 export function parsedPaths(keys: Iterable<string>, opts: { ext?: CoreExtensions } = {}): string[] {
   const listed = [...keys];
-  const { drafts, extPaths } = classifyAll(listed, opts.ext ?? NO_EXTENSIONS);
+  const extensions = opts.ext ?? NO_EXTENSIONS;
+  const { drafts, extPaths } = classifyAll(listed, extensions);
   const paths: string[] = [];
   for (const draft of drafts.values()) {
     if (draft.entityFile !== undefined) paths.push(draft.entityFile);
     paths.push(...draft.comments.values());
+    for (const location of extensions.entityLocations) {
+      const bucket = draft.extPaths.get(location.dir) ?? [];
+      paths.push(...(location.reads ? bucket.filter((path) => location.reads?.(path)) : bucket));
+    }
   }
   for (const bucket of extPaths.values()) paths.push(...bucket);
   if (listed.includes(NAV_MARKER)) paths.push(NAV_MARKER);
@@ -283,8 +318,12 @@ function classifyAll(keys: Iterable<string>, extensions: CoreExtensions): Classi
   const extPaths = new Map<string, string[]>(
     extensions.treeLocations.map((location) => [location.dir, []]),
   );
+  const entityDirs: Record<EntityKind, Set<string>> = { issue: new Set(), pr: new Set() };
+  for (const location of extensions.entityLocations) {
+    for (const kind of location.kinds) entityDirs[kind].add(location.dir);
+  }
   for (const path of [...keys].sort()) {
-    classify(path, drafts, problems, reserved, extPaths);
+    classify(path, drafts, problems, reserved, extPaths, entityDirs);
   }
   return { drafts, problems, reserved, extPaths };
 }
@@ -295,6 +334,7 @@ function classify(
   problems: StructuralProblem[],
   reserved: string[],
   extPaths: Map<string, string[]>,
+  entityDirs: Record<EntityKind, ReadonlySet<string>>,
 ): void {
   const segments = path.split("/");
   const base = segments[segments.length - 1] as string;
@@ -374,6 +414,7 @@ function classify(
       dirName,
       comments: new Map(),
       extraFiles: [],
+      extPaths: new Map(),
     };
     drafts.set(key, draft);
   }
@@ -394,6 +435,15 @@ function classify(
       return;
     }
     draft.comments.set(name, path);
+    return;
+  }
+  // A directory a plugin registered for this kind is that plugin's to read
+  // (§2.12); the same name in the other kind is nobody's, and stays extra.
+  const namespace = inner[0] as string;
+  if (inner.length >= 2 && entityDirs[kind].has(namespace)) {
+    const bucket = draft.extPaths.get(namespace);
+    if (bucket === undefined) draft.extPaths.set(namespace, [path]);
+    else bucket.push(path);
     return;
   }
   draft.extraFiles.push(path);
@@ -430,6 +480,7 @@ function materialize(
   orphans: OrphanDirectory[],
   scope: CommentScope,
   ext: CoreExtensions,
+  extProblems: Map<string, StructuralProblem[]>,
 ): EntityRecord | null {
   const parsedName = parseDirName(draft.dirName);
   if (!parsedName) return null;
@@ -457,7 +508,7 @@ function materialize(
 
   const comments = commentRecords(draft.comments, files, problems);
 
-  return {
+  const record: Omit<EntityRecord, "ext"> = {
     kind: draft.kind,
     id: parsedName.id,
     slug: parsedName.slug,
@@ -476,6 +527,31 @@ function materialize(
     commentsLoaded: commentsInScope(scope, draft.dirPath),
     extraFiles: draft.extraFiles.sort(),
   };
+  return { ...record, ext: entityExt(record, draft, files, ext, extProblems) };
+}
+
+/**
+ * What the entity locations registered for this entity's kind built from its
+ * directory. Every applicable location builds, even with no paths, so a plugin
+ * can tell "nothing recorded" from "not asked" (as a tree location can).
+ */
+function entityExt(
+  record: Omit<EntityRecord, "ext">,
+  draft: EntityDraft,
+  files: NavTree,
+  ext: CoreExtensions,
+  extProblems: Map<string, StructuralProblem[]>,
+): ReadonlyMap<string, unknown> {
+  const locations = ext.entityLocations.filter((location) => location.kinds.includes(record.kind));
+  if (locations.length === 0) return NO_ENTITY_EXT;
+  const models = new Map<string, unknown>();
+  for (const location of locations) {
+    const paths = (draft.extPaths.get(location.dir) ?? []).sort();
+    const built = location.build(files, record, paths);
+    models.set(location.dir, built.model);
+    addProblems(extProblems, location.dir, built.problems);
+  }
+  return models;
 }
 
 /**

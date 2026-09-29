@@ -3,6 +3,11 @@ extend type Query {
   What the probe was configured with, and what it has seen.
   """
   srvprobe: SrvProbe!
+  """
+  The id of the pull request a write to `ref` would go to, through the host's
+  own write-target rule.
+  """
+  srvprobeWriteTarget(ref: ID!): String!
 }
 
 type SrvProbe {

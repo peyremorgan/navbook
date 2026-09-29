@@ -413,8 +413,26 @@ describe("parsedPaths", () => {
     return [...seen].sort();
   };
 
+  // An entity location that reads its Markdown and only lists the rest, as a
+  // plugin keeping screenshots beside its records does.
+  const entityExt = mergeExtensions([
+    {
+      entityLocations: [
+        {
+          dir: "reports",
+          kinds: ["pr"],
+          reads: (path) => path.endsWith(".md"),
+          build: (tree, _entity, paths) => {
+            for (const path of paths) if (path.endsWith(".md")) tree.get(path);
+            return { model: paths, problems: [] };
+          },
+        },
+      ],
+    },
+  ]);
+
   it("covers every file parseTree reads, and nothing it lists without reading", () => {
-    for (const opts of [{}, { ext }]) {
+    for (const opts of [{}, { ext }, { ext: entityExt }]) {
       const wanted = parsedPaths(files.keys(), opts);
       const outside = asked(opts).filter((path) => !wanted.includes(path));
       assert.deepEqual(outside, [], "parseTree read a path parsedPaths left out");
@@ -432,6 +450,21 @@ describe("parsedPaths", () => {
       "prs/open/dk3mp2x9-z/comments/2026-08-03T141207Z-t5kr1gq6.md",
       "prs/open/dk3mp2x9-z/pr.md",
     ]);
+  });
+
+  it("fetches what an entity location reads, and only that", () => {
+    const withRun = tree({
+      "prs/open/dk3mp2x9-z/pr.md": pr(),
+      "prs/open/dk3mp2x9-z/reports/run.md": "---\n---\n",
+      "prs/open/dk3mp2x9-z/reports/shot.png": "\u0089PNG",
+      "issues/open/bqlybac0-x/issue.md": issue(),
+      "issues/open/bqlybac0-x/reports/run.md": "x",
+    });
+    const wanted = parsedPaths(withRun.keys(), { ext: entityExt });
+    assert.ok(wanted.includes("prs/open/dk3mp2x9-z/reports/run.md"));
+    assert.ok(!wanted.includes("prs/open/dk3mp2x9-z/reports/shot.png"));
+    // Registered for pull requests only: an issue's copy is nobody's.
+    assert.ok(!wanted.includes("issues/open/bqlybac0-x/reports/run.md"));
   });
 
   it("hands a registered location's files to its plugin, all of them", () => {

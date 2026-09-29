@@ -32,7 +32,7 @@
  * different promises: `@navbook/core` may release for a format change that
  * costs a plugin nothing.
  */
-export const PLUGIN_API_VERSION = "1.0.0";
+export const PLUGIN_API_VERSION = "1.1.0";
 
 /** The keyword a package must carry to be installable as a plugin (spec 04 §4.3). */
 export const PLUGIN_KEYWORD = "navbook-plugin";
