@@ -132,6 +132,26 @@ describe("nav test list and show", () => {
     assert.deepEqual(json.recent, []);
   });
 
+  it("indents every line of a section, not only its first, and a run's actual the same", () => {
+    const body =
+      "### Many lines\n\n#### Actions\n\n```sh\n### not a step\n```\n\n#### Expected\n\nOne.\nTwo.";
+    const opened = repo.nav(["test", "open", "Long", "-m", body]);
+    assert.equal(opened.code, 0, opened.stderr);
+    const shown = repo.nav(["test", "show", "long"]).stdout;
+    assert.match(
+      shown,
+      /^ {5}actions:\n {7}```sh\n {7}### not a step\n {7}```\n {5}expected:\n {7}One\.\n {7}Two\.$/m,
+    );
+    const started = repo.nav(["test", "run", "long", "--version", "1", "--no-interactive"]);
+    const id = /Started run (\w+)/.exec(started.stdout)?.[1] as string;
+    assert.equal(repo.nav(["test", "record", id, "1", "failed", "-m", "Three.\nFour."]).code, 0);
+    const run = repo.nav(["test", "show", id]).stdout;
+    assert.match(
+      run,
+      /^ {5}expected:\n {7}One\.\n {7}Two\.\n {5}actual:\n {7}Three\.\n {7}Four\.$/m,
+    );
+  });
+
   it("refuses what names no plan and no run, and a --runs that is not a count", () => {
     const missing = repo.nav(["test", "show", "logn"]);
     assert.equal(missing.code, 1);

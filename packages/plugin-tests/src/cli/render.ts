@@ -54,15 +54,22 @@ export function personName(person: string): string {
   return match?.[1]?.trim() || person;
 }
 
+/**
+ * A section's text under its label, one line per element: a caller indents
+ * each element, and would otherwise shift only the first line of a paragraph.
+ */
+function block(text: string): string[] {
+  return indent(text, "     ").split("\n");
+}
+
 /** A plan's steps, numbered, with their actions and expected results. */
 export function renderSteps(steps: readonly PlanStep[], c: Paint): string[] {
   const lines: string[] = [];
   for (const step of steps) {
     lines.push(`${c.bold(`${step.number}.`)} ${step.title}`);
-    lines.push(`   ${c.dim("actions:")}`, indent(step.actions || "(none)", "     "));
+    lines.push(`   ${c.dim("actions:")}`, ...block(step.actions || "(none)"));
     if (step.expected === null) lines.push(`   ${c.dim("(a setup step: nothing to check)")}`);
-    else
-      lines.push(`   ${c.dim("expected:")}`, indent(step.expected || "(nothing written)", "     "));
+    else lines.push(`   ${c.dim("expected:")}`, ...block(step.expected || "(nothing written)"));
   }
   return lines;
 }
@@ -94,10 +101,9 @@ export function renderResults(
     );
     if (record === undefined) continue;
     if (record.status !== "passed" && row.expected !== null && row.expected !== "") {
-      lines.push(`   ${c.dim("expected:")}`, indent(row.expected, "     "));
+      lines.push(`   ${c.dim("expected:")}`, ...block(row.expected));
     }
-    if (record.actual !== null)
-      lines.push(`   ${c.dim("actual:")}`, indent(record.actual, "     "));
+    if (record.actual !== null) lines.push(`   ${c.dim("actual:")}`, ...block(record.actual));
   }
   return lines;
 }
