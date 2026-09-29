@@ -180,7 +180,7 @@
                 {
                   "flags": "--commits <n>",
                   "description": "recent commits to list (default 10)",
-                  "parse": "number"
+                  "parse": "int"
                 }
               ]
             },

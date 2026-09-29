@@ -397,11 +397,16 @@ describe("nav feature list and show", () => {
 
   it("refuses a --commits that is not a whole number, rather than showing no history", () => {
     // #kw143sq9: `abc` dropped the section silently, and `2.5` reached git,
-    // which refused it, and was reported as a feature with no commits.
-    for (const value of ["abc", "2.5", "-1", " "]) {
+    // which refused it, and was reported as a feature with no commits. The
+    // rest are what `Number` reads and nobody means by a count: hex, an
+    // exponent, and a value past 2^53 that it would round.
+    for (const value of ["abc", "2.5", "-1", " ", "", "0x10", "1e1", "9007199254740993"]) {
       const shown = repo.nav(["feature", "show", "auth", "--commits", value]);
       assert.equal(shown.code, 1, `--commits '${value}' was accepted`);
-      assert.match(shown.stderr, /--commits takes a whole number of commits/);
+      assert.match(
+        shown.stderr,
+        /'--commits <n>' argument .* is invalid\. Expected a whole number\./,
+      );
       assert.equal(shown.stdout, "", "nothing is printed before the refusal");
     }
     const json = repo.nav(["feature", "show", "auth", "--json", "--commits", "abc"]);

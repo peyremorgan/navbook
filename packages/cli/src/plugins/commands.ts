@@ -14,6 +14,7 @@
 
 import type { ArgumentSpec, CommandSpec, OptionSpec, VerbContribution } from "@navbook/core";
 import { Command, Option } from "commander";
+import { finiteNumber, wholeNumber } from "../args.ts";
 import type { Ctx } from "../context.ts";
 import type { LoadedPlugin } from "./resolve.ts";
 
@@ -145,12 +146,12 @@ export function applyOption(command: Command, spec: OptionSpec): void {
     option.argParser((value: string, previous: string[] = []) => [...previous, value]);
     option.default([]);
   } else if (spec.parse === "int") {
-    option.argParser((value: string) => Number.parseInt(value, 10));
+    // The parsers the built-in options use, so a plugin's count is refused
+    // where the built-in ones are: `parseInt` read `2.5` as 2 and `3abc` as 3,
+    // and `Number` reads `0x10` and `1e1` and rounds past 2^53 (#kw143sq9).
+    option.argParser(wholeNumber(null));
   } else if (spec.parse === "number") {
-    // Blank rather than 0, and Number rather than parseInt, for the reason the
-    // built-in numeric options do it: a value the command must refuse has to
-    // reach it intact rather than arrive silently rounded or defaulted.
-    option.argParser((value: string) => (value.trim() === "" ? Number.NaN : Number(value)));
+    option.argParser(finiteNumber);
   }
   if (spec.default !== undefined) option.default(spec.default);
   command.addOption(option);
