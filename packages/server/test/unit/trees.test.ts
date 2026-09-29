@@ -144,7 +144,11 @@ describe("the TreeCache watchdog", () => {
       },
     });
     cache.start();
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    // Until it has looked twice, rather than for a fixed while: a loaded
+    // machine can let 40 ms go by with a 5 ms timer firing only once.
+    for (let waited = 0; looks < 2 && waited < 2000; waited += 5) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
     await cache.stop();
     const after = looks;
     assert.ok(after >= 2, `looked ${after} times`);

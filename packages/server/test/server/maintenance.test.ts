@@ -233,7 +233,11 @@ describe("the server's own maintenance", () => {
 
   it("is waited for by a stop, when it finishes within the budget", async () => {
     const dir = scratch();
-    const git = standIn(dir, "sleep 1");
+    // Two seconds, well inside the five-second budget: the run starts after
+    // the mutation's first fetch, before its push, so on a loaded machine a
+    // good part of it has gone by the time the response arrives and the stop
+    // is sent, and one second left too little to tell a wait from none.
+    const git = standIn(dir, "sleep 2");
     const h = await startHarness({ pullIntervalMs: 0, env: { PATH: git.path } });
     try {
       ok(await h.gql(OPEN, { input: { title: "Something to pack", body: "x" } }));
