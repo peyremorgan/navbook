@@ -27,6 +27,17 @@ services:
         NAVBOOK_PLUGINS: ${NAVBOOK_PLUGINS:-}
     image: navbook-server:${NAVBOOK_IMAGE_TAG:-local}
     restart: unless-stopped
+    # How long a stop waits before it kills. Docker's default is 10 s, and a
+    # stop is not instant: the server finishes the requests it has accepted,
+    # and a mutation in flight may be on the network, where any one fetch or
+    # push may take as long as NAVBOOK_GIT_TIMEOUT_MS (30 s unless raised).
+    # Cutting it off there can leave a ref lock behind, or a commit whose push
+    # nobody saw end. Maintenance, which runs beside it, is given 5 s and then
+    # stopped; the background pull is stopped at once. So this is one network
+    # call at the default timeout, plus room for the rest: raise it with
+    # NAVBOOK_GIT_TIMEOUT_MS. A server with nothing in flight stops in moments
+    # whatever it says.
+    stop_grace_period: 45s
     volumes:
       # The clone. One server per clone: operations are serialised against a
       # single working tree, so this service does not scale by replica.
