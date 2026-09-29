@@ -34,6 +34,11 @@ export default defineNuxtPlugin((nuxtApp) => {
     if (isNavigationFailure(failure, NavigationFailureType.cancelled)) return;
     work.endNavigation();
   });
+  // A guard that throws — `auth.global` failing to reach the provider — ends
+  // the navigation without `afterEach`, and the page and its drafts stay. Left
+  // standing, the yes would let a reload discard them without the browser
+  // asking.
+  nuxtApp.$router.onError(() => work.endNavigation());
 
   window.addEventListener("beforeunload", (event) => {
     if (work.mayUnload()) return;
