@@ -307,7 +307,50 @@ export function buildProgram(getCtx: () => Ctx, plugins?: PluginRuntime): Comman
       ),
     );
   }
+  warnUnknownContributions(program, getCtx, plugins);
   return program;
+}
+
+/**
+ * Say which contributions name a command that does not exist.
+ *
+ * Checked once the whole tree is built, so every noun — built-in, shared verb
+ * or another plugin's — has had its chance to be the target. A contribution
+ * that matches nothing does nothing, and a plugin author who typed
+ * `issue lsit` deserves to hear that rather than wonder where their option went.
+ */
+function warnUnknownContributions(
+  program: Command,
+  getCtx: () => Ctx,
+  plugins: PluginRuntime | undefined,
+): void {
+  for (const [on, entries] of plugins?.commands.contributions ?? []) {
+    let command: Command | undefined = program;
+    for (const word of on.split(" ").filter(Boolean)) {
+      command = command?.commands.find((candidate) => candidate.name() === word);
+    }
+    if (command !== undefined && command !== program) continue;
+    for (const { plugin } of entries) {
+      stderrOf(getCtx).write(
+        `nav: plugin ${plugin.name} contributes to '${on}', which is not a nav command\n`,
+      );
+    }
+  }
+}
+
+/**
+ * Where to warn while the command tree is being built.
+ *
+ * The context's stream when there is one; the process's otherwise, because
+ * building a context needs a repository and `nav id` outside one must not fail
+ * over a warning about a plugin.
+ */
+function stderrOf(getCtx: () => Ctx): NodeJS.WritableStream {
+  try {
+    return getCtx().stderr;
+  } catch {
+    return process.stderr;
+  }
 }
 
 /** `nav plugin` — the store verbs of spec 04 §4.3. */
@@ -401,7 +444,6 @@ function buildPrCommand(getCtx: () => Ctx, plugins?: PluginRuntime): Command {
     .option("--no-sync-source", "leave the source branch behind instead of fast-forwarding it")
     .action((id: string | undefined, opts) => cmdPrMerge(getCtx(), id, opts));
 
-  applyContributedOptions(pr, "pr", plugins, getCtx);
   addSharedVerbs(pr, "pr", getCtx, {
     ...(plugins ? { plugins, verbPrefix: "pr" } : {}),
     // No extra columns here: `cmdPrList` owns the PR listing's columns, because
@@ -413,6 +455,9 @@ function buildPrCommand(getCtx: () => Ctx, plugins?: PluginRuntime): Command {
     },
     runList: (ctx, terms, options) => cmdPrList(ctx, terms, options),
   });
+  // After the shared verbs, which are as much this noun's commands as `open`:
+  // an option contributed to `pr list` has to find `list` already there.
+  applyContributedOptions(pr, "pr", plugins, getCtx);
   return pr;
 }
 
@@ -454,7 +499,6 @@ function buildIssueCommand(getCtx: () => Ctx, plugins?: PluginRuntime): Command 
     .option("--commit", commitHelp("issue"))
     .action((id: string, opts) => cmdIssueUnlink(getCtx(), id, opts));
 
-  applyContributedOptions(issue, "issue", plugins, getCtx);
   addSharedVerbs(issue, "issue", getCtx, {
     ...(plugins ? { plugins, verbPrefix: "issue" } : {}),
     extraColumns: [],
@@ -473,6 +517,8 @@ function buildIssueCommand(getCtx: () => Ctx, plugins?: PluginRuntime): Command 
     configureDelete: (command) =>
       command.option("-r, --recursive", "delete its subtasks too, to any depth"),
   });
+  // After the shared verbs, for the reason `buildPrCommand` gives.
+  applyContributedOptions(issue, "issue", plugins, getCtx);
   return issue;
 }
 
@@ -640,7 +686,7 @@ function applyContributedOptions(
         if (problem !== null) {
           // Before `.option()`, which throws on a duplicate flag: the plugin
           // loses its option and says so, rather than taking the CLI down.
-          getCtx().stderr.write(
+          stderrOf(getCtx).write(
             `nav: plugin ${plugin.name} option skipped on '${on}': ${problem}\n`,
           );
           continue;

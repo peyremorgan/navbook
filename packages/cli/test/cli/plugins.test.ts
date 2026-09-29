@@ -88,6 +88,30 @@ function listed(repo: TempRepo, env: NodeJS.ProcessEnv): string[] {
     .map((row) => `${row.name}@${row.version}`);
 }
 
+/** The parts of the probe's `package.json` a variant edits. */
+interface ProbePackage {
+  exports: Record<string, string>;
+  navbook: { cli: { contributions: object[] } };
+}
+
+/**
+ * A copy of the probe with its manifest edited, on the plugin path.
+ *
+ * For the cases one fixture cannot cover without changing what every other
+ * test sees: an extra contribution, a broken entry.
+ */
+function variantProbe(
+  repo: TempRepo,
+  edit: (manifest: ProbePackage, dir: string) => void,
+): NodeJS.ProcessEnv {
+  const dir = join(repo.home, "probe-variant");
+  cpSync(PROBE, dir, { recursive: true });
+  const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+  edit(manifest, dir);
+  writeFileSync(join(dir, "package.json"), JSON.stringify(manifest, null, 2));
+  return { NAVBOOK_PLUGIN_PATH: dir, PROBE_LOG: join(repo.home, "probe.log") };
+}
+
 /** Forget what was logged, so one repository can make several assertions. */
 function clearLog(repo: TempRepo): void {
   rmSync(join(repo.home, "probe.log"), { force: true });
@@ -270,6 +294,33 @@ describe("contributions to a built-in verb", () => {
       assert.ok(path);
       const text = readFileSync(join(repo.dir, path, "issue.md"), "utf8");
       assert.match(text, /^probe-tag: \[flaky, slow\]$/m);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("adds a declared option to a shared verb, and names a verb that does not exist", () => {
+    // `list`, `show`, `close` and the rest are added by the shared-verb
+    // builder; a contribution to one of them must find it there.
+    const repo = probeRepo();
+    try {
+      const env = variantProbe(repo, (manifest) => {
+        manifest.navbook.cli.contributions.push(
+          { on: "issue list", options: [{ flags: "--probe-only", description: "probe rows" }] },
+          { on: "pr close", options: [{ flags: "--probe-why <w>", description: "probe why" }] },
+          { on: "issue lsit", options: [{ flags: "--probe-typo", description: "never seen" }] },
+        );
+      });
+      const list = repo.nav(["issue", "list", "--help"], env);
+      assert.equal(list.code, 0, list.stderr);
+      assert.match(list.stdout, /--probe-only\s+probe rows/);
+      const close = repo.nav(["pr", "close", "--help"], env);
+      assert.match(close.stdout, /--probe-why <w>\s+probe why/);
+      assert.match(
+        list.stderr,
+        /plugin @navbook\/plugin-probe contributes to 'issue lsit', which is not a nav command/,
+      );
+      assert.doesNotMatch(list.stderr, /'issue list'|'pr close'/);
     } finally {
       repo.cleanup();
     }
