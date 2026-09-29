@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -138,10 +138,14 @@ describe("the deployment descriptor", () => {
         continue;
       }
       for (const value of ["", "@navbook/plugin-kb other-plugin"]) {
-        const run = spawnSync("sh", ["-c", `${assignment} printenv NAVBOOK_WEB_PLUGINS`], {
-          encoding: "utf8",
-          env: { ...process.env, NAVBOOK_WEB_PLUGINS: value },
-        });
+        const run: SpawnSyncReturns<string> = spawnSync(
+          "sh",
+          ["-c", `${assignment} printenv NAVBOOK_WEB_PLUGINS`],
+          {
+            encoding: "utf8",
+            env: { ...process.env, NAVBOOK_WEB_PLUGINS: value },
+          },
+        );
         assert.equal(
           run.stdout,
           `${value}\n`,
