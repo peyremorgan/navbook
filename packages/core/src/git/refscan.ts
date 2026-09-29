@@ -71,10 +71,17 @@ export function catBlobs(cwd: string, requests: readonly BlobRequest[]): Map<str
  * Only the header line is read, so no content crosses the pipe: this is how a
  * scan asks "which refs even have this directory?" before paying to read it.
  * Specs that name nothing — the normal case, for a branch with no Navbook
- * directory — are simply absent from the result. A batch git could not answer
- * throws, for the reason {@link catBlobs} does.
+ * directory — are simply absent from the result, and so are specs naming an
+ * object of another `type` when one is asked for: a branch where `prs/open` is
+ * a file or a symlink has no directory there, and listing it as a tree would
+ * fail. A batch git could not answer throws, for the reason {@link catBlobs}
+ * does.
  */
-export function batchResolve(cwd: string, specs: readonly string[]): Map<string, string> {
+export function batchResolve(
+  cwd: string,
+  specs: readonly string[],
+  type?: "blob" | "tree",
+): Map<string, string> {
   const out = new Map<string, string>();
   if (specs.length === 0) return out;
 
@@ -91,6 +98,7 @@ export function batchResolve(cwd: string, specs: readonly string[]): Map<string,
     const parts = line.split(" ");
     const sha = parts[0];
     if (parts.length < 3 || !sha || Number.isNaN(Number(parts[2]))) continue;
+    if (type !== undefined && parts[1] !== type) continue;
     out.set(spec, sha);
   }
   return out;

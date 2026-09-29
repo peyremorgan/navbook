@@ -16,6 +16,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,6 +32,7 @@ import {
   applyComment,
   bindReviewRevision,
   closeEntity,
+  countOpenPrsOnOtherRefs,
   executeEntityDelete,
   executePrMerge,
   findEntity,
@@ -829,6 +831,34 @@ describe("ops: updating and merging a pull request", () => {
         });
       }
     });
+  });
+
+  it("passes over a branch whose prs/open is not a directory", () => {
+    // Anyone can push such a branch; it holds no pull request, and must not
+    // stop the listing, the merge's lookup or the hint for everyone else.
+    for (const make of ["file", "symlink"] as const) {
+      inPrWorkspace((ws, dir) => {
+        git(["checkout", "-q", "main"], { cwd: dir });
+        git(["checkout", "-qb", "odd"], { cwd: dir });
+        for (const status of ["open", "merged"]) {
+          const path = join(dir, `.navbook/prs/${status}`);
+          rmSync(path, { recursive: true, force: true });
+          if (make === "file") writeFileSync(path, "not a directory\n");
+          else symlinkSync("../issues/open", path);
+        }
+        git(["add", "-A"], { cwd: dir });
+        git(["commit", "-qm", "odd"], { cwd: dir });
+        git(["checkout", "-q", "main"], { cwd: dir });
+
+        const found = listPrsAcrossRefs(ws, parseListQuery(ws, [], "pr"));
+        assert.deepEqual(
+          found.map((entry) => entry.entity.id),
+          ["ppp11111"],
+          make,
+        );
+        assert.equal(countOpenPrsOnOtherRefs(ws), 1, make);
+      });
+    }
   });
 
   it("finds a pull request across refs, and reports one that is nowhere", () => {
