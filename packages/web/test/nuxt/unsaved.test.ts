@@ -65,6 +65,30 @@ describe("createUnsavedWork", () => {
     expect(work.dirty()).toBe(true);
   });
 
+  it("lets the document go while unsaved only once leaving is agreed", () => {
+    const work = createUnsavedWork();
+    expect(work.mayUnload()).toBe(true);
+    work.hold(() => true);
+    expect(work.mayUnload()).toBe(false);
+    work.agree();
+    expect(work.mayUnload()).toBe(true);
+    expect(work.mayUnload()).toBe(false);
+  });
+
+  it("holds a yes to a navigation until that navigation is over", () => {
+    // The dialog's yes, then `auth.global` redirecting to the provider: the
+    // browser's prompt must not ask the same question again, however many
+    // times it is consulted before the page goes.
+    const work = createUnsavedWork();
+    work.hold(() => true);
+    work.agreeToNavigation();
+    expect(work.mayUnload()).toBe(true);
+    expect(work.mayUnload()).toBe(true);
+    // Landed or failed, it lapses: a later reload is asked about.
+    work.endNavigation();
+    expect(work.mayUnload()).toBe(false);
+  });
+
   it("ignores an answer when nothing is being asked", () => {
     const work = createUnsavedWork();
     expect(() => work.answer(true)).not.toThrow();

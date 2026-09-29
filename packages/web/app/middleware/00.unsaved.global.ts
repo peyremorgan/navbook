@@ -30,4 +30,7 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
   if (useAuth().signingOut()) return;
   if (to.path === from.path || !work.dirty()) return;
   if (!(await work.confirmLeave())) return abortNavigation();
+  // Held until this navigation settles, since `auth.global` may yet turn it
+  // into the redirect to the provider, and the browser would ask again.
+  work.agreeToNavigation();
 });
