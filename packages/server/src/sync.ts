@@ -41,6 +41,7 @@ import {
   currentBranchAsync,
   fastForwardAsync,
   fetchRemoteAsync,
+  GitStoppedError,
   GitTimeoutError,
   isAlreadyMergedAsync,
   type MergeOutcome,
@@ -214,6 +215,8 @@ interface Background {
   timer: NodeJS.Timeout | null;
   inFlight: Promise<void> | null;
   stopped: boolean;
+  /** Aborted by {@link RepoSync.stop}: stops the fetch in flight, and any merge not yet begun. */
+  stopper: AbortController;
 }
 
 export class RepoSync {
@@ -266,16 +269,32 @@ export class RepoSync {
    */
   start(): void {
     if (this.opts.remote === null || this.opts.pullIntervalMs <= 0 || this.background) return;
-    this.background = { timer: null, inFlight: null, stopped: false };
+    this.background = {
+      timer: null,
+      inFlight: null,
+      stopped: false,
+      stopper: new AbortController(),
+    };
     this.schedule(0);
   }
 
-  /** Stop the background pull, waiting for one in flight to finish. */
+  /**
+   * Stop the background pull, stopping its fetch if one is on the network.
+   *
+   * A fetch is not worth waiting for on the way out: nothing reads what it
+   * brings once the server has stopped, and a slow remote could keep it going
+   * past the few seconds a container is given to stop — after which it is
+   * killed outright, with its ref locks still on disk for the next start to
+   * trip over. Told to stop, git removes those itself. A merge already under
+   * way is local and quick, and is waited for, since cutting it in half is the
+   * one thing this module must never do; one not yet begun never begins.
+   */
   async stop(): Promise<void> {
     const background = this.background;
     if (!background) return;
     background.stopped = true;
     if (background.timer) clearTimeout(background.timer);
+    background.stopper.abort();
     await background.inFlight;
     this.background = null;
     this.lastRefresh = null;
@@ -286,7 +305,7 @@ export class RepoSync {
     if (!background || background.stopped) return;
     background.timer = setTimeout(() => {
       background.timer = null;
-      background.inFlight = this.refresh().finally(() => {
+      background.inFlight = this.refresh(background.stopper.signal).finally(() => {
         background.inFlight = null;
         // From the end of one pull to the start of the next, so a fetch
         // slower than the interval never has a second one queued behind it.
@@ -303,17 +322,26 @@ export class RepoSync {
    * Never throws. What went wrong is the operator's to read in the log, once
    * when it starts going wrong and once when it recovers; meanwhile reads pull
    * for themselves and tell their own callers.
+   *
+   * `signal` is how {@link stop} ends it early: the fetch is stopped, and a
+   * merge that has not begun is skipped — including one still queued for the
+   * clone behind a mutation, which may finish long after the stop was asked
+   * for. A pull ended that way says nothing: it failed at nobody's request.
    */
-  async refresh(): Promise<void> {
+  async refresh(signal?: AbortSignal): Promise<void> {
     const remote = this.opts.remote;
     if (remote === null) return;
     // What the clone is then as fresh as: the remote as it stood when asked.
     const asked = this.now();
     try {
-      await this.net.run(() => this.git.fetchRemote(this.opts.repoRoot, remote, this.network()));
+      await this.net.run(() =>
+        this.git.fetchRemote(this.opts.repoRoot, remote, this.network(signal)),
+      );
       this.opts.afterSync?.();
-      await this.lock.run(() => this.merge(remote));
+      await this.lock.run(() => this.merge(remote, signal));
+      if (signal?.aborted) return;
     } catch (error) {
+      if (error instanceof GitStoppedError && signal?.aborted) return;
       if (this.lastRefresh !== "failed") {
         const why =
           error instanceof MergeConflict
@@ -388,8 +416,11 @@ export class RepoSync {
   }
 
   /** What the calls that reach the network are told. */
-  private network(): NetworkOptions {
-    return this.opts.gitTimeoutMs ? { timeoutMs: this.opts.gitTimeoutMs } : {};
+  private network(signal?: AbortSignal): NetworkOptions {
+    return {
+      ...(this.opts.gitTimeoutMs ? { timeoutMs: this.opts.gitTimeoutMs } : {}),
+      ...(signal === undefined ? {} : { signal }),
+    };
   }
 
   /**
@@ -430,9 +461,16 @@ export class RepoSync {
     }
   }
 
-  /** Merge the remote-tracking branch into HEAD. Throws {@link MergeConflict}. */
-  private async merge(remote: string): Promise<void> {
+  /**
+   * Merge the remote-tracking branch into HEAD. Throws {@link MergeConflict}.
+   *
+   * Does nothing once `signal` has aborted, however far it got with looking:
+   * the questions it asks first change nothing, and the last moment to decide
+   * against moving the branch is just before it moves.
+   */
+  private async merge(remote: string, signal?: AbortSignal): Promise<void> {
     const root = this.opts.repoRoot;
+    if (signal?.aborted) return;
     const branch = await this.git.currentBranch(root);
     if (branch === null) return;
     const upstream = `${remote}/${branch}`;
@@ -440,7 +478,9 @@ export class RepoSync {
     if ((await this.git.resolveSha(root, upstream)) === null) return;
     if (await this.git.isAlreadyMerged(root, upstream)) return;
 
-    if (await this.git.canFastForward(root, upstream)) {
+    const fastForward = await this.git.canFastForward(root, upstream);
+    if (signal?.aborted) return;
+    if (fastForward) {
       await this.git.fastForward(root, upstream);
       return;
     }

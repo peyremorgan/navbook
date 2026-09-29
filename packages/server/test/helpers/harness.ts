@@ -46,6 +46,8 @@ export interface Harness {
 export interface HarnessOptions extends FixtureOptions {
   /** How stale a read may be; 0 makes every read fetch, as the sync tests need. */
   pullIntervalMs?: number;
+  /** The port to ask for; by default 0, whatever the system has free. */
+  port?: number;
   /** How long a fetch or push may take before the server stops it. */
   gitTimeoutMs?: number;
   /** Point the server at the discovery document rather than spelling the issuer and its keys out. */
@@ -82,7 +84,7 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<Harness> 
       "--repo",
       fixture.server.dir,
       "--port",
-      "0",
+      String(opts.port ?? 0),
       "--oidc-audience",
       AUDIENCE,
       ...(opts.discover
