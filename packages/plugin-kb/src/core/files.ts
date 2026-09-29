@@ -93,6 +93,17 @@ export function checkFeatureKey(value: unknown): Problem[] {
 }
 
 /**
+ * The slugs a write names, each once, in the order first given.
+ *
+ * `feature` is a set written as a list: `--feature auth --feature auth`, or an
+ * API client that appends without looking, means one feature, and a file that
+ * said `[auth, auth]` would count the entity twice wherever the list is read.
+ */
+export function uniqueSlugs(values: readonly string[]): string[] {
+  return [...new Set(values)];
+}
+
+/**
  * The features an entity claims, keeping only well-formed slugs.
  *
  * Defensive for the reason every reader in this format is: a hand-edited file

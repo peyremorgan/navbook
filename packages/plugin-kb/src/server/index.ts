@@ -22,10 +22,12 @@ import { readFileSync } from "node:fs";
 import type { EntityRecord } from "@navbook/core";
 import type { GraphQLCtx, ServerPluginHost } from "@navbook/server/plugin";
 import {
+  FEATURE_FILE,
   newFeatureFile,
   newSpecFile,
   readFeatures,
   specFileName,
+  uniqueSlugs,
   useCore,
   validateFeature,
   validateSpec,
@@ -43,7 +45,14 @@ import {
 } from "../core/ops.ts";
 import type { FeatureRecord, SpecRecord } from "../core/tree.ts";
 import { kbOf } from "../core/tree.ts";
-import { applyFeaturePatch, applySpecPatch, isEmptySpecPatch } from "./patch.ts";
+import {
+  applyFeaturePatch,
+  applySpecPatch,
+  assertFieldsUnmoved,
+  featureReadings,
+  isEmptySpecPatch,
+  specReadings,
+} from "./patch.ts";
 
 /** What a `Spec` resolver is handed: the document and the feature holding it. */
 interface SpecParent {
@@ -89,13 +98,17 @@ export function activate(host: ServerPluginHost): void {
   host.entityInput({
     openFields: (input): Record<string, string | readonly string[]> => {
       const values = input.features;
-      return Array.isArray(values) && values.length > 0 ? { feature: values as string[] } : {};
+      return Array.isArray(values) && values.length > 0
+        ? { feature: uniqueSlugs(values as string[]) }
+        : {};
     },
     patchFields: (input) => {
       // Present-and-null clears the key, as it does for the format's own
-      // multi-valued fields; absent leaves it alone.
+      // multi-valued fields; absent leaves it alone. A list is written with
+      // each slug once (`uniqueSlugs`).
       const values = input.features;
-      return values === undefined ? {} : { feature: values };
+      if (values === undefined) return {};
+      return { feature: Array.isArray(values) ? uniqueSlugs(values as string[]) : values };
     },
     filterTerms: (filter): Record<string, string[]> => {
       const values = filter.features;
@@ -235,23 +248,31 @@ export function activate(host: ServerPluginHost): void {
             () => {
               const feature = findFeature(core, ctx.ws, input.slug);
               const before = readFileSync(core.absPath(ctx.ws, feature.filePath), "utf8");
+              // Per field, as the host guards an entity, and after the pull
+              // and before anything is composed or written. The hash as
+              // given, empty included: the schema requires it, and a token
+              // naming no version is stale rather than a pass.
+              assertFieldsUnmoved(
+                host,
+                ctx.ws.repoRoot,
+                `${feature.slug}/${FEATURE_FILE}`,
+                before,
+                input.baseSha,
+                featureReadings(input),
+              );
               const patched = applyFeaturePatch(
-                core,
+                host,
                 before,
                 input,
                 core.repoPath(ctx.ws.navDir, feature.filePath),
               );
               api.checkComposed(patched, validateFeature, "feature");
 
-              // Nothing is written before the operation runs: `editFeature`
-              // takes the finished text, so its guards — the stale check among
-              // them — all run before any file is touched.
-              const edited = editFeature(core, ctx.ws, feature.slug, patched, {
-                commit: true,
-                // As given, empty included: the schema requires it, and a
-                // token naming no version is stale rather than a pass.
-                baseSha: input.baseSha,
-              });
+              // So no whole-file hash for `editFeature`: it would refuse the
+              // very edit the check above let through — somebody's second
+              // quick save, refused over the first one's hash. The write lock
+              // is held from the read above to the write.
+              const edited = editFeature(core, ctx.ws, feature.slug, patched, COMMIT);
               return { run: edited.run, feature: featureAfter(ctx, feature.slug) };
             },
             (edited) => edited.run.committed,
@@ -313,17 +334,23 @@ export function activate(host: ServerPluginHost): void {
               const feature = findFeature(core, ctx.ws, input.feature);
               const spec = resolveSpec(core, feature, input.fileName);
               const before = readFileSync(core.absPath(ctx.ws, spec.path), "utf8");
+              // Per field, as `updateFeature` above.
+              assertFieldsUnmoved(
+                host,
+                ctx.ws.repoRoot,
+                `${feature.slug}/${spec.fileName}`,
+                before,
+                input.baseSha,
+                specReadings(input),
+              );
               const patched = applySpecPatch(
-                core,
+                host,
                 before,
                 input,
                 core.repoPath(ctx.ws.navDir, spec.path),
               );
               api.checkComposed(patched, validateSpec, "specification document");
-              const edited = editSpec(core, ctx.ws, feature.slug, spec.fileName, patched, {
-                commit: true,
-                baseSha: input.baseSha,
-              });
+              const edited = editSpec(core, ctx.ws, feature.slug, spec.fileName, patched, COMMIT);
               return { run: edited.run, ...specAfter(ctx, feature.slug, spec.fileName) };
             },
             (edited) => edited.run.committed,

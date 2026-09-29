@@ -18,6 +18,7 @@ import {
   newSpecFile,
   readFeatures,
   specFileName,
+  uniqueSlugs,
   useCore,
   validateFeature,
   validateSpec,
@@ -251,7 +252,7 @@ export function activate(host: CliPluginHost): void {
   // format's own keys, so it lands in the file exactly as a built-in would.
   const openFields = (opts: Record<string, unknown>): Record<string, readonly string[]> => {
     const values = Array.isArray(opts.feature) ? (opts.feature as string[]) : [];
-    return values.length > 0 ? { feature: values } : {};
+    return values.length > 0 ? { feature: uniqueSlugs(values) } : {};
   };
   host.contribute("issue open", { openFields });
   host.contribute("pr open", { openFields });

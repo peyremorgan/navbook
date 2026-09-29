@@ -146,6 +146,14 @@ export interface ServerPluginHost {
     run<T>(operation: () => T | Promise<T>): Promise<T>;
     /** The error a malformed request gets, with its extension code. */
     invalidInput(message: string): Error;
+    /**
+     * Any other refusal, under the extension code given — `apiError` itself.
+     *
+     * Here rather than only re-exported below: a plugin installed from the
+     * store has no copy of this server to import it from, so a value it needs
+     * at runtime has to be handed to it.
+     */
+    apiError(message: string, code: string, extensions?: Record<string, unknown>): Error;
     /** Refuse an empty required string, naming the field. */
     requireText(value: string, field: string): void;
     /** Validate a composed file before it is written, as the built-ins do. */
