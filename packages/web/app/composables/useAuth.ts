@@ -114,6 +114,11 @@ export function useAuth(): Auth {
       // and sends the browser back to `SIGNED_OUT` afterwards.
       state._navSigningOut = true;
       try {
+        // A renewal in flight — this app's, or the library's own timer's — is
+        // let finish first. Its user is the one signing out: the id token the
+        // provider is sent as a hint comes from it, and forgotten before it
+        // lands, it would be stored again afterwards.
+        await manager.renewalsSettled();
         if (await manager.endsSessions()) {
           try {
             // Settles only if the page comes back without having left: Back
@@ -126,6 +131,10 @@ export function useAuth(): Auth {
           }
         }
         await manager.removeUser();
+        // And one that began while the provider was being asked — an
+        // operation wanting a token before this one was forgotten — has just
+        // stored its user again, so that is forgotten too.
+        if (await manager.renewalsSettled()) await manager.removeUser();
         // Somewhere the route guard will not immediately bounce back out of.
         // Every other page needs a token, so navigating to one of those would
         // send the person straight back to the provider.
