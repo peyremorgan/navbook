@@ -86,13 +86,20 @@ export interface NewPlanInput {
   created: string;
   description?: string;
   steps?: readonly { title: string; actions: string; expected?: string | null }[];
+  /** The whole body as somebody wrote it, instead of `description` and `steps`. */
+  body?: string;
 }
 
 /** Render a new `plan.md`. */
 export function newPlanFile(input: NewPlanInput): string {
   const nav = core.emptyDoc();
   core.patchDoc(nav, { title: input.title, author: input.author, created: input.created });
-  nav.body = renderPlanBody(input.description ?? "", input.steps ?? []);
+  if (input.body !== undefined) {
+    const body = core.normalizeBody(input.body);
+    nav.body = body === "" ? "" : `\n${body}`;
+  } else {
+    nav.body = renderPlanBody(input.description ?? "", input.steps ?? []);
+  }
   return core.serializeDoc(nav);
 }
 

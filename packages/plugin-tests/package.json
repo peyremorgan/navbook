@@ -25,6 +25,7 @@
   },
   "exports": {
     "./core": "./src/core/index.ts",
+    "./cli": "./src/cli/index.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -33,6 +34,10 @@
       "./core": {
         "types": "./dist/core/index.d.ts",
         "default": "./dist/core/index.js"
+      },
+      "./cli": {
+        "types": "./dist/cli/index.d.ts",
+        "default": "./dist/cli/index.js"
       },
       "./package.json": "./package.json"
     }
@@ -108,6 +113,263 @@
       ],
       "commitScopes": [
         "tests"
+      ]
+    },
+    "cli": {
+      "commands": [
+        {
+          "name": "test",
+          "description": "work with test plans and their runs",
+          "commands": [
+            {
+              "name": "open",
+              "description": "create a test plan",
+              "arguments": [
+                {
+                  "name": "title",
+                  "description": "one-line name for the plan"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-m, --message <text>",
+                  "description": "the plan's description and steps; without it $EDITOR is opened on a skeleton"
+                },
+                {
+                  "flags": "--slug <slug>",
+                  "description": "directory name to file it under; derived from the title otherwise"
+                },
+                {
+                  "flags": "--commit",
+                  "description": "wrap the change in a 'docs(tests):' commit"
+                }
+              ]
+            },
+            {
+              "name": "list",
+              "description": "list test plans, with their runs' latest outcome",
+              "arguments": [
+                {
+                  "name": "words",
+                  "description": "words the slug or title must contain",
+                  "optional": true,
+                  "variadic": true
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "one JSON object per plan, newline-delimited"
+                }
+              ]
+            },
+            {
+              "name": "show",
+              "description": "render a plan and its recent runs, or one run beside its plan's steps",
+              "arguments": [
+                {
+                  "name": "ref",
+                  "description": "a plan's slug, or a run's ID",
+                  "complete": "plan-or-run"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--runs <n>",
+                  "description": "recent runs to list with a plan (default 5)",
+                  "parse": "number"
+                },
+                {
+                  "flags": "--json",
+                  "description": "emit a single JSON object"
+                }
+              ]
+            },
+            {
+              "name": "edit",
+              "description": "open a plan's plan.md in $EDITOR",
+              "arguments": [
+                {
+                  "name": "slug",
+                  "description": "the plan's directory name",
+                  "complete": "plan"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--commit",
+                  "description": "wrap the change in a 'docs(tests):' commit"
+                }
+              ]
+            },
+            {
+              "name": "run",
+              "description": "start a run of a plan, and walk through its steps",
+              "arguments": [
+                {
+                  "name": "slug",
+                  "description": "the plan to run",
+                  "complete": "plan"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--pr <id>",
+                  "description": "attach the run to a pull request, writing it in its directory"
+                },
+                {
+                  "flags": "--at <rev>",
+                  "description": "the commit tested (default: the pull request's latest revision, else HEAD unless --version is given)"
+                },
+                {
+                  "flags": "--version <name>",
+                  "description": "the version tested, by name: a release, a build"
+                },
+                {
+                  "flags": "--env <text>",
+                  "description": "where it was tested"
+                },
+                {
+                  "flags": "--interactive",
+                  "description": "walk through the steps even without a terminal, reading answers from stdin"
+                },
+                {
+                  "flags": "--no-interactive",
+                  "description": "only start the run; record its steps with 'nav test record'"
+                },
+                {
+                  "flags": "--commit",
+                  "description": "wrap the change in a 'docs(tests):' commit"
+                }
+              ]
+            },
+            {
+              "name": "record",
+              "description": "record one step of a run",
+              "arguments": [
+                {
+                  "name": "run",
+                  "description": "the run's ID, or an unambiguous prefix of it",
+                  "complete": "run"
+                },
+                {
+                  "name": "step",
+                  "description": "the step's number in the plan"
+                },
+                {
+                  "name": "status",
+                  "description": "passed, failed, blocked or skipped",
+                  "complete": "status"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-m, --actual <text>",
+                  "description": "what was observed"
+                },
+                {
+                  "flags": "--commit",
+                  "description": "wrap the change in a 'docs(tests):' commit"
+                }
+              ]
+            },
+            {
+              "name": "resume",
+              "description": "walk through a run's unrecorded steps",
+              "arguments": [
+                {
+                  "name": "run",
+                  "description": "the run's ID, or an unambiguous prefix of it",
+                  "complete": "run"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--commit",
+                  "description": "wrap the change in a 'docs(tests):' commit"
+                }
+              ]
+            },
+            {
+              "name": "finish",
+              "description": "say a run is done; its unrecorded steps stay not run",
+              "arguments": [
+                {
+                  "name": "run",
+                  "description": "the run's ID, or an unambiguous prefix of it",
+                  "complete": "run"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--commit",
+                  "description": "wrap the change in a 'docs(tests):' commit"
+                }
+              ]
+            },
+            {
+              "name": "runs",
+              "description": "list runs, newest first",
+              "arguments": [
+                {
+                  "name": "terms",
+                  "description": "a plan's slug, or plan:SLUG, pr:ID, outcome:STATE",
+                  "optional": true,
+                  "variadic": true,
+                  "complete": "runs-term"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--all-refs",
+                  "description": "include runs in pull requests on other fetched branches"
+                },
+                {
+                  "flags": "--json",
+                  "description": "one JSON object per run, newline-delimited"
+                }
+              ]
+            },
+            {
+              "name": "attach",
+              "description": "attach files to a run, and link them from it",
+              "arguments": [
+                {
+                  "name": "run",
+                  "description": "the run's ID, or an unambiguous prefix of it",
+                  "complete": "run"
+                },
+                {
+                  "name": "files",
+                  "description": "the files to copy beside the run",
+                  "variadic": true
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--step <n>",
+                  "description": "link them under this recorded step's actual result, rather than in the notes",
+                  "parse": "number"
+                },
+                {
+                  "flags": "--commit",
+                  "description": "wrap the change in a 'docs(tests):' commit"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "contributions": [
+        {
+          "on": "pr show",
+          "showSection": true,
+          "jsonExtra": true
+        },
+        {
+          "on": "pr list",
+          "completions": true
+        }
       ]
     }
   },
