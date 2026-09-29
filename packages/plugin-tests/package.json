@@ -27,6 +27,7 @@
     "./core": "./src/core/index.ts",
     "./cli": "./src/cli/index.ts",
     "./server": "./src/server/index.ts",
+    "./web": "./web/nuxt.config.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -44,20 +45,24 @@
         "types": "./dist/server/index.d.ts",
         "default": "./dist/server/index.js"
       },
+      "./web": "./web/nuxt.config.ts",
       "./package.json": "./package.json"
     }
   },
   "files": [
     "dist",
     "doc",
-    "schema.graphql"
+    "schema.graphql",
+    "web"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.tools.json --noEmit",
     "test": "node --test \"test/**/*.test.ts\"",
     "prepack": "node ../../script/require-pnpm.js && pnpm build",
-    "prepublishOnly": "node ../../script/require-pnpm.js"
+    "prepublishOnly": "node ../../script/require-pnpm.js",
+    "codegen": "graphql-codegen --config codegen.ts",
+    "codegen:check": "graphql-codegen --config codegen.ts && git diff --exit-code -- web/src/generated"
   },
   "peerDependencies": {
     "@navbook/core": "^0.4.0",
@@ -380,7 +385,8 @@
     },
     "server": {
       "schema": "schema.graphql"
-    }
+    },
+    "web": true
   },
   "peerDependenciesMeta": {
     "@apollo/client": {

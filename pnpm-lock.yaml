@@ -187,6 +187,9 @@ importers:
       '@navbook/plugin-kb':
         specifier: workspace:*
         version: link:../plugin-kb
+      '@navbook/plugin-tests':
+        specifier: workspace:*
+        version: link:../plugin-tests
       '@playwright/test':
         specifier: ^1.62.1
         version: 1.62.1

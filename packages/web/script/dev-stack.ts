@@ -27,21 +27,23 @@ const PACKAGE_ROOT = join(HERE, "..");
 const SERVER_ENTRY = join(PACKAGE_ROOT, "..", "server", "src", "main.ts");
 
 /**
- * The knowledge base, for the API this stack starts.
+ * This repository's plugins, for the API this stack starts.
  *
- * The fixture repository has features in it, so the server has to have the
- * plugin that defines them — exactly as the deployment it stands in for does,
+ * The fixture repository has features and test plans in it, so the server has
+ * to have the plugins that define them — exactly as the deployment it stands in for does,
  * and as the end-to-end helper does. The client half is `NAVBOOK_WEB_PLUGINS`,
  * which this package's `dev:stack` script sets; a plugin you are writing
  * yourself goes on `NAVBOOK_PLUGIN_PATH` beside this one, since `process.env`
  * is spread whole into both children.
  */
-const KB_PLUGIN = join(PACKAGE_ROOT, "..", "plugin-kb");
+const OWN_PLUGINS = ["plugin-kb", "plugin-tests"]
+  .map((name) => join(PACKAGE_ROOT, "..", name))
+  .join(":");
 
-/** `NAVBOOK_PLUGIN_PATH` with this repository's own plugin on it. */
+/** `NAVBOOK_PLUGIN_PATH` with this repository's own plugins on it. */
 function pluginPath(): string {
   const given = process.env.NAVBOOK_PLUGIN_PATH;
-  return given === undefined || given === "" ? KB_PLUGIN : `${given}:${KB_PLUGIN}`;
+  return given === undefined || given === "" ? OWN_PLUGINS : `${given}:${OWN_PLUGINS}`;
 }
 
 /** Ports `public/config.json` names, so the defaults need no configuration. */

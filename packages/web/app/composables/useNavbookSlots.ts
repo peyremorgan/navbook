@@ -108,8 +108,10 @@ export interface FilterSlot {
  * A badge on a row in a listing, beside the labels.
  *
  * Given the entity the row drew and `where` — a short name for the listing it
- * is in, `issue` or `inbox-row` — because the same badge is placed differently
- * in each and an end-to-end test finds it by a name that says which.
+ * is in, `issue`, `pr` or `inbox-row` — because the same badge is placed
+ * differently in each and an end-to-end test finds it by a name that says
+ * which. A badge that only means something beside one kind draws nothing
+ * elsewhere.
  */
 export interface RowBadgeSlot {
   component: Component;

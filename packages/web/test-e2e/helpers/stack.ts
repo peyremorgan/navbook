@@ -23,8 +23,10 @@ import { fileURLToPath } from "node:url";
 import { type DevIssuer, startDevIssuer } from "../../script/dev-issuer.ts";
 import { createFixtureRepo, type FixtureRepo } from "../../script/fixture-repo.ts";
 
-/** `@navbook/plugin-kb`, which this suite's tree needs to be readable. */
-const KB_PLUGIN = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "plugin-kb");
+/** The plugins this suite's tree needs to be readable: features, and test plans. */
+const PLUGINS = ["plugin-kb", "plugin-tests"]
+  .map((name) => join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", name))
+  .join(":");
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 export const PACKAGE_ROOT = resolve(HERE, "..", "..");
@@ -97,10 +99,10 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       env: {
         ...repo.env,
         PATH: process.env.PATH,
-        // The fixture repository has features in it, so the server this suite
-        // talks to needs the plugin that defines them — exactly as the
-        // deployment it stands in for does.
-        NAVBOOK_PLUGIN_PATH: KB_PLUGIN,
+        // The fixture repository has features and test plans in it, so the
+        // server this suite talks to needs the plugins that define them —
+        // exactly as the deployment it stands in for does.
+        NAVBOOK_PLUGIN_PATH: PLUGINS,
       },
       stdio: ["ignore", "pipe", "pipe"],
     },

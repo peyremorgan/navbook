@@ -56,6 +56,17 @@ import {
   newSpecFile,
   specFileName,
 } from "@navbook/plugin-kb/core";
+import {
+  activate as activateTests,
+  allRuns,
+  createPlan as createPlanOp,
+  loadTree,
+  newPlanFile,
+  resolvePlan,
+  resolveRun,
+  saveRun,
+  startRun,
+} from "@navbook/plugin-tests/core";
 
 /**
  * The knowledge base's format half, activated as a front end would.
@@ -69,6 +80,13 @@ import {
  */
 const KB_EXTENSIONS = ((): CoreExtensions => {
   const parts: ExtensionParts[] = [];
+  // And test plans, which this tree has too, for the same two reasons.
+  activateTests({
+    core,
+    manifest: { short: "tests" } as PluginManifest,
+    settings: {},
+    register: (registered) => void parts.push(registered),
+  });
   activateKb({
     core,
     // A real host reads these out of the package's `navbook` key and out of
@@ -88,6 +106,9 @@ export const COMMITTER = { name: "Navbook Dev Server", email: "dev-server@exampl
 
 /** The branch the seeded pull request lives on, and which the server serves. */
 export const SERVED_BRANCH = "feat/served";
+/** The test plan the fixture seeds, by its slug. */
+export const TEST_PLAN = "slow-sign-in";
+
 /** A pull request on a branch the server does not hold; commenting must refuse. */
 export const UNSERVED_BRANCH = "feat/unserved";
 
@@ -134,6 +155,10 @@ export const IDS = {
   next: "aaaa0009",
   someday: "aaaa0010",
   servedPr: "bbbb0001",
+  /** A finished, passing run of the test plan, on the served pull request. */
+  servedRun: "dddd0001",
+  /** A run of the test plan somebody started and has not finished. */
+  openRun: "dddd0002",
   unservedPr: "bbbb0002",
   declinedPr: "bbbb0003",
 } as const;
@@ -391,6 +416,41 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
       "password behind it changes.",
     ].join("\n"),
   });
+
+  /* ----------------------------------------------------------- test plans */
+
+  // On main before any pull request branches off, so every branch has it.
+  {
+    const context = ws("2026-07-25T09:00:00Z", []);
+    createPlanOp(
+      core,
+      context,
+      {
+        content: newPlanFile({
+          title: "Sign in on a slow connection",
+          author: currentAuthor(context),
+          created: "2026-07-25T09:00:00Z",
+          description: "Throttle the browser to slow 3G before starting.",
+          steps: [
+            {
+              title: "Open the sign-in page",
+              actions: "Browse to `/login`.",
+              expected: "The form shows.",
+            },
+            {
+              title: "Sign in",
+              actions: "Enter a valid address and password, and press **Sign in**.",
+              expected: "The dashboard opens, however long the connection takes.",
+            },
+            { title: "Sign out", actions: "Press **Sign out** in the menu." },
+          ],
+        }),
+        slug: TEST_PLAN,
+        fallbackTitle: "Sign in on a slow connection",
+      },
+      { commit: true },
+    );
+  }
 
   // A feature with nothing written down yet: the empty state has to look like
   // something too.
@@ -711,6 +771,58 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     file: "app/auth/session.ts",
     line: "42-48",
   });
+
+  // A run of the test plan on the served pull request, against the revision it
+  // pinned, every step passed; and one started beside the plan and left open.
+  {
+    const run = (date: string, id: string, pr: string | null): string => {
+      const context = ws(date, [id]);
+      const tree = loadTree(core, context);
+      const started = startRun(
+        core,
+        context,
+        {
+          plan: resolvePlan(core, tree, TEST_PLAN),
+          pr: pr === null ? null : findEntity(context, "pr", pr),
+          commit: pr === null ? null : pinnedRevision(pr),
+          version: pr === null ? "1.4.0" : null,
+        },
+        { commit: true },
+      );
+      return started.id;
+    };
+    const record = (
+      date: string,
+      id: string,
+      results: { number: number; status: "passed" | "failed" }[],
+      finish: boolean,
+    ): void => {
+      const context = ws(date, []);
+      const tree = loadTree(core, context);
+      const found = resolveRun(core, allRuns(tree), id);
+      saveRun(
+        core,
+        context,
+        found,
+        resolvePlan(core, tree, TEST_PLAN).steps,
+        { results, finish },
+        { commit: true },
+      );
+    };
+    run("2026-08-04T13:00:00Z", IDS.servedRun, IDS.servedPr);
+    record(
+      "2026-08-04T13:20:00Z",
+      IDS.servedRun,
+      [
+        { number: 1, status: "passed" },
+        { number: 2, status: "passed" },
+        { number: 3, status: "passed" },
+      ],
+      true,
+    );
+    run("2026-08-04T14:00:00Z", IDS.openRun, null);
+    record("2026-08-04T14:10:00Z", IDS.openRun, [{ number: 1, status: "passed" }], false);
+  }
 
   // A pull request that is over, opened and closed on the branch the server
   // serves so the working tree is where it ends up. The cross-branch scan
