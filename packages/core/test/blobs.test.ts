@@ -54,6 +54,24 @@ describe("catObjects", () => {
   });
 });
 
+describe("catObjects and a submodule", () => {
+  it("leaves out a path naming a gitlink, as it does any other non-blob", () => {
+    const sub = mkdtempSync(join(tmpdir(), "navbook-gitlink-"));
+    try {
+      git(["init", "--quiet", "-b", "main"], { cwd: sub });
+      writeFileSync(join(sub, "f.txt"), "text\n");
+      git(["add", "f.txt"], { cwd: sub });
+      // A gitlink to a commit this repository does not hold, as a submodule is.
+      const commit = "1".repeat(40);
+      git(["update-index", "--add", "--cacheinfo", `160000,${commit},vendor`], { cwd: sub });
+      const staged = catObjects(sub, [":vendor", ":f.txt"], 1 << 20);
+      assert.deepEqual([...staged], [[":f.txt", "text\n"]]);
+    } finally {
+      rmSync(sub, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("catObjects framing", () => {
   it("reads past a missing path whose name looks like a header", () => {
     // Git echoes a missing spec back verbatim: `HEAD:a blob 12 z missing`
