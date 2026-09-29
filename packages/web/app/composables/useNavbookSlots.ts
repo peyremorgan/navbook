@@ -94,6 +94,11 @@ export interface FilterSlot {
   apiField: string;
   label: string;
   icon: string;
+  /**
+   * The listings it belongs to. Only these offer the chip, read the parameter
+   * or send the field, so a field added to one noun's filter alone is never
+   * sent to the other's, which would refuse it.
+   */
   nouns: ("issue" | "pr")[];
   /** The values to offer; called when the menu opens. */
   options: () => string[];
@@ -234,7 +239,7 @@ export function useNavbookSlots() {
         slots.filters.push(filter);
         // The pure filter functions keep their own list, so they stay testable
         // without an app; this is the one place the two are kept in step.
-        registerFilterParam(filter.param, filter.apiField);
+        registerFilterParam(filter.param, filter.apiField, filter.nouns);
       }
       for (const badge of registration.rowBadges ?? []) slots.rowBadges.push(badge);
       for (const group of registration.inboxGroups ?? []) {

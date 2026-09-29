@@ -62,6 +62,9 @@ export interface FilterState {
   ext: Record<string, string[]>;
 }
 
+/** The two listings a filter can be for. */
+export type FilterNoun = "issue" | "pr";
+
 /**
  * Filter parameters plugin layers registered.
  *
@@ -69,14 +72,33 @@ export interface FilterState {
  * because everything in this file is a pure function over a query string and
  * has to stay unit-testable without mounting an app. A layer's Nuxt plugin
  * registers into the slots, and the slots push here.
+ *
+ * `nouns` is which listings the parameter belongs to. A plugin's SDL may add
+ * its field to `IssueFilter` alone, and the API refuses a field its input
+ * does not have rather than matching nothing (spec 04 §4.3) — so a parameter
+ * registered for issues is neither read on the pull request listing nor sent
+ * in its filter.
  */
-export const FILTER_EXTENSIONS: { param: string; apiField: string }[] = [];
+export const FILTER_EXTENSIONS: { param: string; apiField: string; nouns: FilterNoun[] }[] = [];
 
 /** Register a plugin's filter parameter. Called by the slot registry. */
-export function registerFilterParam(param: string, apiField: string): void {
+export function registerFilterParam(
+  param: string,
+  apiField: string,
+  nouns: readonly FilterNoun[] = ["issue", "pr"],
+): void {
   if (!FILTER_EXTENSIONS.some((entry) => entry.param === param)) {
-    FILTER_EXTENSIONS.push({ param, apiField });
+    FILTER_EXTENSIONS.push({ param, apiField, nouns: [...nouns] });
   }
+}
+
+/** The registered parameters that apply to a listing; every one when it is not named. */
+function extensionsFor(
+  noun: FilterNoun | undefined,
+): { param: string; apiField: string; nouns: FilterNoun[] }[] {
+  return noun === undefined
+    ? FILTER_EXTENSIONS
+    : FILTER_EXTENSIONS.filter((entry) => entry.nouns.includes(noun));
 }
 
 /** Forget every registered parameter. For tests. */
@@ -231,6 +253,12 @@ export interface FilterKeys {
   deadlines?: readonly DeadlineState[];
   /** Whether it has reviewers at all: only a pull request does (spec 02 §2.7). */
   reviewers?: boolean;
+  /**
+   * Which listing this is, so a plugin's parameter registered for the other
+   * one is dropped as `reviewer` is on the issue list. Unnamed, every
+   * registered parameter is read.
+   */
+  noun?: FilterNoun;
 }
 
 export function queryToFilter(query: RouteQuery, keys: FilterKeys): FilterState {
@@ -246,9 +274,9 @@ export function queryToFilter(query: RouteQuery, keys: FilterKeys): FilterState 
     deadline: deadlineStates(query.deadline, keys.deadlines ?? []),
     text: joinTerms(queryValues(query.q).flatMap(splitTerms)),
     ext: Object.fromEntries(
-      FILTER_EXTENSIONS.map(({ param }) => [param, queryValues(query[param])]).filter(
-        ([, values]) => (values as string[]).length > 0,
-      ),
+      extensionsFor(keys.noun)
+        .map(({ param }) => [param, queryValues(query[param])])
+        .filter(([, values]) => (values as string[]).length > 0),
     ),
   };
 }
@@ -292,7 +320,7 @@ export function filterToQuery(filter: FilterState): Record<string, string[]> {
  * API refuses the other noun's rather than matching nothing (spec 04 §4.3).
  */
 export function toIssueFilter(filter: FilterState): IssueFilter {
-  const issueFilter: IssueFilter = sharedFilter(filter);
+  const issueFilter: IssueFilter = sharedFilter(filter, "issue");
   // `queryToFilter` already keeps only the listing's statuses; this narrows
   // the type, and drops a `MERGED` the API would refuse on an issue.
   const status = filter.status.filter((value): value is IssueStatus => value !== "MERGED");
@@ -303,20 +331,26 @@ export function toIssueFilter(filter: FilterState): IssueFilter {
 
 /** The pull request half of `toIssueFilter`. */
 export function toPrFilter(filter: FilterState): PrFilter {
-  const prFilter: PrFilter = sharedFilter(filter);
+  const prFilter: PrFilter = sharedFilter(filter, "pr");
   if (filter.status.length > 0) prFilter.status = [...filter.status];
   if (filter.reviewers.length > 0) prFilter.reviewers = [...filter.reviewers];
   return prFilter;
 }
 
-/** The keys both nouns have, which is most of them; `status` differs in type. */
-function sharedFilter(filter: FilterState): Omit<IssueFilter & PrFilter, "status"> {
+/**
+ * The keys both nouns have, which is most of them; `status` differs in type.
+ * A plugin's parameter goes in only for the nouns it was registered for.
+ */
+function sharedFilter(
+  filter: FilterState,
+  noun: FilterNoun,
+): Omit<IssueFilter & PrFilter, "status"> {
   const shared: Omit<IssueFilter & PrFilter, "status"> = {};
   if (filter.labels.length > 0) shared.labels = [...filter.labels];
   if (filter.assignees.length > 0) shared.assignees = [...filter.assignees];
   if (filter.authors.length > 0) shared.authors = [...filter.authors];
   if (filter.milestones.length > 0) shared.milestones = [...filter.milestones];
-  for (const { param, apiField } of FILTER_EXTENSIONS) {
+  for (const { param, apiField } of extensionsFor(noun)) {
     const values = filter.ext[param] ?? [];
     // Cast because the field is one a plugin's SDL added: the generated type
     // describes the core schema, and cannot know about it.
