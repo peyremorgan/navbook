@@ -111,13 +111,14 @@ defineExpose({ clear: () => (body.value = "") });
       color="warning"
       variant="subtle"
       icon="i-lucide-git-branch"
-      title="This pull request cannot be commented on from here"
+      title="This pull request cannot be written to right now"
       data-testid="unserved-branch"
     >
       <template #description>
         Its files live on <code>{{ props.unservedBranch }}</code
-        >, which this server does not have checked out. A comment must be written beside the pull
-        request it belongs to, so serve a checkout of that branch to review it.
+        >, and the server could not write there. A comment is written beside the pull request it
+        belongs to, so that branch has to be on the remote, and not checked out by anybody else on
+        the server's machine.
       </template>
     </UAlert>
 

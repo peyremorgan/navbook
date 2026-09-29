@@ -13,13 +13,37 @@
  * ephemeral, so a stored session names a provider that is no longer there.
  */
 
-import { test as base, type Page } from "@playwright/test";
+import { test as base, type Page, type Route } from "@playwright/test";
 import { type Stack, type StackOptions, startStack } from "./stack.ts";
 
 export interface Fixtures {
   stack: Stack;
   /** A page that has already been through the provider. */
   signedIn: Page;
+}
+
+/**
+ * Answer one named operation, and let every other one through.
+ *
+ * For `page.route` on the GraphQL endpoint: what is proved is the client's
+ * behaviour over a slow or refusing backend, with every other request still
+ * answered by the real server.
+ */
+export function only(operation: string, handle: (route: Route) => Promise<void>) {
+  return async (route: Route): Promise<void> => {
+    const body = route.request().postData() ?? "";
+    if (!body.includes(`${operation}(`)) return route.continue();
+    await handle(route);
+  };
+}
+
+/** The body the server sends when it refuses `operation`, for `route.fulfill`. */
+export function refusal(
+  operation: string,
+  message: string,
+  extensions: Record<string, unknown>,
+): string {
+  return JSON.stringify({ data: null, errors: [{ message, path: [operation], extensions }] });
 }
 
 /**

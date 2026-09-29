@@ -11,7 +11,7 @@
  */
 
 import { expect, type Page } from "@playwright/test";
-import { chooseOrCreate, test, toasts } from "./helpers/fixtures.ts";
+import { chooseOrCreate, only, refusal, test, toasts } from "./helpers/fixtures.ts";
 
 /** File an issue through the form, and return the id the server minted. */
 async function fileIssue(page: Page, appUrl: string, title: string, body: string): Promise<string> {
@@ -104,14 +104,25 @@ test("refuses to empty a title, and keeps the editor open to say so", async ({
 });
 
 test("keeps a comment that could not be written", async ({ signedIn, stack }) => {
-  // A pull request on a branch this server does not serve refuses the comment,
-  // and what was typed is what a person wrote: it must survive the refusal.
+  // What was typed is what a person wrote: it must survive a refusal.
+  const refuse = only("addComment", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: refusal("addComment", "'feat/unserved' is not a branch on 'origin'", {
+        code: "PRECONDITION",
+        branch: "feat/unserved",
+      }),
+    }),
+  );
+  await signedIn.route(stack.apiUrl, refuse);
   await signedIn.goto(`${stack.appUrl}/prs/bbbb0002`);
   await signedIn.getByTestId("review-body").fill("Words worth keeping.");
   await signedIn.getByTestId("review-submit").click();
 
   await expect(signedIn.getByTestId("unserved-branch")).toBeVisible();
   await expect(signedIn.getByTestId("review-body")).toHaveValue("Words worth keeping.");
+  await signedIn.unroute(stack.apiUrl, refuse);
 });
 
 test("empties the box once a comment has landed", async ({ signedIn, stack }) => {

@@ -149,13 +149,19 @@ export function reparentConflict(
 }
 
 /**
- * The branch a pull request lives on, when commenting was refused because this
- * server does not have it checked out.
+ * The branch a pull request lives on, when a write to it was refused because
+ * the server could not write on that branch.
+ *
+ * The server writes a pull request on its own branch, in a worktree it makes
+ * for the purpose (spec 06 §6.3), so this is the exception: a branch that is
+ * not on the remote, or that somebody else's worktree holds. Every such refusal
+ * names the branch, which is what tells it from a precondition about anything
+ * else.
  */
 export function unservedBranch(failure: ApiFailure): string | null {
   if (failure.code !== "PRECONDITION") return null;
-  const ref = failure.extensions.sourceRef;
-  return typeof ref === "string" ? ref : null;
+  const branch = failure.extensions.branch;
+  return typeof branch === "string" ? branch : null;
 }
 
 /**

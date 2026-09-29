@@ -27,7 +27,7 @@ function submit(): void {
  * Emptied by whoever owns the mutation, once it has actually landed.
  *
  * Clearing on submit would be a data loss the moment a write fails — a push
- * the server could not land, a comment on a branch it does not serve — and
+ * the server could not land, a branch it could not write on — and
  * what was lost is something a person wrote.
  */
 defineExpose({ clear: () => (body.value = "") });

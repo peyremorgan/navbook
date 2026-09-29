@@ -15,7 +15,7 @@
  *
  * None of it depends on what another spec left behind: nothing in the suite
  * ever writes an assignee, and the review request that is asserted is on the
- * branch nothing can write to.
+ * pull request nothing in the suite reviews.
  */
 
 import assert from "node:assert/strict";

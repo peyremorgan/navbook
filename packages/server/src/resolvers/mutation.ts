@@ -23,31 +23,40 @@ import {
   type CommentRecord,
   closeEntity,
   currentAuthor,
+  defaultBranch,
   type EntityKind,
   type EntityRecord,
   executeIssueLink,
   FrontmatterError,
   findEntity,
   findParentIssue,
+  findPrToWrite,
+  loadRepo,
   locatePr,
+  locatePrToWrite,
   type NewCommentInput,
   newCommentFile,
   newIssueFile,
+  newPrFile,
   nowIso,
   openIssue,
+  openPr,
   planIssueLink,
   prepareOpen,
+  preparePrOpen,
   type Repo,
   type RunPlanResult,
   reopenEntity,
   repoPath,
   resolveComment,
   resolveEntity,
+  resolveSha,
   unlinkIssue,
   validateComment,
   validateIssue,
   validatePr,
   WorkspaceError,
+  type WsCtx,
 } from "@navbook/core";
 import type { GraphQLError } from "graphql";
 import { checkComposed, requireText } from "../compose.ts";
@@ -67,6 +76,8 @@ import {
   namedFields,
   type PluginField,
 } from "../patch.ts";
+import type { WriteResult } from "../sync.ts";
+import { type WriteSite, writeOnBranch } from "../write-site.ts";
 import { toCoreKind, toCoreVerdict } from "./map.ts";
 
 /** Mutations always commit: a change nobody committed is not a change made. */
@@ -118,6 +129,35 @@ export function commitInfo(ctx: GraphQLCtx, result: RunPlanResult, pushed: boole
 function afterWrite(ctx: GraphQLCtx): Repo {
   ctx.invalidateRepo();
   return ctx.loadRepo("all");
+}
+
+/**
+ * The tree as a write at `site` has just left it.
+ *
+ * The clone's own tree for a write made there; the worktree's, read whole,
+ * for one made on another branch. That one is never the clone's cached tree,
+ * which describes the served branch — and it is read with every comment, so a
+ * payload's fields never go back to the served branch for them.
+ */
+function afterWriteAt(ctx: GraphQLCtx, at: WsCtx, site: WriteSite): Repo {
+  return site.worktree === null ? afterWrite(ctx) : loadRepo(at, { comments: "all" });
+}
+
+/**
+ * Where to read a pull request's target from: the local branch of its name,
+ * or else the remote's copy — the server checks out one branch, and a target
+ * like `release` exists in its clone only as `origin/release`.
+ */
+function targetRev(ctx: GraphQLCtx, at: WsCtx, target: string): { targetRev?: string } {
+  const remote = ctx.sync.remote;
+  if (remote === null || resolveSha(at.repoRoot, `refs/heads/${target}`) !== null) return {};
+  const tracking = `refs/remotes/${remote}/${target}`;
+  return resolveSha(at.repoRoot, tracking) === null ? {} : { targetRev: tracking };
+}
+
+/** The branch a payload read from `site` was found on, in `Pr.refs`' terms. */
+function refsOf(site: WriteSite): string[] {
+  return site.worktree === null ? [] : [site.branch];
 }
 
 /** One entity from an already-loaded tree. */
@@ -200,9 +240,8 @@ export const Mutation: MutationResolvers = {
   updatePr: (_parent, { input }, ctx) =>
     run(async () => {
       const { result, pushed } = await patchEntity(ctx, "pr", input);
-      // A working-tree read, so it was found on no ref in particular.
       return {
-        pr: { entity: result.entity, refs: [] },
+        pr: { entity: result.entity, refs: result.refs },
         commit: commitInfo(ctx, result.run, pushed),
       };
     }),
@@ -264,46 +303,114 @@ export const Mutation: MutationResolvers = {
       const kind = toCoreKind(input.kind);
       const review = reviewFields(input, kind);
 
-      const { result, pushed } = await ctx.sync.write(
-        () => {
-          const entity = writeTarget(ctx, kind, input.ref);
-          const replyTo =
-            input.replyTo === undefined || input.replyTo === null
-              ? undefined
-              : resolveComment(entity, input.replyTo);
+      const { result, pushed } = await writeEntity(ctx, kind, input.ref, (at, entity, site) => {
+        const replyTo =
+          input.replyTo === undefined || input.replyTo === null
+            ? undefined
+            : resolveComment(entity, input.replyTo);
 
-          const content = newCommentFile({
-            author: currentAuthor(ctx.ws),
-            body: input.body,
-            ...(replyTo ? { replyTo } : {}),
-            // Bound here, inside the transaction: the revision it resolves
-            // against is the one the tree records after the pull.
-            ...(review ? { ...review, revision: bindReviewRevision(entity, review.revision) } : {}),
-          });
-          checkComposed(
-            content,
-            (parsed) => validateComment(parsed, { onPr: kind === "pr" }),
-            noun(review),
-          );
+        const content = newCommentFile({
+          author: currentAuthor(at),
+          body: input.body,
+          ...(replyTo ? { replyTo } : {}),
+          // Bound here, inside the transaction: the revision it resolves
+          // against is the one the tree records after the pull.
+          ...(review ? { ...review, revision: bindReviewRevision(entity, review.revision) } : {}),
+        });
+        checkComposed(
+          content,
+          (parsed) => validateComment(parsed, { onPr: kind === "pr" }),
+          noun(review),
+        );
 
-          // A verdict is what makes it a review rather than a comment that
-          // happens to point at a line, exactly as `nav pr review` decides it.
-          const added = applyComment(
-            ctx.ws,
-            entity,
-            { content, review: review?.verdict !== undefined },
-            COMMIT,
-          );
-          const written = from(afterWrite(ctx), kind, entity.id);
-          return { run: added.run, entity: written, comment: addedComment(written, added.id) };
-        },
-        (commented) => commented.run.committed,
-      );
+        // A verdict is what makes it a review rather than a comment that
+        // happens to point at a line, exactly as `nav pr review` decides it.
+        const added = applyComment(
+          at,
+          entity,
+          { content, review: review?.verdict !== undefined },
+          COMMIT,
+        );
+        const written = from(afterWriteAt(ctx, at, site), kind, entity.id);
+        return {
+          run: added.run,
+          entity: written,
+          refs: refsOf(site),
+          comment: addedComment(written, added.id),
+        };
+      });
 
       return {
         comment: result.comment,
         entity:
-          result.entity.kind === "issue" ? result.entity : { entity: result.entity, refs: [] },
+          result.entity.kind === "issue"
+            ? result.entity
+            : { entity: result.entity, refs: result.refs },
+        commit: commitInfo(ctx, result.run, pushed),
+      };
+    }),
+
+  openPr: (_parent, { input }, ctx) =>
+    run(async () => {
+      requireText(input.title, "title");
+      requireText(input.body, "body");
+      const source = requireText(input.source, "source").trim();
+      const target = input.target?.trim() || undefined;
+      // Settled before anything is checked out: there is nothing to look at.
+      if (target === source) {
+        throw apiError(`a pull request cannot target its own branch (${source})`, "PRECONDITION");
+      }
+
+      const { result, pushed } = await writeOnBranch(
+        ctx,
+        () => source,
+        (at, site) => {
+          if (!at.hasNavbook) {
+            throw apiError(
+              `'${source}' has no ${at.navDir}/ to open a pull request in`,
+              "PRECONDITION",
+              {
+                details: [
+                  "a pull request is written on its source branch, which has to carry the tracker",
+                ],
+              },
+            );
+          }
+          const named = target ?? defaultBranch(at.repoRoot) ?? undefined;
+          const draft = preparePrOpen(at, {
+            source,
+            title: input.title,
+            ...(named === undefined ? {} : { target: named, ...targetRev(ctx, at, named) }),
+          });
+          const content = newPrFile({
+            title: draft.title,
+            author: currentAuthor(at),
+            created: draft.created,
+            body: input.body,
+            target: draft.target,
+            source: draft.source,
+            revisions: [draft.revision],
+            ...(input.draft ? { draft: true } : {}),
+            ...(input.reviewers ? { reviewers: [...input.reviewers] } : {}),
+            ...(input.labels ? { labels: [...input.labels] } : {}),
+            ...(input.assignees ? { assignee: [...input.assignees] } : {}),
+            ...(input.milestone ? { milestone: input.milestone } : {}),
+            ext: ctx.plugins.openFields(input as Record<string, unknown>),
+          });
+          checkComposed(content, (parsed) => validatePr(parsed, at.ext), "pull request");
+
+          const opened = openPr(at, { content, fallbackTitle: draft.title }, COMMIT);
+          return {
+            run: opened.run,
+            pr: from(afterWriteAt(ctx, at, site), "pr", opened.id),
+            refs: refsOf(site),
+          };
+        },
+        (opened) => opened.run.committed,
+      );
+
+      return {
+        pr: { entity: result.pr, refs: result.refs },
         commit: commitInfo(ctx, result.run, pushed),
       };
     }),
@@ -372,15 +479,12 @@ export const Mutation: MutationResolvers = {
 };
 
 /**
- * The entity a write is to be made to, in the branch the server serves.
+ * The entity a plugin's write is to be made to, in the branch the server serves.
  *
- * A pull request's files live on the branch it proposes to merge (spec 03
- * §3.5), so one this checkout does not hold can be neither commented on nor
- * patched here: a comment would land in a directory with no `pr.md` beside it,
- * which is the stranded-comment fault of spec 03 §3.3.1 rather than a review,
- * and there is no `pr.md` here to patch at all. The cross-ref scan can still
- * see it, so the refusal says where it actually lives instead of repeating that
- * it was not found.
+ * A pull request this checkout does not hold is refused with PRECONDITION and
+ * the branch that carries it: what a plugin keeps beside `pr.md` is written
+ * there or nowhere, and the host's own writes reach that branch through
+ * `writeEntity` instead.
  */
 export function writeTarget(ctx: GraphQLCtx, kind: EntityKind, ref: string): EntityRecord {
   try {
@@ -405,17 +509,43 @@ export function writeTarget(ctx: GraphQLCtx, kind: EntityKind, ref: string): Ent
 }
 
 /**
+ * Run a write against an entity where it lives.
+ *
+ * An issue lives on the served branch. A pull request lives on the branch it
+ * proposes to merge (spec 03 §3.5), and one this checkout does not hold is
+ * written there — in a temporary worktree on that branch, which is then pushed
+ * — rather than beside no `pr.md` at all, the stranded comment of spec 03
+ * §3.3.1. Where it lives is decided under the lock, after the fetch, and the
+ * entity the body is given is read at the site, after that site was brought up
+ * to date: it is the copy the write lands beside.
+ */
+function writeEntity<T extends { run: RunPlanResult }>(
+  ctx: GraphQLCtx,
+  kind: EntityKind,
+  ref: string,
+  body: (at: WsCtx, entity: EntityRecord, site: WriteSite) => T,
+): Promise<WriteResult<T>> {
+  return writeOnBranch(
+    ctx,
+    () => (kind === "pr" ? (locatePrToWrite(ctx.ws, ref).elsewhere?.branch ?? null) : null),
+    (at, site) =>
+      body(at, kind === "pr" ? findPrToWrite(at, ref) : findEntity(at, kind, ref), site),
+    (result) => result.run.committed,
+  );
+}
+
+/**
  * Rewrite an entity's file from a patch, and record the edit as an edit.
  *
  * Both kinds go through here: the difference between them is which validator
- * the result must satisfy and, for a pull request, that its file may not be on
- * this branch at all — the refusal `writeTarget` raises.
+ * the result must satisfy and, for a pull request, that its file may be on
+ * another branch — where `writeEntity` takes the write.
  */
 async function patchEntity(
   ctx: GraphQLCtx,
   kind: EntityKind,
   input: UpdateIssueInput | UpdatePrInput,
-): Promise<{ result: { entity: EntityRecord; run: RunPlanResult }; pushed: boolean }> {
+): Promise<WriteResult<{ entity: EntityRecord; run: RunPlanResult; refs: string[] }>> {
   // A plugin's own field counts as something to change: `updateIssue` naming
   // only `features` is a patch, not an empty one.
   const extFields = ctx.plugins.patchFields(input as Record<string, unknown>);
@@ -424,52 +554,51 @@ async function patchEntity(
     throw invalidInput("the patch names no field to change");
   }
 
-  return ctx.sync.write(
-    () => {
-      const entity = writeTarget(ctx, kind, input.ref);
-      const path = absPath(ctx.ws, entity.filePath);
-      const before = readFileSync(path, "utf8");
-      // After the pull and before the write, like core's own stale check: a
-      // refusal leaves the tree exactly as it was.
-      if (input.baseSha !== undefined && input.baseSha !== null) {
-        assertFieldsUnmoved(ctx, entity, before, input, input.baseSha, pluginFields);
-      }
-      const patched = applyEntityPatch(
-        before,
-        input,
-        repoPath(ctx.ws.navDir, entity.filePath),
-        extFields,
-      );
-      // Validated before the file is touched, so a rejected patch leaves the
-      // tree exactly as it was.
-      // With the plugins' keys: a field a plugin owns is validated by it, and a
-      // value it refuses must not reach the file, where doctor would find it.
-      checkComposed(
-        patched,
-        (parsed) =>
-          kind === "issue" ? validateIssue(parsed, ctx.ws.ext) : validatePr(parsed, ctx.ws.ext),
-        kind,
-      );
+  return writeEntity(ctx, kind, input.ref, (at, entity, site) => {
+    const path = absPath(at, entity.filePath);
+    const before = readFileSync(path, "utf8");
+    // After the pull and before the write, like core's own stale check: a
+    // refusal leaves the tree exactly as it was.
+    if (input.baseSha !== undefined && input.baseSha !== null) {
+      assertFieldsUnmoved(ctx, entity, before, input, input.baseSha, pluginFields);
+    }
+    const patched = applyEntityPatch(
+      before,
+      input,
+      repoPath(ctx.ws.navDir, entity.filePath),
+      extFields,
+    );
+    // Validated before the file is touched, so a rejected patch leaves the
+    // tree exactly as it was.
+    // With the plugins' keys: a field a plugin owns is validated by it, and a
+    // value it refuses must not reach the file, where doctor would find it.
+    checkComposed(
+      patched,
+      (parsed) => (kind === "issue" ? validateIssue(parsed, at.ext) : validatePr(parsed, at.ext)),
+      kind,
+    );
 
-      // Editing in place is what `applyEntityEdit` records — it reads the file
-      // back, which is what puts the edit in the plan and so under the --commit
-      // guard. Every other operation writes nothing until it is sure it can
-      // commit (core's guard runs first, by design); this one cannot, so it
-      // undoes its own write instead. A patched file left behind by a failure
-      // would become the base of the next edit, and be committed under somebody
-      // else's request.
-      writeFileSync(path, patched, "utf8");
-      let edit: RunPlanResult;
-      try {
-        edit = applyEntityEdit(ctx.ws, entity, COMMIT);
-      } catch (error) {
-        writeFileSync(path, before, "utf8");
-        throw error;
-      }
-      return { run: edit, entity: from(afterWrite(ctx), kind, entity.id) };
-    },
-    (edit) => edit.run.committed,
-  );
+    // Editing in place is what `applyEntityEdit` records — it reads the file
+    // back, which is what puts the edit in the plan and so under the --commit
+    // guard. Every other operation writes nothing until it is sure it can
+    // commit (core's guard runs first, by design); this one cannot, so it
+    // undoes its own write instead. A patched file left behind by a failure
+    // would become the base of the next edit, and be committed under somebody
+    // else's request.
+    writeFileSync(path, patched, "utf8");
+    let edit: RunPlanResult;
+    try {
+      edit = applyEntityEdit(at, entity, COMMIT);
+    } catch (error) {
+      writeFileSync(path, before, "utf8");
+      throw error;
+    }
+    return {
+      run: edit,
+      entity: from(afterWriteAt(ctx, at, site), kind, entity.id),
+      refs: refsOf(site),
+    };
+  });
 }
 
 /**

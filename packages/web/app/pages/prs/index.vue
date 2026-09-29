@@ -6,8 +6,8 @@
   That is what the "every branch" toggle is for: without it this lists what is
   in the working tree, with it the server scans every branch it has fetched.
   The difference is worth a control rather than a default, because the scan
-  costs a great deal more and the result is only readable — a pull request on a
-  branch this server does not serve cannot be commented on.
+  costs a great deal more. A pull request found on another branch is written
+  there all the same: the server makes a worktree on that branch for the write.
 
   The scan finds open pull requests only, so switching it on narrows by status
   without the filter having asked — the one place a listing here does that,

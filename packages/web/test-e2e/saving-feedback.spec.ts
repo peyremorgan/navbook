@@ -11,17 +11,7 @@
  * labels and assignees they leave behind break no other spec.
  */
 
-import type { Route } from "@playwright/test";
-import { chooseOrCreate, expect, test, toasts } from "./helpers/fixtures.ts";
-
-/** Answer one named operation, and let every other one through. */
-function only(operation: string, handle: (route: Route) => Promise<void>) {
-  return async (route: Route): Promise<void> => {
-    const body = route.request().postData() ?? "";
-    if (!body.includes(`${operation}(`)) return route.continue();
-    await handle(route);
-  };
-}
+import { chooseOrCreate, expect, only, refusal, test, toasts } from "./helpers/fixtures.ts";
 
 /** A gate that holds a request until the test opens it. */
 function gate(): { held: Promise<void>; open: () => void } {
@@ -33,18 +23,9 @@ function gate(): { held: Promise<void>; open: () => void } {
 }
 
 /** What the server sends when the remote refuses the push. */
-const REFUSED = JSON.stringify({
-  data: null,
-  errors: [
-    {
-      message: "the remote refused the push",
-      path: ["updateIssue"],
-      extensions: {
-        code: "SYNC_PUSH_REJECTED",
-        details: ["origin rejected refs/heads/main"],
-      },
-    },
-  ],
+const REFUSED = refusal("updateIssue", "the remote refused the push", {
+  code: "SYNC_PUSH_REJECTED",
+  details: ["origin rejected refs/heads/main"],
 });
 
 test("shows a saved assignee at once, and admits to waiting only once it is slow", async ({

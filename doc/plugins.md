@@ -249,8 +249,7 @@ last fetched, and miss what somebody pushed a moment ago.
 
 A mutation that writes beside a pull request's `pr.md` takes its target from
 `host.api.writeTarget(ctx, "pr", ref)`, which refuses a pull request the served
-checkout does not hold exactly as the built-in writes do: with `PRECONDITION`
-and the branch that carries it.
+checkout does not hold with `PRECONDITION` and the branch that carries it.
 
 ### The web half
 

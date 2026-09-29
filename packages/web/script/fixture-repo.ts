@@ -16,8 +16,8 @@
  * The seeded content is chosen for the cases that are hard to reach by
  * clicking: a subtask tree with a cycle and a repeat in it, a comment that
  * replies to another, a review bound to a revision, and a pull request on a
- * branch the server does not have checked out — the one that must refuse a
- * comment and say which branch to serve.
+ * branch the server does not have checked out — the one it writes to on that
+ * branch, in a worktree of its own.
  */
 
 import { spawnSync } from "node:child_process";
@@ -729,12 +729,13 @@ function seed(dir: string, env: NodeJS.ProcessEnv, git: Git, write: Write): void
     reviewers: ["someone@example.invalid"],
   });
 
-  // Asked of the person the suite signs in as, and on the branch nothing can
-  // write to — so what this request looks like from the outside stays put
-  // however much the rest of the suite reviews the other pull request.
+  // Asked of the person the suite signs in as, and on a branch the server
+  // writes to only through a worktree. Nothing in the suite reviews it, so what
+  // this request looks like from the outside stays put however much the rest
+  // of the suite reviews the other pull request.
   // A comment on an issue rides on this branch too, so the Changes tab has a
-  // tracker commit to summarise. On the branch nothing serves, so the issue
-  // as every other spec reads it is untouched.
+  // tracker commit to summarise. On a branch the clone does not serve, so the
+  // issue as every other spec reads it is untouched.
   openPrOn(
     "2026-08-05T10:00:00Z",
     IDS.unservedPr,

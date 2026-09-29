@@ -8,7 +8,8 @@
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { errorCode, type Harness, ok, startHarness } from "../helpers/harness.ts";
+import { errorCode, type Harness, ok, originSubjects, startHarness } from "../helpers/harness.ts";
+import { worktrees } from "../helpers/temprepo.ts";
 
 interface PrShape {
   id: string;
@@ -93,31 +94,89 @@ describe("pull requests", () => {
     assert.deepEqual(missed.prs, []);
   });
 
-  it("refuses to comment on one this checkout does not hold, saying where it is", async () => {
-    // Writing the comment here would put it in a directory with no pr.md
-    // beside it, which is a stranded comment (spec 03 §3.3.1), not a review.
-    const response = await h.gql(
-      `mutation R($ref: ID!) {
-         addComment(input: { kind: PR, ref: $ref, body: "x" }) { comment { id } }
-       }`,
-      { ref: "pr111111" },
+  it("reviews one this checkout does not hold on its own branch, and pushes that", async () => {
+    // Writing the review here would put it in a directory with no pr.md beside
+    // it, a stranded comment (spec 03 §3.3.1); the server writes it on the
+    // branch instead, the way `nav pr review` in another worktree would.
+    const listed = ok<{ pr: { revisions: { head: string }[] } }>(
+      await h.gql(`query { pr(ref: "pr111111") { revisions { head } } }`),
     );
-    assert.equal(errorCode(response), "PRECONDITION");
-    assert.equal(response.errors[0]?.extensions?.sourceRef, "origin/fix-login");
-    assert.match(response.errors[0]?.message ?? "", /does not have checked out/);
+    const head = listed.pr.revisions[0]?.head as string;
+    const servedBefore = h.fixture.server.git(["rev-parse", "HEAD"]).stdout.trim();
+
+    const data = ok<{
+      addComment: {
+        comment: { verdict: string; revision: string; author: string };
+        entity: { id: string; refs: string[]; comments: { id: string }[] };
+        commit: { committed: boolean; subject: string; pushed: boolean };
+      };
+    }>(
+      await h.gql(
+        `mutation R($ref: ID!) {
+           addComment(input: { kind: PR, ref: $ref, body: "Looks right.", verdict: APPROVE }) {
+             comment { verdict revision author }
+             entity { id ... on Pr { refs comments { id } } }
+             commit { committed subject pushed }
+           }
+         }`,
+        { ref: "pr111111" },
+      ),
+    );
+    const { comment, entity, commit } = data.addComment;
+    assert.equal(comment.verdict, "APPROVE");
+    assert.equal(comment.revision, head);
+    assert.match(comment.author, /person@example\.invalid/);
+    assert.equal(entity.id, "pr111111");
+    assert.deepEqual(entity.refs, ["fix-login"]);
+    assert.equal(entity.comments.length, 1);
+    assert.deepEqual(commit, {
+      committed: true,
+      subject: "docs(pr): review #pr111111",
+      pushed: true,
+    });
+
+    assert.equal(originSubjects(h.fixture.origin, "fix-login")[0], "docs(pr): review #pr111111");
+    // Nothing of it on the served branch, and nothing left behind in the clone.
+    assert.equal(h.fixture.server.git(["rev-parse", "HEAD"]).stdout.trim(), servedBefore);
+    assert.deepEqual(worktrees(h.fixture.server.dir), [h.fixture.server.dir]);
+    assert.equal(h.fixture.server.git(["branch", "--list", "fix-login"]).stdout, "");
+
+    // And the scan reads it back from the branch it went to.
+    const after = ok<{ pr: { comments: { verdict: string }[]; refs: string[] } }>(
+      await h.gql(`query { pr(ref: "pr111111") { refs comments { verdict } } }`),
+    );
+    assert.deepEqual(after.pr.comments, [{ verdict: "APPROVE" }]);
+    assert.deepEqual(after.pr.refs, ["origin/fix-login"]);
   });
 
-  it("refuses to patch one this checkout does not hold, saying where it is", async () => {
-    // There is no `pr.md` on this branch to patch at all, so the answer is the
-    // same as for a comment: serve the branch that carries it.
-    const response = await h.gql(
-      `mutation P($ref: ID!) {
-         updatePr(input: { ref: $ref, reviewers: ["alice@example.com"] }) { pr { id } }
-       }`,
-      { ref: "pr111111" },
+  it("patches one this checkout does not hold on its own branch", async () => {
+    const data = ok<{
+      updatePr: {
+        pr: { reviewers: string[]; refs: string[] };
+        commit: { committed: boolean; subject: string; pushed: boolean };
+      };
+    }>(
+      await h.gql(
+        `mutation P($ref: ID!) {
+           updatePr(input: { ref: $ref, reviewers: ["alice@example.com"] }) {
+             pr { reviewers refs }
+             commit { committed subject pushed }
+           }
+         }`,
+        { ref: "pr111111" },
+      ),
     );
-    assert.equal(errorCode(response), "PRECONDITION");
-    assert.equal(response.errors[0]?.extensions?.sourceRef, "origin/fix-login");
+    assert.deepEqual(data.updatePr.pr.reviewers, ["alice@example.com"]);
+    assert.deepEqual(data.updatePr.pr.refs, ["fix-login"]);
+    assert.equal(data.updatePr.commit.pushed, true);
+    assert.equal(originSubjects(h.fixture.origin, "fix-login")[0], data.updatePr.commit.subject);
+    assert.match(data.updatePr.commit.subject, /^docs\(pr\): .*#pr111111$/);
+    assert.deepEqual(worktrees(h.fixture.server.dir), [h.fixture.server.dir]);
+  });
+
+  it("refuses a patch that names no field, before checking anything out", async () => {
+    const response = await h.gql(`mutation { updatePr(input: { ref: "pr111111" }) { pr { id } } }`);
+    assert.equal(errorCode(response), "INVALID_INPUT");
   });
 
   it("points an issue query at a pull request back at the right noun", async () => {

@@ -4,17 +4,28 @@
  * branch the server is on decides what it can read and what it can write.
  *
  * The fixture is arranged around that. One pull request is on the branch the
- * clone is checked out at — readable and writable. The other is on a branch the
- * clone has only fetched — findable with `allRefs`, readable, and writable by
- * nobody. Proving the second refuses, and says which branch to serve, is the
- * point of this file.
+ * clone is checked out at. The other is on a branch the clone has only fetched
+ * — findable with `allRefs`, and written on that branch, in a worktree the
+ * server makes for the one write (spec 06 §6.3). Proving the second is written
+ * where it lives, and that the rare refusal to write there says which branch,
+ * is the point of this file.
  *
- * The unserved one is also where the review request is asserted, for the same
- * reason: nothing here can write to it, so what it asks of the signed-in person
- * stays outstanding however much the rest of the suite reviews the other.
+ * The unserved one is also where the review request is asserted: nothing here
+ * reviews it — the writes to it are a plain comment and a reviewer — so what it
+ * asks of the signed-in person stays outstanding however much the rest of the
+ * suite reviews the other.
  */
 
-import { chooseOrCreate, expect, test, toasts } from "./helpers/fixtures.ts";
+import { chooseOrCreate, expect, only, refusal, test, toasts } from "./helpers/fixtures.ts";
+
+/** What the server says when it cannot write on the branch a pull request lives on. */
+function unwritable(operation: string): string {
+  return refusal(operation, "'feat/unserved' is not a branch on 'origin'", {
+    code: "PRECONDITION",
+    branch: "feat/unserved",
+    details: ["push 'feat/unserved' first, and name it without the remote"],
+  });
+}
 
 test("lists what the checkout holds, and no more", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/prs`);
@@ -124,25 +135,46 @@ test("offers the review fields only once there is a verdict", async ({ signedIn,
   await expect(signedIn.getByTestId("review-line")).toBeVisible();
 });
 
-test("refuses a comment on a branch it does not serve, and says which", async ({
+test("comments on one on a branch it does not serve, writing it on that branch", async ({
   signedIn,
   stack,
 }) => {
+  const said = `Commented from the browser at ${Date.now()}.`;
   await signedIn.goto(`${stack.appUrl}/prs/bbbb0002`);
   await expect(signedIn.getByTestId("pr-title")).toContainText("does not serve");
 
-  await signedIn.getByTestId("review-body").fill("Can this be commented on from here?");
+  await signedIn.getByTestId("review-body").fill(said);
   await signedIn.getByTestId("review-submit").click();
 
-  // Not a toast: the remedy is to serve another branch, which is an operator's
-  // action, and it belongs beside the form that provoked it.
+  await expect(toasts(signedIn)).toContainText("docs(pr): comment on #bbbb0002");
+  await expect(signedIn.getByTestId("pr-comment-thread")).toContainText(said);
+  await expect(signedIn.getByTestId("unserved-branch")).toHaveCount(0);
+  await expect(signedIn.getByTestId("review-body")).toHaveValue("");
+});
+
+test("says which branch when it cannot write there, and stops offering", async ({
+  signedIn,
+  stack,
+}) => {
+  const refuse = only("addComment", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: unwritable("addComment") }),
+  );
+  await signedIn.route(stack.apiUrl, refuse);
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0002`);
+
+  await signedIn.getByTestId("review-body").fill("Can this be written there?");
+  await signedIn.getByTestId("review-submit").click();
+
+  // Not a toast: the remedy is an operator's, about a branch, and it belongs
+  // beside the form that provoked it.
   const alert = signedIn.getByTestId("unserved-branch");
   await expect(alert).toBeVisible();
   await expect(alert).toContainText("feat/unserved");
-  await expect(alert).toContainText("serve a checkout of that branch");
+  await expect(alert).toContainText("could not write there");
 
   // And the form stops offering, rather than letting it be tried again.
   await expect(signedIn.getByTestId("review-submit")).toBeDisabled();
+  await signedIn.unroute(stack.apiUrl, refuse);
 });
 
 test("shows who was asked to review, and what each of them said", async ({ signedIn, stack }) => {
@@ -258,10 +290,26 @@ test("finds the reviews this person still owes", async ({ signedIn, stack }) => 
   await expect(signedIn.getByTestId("pr-row-bbbb0001")).toBeVisible();
 });
 
-test("refuses to change the reviewers of a branch it does not serve", async ({
+test("changes the reviewers of one on a branch it does not serve", async ({ signedIn, stack }) => {
+  const who = `unserved-${Date.now()}@example.invalid`;
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0002`);
+  await signedIn.getByTestId("edit-reviewers").click();
+  await chooseOrCreate(signedIn, "input-reviewers", who);
+  await signedIn.getByTestId("save-reviewers").click();
+
+  await expect(toasts(signedIn)).toContainText("docs(pr): edit #bbbb0002");
+  await expect(signedIn.getByTestId(`reviewer-${who}`)).toContainText("Pending");
+  await expect(signedIn.getByTestId("unserved-branch")).toHaveCount(0);
+});
+
+test("stops offering every field when it cannot write on the branch", async ({
   signedIn,
   stack,
 }) => {
+  const refuse = only("updatePr", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: unwritable("updatePr") }),
+  );
+  await signedIn.route(stack.apiUrl, refuse);
   await signedIn.goto(`${stack.appUrl}/prs/bbbb0002`);
   await signedIn.getByTestId("edit-reviewers").click();
   await chooseOrCreate(signedIn, "input-reviewers", "nobody@example.invalid");
@@ -278,6 +326,7 @@ test("refuses to change the reviewers of a branch it does not serve", async ({
   for (const field of ["reviewers", "labels", "assignees", "milestone", "title"]) {
     await expect(signedIn.getByTestId(`edit-${field}`)).toHaveCount(0);
   }
+  await signedIn.unroute(stack.apiUrl, refuse);
 });
 
 test("says so when there is no such pull request", async ({ signedIn, stack }) => {

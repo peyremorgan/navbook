@@ -9,11 +9,12 @@
   edited here exactly as an issue's is. Only `rank` and `deadline` are missing
   from the sidebar, because they are an issue's alone (spec 02 §2.5).
 
-  The refusal worth designing for is `PRECONDITION`. A pull request's files
-  live on the branch it proposes to merge, so `allRefs` can find one this
-  server does not have checked out: it can be read, and it can be written to by
-  nobody. The alert says which branch to serve instead, because that is the
-  actual remedy and nothing this client does can substitute for it.
+  The refusal worth designing for is `PRECONDITION` naming a branch. A pull
+  request's files live on the branch it proposes to merge, and the server
+  writes one it does not have checked out on that branch, in a worktree of its
+  own (spec 06 §6.3) — unless it cannot: the branch is not on the remote, or
+  somebody else's worktree holds it. The alert says which branch, because the
+  remedy is an operator's and nothing this client does can substitute for it.
 
   The other refusal is `STALE_CONTENT`, and it is `useStaleEdit`'s, as on the
   issue page: every save names the version it was edited from, a field somebody
@@ -359,14 +360,13 @@ async function save(change: Partial<EntityEdit>): Promise<void> {
 }
 
 /**
- * Whether commenting is possible at all.
+ * Whether writing is possible at all.
  *
- * `refs` is empty for a pull request read out of the working tree and holds
- * the branches the cross-ref scan found it on otherwise — so a non-empty
- * `refs` that does not include the checkout is the hint that a comment will be
- * refused. It is only a hint: the server decides, and its refusal is what sets
- * `refusedOn`. Showing the form and letting it fail once is better than
- * guessing wrong and hiding it from somebody who could have used it.
+ * A pull request on another branch is written there, so being found on one is
+ * no reason to expect a refusal: only the server knows whether it can write on
+ * that branch, and its refusal is what sets `refusedOn`. Showing the form and
+ * letting it fail once is better than guessing wrong and hiding it from
+ * somebody who could have used it.
  */
 const branchHint = computed(() => refusedOn.value);
 </script>

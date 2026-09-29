@@ -75,6 +75,11 @@ export interface Clone {
   fileIssue(title: string, body: string, ids: string): void;
   /** Open a pull request on a new branch, and go back to main. */
   filePr(title: string, body: string, ids: string, branch: string): void;
+  /**
+   * Make `name` from main with one commit touching `file`, and go back to
+   * main: a branch somebody has pushed work on, before any pull request.
+   */
+  branch(name: string, file?: string): void;
   /** Close what this clone holds, as somebody working from a terminal would. */
   close(kind: EntityKind, ref: string, resolution: string): void;
   write(relativePath: string, content: string): void;
@@ -201,6 +206,12 @@ export function makeFixture(opts: FixtureOptions = {}): Fixture {
         openPr(ws, { content, fallbackTitle: title }, { commit: true });
         run(dir, ["checkout", "--quiet", "main"]);
       },
+      branch(name, file = `${name.replaceAll("/", "-")}.txt`) {
+        run(dir, ["checkout", "--quiet", "-b", name, "main"]);
+        clone.write(file, `work on ${name}\n`);
+        clone.commitAll(`feat: work on ${name}`);
+        run(dir, ["checkout", "--quiet", "main"]);
+      },
       close(kind, ref, resolution) {
         const ws = makeWsCtx({ cwd: dir, env });
         closeEntity(ws, kind, ref, { resolution }, { commit: true });
@@ -239,6 +250,18 @@ export function makeFixture(opts: FixtureOptions = {}): Fixture {
       rmSync(root, { recursive: true, force: true });
     },
   };
+}
+
+/** The paths of a repository's worktrees, its own first. */
+export function worktrees(dir: string): string[] {
+  const result = spawnSync("git", ["worktree", "list", "--porcelain"], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+  return (result.stdout ?? "")
+    .split("\n")
+    .filter((line) => line.startsWith("worktree "))
+    .map((line) => line.slice("worktree ".length));
 }
 
 /** Commit subjects on a ref of the bare origin, newest first. */

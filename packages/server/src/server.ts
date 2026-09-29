@@ -29,6 +29,7 @@ import { isOpen } from "./policy.ts";
 import { makeSchema } from "./schema.ts";
 import { RepoSync } from "./sync.ts";
 import { TreeCache } from "./trees.ts";
+import { sweepTemporaryWorktrees } from "./write-site.ts";
 
 export class StartupError extends Error {}
 
@@ -118,6 +119,9 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     remove: config.maintenanceIntervalMs > 0,
     report,
   });
+  // A temporary worktree is only ever one write's, so any that exists now was
+  // left by a server that was killed mid-write.
+  sweepTemporaryWorktrees(repoRoot, report);
   if (remote === null) {
     report(`warning: no '${config.remote}' remote; running local-only, nothing will be pushed`);
   }
@@ -212,6 +216,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
         navDir,
         ext: loaded.ext,
         plugins: loaded.runtime,
+        report,
       });
     },
   });

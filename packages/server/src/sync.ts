@@ -129,6 +129,39 @@ export interface WriteResult<T> {
   pushed: boolean;
 }
 
+/** Where a write happens: the clone itself, or a worktree of it on another branch. */
+export interface WriteRoot {
+  root: string;
+}
+
+/** How a write went, as the site it ran in is told when it is closed. */
+export interface WriteOutcome {
+  /** True when anything threw: the merge, the body, or the push. */
+  failed: boolean;
+  pushed: boolean;
+}
+
+/**
+ * A write made somewhere other than the clone's checked-out branch.
+ *
+ * {@link RepoSync.writeOn} runs it: `open` picks the site once the clone is
+ * up to date, `body` writes there, and `close` is told how it went. The
+ * site's branch is merged with its remote-tracking branch before the body and
+ * pushed after it, by exactly the rules the clone's own branch follows.
+ */
+export interface WriteOn<T, S extends WriteRoot> {
+  /**
+   * Choose where to write. Runs under the lock, after the pull, and
+   * synchronously; it may throw, and then there is nothing to close.
+   */
+  open(): S;
+  body(site: S): T;
+  /** Whether the body produced a commit: one that did not has nothing to push. */
+  committed(result: T): boolean;
+  /** Called once for every site `open` returned, after the push or the failure. Must not throw. */
+  close(site: S, outcome: WriteOutcome): void;
+}
+
 /**
  * A merge with the remote that git could not do on its own.
  *
@@ -251,12 +284,19 @@ export class RepoSync {
     return this.opts.remote === null;
   }
 
+  /** The remote this clone synchronises with, or null when it works offline. */
+  get remote(): string | null {
+    return this.opts.remote;
+  }
+
   /** Run a read, having brought the clone up to date first. */
   read<T>(body: () => T): Promise<T> {
     return this.lock.run(async () => {
       // While the background pull keeps up, the clone is already as fresh as
       // a read may ask for, and fetching again would only make it wait.
-      if (this.lastRefresh !== "ok") await this.pull({ force: false, keptLocalCommit: false });
+      if (this.lastRefresh !== "ok") {
+        await this.pull(this.opts.repoRoot, { force: false, keptLocalCommit: false });
+      }
       return body();
     });
   }
@@ -338,7 +378,7 @@ export class RepoSync {
         this.git.fetchRemote(this.opts.repoRoot, remote, this.network(signal)),
       );
       this.opts.afterSync?.();
-      await this.lock.run(() => this.merge(remote, signal));
+      await this.lock.run(() => this.merge(this.opts.repoRoot, remote, signal));
       if (signal?.aborted) return;
     } catch (error) {
       if (error instanceof GitStoppedError && signal?.aborted) return;
@@ -379,21 +419,53 @@ export class RepoSync {
    * pushed would be a lie.
    */
   write<T>(body: () => T, committed: (result: T) => boolean): Promise<WriteResult<T>> {
+    return this.writeOn({
+      open: () => ({ root: this.opts.repoRoot }),
+      body: () => body(),
+      committed,
+      close: () => undefined,
+    });
+  }
+
+  /**
+   * Run a mutation on a site `op` chooses, between a pull and a push.
+   *
+   * The clone is pulled first, as for any write, so the choice is made
+   * against the remote as it stands. A site in a worktree of its own is then
+   * merged with its branch's remote-tracking branch — fast-forward, merge, or
+   * a conflict reported and aborted — and the push after the body is of that
+   * branch. That is the served branch's whole transaction, moved: spec 06 §6.3
+   * gives no branch a privileged path.
+   */
+  writeOn<T, S extends WriteRoot>(op: WriteOn<T, S>): Promise<WriteResult<T>> {
     return this.lock.run(async () => {
-      await this.pull({ force: true, keptLocalCommit: false });
-      this.opts.onWrite?.();
-      let result: T;
+      await this.pull(this.opts.repoRoot, { force: true, keptLocalCommit: false });
+      const site = op.open();
+      const outcome: WriteOutcome = { failed: true, pushed: false };
       try {
-        result = body();
-      } catch (error) {
+        const remote = this.opts.remote;
+        if (site.root !== this.opts.repoRoot && remote !== null) {
+          await this.mergeReporting(site.root, remote, false);
+        }
         this.opts.onWrite?.();
-        throw error;
-      }
-      if (!committed(result)) return { result, pushed: false };
-      try {
-        return { result, pushed: await this.pushWithRetry() };
+        let result: T;
+        try {
+          result = op.body(site);
+        } catch (error) {
+          this.opts.onWrite?.();
+          throw error;
+        }
+        if (op.committed(result)) {
+          try {
+            outcome.pushed = await this.pushWithRetry(site.root);
+          } finally {
+            this.opts.afterSync?.();
+          }
+        }
+        outcome.failed = false;
+        return { result, pushed: outcome.pushed };
       } finally {
-        this.opts.afterSync?.();
+        op.close(site, outcome);
       }
     });
   }
@@ -441,35 +513,47 @@ export class RepoSync {
    * network's. A mutation always fetches: it is about to write, and writing on a
    * stale tree is how avoidable conflicts are made.
    */
-  private async pull(opts: { force: boolean; keptLocalCommit: boolean }): Promise<void> {
+  private async pull(
+    root: string,
+    opts: { force: boolean; keptLocalCommit: boolean },
+  ): Promise<void> {
     const remote = this.opts.remote;
     if (remote === null) return;
     if (!opts.force && this.now() - this.lastFetch < this.opts.pullIntervalMs) return;
 
     try {
+      // One fetch serves every worktree: they share the clone's refs.
       await this.net.run(() => this.git.fetchRemote(this.opts.repoRoot, remote, this.network()));
     } catch (error) {
       throw this.stopped(error, opts.keptLocalCommit);
     }
     this.lastFetch = this.now();
     this.opts.afterSync?.();
+    await this.mergeReporting(root, remote, opts.keptLocalCommit);
+  }
+
+  /** {@link merge}, with a conflict turned into the error a client is told. */
+  private async mergeReporting(
+    root: string,
+    remote: string,
+    keptLocalCommit: boolean,
+  ): Promise<void> {
     try {
-      await this.merge(remote);
+      await this.merge(root, remote);
     } catch (error) {
-      if (error instanceof MergeConflict) throw syncConflict(error.paths, opts.keptLocalCommit);
+      if (error instanceof MergeConflict) throw syncConflict(error.paths, keptLocalCommit);
       throw error;
     }
   }
 
   /**
-   * Merge the remote-tracking branch into HEAD. Throws {@link MergeConflict}.
+   * Merge the remote-tracking branch into `root`'s HEAD. Throws {@link MergeConflict}.
    *
    * Does nothing once `signal` has aborted, however far it got with looking:
    * the questions it asks first change nothing, and the last moment to decide
    * against moving the branch is just before it moves.
    */
-  private async merge(remote: string, signal?: AbortSignal): Promise<void> {
-    const root = this.opts.repoRoot;
+  private async merge(root: string, remote: string, signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) return;
     const branch = await this.git.currentBranch(root);
     if (branch === null) return;
@@ -523,17 +607,16 @@ export class RepoSync {
    * spinning. The change is safe either way — it is in the clone's history, and
    * the error says so.
    */
-  private async pushWithRetry(): Promise<boolean> {
+  private async pushWithRetry(root: string): Promise<boolean> {
     const remote = this.opts.remote;
     if (remote === null) return false;
-    const root = this.opts.repoRoot;
     const branch = await this.git.currentBranch(root);
     if (branch === null) return false;
 
     if ((await this.push(root, remote, branch)) === "ok") return true;
     // Rejected: somebody pushed first. Merge what they pushed and try again —
     // and if that merge conflicts, the commit stays local, which the error says.
-    await this.pull({ force: true, keptLocalCommit: true });
+    await this.pull(root, { force: true, keptLocalCommit: true });
     if ((await this.push(root, remote, branch)) === "ok") return true;
     throw syncPushRejected();
   }

@@ -101,6 +101,8 @@ export interface GraphQLCtx {
    * this, and every mutation emits its event through it (spec 06 §6.2).
    */
   plugins: PluginRuntime;
+  /** Where to say what an operator should know: the server's log. */
+  report: (line: string) => void;
 }
 
 export interface MakeContextOptions {
@@ -125,6 +127,8 @@ export interface MakeContextOptions {
   ext?: CoreExtensions;
   /** The plugin runtime, for resolvers and the mutation event. */
   plugins: PluginRuntime;
+  /** The server's log; nothing is said when it is omitted. */
+  report?: (line: string) => void;
 }
 
 export function makeGraphQLCtx(opts: MakeContextOptions): GraphQLCtx {
@@ -171,5 +175,6 @@ export function makeGraphQLCtx(opts: MakeContextOptions): GraphQLCtx {
     authors: opts.authors,
     revisions: opts.revisions,
     config: opts.config,
+    report: opts.report ?? (() => undefined),
   };
 }

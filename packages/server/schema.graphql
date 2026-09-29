@@ -194,7 +194,10 @@ type Pr implements Entity {
   draft: Boolean!
   revisions: [Revision!]!
   merged: MergedInfo
-  "Branches the cross-ref scan found it on; empty for a working-tree read."
+  """
+  Branches the cross-ref scan found it on, or the branch a write was just made
+  on; empty for a working-tree read.
+  """
   refs: [String!]!
 
   "Who it asks to review, as `reviewer:` records them (spec 02 §2.7)."
@@ -626,8 +629,9 @@ Fields to change on a pull request.
 
 The twin of `UpdateIssueInput`, with the same absent-versus-null rules, plus
 the people it asks to review. What a pull request *is* — its revisions, its
-target, whether it merged — is not patchable here: those need a branch and a
-working tree, and the checkout-centric verbs are not exposed (spec 06 §6.3).
+target, whether it merged — is not patchable here: appending a revision and
+merging need a working tree on the branch and are not exposed (spec 06 §6.3).
+Opening one is `openPr`.
 """
 input UpdatePrInput {
   ref: ID!
@@ -642,6 +646,36 @@ input UpdatePrInput {
 }
 
 type UpdatePrPayload {
+  pr: Pr!
+  commit: CommitInfo!
+}
+
+"""
+Fields for a new pull request.
+
+`source` is the branch carrying the commits, named without its remote. The
+server does not need it checked out: it checks the branch out into a temporary
+worktree of its clone, writes the pull request there — its files live on the
+branch they propose to merge (spec 03 §3.5) — and pushes the branch. So the
+branch has to be on the remote already.
+"""
+input OpenPrInput {
+  source: String!
+  "Branch to merge into; the repository's default branch when omitted."
+  target: String
+  title: String!
+  body: String!
+  "Mark it as not ready for review yet."
+  draft: Boolean
+  "Who to ask for a review (spec 02 §2.7)."
+  reviewers: [String!]
+  labels: [String!]
+  assignees: [String!]
+  milestone: String
+}
+
+type OpenPrPayload {
+  "Read back from the branch it was written on, which `refs` names."
   pr: Pr!
   commit: CommitInfo!
 }
@@ -673,9 +707,10 @@ A comment, or a review when a verdict is given.
 Review fields are meaningful only on pull requests (§2.6), and `revision` binds
 the review to one recorded state of the branch — the latest, unless named.
 
-A comment is written beside the entity it belongs to, so a pull request the
-server's checkout does not hold cannot be commented on from here even though
-`prs(allRefs: true)` can see it: serve a checkout of its branch to review it.
+A comment is written beside the entity it belongs to. On a pull request the
+server's checkout does not hold — one `prs(allRefs: true)` finds on another
+branch — that is its branch: the comment is written in a temporary worktree
+there, and the branch is pushed, as `openPr` does.
 """
 input AddCommentInput {
   kind: Kind!
@@ -731,11 +766,19 @@ type Mutation {
   """
   Patch a pull request's metadata, `reviewers` included.
 
-  Refused with `PRECONDITION` when this checkout does not hold the branch the
-  pull request lives on, for the reason `addComment` is: there is no `pr.md`
-  here to patch, and the answer is to serve that branch.
+  One on a branch this checkout does not hold is patched on that branch, in a
+  temporary worktree, and the branch is pushed; see `openPr`.
   """
   updatePr(input: UpdatePrInput!): UpdatePrPayload!
+  """
+  Open a pull request on `source`, and push that branch.
+
+  Refused with `PRECONDITION` when `source` is not a branch on the remote, is
+  checked out in a worktree somebody else made, equals `target`, or shares no
+  history with it; with `SYNC_CONFLICT` when the server's copy of the branch
+  cannot be merged with the remote's.
+  """
+  openPr(input: OpenPrInput!): OpenPrPayload!
   closeIssue(input: CloseIssueInput!): CloseIssuePayload!
   reopenIssue(ref: ID!): ReopenIssuePayload!
   addComment(input: AddCommentInput!): AddCommentPayload!

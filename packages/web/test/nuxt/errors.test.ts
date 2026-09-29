@@ -185,18 +185,15 @@ describe("reparentConflict", () => {
 });
 
 describe("unservedBranch", () => {
-  it("reads the branch a refused pull-request comment named", () => {
+  it("reads the branch a refused pull-request write named", () => {
     const failure = describeApiError(
-      apolloError(
-        "#bbbb0002 is on 'origin/feat/unserved', which this server does not have checked out",
-        {
-          code: "PRECONDITION",
-          sourceRef: "origin/feat/unserved",
-          details: ["a comment must be written beside the pull request it belongs to"],
-        },
-      ),
+      apolloError("'feat/unserved' is not a branch on 'origin'", {
+        code: "PRECONDITION",
+        branch: "feat/unserved",
+        details: ["push 'feat/unserved' first, and name it without the remote"],
+      }),
     );
-    assert.equal(unservedBranch(failure), "origin/feat/unserved");
+    assert.equal(unservedBranch(failure), "feat/unserved");
   });
 
   it("is null for a precondition that is about something else", () => {

@@ -9,7 +9,7 @@
  * A run attached to a pull request is written beside its `pr.md`. The served
  * checkout holds one branch, so a pull request that only another branch
  * carries is refused with PRECONDITION and that branch, through the host's own
- * `writeTarget` — exactly the answer a comment on it gets.
+ * `writeTarget`.
  */
 
 import { execFileSync } from "node:child_process";

@@ -36,9 +36,10 @@ export type Scalars = {
  * Review fields are meaningful only on pull requests (§2.6), and `revision` binds
  * the review to one recorded state of the branch — the latest, unless named.
  *
- * A comment is written beside the entity it belongs to, so a pull request the
- * server's checkout does not hold cannot be commented on from here even though
- * `prs(allRefs: true)` can see it: serve a checkout of its branch to review it.
+ * A comment is written beside the entity it belongs to. On a pull request the
+ * server's checkout does not hold — one `prs(allRefs: true)` finds on another
+ * branch — that is its branch: the comment is written in a temporary worktree
+ * there, and the branch is pushed, as `openPr` does.
  */
 export type AddCommentInput = {
   body: Scalars['String']['input'];
@@ -389,15 +390,23 @@ export type Mutation = {
   closeIssue: CloseIssuePayload;
   linkIssue: LinkIssuePayload;
   openIssue: OpenIssuePayload;
+  /**
+   * Open a pull request on `source`, and push that branch.
+   *
+   * Refused with `PRECONDITION` when `source` is not a branch on the remote, is
+   * checked out in a worktree somebody else made, equals `target`, or shares no
+   * history with it; with `SYNC_CONFLICT` when the server's copy of the branch
+   * cannot be merged with the remote's.
+   */
+  openPr: OpenPrPayload;
   reopenIssue: ReopenIssuePayload;
   unlinkIssue: UnlinkIssuePayload;
   updateIssue: UpdateIssuePayload;
   /**
    * Patch a pull request's metadata, `reviewers` included.
    *
-   * Refused with `PRECONDITION` when this checkout does not hold the branch the
-   * pull request lives on, for the reason `addComment` is: there is no `pr.md`
-   * here to patch, and the answer is to serve that branch.
+   * One on a branch this checkout does not hold is patched on that branch, in a
+   * temporary worktree, and the branch is pushed; see `openPr`.
    */
   updatePr: UpdatePrPayload;
 };
@@ -420,6 +429,11 @@ export type MutationLinkIssueArgs = {
 
 export type MutationOpenIssueArgs = {
   input: OpenIssueInput;
+};
+
+
+export type MutationOpenPrArgs = {
+  input: OpenPrInput;
 };
 
 
@@ -462,6 +476,37 @@ export type OpenIssuePayload = {
   issue: Issue;
   /** The issue it was filed under, when one was named. */
   parent?: Maybe<Issue>;
+};
+
+/**
+ * Fields for a new pull request.
+ *
+ * `source` is the branch carrying the commits, named without its remote. The
+ * server does not need it checked out: it checks the branch out into a temporary
+ * worktree of its clone, writes the pull request there — its files live on the
+ * branch they propose to merge (spec 03 §3.5) — and pushes the branch. So the
+ * branch has to be on the remote already.
+ */
+export type OpenPrInput = {
+  assignees?: InputMaybe<Array<Scalars['String']['input']>>;
+  body: Scalars['String']['input'];
+  /** Mark it as not ready for review yet. */
+  draft?: InputMaybe<Scalars['Boolean']['input']>;
+  labels?: InputMaybe<Array<Scalars['String']['input']>>;
+  milestone?: InputMaybe<Scalars['String']['input']>;
+  /** Who to ask for a review (spec 02 §2.7). */
+  reviewers?: InputMaybe<Array<Scalars['String']['input']>>;
+  source: Scalars['String']['input'];
+  /** Branch to merge into; the repository's default branch when omitted. */
+  target?: InputMaybe<Scalars['String']['input']>;
+  title: Scalars['String']['input'];
+};
+
+export type OpenPrPayload = {
+  __typename?: 'OpenPrPayload';
+  commit: CommitInfo;
+  /** Read back from the branch it was written on, which `refs` names. */
+  pr: Pr;
 };
 
 export type Pr = Entity & {
@@ -514,7 +559,10 @@ export type Pr = Entity & {
   merged?: Maybe<MergedInfo>;
   milestone?: Maybe<Scalars['String']['output']>;
   path: Scalars['String']['output'];
-  /** Branches the cross-ref scan found it on; empty for a working-tree read. */
+  /**
+   * Branches the cross-ref scan found it on, or the branch a write was just made
+   * on; empty for a working-tree read.
+   */
   refs: Array<Scalars['String']['output']>;
   /**
    * What those reviews add up to, counted by `reviewPolicy`. Never a gate: it is
@@ -807,8 +855,9 @@ export type UpdateIssuePayload = {
  *
  * The twin of `UpdateIssueInput`, with the same absent-versus-null rules, plus
  * the people it asks to review. What a pull request *is* — its revisions, its
- * target, whether it merged — is not patchable here: those need a branch and a
- * working tree, and the checkout-centric verbs are not exposed (spec 06 §6.3).
+ * target, whether it merged — is not patchable here: appending a revision and
+ * merging need a working tree on the branch and are not exposed (spec 06 §6.3).
+ * Opening one is `openPr`.
  */
 export type UpdatePrInput = {
   assignees?: InputMaybe<Array<Scalars['String']['input']>>;
@@ -953,6 +1002,8 @@ export type ResolversTypes = {
   Mutation: ResolverTypeWrapper<Record<PropertyKey, never>>;
   OpenIssueInput: OpenIssueInput;
   OpenIssuePayload: ResolverTypeWrapper<Omit<OpenIssuePayload, 'issue' | 'parent'> & { issue: ResolversTypes['Issue'], parent?: Maybe<ResolversTypes['Issue']> }>;
+  OpenPrInput: OpenPrInput;
+  OpenPrPayload: ResolverTypeWrapper<Omit<OpenPrPayload, 'pr'> & { pr: ResolversTypes['Pr'] }>;
   Pr: ResolverTypeWrapper<PrParent>;
   PrFilter: PrFilter;
   Query: ResolverTypeWrapper<Record<PropertyKey, never>>;
@@ -1006,6 +1057,8 @@ export type ResolversParentTypes = {
   Mutation: Record<PropertyKey, never>;
   OpenIssueInput: OpenIssueInput;
   OpenIssuePayload: Omit<OpenIssuePayload, 'issue' | 'parent'> & { issue: ResolversParentTypes['Issue'], parent?: Maybe<ResolversParentTypes['Issue']> };
+  OpenPrInput: OpenPrInput;
+  OpenPrPayload: Omit<OpenPrPayload, 'pr'> & { pr: ResolversParentTypes['Pr'] };
   Pr: PrParent;
   PrFilter: PrFilter;
   Query: Record<PropertyKey, never>;
@@ -1167,6 +1220,7 @@ export type MutationResolvers<ContextType = GraphQLCtx, ParentType extends Resol
   closeIssue?: Resolver<ResolversTypes['CloseIssuePayload'], ParentType, ContextType, RequireFields<MutationCloseIssueArgs, 'input'>>;
   linkIssue?: Resolver<ResolversTypes['LinkIssuePayload'], ParentType, ContextType, RequireFields<MutationLinkIssueArgs, 'input'>>;
   openIssue?: Resolver<ResolversTypes['OpenIssuePayload'], ParentType, ContextType, RequireFields<MutationOpenIssueArgs, 'input'>>;
+  openPr?: Resolver<ResolversTypes['OpenPrPayload'], ParentType, ContextType, RequireFields<MutationOpenPrArgs, 'input'>>;
   reopenIssue?: Resolver<ResolversTypes['ReopenIssuePayload'], ParentType, ContextType, RequireFields<MutationReopenIssueArgs, 'ref'>>;
   unlinkIssue?: Resolver<ResolversTypes['UnlinkIssuePayload'], ParentType, ContextType, RequireFields<MutationUnlinkIssueArgs, 'ref'>>;
   updateIssue?: Resolver<ResolversTypes['UpdateIssuePayload'], ParentType, ContextType, RequireFields<MutationUpdateIssueArgs, 'input'>>;
@@ -1177,6 +1231,11 @@ export type OpenIssuePayloadResolvers<ContextType = GraphQLCtx, ParentType exten
   commit?: Resolver<ResolversTypes['CommitInfo'], ParentType, ContextType>;
   issue?: Resolver<ResolversTypes['Issue'], ParentType, ContextType>;
   parent?: Resolver<Maybe<ResolversTypes['Issue']>, ParentType, ContextType>;
+};
+
+export type OpenPrPayloadResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['OpenPrPayload'] = ResolversParentTypes['OpenPrPayload']> = {
+  commit?: Resolver<ResolversTypes['CommitInfo'], ParentType, ContextType>;
+  pr?: Resolver<ResolversTypes['Pr'], ParentType, ContextType>;
 };
 
 export type PrResolvers<ContextType = GraphQLCtx, ParentType extends ResolversParentTypes['Pr'] = ResolversParentTypes['Pr']> = {
@@ -1314,6 +1373,7 @@ export type Resolvers<ContextType = GraphQLCtx> = {
   MergedInfo?: MergedInfoResolvers<ContextType>;
   Mutation?: MutationResolvers<ContextType>;
   OpenIssuePayload?: OpenIssuePayloadResolvers<ContextType>;
+  OpenPrPayload?: OpenPrPayloadResolvers<ContextType>;
   Pr?: PrResolvers<ContextType>;
   Query?: QueryResolvers<ContextType>;
   ReopenIssuePayload?: ReopenIssuePayloadResolvers<ContextType>;

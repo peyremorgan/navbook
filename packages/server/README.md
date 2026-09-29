@@ -220,7 +220,13 @@ Failures carry a machine-readable `extensions.code`: every
 actually said goes to the server's log, because its stderr can carry the
 remote's URL, server-side paths, and hook output.
 
-Three mutations have a shape worth knowing:
+Some mutations have a shape worth knowing:
+
+- **`openPr`** takes the branch carrying the work by name (`source`), which
+  must already be pushed. The server checks it out into a temporary worktree of
+  its clone, writes the pull request there — its files live on the branch they
+  propose to merge — and pushes the branch. **`addComment`** and **`updatePr`**
+  on a pull request the served branch does not hold go the same way.
 
 - **`linkIssue`** refuses with `REPARENT_REQUIRED` when the issue already has a
   parent, naming the one it has now. Moving a subtask changes a structure
@@ -282,13 +288,13 @@ clone has fetched and no more.
 
 ### What it does not do
 
-Pull request `merge`, `open` and `update`, entity `delete`, `init`,
-`doctor --fix`, and renaming or deleting a feature or one of its documents are
-not exposed; they are checkout-centric maintainer actions,
-and `doctor` is read-only here. A pull request's files live on the branch it
-proposes to merge, so `prs(allRefs: true)` can find one this checkout does not
-hold, but commenting on it needs a server serving that branch — the refusal
-says which one.
+Pull request `merge` and `update` (appending a revision), entity `delete`,
+`init`, `doctor --fix`, and renaming or deleting a feature or one of its
+documents are not exposed; they are checkout-centric maintainer actions, and
+`doctor` is read-only here. A pull request's files live on the branch it
+proposes to merge, so `prs(allRefs: true)` finds ones this checkout does not
+hold — and writing to one happens on that branch, in a temporary worktree the
+server makes and removes. The branch has to be on the remote already.
 
 ## Development
 

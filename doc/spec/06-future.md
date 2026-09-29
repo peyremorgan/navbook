@@ -100,7 +100,7 @@ what keeps the format from acquiring a second implementation by accident:
   clone but not pushed: it exists nowhere anyone else can pull from, and a
   client that reported it as saved would be lying about where the work went.
 
-Two consequences worth recording, because both are refusals rather than
+Some consequences worth recording, most of them refusals rather than
 omissions.
 
 **Specification documents are edited in the browser, and a stale write is
@@ -115,22 +115,28 @@ field edited from a rendered value carries the hash of the file it was read
 from, and is refused only when that field — not the file — has changed since,
 because two people changing different fields of one issue are not in conflict.
 
-**The checkout-centric verbs are not exposed.** Opening a pull request,
-appending a revision to one, merging it, deleting an entity, `init`, and
-`doctor --fix` need a branch and a working tree rather than a request, and a
-gateway performing them would be making decisions on somebody's behalf that
-they could not see. `doctor` is read-only over the API. Editing a pull
-request's *metadata* is not on that list: asking somebody to review, or
-relabelling, is a patch to one file and nothing else, so it is exposed exactly
-as an issue's is.
+**Most checkout-centric verbs are not exposed.** Appending a revision to a pull
+request, merging it, deleting an entity, `init`, and `doctor --fix` need a
+branch and a working tree rather than a request, and a gateway performing them
+would be making decisions on somebody's behalf that they could not see.
+`doctor` is read-only over the API. Editing a pull request's *metadata* is not
+on that list: asking somebody to review, or relabelling, is a patch to one file
+and nothing else, so it is exposed exactly as an issue's is.
 
-**A pull request can be visible and still not writable.** Its files live on
-the branch it proposes to merge ([03 §3.5](03-merge-and-branches.md)), so a
-cross-ref scan finds ones the serving checkout does not hold. Writing a comment
-beside a `pr.md` that is not there would produce the stranded comment of
-[03 §3.3.1](03-merge-and-branches.md) — and there is no `pr.md` there to patch
-either — so the server refuses and names the branch that would have to be
-served instead.
+**A pull request is written on its branch, wherever the server stands.** Its
+files live on the branch it proposes to merge ([03 §3.5](03-merge-and-branches.md)),
+which the serving checkout usually does not hold, and a comment written beside
+a `pr.md` that is not there would be the stranded comment of
+[03 §3.3.1](03-merge-and-branches.md). So the server does what a person at a
+terminal does: it checks the branch out into a temporary worktree of its
+clone, writes there, commits, pushes that branch, and removes the worktree.
+The same mechanism is what lets it *open* a pull request — the one
+checkout-centric verb it exposes, because opening one is writing the first
+file on a branch somebody already pushed. The branch has to exist on the
+remote; the server never creates one anybody would see, and its local copy of
+one is merged with the remote's under the served branch's rules — a conflict
+is surfaced, not resolved. Everything else about the write is the rule above:
+`author:` the person, the committer the gateway.
 
 **A plugin's web half is compiled in, and reads its own data off `ext`.** An
 extension ([02 §2.12](02-data-model.md)) that has something to show in a browser

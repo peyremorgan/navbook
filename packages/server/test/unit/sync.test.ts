@@ -14,6 +14,11 @@ import { GitStoppedError, GitTimeoutError } from "@navbook/core";
 import { RepoSync, type SyncGit } from "../../src/sync.ts";
 
 const ROOT = "/clone";
+/** A worktree of the clone, on another branch. */
+const SITE = "/worktree";
+
+/** Where a call ran, when it was not the clone: the worktree's calls say so. */
+const where = (cwd: string): string => (cwd === ROOT ? "" : ` ${cwd}`);
 
 /**
  * What git says, one call at a time.
@@ -97,24 +102,24 @@ function recorder(script: Scripted = {}): Recorder {
     resolveSha: async () => (script.noUpstream ? null : "a".repeat(40)),
     isAlreadyMerged: async () => !next(behind),
     canFastForward: async () => script.fastForwardable === true,
-    fastForward: async () => {
-      calls.push("fast-forward");
+    fastForward: async (cwd) => {
+      calls.push(`fast-forward${where(cwd)}`);
     },
-    mergeNoCommit: async () => {
+    mergeNoCommit: async (cwd) => {
       const outcome = next(merges);
-      calls.push(`merge -> ${outcome}`);
+      calls.push(`merge${where(cwd)} -> ${outcome}`);
       return outcome;
     },
-    commitMerge: async () => {
-      calls.push("commit-merge");
+    commitMerge: async (cwd) => {
+      calls.push(`commit-merge${where(cwd)}`);
       if (script.commitMergeFails) throw new Error("hook refused the merge commit");
       return "b".repeat(40);
     },
-    abortMerge: async () => {
-      calls.push("abort-merge");
+    abortMerge: async (cwd) => {
+      calls.push(`abort-merge${where(cwd)}`);
     },
     conflictedPaths: async () => script.conflicted ?? [".navbook/issues/open/aa111111-x/issue.md"],
-    currentBranch: async () => "main",
+    currentBranch: async (cwd) => (cwd === SITE ? "feature" : "main"),
   };
   return { git, calls, timeouts };
 }
@@ -558,6 +563,190 @@ describe("RepoSync.write", () => {
     const { pushed } = await sync.write(() => "local", committed);
     assert.equal(pushed, false);
     assert.deepEqual(calls, []);
+  });
+});
+
+describe("RepoSync.writeOn", () => {
+  const committed = () => true;
+
+  /** A site in a worktree, whose lifecycle is written into `calls` beside git's. */
+  function siteOp(
+    calls: string[],
+    over: { root?: string; body?: (root: string) => unknown; committed?: () => boolean } = {},
+  ) {
+    return {
+      open: () => {
+        calls.push("open");
+        return { root: over.root ?? SITE };
+      },
+      body: (site: { root: string }) => {
+        calls.push(`body ${site.root}`);
+        return over.body ? over.body(site.root) : "written";
+      },
+      committed: over.committed ?? committed,
+      close: (site: { root: string }, outcome: { failed: boolean; pushed: boolean }) => {
+        calls.push(`close ${site.root} failed=${outcome.failed} pushed=${outcome.pushed}`);
+      },
+    };
+  }
+
+  it("pulls the clone, opens, merges the site, writes there, pushes its branch, closes", async () => {
+    const { sync, calls } = makeSync({ behind: [false, true], fastForwardable: true });
+    const { result, pushed } = await sync.writeOn(siteOp(calls));
+    assert.equal(result, "written");
+    assert.equal(pushed, true);
+    assert.deepEqual(calls, [
+      "fetch origin",
+      "open",
+      `fast-forward ${SITE}`,
+      `body ${SITE}`,
+      "push origin feature -> ok",
+      `close ${SITE} failed=false pushed=true`,
+    ]);
+  });
+
+  it("merges a site whose branch diverged from its remote before writing", async () => {
+    const { sync, calls } = makeSync({ behind: [false, true] });
+    await sync.writeOn(siteOp(calls));
+    assert.deepEqual(calls.slice(1, 5), [
+      "open",
+      `merge ${SITE} -> staged`,
+      `commit-merge ${SITE}`,
+      `body ${SITE}`,
+    ]);
+  });
+
+  it("writes in the clone when the site is the clone, merging nothing twice", async () => {
+    const { sync, calls } = makeSync({ behind: [false, true], fastForwardable: true });
+    await sync.writeOn(siteOp(calls, { root: ROOT }));
+    assert.deepEqual(calls, [
+      "fetch origin",
+      "open",
+      `body ${ROOT}`,
+      "push origin main -> ok",
+      `close ${ROOT} failed=false pushed=true`,
+    ]);
+  });
+
+  it("closes a site whose body threw, having pushed nothing", async () => {
+    const { sync, calls } = makeSync();
+    await assert.rejects(
+      sync.writeOn(
+        siteOp(calls, {
+          body: () => {
+            throw new Error("refused");
+          },
+        }),
+      ),
+      /refused/,
+    );
+    assert.deepEqual(calls, [
+      "fetch origin",
+      "open",
+      `body ${SITE}`,
+      `close ${SITE} failed=true pushed=false`,
+    ]);
+  });
+
+  it("closes nothing when opening failed", async () => {
+    const { sync, calls } = makeSync();
+    let closed = false;
+    await assert.rejects(
+      sync.writeOn({
+        open: () => {
+          throw new Error("no such branch");
+        },
+        body: () => undefined,
+        committed,
+        close: () => {
+          closed = true;
+        },
+      }),
+      /no such branch/,
+    );
+    assert.equal(closed, false);
+    assert.deepEqual(calls, ["fetch origin"]);
+  });
+
+  it("closes a site that committed nothing, without pushing", async () => {
+    const { sync, calls } = makeSync();
+    const { pushed } = await sync.writeOn(siteOp(calls, { committed: () => false }));
+    assert.equal(pushed, false);
+    assert.deepEqual(calls.at(-1), `close ${SITE} failed=false pushed=false`);
+    assert.equal(calls.filter((call) => call.startsWith("push")).length, 0);
+  });
+
+  it("reports a site that conflicts with its remote branch, and still closes it", async () => {
+    const { sync, calls } = makeSync({ behind: [false, true], merges: ["conflict"] });
+    await assert.rejects(sync.writeOn(siteOp(calls)), (error: unknown) => {
+      const extensions = extensionsOf(error);
+      assert.equal(extensions.code, "SYNC_CONFLICT");
+      // Nothing of this request's was committed yet.
+      assert.equal(extensions.keptLocalCommit, false);
+      return true;
+    });
+    assert.deepEqual(calls, [
+      "fetch origin",
+      "open",
+      `merge ${SITE} -> conflict`,
+      `abort-merge ${SITE}`,
+      `close ${SITE} failed=true pushed=false`,
+    ]);
+  });
+
+  it("merges into the site, not the clone, when its push is refused, and pushes again", async () => {
+    const { sync, calls } = makeSync({
+      pushes: ["rejected", "ok"],
+      behind: [false, false, true],
+      fastForwardable: true,
+    });
+    const { pushed } = await sync.writeOn(siteOp(calls));
+    assert.equal(pushed, true);
+    assert.deepEqual(calls, [
+      "fetch origin",
+      "open",
+      `body ${SITE}`,
+      "push origin feature -> rejected",
+      "fetch origin",
+      `fast-forward ${SITE}`,
+      "push origin feature -> ok",
+      `close ${SITE} failed=false pushed=true`,
+    ]);
+  });
+
+  it("keeps the site's commit and says so when the retry's merge conflicts", async () => {
+    const { sync, calls } = makeSync({
+      pushes: ["rejected"],
+      behind: [false, false, true],
+      merges: ["conflict"],
+    });
+    await assert.rejects(sync.writeOn(siteOp(calls)), (error: unknown) => {
+      assert.equal(extensionsOf(error).keptLocalCommit, true);
+      return true;
+    });
+    assert.equal(calls.at(-1), `close ${SITE} failed=true pushed=false`);
+  });
+
+  it("writes on the site without merging or pushing when there is no remote", async () => {
+    const { sync, calls } = makeSync({}, { remote: null });
+    const { pushed } = await sync.writeOn(siteOp(calls));
+    assert.equal(pushed, false);
+    assert.deepEqual(calls, ["open", `body ${SITE}`, `close ${SITE} failed=false pushed=false`]);
+  });
+
+  it("says a write is starting, and that git wrote, as a write in the clone does", async () => {
+    const order: string[] = [];
+    const { sync } = makeSync(
+      {},
+      { onWrite: () => order.push("write"), afterSync: () => order.push("synced") },
+    );
+    await sync.writeOn({
+      open: () => ({ root: SITE }),
+      body: () => order.push("body"),
+      committed,
+      close: () => order.push("close"),
+    });
+    assert.deepEqual(order, ["synced", "write", "body", "synced", "close"]);
   });
 });
 
