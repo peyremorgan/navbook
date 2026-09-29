@@ -27,7 +27,7 @@ import type { MergeMethod } from "../src/core/policy.ts";
 import { emptyQuery } from "../src/core/query.ts";
 import type { EntityRecord } from "../src/core/tree.ts";
 import { GitError, git } from "../src/git/exec.ts";
-import { resolveSha } from "../src/git/repo.ts";
+import { addWorktree, removeWorktree, resolveSha } from "../src/git/repo.ts";
 import {
   applyComment,
   bindReviewRevision,
@@ -930,3 +930,22 @@ function findEntityOrNull(ws: WsCtx, ref: string): EntityRecord | null {
     return null;
   }
 }
+
+describe("git: worktrees", () => {
+  it("checks out a branch named like an option, rather than obeying it", () => {
+    inWorkspace((_ws, dir) => {
+      git(["commit", "-q", "--allow-empty", "-m", "first"], { cwd: dir });
+      // A full refname may start with a dash, and a fetch can bring one in.
+      git(["update-ref", "refs/heads/--detach", "HEAD"], { cwd: dir });
+      git(["commit", "-q", "--allow-empty", "-m", "second"], { cwd: dir });
+      const path = `${dir}-wt`;
+      addWorktree(dir, path, "--detach");
+      try {
+        assert.equal(git(["log", "-1", "--format=%s"], { cwd: path }).trim(), "first");
+      } finally {
+        removeWorktree(dir, path, { force: true });
+      }
+      assert.equal(existsSync(path), false);
+    });
+  });
+});
