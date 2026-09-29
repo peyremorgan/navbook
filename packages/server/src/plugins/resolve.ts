@@ -20,6 +20,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import {
+  hasPluginKeyword,
+  isPluginPackageName,
   PLUGIN_API_VERSION,
   type PluginManifest,
   parsePluginPackage,
@@ -58,6 +60,18 @@ export function resolveServerPlugins(ws: WsCtx, env: NodeJS.ProcessEnv): ServerP
   const out: ServerPlugin[] = [];
 
   for (const [name, settings] of declaration.plugins) {
+    // The declaration is whatever was last pushed to the served branch, so a
+    // name there is never a path: `/srv/clone/.navbook/x` or `../x` would
+    // resolve to a directory of the clone itself, and the server would import
+    // code anybody with push access wrote. Only a plugin's package name is
+    // looked up, and only among the packages installed beside the server —
+    // the CLI's rule, which loads from its own store and never from a clone.
+    if (!byPath.has(name) && !isPluginPackageName(name)) {
+      throw new PluginResolutionError(
+        `${ws.navDir}/navbook.json declares '${name}', which is not named as a plugin ` +
+          "(@navbook/plugin-<name>, navbook-plugin-<name> or @scope/navbook-plugin-<name>)",
+      );
+    }
     const found = byPath.get(name) ?? installedPlugin(name);
     if (found === null) {
       throw new PluginResolutionError(
@@ -105,14 +119,30 @@ function readPlugin(dir: string): Found {
   return { name, version, dir, manifest };
 }
 
-/** Locate a plugin installed beside the server. */
+/**
+ * Locate a plugin installed beside the server.
+ *
+ * What resolves must be the package that was asked for, and must say it is a
+ * plugin, as `nav plugin install` checks before it records one: a name that
+ * resolves to some other package is not that plugin, whatever its manifest
+ * claims.
+ */
 function installedPlugin(name: string): Found | null {
   const require = createRequire(import.meta.url);
   for (const specifier of [`${name}/package.json`, name]) {
     try {
       const resolved = require.resolve(specifier);
       const dir = specifier.endsWith("package.json") ? dirname(resolved) : packageRootOf(resolved);
-      if (dir !== null) return readPlugin(dir);
+      if (dir === null) continue;
+      const found = readPlugin(dir);
+      if ("error" in found) return found;
+      if (found.name !== name) {
+        return { error: `it resolved to ${dir}, which is the package ${found.name}` };
+      }
+      if (!hasPluginKeyword(JSON.parse(readFileSync(join(dir, "package.json"), "utf8")))) {
+        return { error: "it does not carry the 'navbook-plugin' keyword" };
+      }
+      return found;
     } catch {
       // Try the next specifier; a plugin need not export its package.json.
     }

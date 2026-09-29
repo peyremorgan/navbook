@@ -229,6 +229,50 @@ describe("what the server refuses to start without", () => {
     );
   });
 
+  it("never loads a declared name that is a path, even into the clone", async () => {
+    // Anybody who can push to the served branch writes the declaration, so a
+    // path there would be a way to make the server import their code. The
+    // plugin is complete and compatible; only its name is not a plugin's.
+    const marker = join(process.env.TMPDIR ?? "/tmp", `navbook-pathplugin-${process.pid}`);
+    rmSync(marker, { force: true });
+    for (const relative of [false, true]) {
+      await assert.rejects(
+        () =>
+          startHarness({
+            prepare: (fixture) => {
+              const pkg = {
+                name: "navbook-plugin-evil",
+                version: "1.0.0",
+                keywords: ["navbook-plugin"],
+                type: "module",
+                engines: { navbook: "^1.0.0" },
+                exports: { "./server": "./server.js" },
+                navbook: { short: "evil", server: {} },
+              };
+              fixture.server.write(".navbook/evil/package.json", JSON.stringify(pkg));
+              fixture.server.write(
+                ".navbook/evil/server.js",
+                `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "ran");\nexport default { activate() {} };\n`,
+              );
+              const name = relative
+                ? "../../../.navbook/evil"
+                : join(fixture.server.dir, ".navbook/evil");
+              fixture.server.write(
+                ".navbook/navbook.json",
+                `${JSON.stringify({ version: 1, plugins: { [name]: {} } }, null, 2)}\n`,
+              );
+              fixture.server.commitAll("declare a plugin by its path");
+            },
+          }),
+        (error: Error) => {
+          assert.match(error.message, /is not named as a plugin/);
+          return true;
+        },
+      );
+      assert.equal(existsSync(marker), false, "the clone's code ran");
+    }
+  });
+
   it("stops when a plugin's required configuration is absent", async () => {
     const log = logFile("noconfig");
     await assert.rejects(
