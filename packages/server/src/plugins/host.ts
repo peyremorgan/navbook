@@ -43,7 +43,11 @@ export interface MutationEvent {
   message: string;
   /** False when the operation turned out to be a no-op. */
   committed: boolean;
-  /** Whether the commit reached the remote; false is a `SYNC_CONFLICT`. */
+  /**
+   * Whether the commit reached the remote: false when the server has no
+   * remote, or nothing was committed. A write whose push fails throws before
+   * any event, so no listener hears of a change its author was told failed.
+   */
   pushed: boolean;
   /** Who the token said was acting — the person, not the machine account. */
   viewer: Identity;

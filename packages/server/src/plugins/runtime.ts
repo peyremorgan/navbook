@@ -115,8 +115,9 @@ export class PluginRuntime {
   /**
    * Tell every listener, and let none of them break the mutation.
    *
-   * The write has already committed and pushed by the time this runs, so there
-   * is nothing left to roll back and nothing a listener could usefully refuse.
+   * The write has already committed, and pushed where there is a remote, by
+   * the time this runs, so there is nothing left to roll back and nothing a
+   * listener could usefully refuse.
    * A listener that throws has a bug in it, and reporting that is strictly
    * better than turning somebody's successful `openIssue` into an error about
    * a chat bridge they may not even know is installed.
