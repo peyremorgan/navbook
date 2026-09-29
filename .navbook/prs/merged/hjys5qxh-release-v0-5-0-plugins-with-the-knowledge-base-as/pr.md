@@ -10,6 +10,9 @@ revisions:
   - head: aa86a393f9fcf04f093ebd13c01d8f4e9c69e4a4
     base: b93ca766fdce43cdfdc79f85ce396abc6a3d49d9
     date: 2026-09-29T10:29:28Z
+merged:
+  date: 2026-09-29T10:30:03Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Releases v0.5.0: everything on `dev` since v0.4.0, plus the fixes from the release review (#aocfb72n) and the version bump.
