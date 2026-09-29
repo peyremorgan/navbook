@@ -623,6 +623,19 @@ describe("withComments", () => {
     assert.deepEqual(read.comments, []);
     assert.equal(read.commentsLoaded, true);
   });
+  it("fails on a comments directory it cannot read, as a full load does", () => {
+    const bare = loadRepo(ws, { comments: "none" }).byId.get("bqlybac0") as EntityRecord;
+    const comments = join(dir, ".navbook", "issues/open/bqlybac0-x/comments");
+    chmodSync(comments, 0o000);
+    try {
+      // Served as "no comments", an unreadable directory would look like a
+      // conversation that never happened.
+      assert.throws(() => withComments(ws, bare), { code: "EACCES" });
+      assert.throws(() => loadRepo(ws), { code: "EACCES" });
+    } finally {
+      chmodSync(comments, 0o755);
+    }
+  });
 });
 
 describe("treePeople", () => {

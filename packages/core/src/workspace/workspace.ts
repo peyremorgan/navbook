@@ -136,8 +136,12 @@ export function withComments(ws: WsCtx, entity: EntityRecord): EntityRecord {
   let entries: Dirent<string>[] = [];
   try {
     entries = readdirSync(join(ws.navRoot, dir), { withFileTypes: true, encoding: "utf8" });
-  } catch {
+  } catch (error) {
     // No `comments/` at all, which is an entity nobody has commented on yet.
+    // Anything else is a directory that could not be read, which a full load
+    // reports (`walk`), and must not be served as "no comments".
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
   }
   for (const entry of entries) {
     if (!entry.isFile()) continue;
