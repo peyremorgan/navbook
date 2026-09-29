@@ -13,7 +13,7 @@ revisions:
 
 Closes #kw6afa4a, the second of three steps towards #c43a2w7e (plugin-chat).
 
-**Stacked on #lfr46mfi**: this branch starts from #yp56dc43's commits, so merge that one first and rebase this onto `dev`.
+**Stacked on `#lfr46mfi`**: this branch starts from #yp56dc43's commits, so merge that one first and rebase this onto `dev`.
 
 A plugin that acts for somebody (an assistant, a chat bridge) needs four things the hosts did not offer. This adds them.
 
@@ -61,6 +61,6 @@ What the new tests cover:
 - Two probe-plugin cases for `ui.withPrWriteSite`.
 - A vitest case for `overlays`.
 
-Under a load average of 10-25, the TreeCache watchdog, maintenance stop and CLI perf-budget tests failed once each. All pass on rerun alone, and #lfr46mfi's branch shows the same perf flake.
+Under a load average of 10-25, the TreeCache watchdog, maintenance stop and CLI perf-budget tests failed once each. All pass on rerun alone, and `#lfr46mfi`'s branch shows the same perf flake.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
