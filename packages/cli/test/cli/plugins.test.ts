@@ -686,6 +686,27 @@ describe("a plugin that cannot be used", () => {
   });
 });
 
+describe("a plugin whose registration is malformed", () => {
+  it("is skipped and named, and the command still runs", () => {
+    const repo = probeRepo();
+    try {
+      const env = variantProbe(repo, (_manifest, dir) => {
+        writeFileSync(
+          join(dir, "core.js"),
+          'export function activate(host) { host.register({ treeLocations: { dir: "probe" } }); }\n',
+        );
+      });
+      repo.nav(["issue", "open", "One", "-m", "Body."]);
+      const result = repo.nav(["issue", "list"], env);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stderr, /plugin @navbook\/plugin-probe skipped: what it registered/);
+      assert.match(result.stdout, /One/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
 describe("a plugin whose code is not where the index says", () => {
   it("says it could not be loaded, not that it lacks the command", () => {
     const repo = probeRepo({ declare: false });

@@ -161,11 +161,15 @@ export async function loadCoreExtensions(plugins: readonly LoadedPlugin[]): Prom
       mergeExtensions([...kept, ...part.registered]);
       kept.push(...part.registered);
     } catch (error) {
-      if (error instanceof ExtensionConflictError) {
-        problems.push(`nav: plugin ${part.name} skipped: ${error.message}`);
-        continue;
-      }
-      throw error;
+      // Any fault, not only a collision: a registration of the wrong shape
+      // (`treeLocations` as an object, say) throws a TypeError from deep in
+      // the merge, and rethrowing it would take down every command over one
+      // plugin — the outcome this function exists to prevent.
+      const why =
+        error instanceof ExtensionConflictError
+          ? error.message
+          : `what it registered could not be used: ${message(error)}`;
+      problems.push(`nav: plugin ${part.name} skipped: ${why}`);
     }
   }
 
