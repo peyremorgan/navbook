@@ -5,6 +5,7 @@ created: 2026-09-29T01:23:21Z
 labels: [plugin]
 assignee: Claude <noreply@anthropic.com>
 parent: c43a2w7e
+resolution: fixed
 ---
 
 A pull request's files live on its source branch (spec 03 §3.5), which the serving checkout usually does not hold. Today the server refuses `addComment` and `updatePr` on such a pull request (PRECONDITION) and cannot open one at all (spec 06 lists opening as not exposed).
