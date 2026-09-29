@@ -236,7 +236,7 @@ export function activate(host: ServerPluginHost): void {
               const feature = findFeature(core, ctx.ws, input.slug);
               const before = readFileSync(core.absPath(ctx.ws, feature.filePath), "utf8");
               const patched = applyFeaturePatch(
-                core,
+                host,
                 before,
                 input,
                 core.repoPath(ctx.ws.navDir, feature.filePath),
@@ -314,7 +314,7 @@ export function activate(host: ServerPluginHost): void {
               const spec = resolveSpec(core, feature, input.fileName);
               const before = readFileSync(core.absPath(ctx.ws, spec.path), "utf8");
               const patched = applySpecPatch(
-                core,
+                host,
                 before,
                 input,
                 core.repoPath(ctx.ws.navDir, spec.path),
