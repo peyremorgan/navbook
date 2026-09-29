@@ -11,9 +11,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { makeTempRepo, PACKAGE_ROOT, type TempRepo } from "../helpers/temprepo.ts";
+import {
+  deterministicEnv,
+  makeTempRepo,
+  navCommand,
+  PACKAGE_ROOT,
+  type RunResult,
+  type TempRepo,
+} from "../helpers/temprepo.ts";
 
 const PROBE = join(PACKAGE_ROOT, "test", "fixtures", "plugin-probe");
 
@@ -878,6 +885,45 @@ describe("nav plugin", () => {
       assert.equal(result.code, 0, `${result.stdout}${result.stderr}`);
       assert.deepEqual(listed(repo, npm.env), ["@navbook/plugin-probe@1.0.0"]);
       assert.equal(npm.log().length, 1);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("works outside a repository, since the store is the user's", () => {
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    // The home directory is beside the repository, not in it; the ceiling
+    // keeps git from finding any repository the test directory sits in.
+    const outside = (args: string[]): RunResult => {
+      const command = navCommand();
+      const result = spawnSync(command[0] as string, [...command.slice(1), ...args], {
+        cwd: repo.home,
+        encoding: "utf8",
+        env: {
+          ...deterministicEnv(repo.home),
+          ...npm.env,
+          GIT_CEILING_DIRECTORIES: dirname(repo.home),
+        },
+      });
+      return { code: result.status ?? 1, stdout: result.stdout, stderr: result.stderr };
+    };
+    try {
+      npm.publish("1.0.0");
+      const installed = outside(["plugin", "install", "@navbook/plugin-probe", "-y"]);
+      assert.equal(installed.code, 0, installed.stderr);
+      assert.match(installed.stdout, /Installed @navbook\/plugin-probe@1\.0\.0/);
+      const list = outside(["plugin", "list"]);
+      assert.equal(list.code, 0, list.stderr);
+      assert.match(list.stdout, /@navbook\/plugin-probe\s+1\.0\.0/);
+
+      npm.publish("1.1.0");
+      const updated = outside(["plugin", "update", "@navbook/plugin-probe", "-y"]);
+      assert.equal(updated.code, 0, updated.stderr);
+      assert.match(updated.stdout, /Updated @navbook\/plugin-probe 1\.0\.0 → 1\.1\.0/);
+      const removed = outside(["plugin", "remove", "@navbook/plugin-probe", "-y"]);
+      assert.equal(removed.code, 0, removed.stderr);
+      assert.match(removed.stdout, /Removed @navbook\/plugin-probe/);
     } finally {
       repo.cleanup();
     }

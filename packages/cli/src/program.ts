@@ -53,7 +53,7 @@ import {
   cmdPrUpdate,
 } from "./commands/pr.ts";
 import { YES_HELP } from "./commands/pr-elsewhere.ts";
-import type { Ctx } from "./context.ts";
+import type { Ctx, GetCtx } from "./context.ts";
 import {
   applyOption,
   buildPluginCommand as buildDeclaredCommand,
@@ -225,7 +225,7 @@ function readsTheTree(action: Command): boolean {
   return !FORMAT_INDEPENDENT.has(top.name());
 }
 
-export function buildProgram(getCtx: () => Ctx, plugins?: PluginRuntime): Command {
+export function buildProgram(getCtx: GetCtx, plugins?: PluginRuntime): Command {
   const program = withoutHelpVerb(new Command());
   program
     .name("nav")
@@ -354,8 +354,15 @@ function stderrOf(getCtx: () => Ctx): NodeJS.WritableStream {
   }
 }
 
-/** `nav plugin` — the store verbs of spec 04 §4.3. */
-function buildPluginCommand(getCtx: () => Ctx): Command {
+/**
+ * `nav plugin` — the store verbs of spec 04 §4.3.
+ *
+ * The store is per user, not per repository, so none of these needs one:
+ * installing a plugin from a home directory is as ordinary as installing it
+ * from a checkout. Inside a repository they still read its declaration.
+ */
+function buildPluginCommand(getRepoCtx: GetCtx): Command {
+  const getCtx = () => getRepoCtx({ requireRepo: false });
   const plugin = withoutHelpVerb(new Command("plugin")).description("install and manage plugins");
 
   plugin
