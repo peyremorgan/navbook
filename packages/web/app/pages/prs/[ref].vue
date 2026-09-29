@@ -617,10 +617,10 @@ const branchHint = computed(() => refusedOn.value);
           <!-- What plugin layers registered for a pull request; see the issue page. -->
           <component
             :is="panel.component"
-            :is-disabled="branchHint !== null"
             v-for="(panel, index) in slots.panels('pr')"
             :key="`panel-${index}`"
             :entity="shown"
+            :disabled="branchHint !== null"
             :saving="edits.saving.value"
             :field-save="edits.field('ext')"
             @save="save"

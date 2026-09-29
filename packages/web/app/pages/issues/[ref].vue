@@ -438,6 +438,7 @@ async function unlink(child: string): Promise<void> {
             v-for="(panel, index) in slots.panels('issue')"
             :key="`panel-${index}`"
             :entity="shown"
+            :disabled="false"
             :saving="edits.saving.value"
             :field-save="edits.field('ext')"
             @save="save"

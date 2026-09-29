@@ -46,6 +46,12 @@ export interface NavLinkSlot {
  * values go in `ext` under the field name its SDL added
  * ({@link EntityFieldSlot}).
  *
+ * It is also given `disabled`, set when the server has already said it cannot
+ * take a write to this entity — a pull request whose branch this checkout
+ * does not hold — and a panel that edits withdraws its offer to, as the
+ * built-in editors beside it do. A panel must declare it even if it only
+ * reads: a prop a component does not declare lands on its root element.
+ *
  * Kept to one shape for issues and pull requests, because a plugin that has
  * something to say about one usually has the same thing to say about the
  * other.
