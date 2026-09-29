@@ -303,11 +303,14 @@ export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void 
       when: (entities) => entities.some((entity) => summaryOf(entity).reviewers.length > 0),
     },
   ];
+  // The listing's own columns first, then whatever plugins contributed: the
+  // caller's are added to these, never replaced by them.
+  const columns = [...extraColumns, ...(opts.extraColumns ?? [])];
   const query = parseListQuery(ctx, terms, "pr");
 
   if (!opts.allRefs) {
     const here = listEntities(ctx, "pr", query);
-    reportList(ctx, "pr", here, { ...opts, extraColumns });
+    reportList(ctx, "pr", here, { ...opts, extraColumns: columns });
     if (here.length === 0) hintOtherRefs(ctx, opts);
     return;
   }
@@ -318,7 +321,10 @@ export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void 
     ctx.stdout.write(
       `${toNdjson(
         matched.map((entry) =>
-          entityJson(ctx.navDir, entry.entity, { refs: entry.refs.map((ref) => ref.short) }),
+          entityJson(ctx.navDir, entry.entity, {
+            ...(opts.jsonExtra?.(entry.entity) ?? {}),
+            refs: entry.refs.map((ref) => ref.short),
+          }),
         ),
       )}\n`,
     );
@@ -336,7 +342,7 @@ export function cmdPrList(ctx: Ctx, terms: string[], opts: PrListOptions): void 
     {
       ...opts,
       extraColumns: [
-        ...extraColumns,
+        ...columns,
         {
           header: "refs",
           value: (entity: EntityRecord) =>

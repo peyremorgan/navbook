@@ -112,6 +112,40 @@ function variantProbe(
   return { NAVBOOK_PLUGIN_PATH: dir, PROBE_LOG: join(repo.home, "probe.log") };
 }
 
+/**
+ * A probe that also contributes to `pr list`: a `probe` column and a
+ * `probeSeen` key, whose JSON also tries `extraJson` on for size.
+ */
+function prListProbe(repo: TempRepo, extraJson: Record<string, unknown> = {}): NodeJS.ProcessEnv {
+  return variantProbe(repo, (manifest, dir) => {
+    manifest.navbook.cli.contributions.push({ on: "pr list", columns: true, jsonExtra: true });
+    manifest.exports["./cli"] = "./cli-pr.js";
+    writeFileSync(
+      join(dir, "cli-pr.js"),
+      `import { activate as probe } from "./cli.js";
+export function activate(host) {
+  probe(host);
+  host.contribute("pr list", {
+    columns: [{ header: "probe", value: () => "seen" }],
+    jsonExtra: () => ({ probeSeen: true, ...${JSON.stringify(extraJson)} }),
+  });
+}
+`,
+    );
+  });
+}
+
+/** A pull request opened on `feat/x`, with `main` checked out again. */
+function openPrElsewhere(repo: TempRepo, env: NodeJS.ProcessEnv): void {
+  repo.commitAll("chore: init");
+  repo.git(["checkout", "--quiet", "-b", "feat/x"]);
+  repo.write("x.txt", "x\n");
+  repo.commitAll("feat: x");
+  const opened = repo.nav(["pr", "open", "--title", "X", "-m", "Body.", "--commit"], env);
+  assert.equal(opened.code, 0, opened.stderr);
+  repo.git(["checkout", "--quiet", "main"]);
+}
+
 /** Forget what was logged, so one repository can make several assertions. */
 function clearLog(repo: TempRepo): void {
   rmSync(join(repo.home, "probe.log"), { force: true });
@@ -364,6 +398,32 @@ describe("contributions to a built-in verb", () => {
       assert.deepEqual(row.probeTags, ["flaky"]);
       // The format's own keys are still there and still the format's.
       assert.equal(row.title, "One");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("adds a column and JSON keys to 'pr list', across refs too", () => {
+    // `pr list` builds columns of its own (target, reviews, refs), and those
+    // must be added to what plugins contributed rather than replace it.
+    const repo = probeRepo();
+    try {
+      const env = prListProbe(repo);
+      openPrElsewhere(repo, env);
+      repo.git(["checkout", "--quiet", "feat/x"]);
+      const here = repo.nav(["pr", "list"], env);
+      assert.equal(here.code, 0, here.stderr);
+      assert.match(here.stdout, /PROBE/);
+      assert.match(here.stdout, /TARGET/);
+      repo.git(["checkout", "--quiet", "main"]);
+
+      const across = repo.nav(["pr", "list", "--all-refs"], env);
+      assert.match(across.stdout, /PROBE/);
+      assert.match(across.stdout, /REFS/);
+      const json = repo.nav(["pr", "list", "--all-refs", "--json"], env);
+      const row = JSON.parse(json.stdout.trim()) as { probeSeen?: boolean; refs: string[] };
+      assert.equal(row.probeSeen, true);
+      assert.deepEqual(row.refs, ["feat/x"]);
     } finally {
       repo.cleanup();
     }
