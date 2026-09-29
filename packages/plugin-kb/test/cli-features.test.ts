@@ -93,6 +93,17 @@ describe("nav feature open", () => {
     assert.match(read(repo, ".navbook/specs/auth/feature.md"), /^title: Authentication$/m);
   });
 
+  it("refuses to write over a hand-written feature.md that does not parse", () => {
+    // Uncommitted as well: the check is against the disk, not only the index.
+    const path = ".navbook/specs/billing/feature.md";
+    repo.write(path, "Billing, in my own words.\n");
+    const result = repo.nav(["feature", "open", "Billing", "-m", "x"]);
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(result.stderr, /specs\/billing\/feature\.md already exists/);
+    assert.equal(read(repo, path), "Billing, in my own words.\n");
+    repo.git(["clean", "-fd"]);
+  });
+
   it("opens $EDITOR when no message is given", () => {
     const editor = editorAppending(repo, "editor-feature.sh", "Written in the editor.");
     const result = repo.nav(["feature", "open", "Search", "--commit"], { EDITOR: editor });
@@ -171,6 +182,18 @@ describe("nav feature spec", () => {
     const result = repo.nav(["feature", "spec", "add", "auth", "Login flow", "-m", "x"]);
     assert.equal(result.code, 1);
     assert.match(result.stderr, /already has a 'login-flow\.md'/);
+  });
+
+  it("refuses to write over a document that does not parse, rather than taking the name as free", () => {
+    // Text with no frontmatter builds no record, so the feature does not list
+    // it — but it is somebody's file, and `spec add` must not replace it.
+    const path = ".navbook/specs/auth/draft-notes.md";
+    repo.write(path, "Half-written, no frontmatter yet.\n");
+    const result = repo.nav(["feature", "spec", "add", "auth", "Draft notes", "-m", "new body"]);
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(result.stderr, /draft-notes\.md already exists/);
+    assert.equal(read(repo, path), "Half-written, no frontmatter yet.\n");
+    repo.git(["clean", "-fd"]);
   });
 
   it("lists documents, as a table and as JSON", () => {

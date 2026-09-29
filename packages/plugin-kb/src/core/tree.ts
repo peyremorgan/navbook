@@ -63,10 +63,19 @@ export interface FeatureRecord {
 export interface KbModel {
   features: FeatureRecord[];
   featureBySlug: Map<string, FeatureRecord>;
+  /**
+   * Every path the host routed here, relative to the Navbook directory —
+   * including the ones no record was built from.
+   *
+   * A file that does not parse is dropped from `features` and reported, but it
+   * is still somebody's file: this is what lets a create refuse to write over
+   * it rather than mistake it for a free name.
+   */
+  paths: ReadonlySet<string>;
 }
 
 /** The reading of a tree with no `specs/` at all, which is most of them. */
-export const EMPTY_KB: KbModel = { features: [], featureBySlug: new Map() };
+export const EMPTY_KB: KbModel = { features: [], featureBySlug: new Map(), paths: new Set() };
 
 interface FeatureDraft {
   slug: string;
@@ -107,7 +116,7 @@ export function buildKb(
     featureBySlug.set(record.slug, record);
   }
 
-  return { model: { features, featureBySlug }, problems };
+  return { model: { features, featureBySlug, paths: new Set(paths) }, problems };
 }
 
 function classify(

@@ -554,6 +554,10 @@ describe("a document a tool would not have created", () => {
           ".navbook/specs/auth/Session Policy.md",
           "---\ntitle: Session policy\nsome-tool-state: {phase: draft}\n---\n\nThirty days.\n",
         );
+        // Two files that do not parse at all, which build no record and so
+        // look, to the records alone, like names nobody has taken.
+        fixture.peer.write(".navbook/specs/auth/draft.md", "Half-written, no frontmatter.\n");
+        fixture.peer.write(".navbook/specs/billing/feature.md", "Billing, in my own words.\n");
         fixture.peer.commitAll("docs(feature): hand-write a feature");
         fixture.peer.git(["push", "--quiet"]);
       },
@@ -609,6 +613,21 @@ describe("a document a tool would not have created", () => {
       ),
       "INVALID_INPUT",
     );
+  });
+
+  it("refuses to create over a file that does not parse, and leaves it and origin alone", async () => {
+    const head = originSubjects(h.fixture.origin)[0];
+    assert.equal(
+      errorCode(
+        await h.gql(ADD_SPEC, { input: { feature: "auth", title: "Draft", body: "New." } }),
+      ),
+      "ALREADY_EXISTS",
+    );
+    assert.equal(errorCode(await h.gql(CREATE, { input: { title: "Billing" } })), "ALREADY_EXISTS");
+    const fileOf = (path: string): string => readFileSync(join(h.fixture.server.dir, path), "utf8");
+    assert.equal(fileOf(".navbook/specs/auth/draft.md"), "Half-written, no frontmatter.\n");
+    assert.equal(fileOf(".navbook/specs/billing/feature.md"), "Billing, in my own words.\n");
+    assert.equal(originSubjects(h.fixture.origin)[0], head);
   });
 });
 

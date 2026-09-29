@@ -13,7 +13,7 @@
  * exactly those.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import type * as NavbookCore from "@navbook/core";
 import type { EntityRecord, Plan, Repo, RunPlanResult, WsCtx } from "@navbook/core";
 import {
@@ -308,7 +308,8 @@ export function createFeature(
   if (kbOf(repo.ext).featureBySlug.has(slug)) {
     core.wsFail("already-exists", `feature '${slug}' already exists at ${SPECS_DIR}/${slug}/`);
   }
-  const { plan, dirPath } = planFeatureCreate(core, slug, input.content);
+  const { plan, dirPath, filePath } = planFeatureCreate(core, slug, input.content);
+  requireFreePath(core, ws, repo, filePath);
   return { slug, dirPath, run: core.runPlan(ws, plan, { commit: opts.commit }) };
 }
 
@@ -340,6 +341,7 @@ export function addSpec(
   if (feature.specs.some((spec) => spec.fileName === fileName)) {
     core.wsFail("already-exists", `feature '${feature.slug}' already has a '${fileName}'`);
   }
+  requireFreePath(core, ws, tree(core, ws), `${feature.dirPath}/${fileName}`);
   return {
     feature,
     fileName,
@@ -476,6 +478,25 @@ export function applyFeatureEdit(
 }
 
 /* ------------------------------------------------------------------ helpers */
+
+/**
+ * Refuse to create a file where one already is.
+ *
+ * The records alone cannot say so: a file that does not parse builds no
+ * record, so a hand-written `feature.md` with no frontmatter, or a document
+ * somebody is halfway through, would read as a free name and be written over
+ * — and, on the server, committed and pushed over. So the check is against
+ * the paths the tree listed, which include the files that did not parse, and
+ * against the disk, which includes the files git has not been told about yet.
+ */
+function requireFreePath(core: Core, ws: WsCtx, repo: Repo, path: string): void {
+  if (!kbOf(repo.ext).paths.has(path) && !existsSync(core.absPath(ws, path))) return;
+  core.wsFail(
+    "already-exists",
+    `${path} already exists, though not as a file this tool could read`,
+    ["run 'nav doctor' to see what is wrong with it, then fix or move it by hand"],
+  );
+}
 
 function requireSlug(core: Core, derived: string, given?: string): string {
   const slug = given ?? derived;
