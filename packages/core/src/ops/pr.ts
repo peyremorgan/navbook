@@ -125,6 +125,26 @@ export interface PrOpenDraft {
   revision: Revision;
 }
 
+/** What {@link preparePrOpen} may be told rather than work out. */
+export interface PrOpenOptions {
+  /**
+   * Branch the pull request rides on: the checked-out branch when omitted.
+   *
+   * Named, it need not be checked out at all, which is how a pull request is
+   * opened on a branch the caller is not standing on — its tip is read from
+   * the branch, never from `HEAD`.
+   */
+  source?: string;
+  target?: string;
+  /**
+   * Where to read the target from, when that is not the local branch of its
+   * name: a remote-tracking branch, for a caller that never checked the
+   * target out. The pull request still records {@link target} by name.
+   */
+  targetRev?: string;
+  title?: string;
+}
+
 /**
  * Work out everything a new pull request needs from git, and check the branch
  * is in a state that can carry one.
@@ -133,12 +153,9 @@ export interface PrOpenDraft {
  * can fail for its own reasons, and that should not pre-empt a complaint about
  * the text itself.
  */
-export function preparePrOpen(
-  ws: WsCtx,
-  opts: { target?: string; title?: string } = {},
-): PrOpenDraft {
+export function preparePrOpen(ws: WsCtx, opts: PrOpenOptions = {}): PrOpenDraft {
   requireNavbook(ws);
-  const source = currentBranch(ws.repoRoot);
+  const source = opts.source ?? currentBranch(ws.repoRoot);
   if (!source) {
     wsFail("precondition", "HEAD is detached; check out the branch the pull request rides on");
   }
@@ -149,9 +166,19 @@ export function preparePrOpen(
     wsFail("precondition", `a pull request cannot target its own branch (${source})`);
   }
 
-  const head = resolveSha(ws.repoRoot, "HEAD");
-  if (!head) wsFail("precondition", "this branch has no commits yet");
-  const base = mergeBase(ws.repoRoot, "HEAD", target);
+  const head =
+    opts.source === undefined
+      ? resolveSha(ws.repoRoot, "HEAD")
+      : resolveSha(ws.repoRoot, `refs/heads/${source}`);
+  if (!head) {
+    wsFail(
+      "precondition",
+      opts.source === undefined
+        ? "this branch has no commits yet"
+        : `'${source}' is not a local branch`,
+    );
+  }
+  const base = mergeBase(ws.repoRoot, head, opts.targetRev ?? target);
   if (!base) {
     wsFail("precondition", `'${target}' does not exist, or shares no history with ${source}`);
   }
@@ -164,7 +191,7 @@ export function preparePrOpen(
     base,
     created,
     // Only ask git for a subject when there is no title to use it for.
-    title: opts.title ?? lastCommitSubject(ws) ?? source,
+    title: opts.title ?? lastCommitSubject(ws, head) ?? source,
     revision: { head, base, date: created },
   };
 }
@@ -174,8 +201,8 @@ export function openPr(ws: WsCtx, input: OpenInput, opts: CommitOptions): OpenEn
   return openEntity(ws, "pr", input, opts);
 }
 
-function lastCommitSubject(ws: WsCtx): string | null {
-  const subject = gitMaybe(["log", "-1", "--format=%s"], { cwd: ws.repoRoot });
+function lastCommitSubject(ws: WsCtx, rev: string): string | null {
+  const subject = gitMaybe(["log", "-1", "--format=%s", rev, "--"], { cwd: ws.repoRoot });
   return subject === null || subject === "" ? null : subject;
 }
 

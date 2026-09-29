@@ -344,6 +344,39 @@ export function removeWorktree(cwd: string, path: string, opts: { force?: boolea
 }
 
 /**
+ * Create a local branch at `startPoint`. Git refuses a branch that already
+ * exists, which is the point: a caller that wanted to move one says so with
+ * {@link updateBranch}.
+ */
+export function createBranch(cwd: string, branch: string, startPoint: string): void {
+  git(["branch", "--quiet", "--no-track", branch, startPoint], { cwd });
+}
+
+/**
+ * Delete a local branch, provided it still points at `expected`.
+ *
+ * `update-ref -d` with the old value rather than `branch -D`: a branch that
+ * gained a commit since the caller looked is left alone, and the call fails
+ * instead of throwing that commit away.
+ */
+export function deleteBranch(cwd: string, branch: string, expected: string): void {
+  git(["update-ref", "-d", `refs/heads/${branch}`, expected], { cwd });
+}
+
+/**
+ * True when git accepts `name` as the name of a branch.
+ *
+ * `check-ref-format --branch` also *expands* the shorthands `@` and `@{-N}`
+ * (the current and the Nth previous branch) before judging them, so a name
+ * that is one of those would pass as whatever it stands for. Neither is a
+ * name anybody can create, so both are refused before git is asked.
+ */
+export function isValidBranchName(cwd: string, name: string): boolean {
+  if (name === "@" || name.includes("@{")) return false;
+  return gitRun(["check-ref-format", "--branch", name], { cwd }).code === 0;
+}
+
+/**
  * Point a local branch at `to`, provided it still points at `from`.
  *
  * `update-ref` rather than `branch -f`: it takes the expected old value, so a

@@ -609,6 +609,91 @@ describe("ops: opening a pull request", () => {
       );
     });
   });
+
+  it("reads a named source from its branch, not from HEAD", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "main"], { cwd: dir });
+      const tip = git(["rev-parse", "feature"], { cwd: dir }).trim();
+      const draft = preparePrOpen(ws, { source: "feature", target: "main" });
+      assert.equal(draft.source, "feature");
+      assert.equal(draft.head, tip);
+      assert.equal(draft.base, git(["merge-base", "feature", "main"], { cwd: dir }).trim());
+      assert.deepEqual(draft.revision, { head: tip, base: draft.base, date: draft.created });
+      // The fallback title is the source's last subject, not the checked-out branch's.
+      assert.equal(draft.title, git(["log", "-1", "--format=%s", "feature"], { cwd: dir }).trim());
+    });
+  });
+
+  it("opens from a named source while HEAD is detached", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "--detach", "main"], { cwd: dir });
+      assert.equal(preparePrOpen(ws, { source: "feature", target: "main" }).source, "feature");
+      assert.throws(
+        () => preparePrOpen(ws, { target: "main" }),
+        (error: unknown) =>
+          error instanceof WorkspaceError &&
+          error.code === "precondition" &&
+          /HEAD is detached/.test(error.message),
+      );
+    });
+  });
+
+  it("refuses a named source that is not a local branch", () => {
+    inPrWorkspace((ws) => {
+      for (const source of ["nowhere", "origin/feature", "HEAD~1"]) {
+        assert.throws(
+          () => preparePrOpen(ws, { source, target: "main" }),
+          (error: unknown) =>
+            error instanceof WorkspaceError &&
+            error.code === "precondition" &&
+            error.message.includes(`'${source}' is not a local branch`),
+          source,
+        );
+      }
+    });
+  });
+
+  it("refuses a named source that is its own target", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "main"], { cwd: dir });
+      assert.throws(
+        () => preparePrOpen(ws, { source: "feature", target: "feature" }),
+        (error: unknown) => error instanceof WorkspaceError && error.code === "precondition",
+      );
+    });
+  });
+
+  it("reads the target from another revision when told to, recording its name", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["update-ref", "refs/remotes/origin/release", "main"], { cwd: dir });
+      const draft = preparePrOpen(ws, {
+        source: "feature",
+        target: "release",
+        targetRev: "refs/remotes/origin/release",
+      });
+      assert.equal(draft.target, "release");
+      assert.equal(draft.base, git(["merge-base", "feature", "main"], { cwd: dir }).trim());
+      // Without it, a target that is no local branch is nowhere.
+      assert.throws(
+        () => preparePrOpen(ws, { source: "feature", target: "release" }),
+        (error: unknown) =>
+          error instanceof WorkspaceError && /'release' does not exist/.test(error.message),
+      );
+    });
+  });
+
+  it("refuses a named source that shares no history with its target", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "--orphan", "island"], { cwd: dir });
+      git(["commit", "-qm", "alone"], { cwd: dir });
+      git(["checkout", "-q", "main"], { cwd: dir });
+      assert.throws(
+        () => preparePrOpen(ws, { source: "island", target: "main" }),
+        (error: unknown) =>
+          error instanceof WorkspaceError && /shares no history/.test(error.message),
+      );
+    });
+  });
 });
 
 describe("ops: binding a review to a revision", () => {
