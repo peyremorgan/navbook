@@ -68,6 +68,7 @@ no plugin fetches from or pushes to the repository's remotes (spec 04 §4.4).
 |---|---|
 | [`@navbook/plugin-kb`](../packages/plugin-kb/README.md) | The knowledge base: features under `specs/`, the documents that describe them, and the `feature:` key that attaches work to one |
 | [`@navbook/plugin-tests`](../packages/plugin-tests/README.md) | Manual test plans under `tests/`, and the runs that record executing one: standalone, or inside a pull request's directory, with a `tested:` term to find what passed |
+| [`@navbook/plugin-chat`](../packages/plugin-chat/README.md) | An assistant: `nav chat` and a button in the web tracker, talking to an OpenAI-compatible model, reading the tracker and — once you approve — writing to it |
 
 `@navbook/plugin-kb` is also the worked example. It uses every seam a plugin
 has — a directory of its own, a frontmatter key, a query term, doctor checks, a

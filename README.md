@@ -340,6 +340,13 @@ declaring is one act, installing is another, and they are made by different
 people. [`doc/plugins.md`](doc/plugins.md) is the list of plugins and the guide
 to writing one.
 
+One of them is an assistant.
+[`@navbook/plugin-chat`](packages/plugin-chat/README.md) adds `nav chat` and a
+button in the web tracker. It answers questions about the tracker ("what is
+assigned to me?", "which issues are overdue?") and files, reviews and closes
+things once you approve each change, talking to any OpenAI-compatible model you
+configure, a local one included.
+
 ## Documentation
 
 The [specification](doc/spec/README.md) is the normative definition of the file
@@ -378,6 +385,9 @@ there rather than in the core, and it is what proves the plugin surface is
 enough to build on — it uses every part of it. `packages/plugin-tests`
 ([`@navbook/plugin-tests`](packages/plugin-tests/README.md)) is the second:
 manual test plans, and runs of them kept beside a pull request.
+`packages/plugin-chat` ([`@navbook/plugin-chat`](packages/plugin-chat/README.md))
+is the assistant, the plugin that acts for somebody: it performs its writes
+through the host's own operations rather than its own copies of them.
 Development needs no build step outside the web client: a library's entry point
 is its TypeScript source, and Node runs it directly.
 
