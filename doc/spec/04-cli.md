@@ -614,7 +614,11 @@ a house style.
 ## 4.4 What the CLI does not do
 
 - No daemon, no lock files, no state outside the tree.
-- No network operations of any kind in v1.
+- No network operations from the verbs that read or write the tree. A
+  plugin's own command (§4.3) may reach a service it is configured for — an
+  assistant's model endpoint, say — and MUST say so in its description and
+  documentation; it MUST NOT fetch from or push to the repository's remotes,
+  which stay the user's to move.
 - No automatic archiving, renumbering, or "cleanup" — every mutation is an
   explicit command.
 - No plugin code loaded for a command whose declaration does not name it

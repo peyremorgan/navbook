@@ -56,6 +56,11 @@ Settings under a plugin's name in `navbook.json` are committed, shared by
 everyone who clones, and therefore never secret. A plugin that needs a
 credential reads it from the environment.
 
+The built-in verbs never touch the network. A plugin's own command may reach
+a service it is configured for — a model endpoint, an issue importer's API —
+and says so in its description and README; no plugin fetches from or pushes to
+the repository's remotes (spec 04 §4.4).
+
 ## Available plugins
 
 | Plugin | What it adds |
@@ -247,9 +252,29 @@ since the tree last changed — shares one parse:
 A root field that used `ctx.repo()` alone would answer from whatever the clone
 last fetched, and miss what somebody pushed a moment ago.
 
-A mutation that writes beside a pull request's `pr.md` takes its target from
-`host.api.writeTarget(ctx, "pr", ref)`, which refuses a pull request the served
-checkout does not hold with `PRECONDITION` and the branch that carries it.
+A pull request's files live on its source branch, so a plugin writing beside
+one uses the host's write site rather than the working tree:
+
+- on the server, `host.api.writeEntity(ctx, kind, ref, (at, entity, site) =>
+  …)` runs the write in the clone for an issue, and on the pull request's
+  branch — in a temporary worktree, then pushed — for a pull request;
+- in the CLI, `host.ui.withPrWriteSite(ref, { assumeYes }, (at, entity) => …)`
+  asks, as `nav pr comment` does, before writing in a worktree on the branch,
+  and `host.ui.withBranchWriteSite(branch, …)` does the same for a branch
+  with no pull request on it yet.
+
+`host.api.writeTarget(ctx, "pr", ref)` is the stricter choice for data that
+must sit in the served tree: it returns the entity there, and refuses a pull
+request the served checkout does not hold with `PRECONDITION` and the branch
+that carries it.
+
+A server plugin acting for somebody — an assistant, a chat bridge — needs no
+copy of the built-in operations: `host.api.execute(ctx, document, variables)`
+runs a GraphQL operation against the schema the server serves, as that
+request's viewer, through the same resolvers, transactions and mutation event
+as a client's request. The schema exists once every plugin has activated, so
+it is available from a resolver or a service, and `host.api.schema()` lets a
+service check its documents when it starts.
 
 ### The web half
 
@@ -290,6 +315,11 @@ export default defineNuxtPlugin({
   },
 });
 ```
+
+One more slot draws over every page rather than in one: `overlays: [{
+component }]` renders a component after the page in the default layout — a
+floating button and the panel it opens, say — and so never on the signed-out
+pages, which sit outside that layout.
 
 **`Entity.ext` is how a plugin draws on somebody else's row.** A plugin's SDL
 extends `Issue`, but nothing extends a *fragment* — and the host's list-row
