@@ -34,6 +34,22 @@ export interface UnsavedWork {
   agree(): void;
   /** Whether leaving was agreed to; reading it spends the agreement. */
   takeAgreement(): boolean;
+  /**
+   * The dialog's yes to the navigation under way. Until it is over
+   * (`endNavigation`), a way out of the document it leads to is not asked
+   * about again: `auth.global` may answer it with the redirect to the
+   * provider, and the browser's own prompt would then ask the question the
+   * person has just answered.
+   */
+  agreeToNavigation(): void;
+  /** That navigation is over, one way or the other; a later one is asked. */
+  endNavigation(): void;
+  /**
+   * Whether the document may go without the browser asking: nothing is
+   * unsaved, or leaving was agreed — by a caller that asked for itself, which
+   * this spends, or in the dialog for the navigation under way.
+   */
+  mayUnload(): boolean;
 }
 
 export function createUnsavedWork(): UnsavedWork {
@@ -43,6 +59,22 @@ export function createUnsavedWork(): UnsavedWork {
   // One way out, not every one after it: the drafts are still held, so if
   // that way out never happens — a sign-out that failed — they stay guarded.
   let agreed = false;
+  // The navigation agreed to in the dialog is still under way. Not spent
+  // like `agreed`, since nothing says how often the browser consults the
+  // guard before the page goes; lowered instead when the navigation is over,
+  // or every later reload would go unasked.
+  let navigating = false;
+
+  function dirty(): boolean {
+    for (const isDirty of held) if (isDirty()) return true;
+    return false;
+  }
+
+  function takeAgreement(): boolean {
+    const was = agreed;
+    agreed = false;
+    return was;
+  }
 
   function answer(leave: boolean): void {
     const pending = settle;
@@ -61,10 +93,7 @@ export function createUnsavedWork(): UnsavedWork {
         held.delete(entry);
       };
     },
-    dirty() {
-      for (const isDirty of held) if (isDirty()) return true;
-      return false;
-    },
+    dirty,
     asking,
     confirmLeave() {
       // A second question replaces the first: whatever it was about has been
@@ -79,10 +108,15 @@ export function createUnsavedWork(): UnsavedWork {
     agree() {
       agreed = true;
     },
-    takeAgreement() {
-      const was = agreed;
-      agreed = false;
-      return was;
+    takeAgreement,
+    agreeToNavigation() {
+      navigating = true;
+    },
+    endNavigation() {
+      navigating = false;
+    },
+    mayUnload() {
+      return takeAgreement() || navigating || !dirty();
     },
   };
 }

@@ -9,16 +9,20 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, it } from "vitest";
+import { afterEach, describe, it } from "vitest";
 import {
   buildEntityPatch,
   describeEntityEdit,
+  describeWrite,
   type EntityEdit,
   fieldLabel,
   normalizeList,
   normalizeOptional,
   PatchError,
   parseRankInput,
+  registerPatchField,
+  resetPatchFields,
+  withPluginFields,
 } from "../../app/utils/patch";
 
 const BEFORE: EntityEdit = {
@@ -290,5 +294,49 @@ describe("describeEntityEdit", () => {
 
   it("prints a rank as the number it is", () => {
     assert.deepEqual(describeEntityEdit({ rank: 0 }), [{ field: "rank", value: "0" }]);
+  });
+});
+
+describe("describeWrite", () => {
+  afterEach(() => resetPatchFields());
+
+  it("names the field that went out", () => {
+    assert.equal(describeWrite({ title: "Mine" }), "Title updated");
+    assert.equal(describeWrite({ body: "Words." }), "Description updated");
+    assert.equal(describeWrite({ milestone: null }), "Milestone updated");
+  });
+
+  it("calls a plugin's field what its layer registered, never ext", () => {
+    // A panel saves its whole `ext` map; what went out is the one field in it
+    // that moved, under the input name the plugin's SDL added.
+    registerPatchField("features", "features");
+    const patch = buildEntityPatch(BEFORE, { ext: { ...BEFORE.ext, features: ["auth"] } });
+    assert.ok(patch !== null);
+    assert.equal(describeWrite(patch), "Features updated");
+  });
+
+  it("names every field when more than one moved", () => {
+    assert.equal(
+      describeWrite({ labels: [], assignees: [], milestone: null }),
+      "Labels, assignees and milestone updated",
+    );
+  });
+});
+
+describe("withPluginFields", () => {
+  it("adds what a plugin's form field set", () => {
+    assert.deepEqual(withPluginFields({ title: "Mine" }, { features: ["auth"] }), {
+      title: "Mine",
+      features: ["auth"],
+    });
+  });
+
+  it("never lets a plugin key replace one of the format's own", () => {
+    // Including one the person left empty: null is what they chose.
+    const input = withPluginFields(
+      { title: "Mine", parent: null },
+      { title: "Theirs", parent: "abcd1234", features: ["auth"] },
+    );
+    assert.deepEqual(input, { title: "Mine", parent: null, features: ["auth"] });
   });
 });

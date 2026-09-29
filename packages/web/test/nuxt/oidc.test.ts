@@ -22,6 +22,8 @@ let server: Server;
 let issuer = "";
 /** The form bodies the token endpoint was sent, oldest first. */
 const tokenRequests: URLSearchParams[] = [];
+/** While set, the token endpoint answers only once it settles. */
+let tokenGate: Promise<void> | null = null;
 
 beforeAll(async () => {
   server = createServer(async (request, response) => {
@@ -45,6 +47,7 @@ beforeAll(async () => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(chunk as Buffer);
     tokenRequests.push(new URLSearchParams(Buffer.concat(chunks).toString("utf8")));
+    await tokenGate;
     // Refused on purpose: the request is the thing under test, and a refusal
     // spares the client validating tokens this stub has no key to sign.
     response
@@ -62,6 +65,7 @@ afterAll(async () => {
 
 afterEach(() => {
   tokenRequests.length = 0;
+  tokenGate = null;
 });
 
 function settings(discoveryPath = "/.well-known/openid-configuration") {
@@ -123,6 +127,39 @@ describe("oidc settings", () => {
 });
 
 describe("signing out", () => {
+  it("can wait for a renewal in flight, which would otherwise store a user afterwards", async () => {
+    const manager = new ApiUserManager(settings(), AUDIENCE);
+    await manager.storeUser(
+      new User({
+        access_token: "spent",
+        refresh_token: "r3fresh",
+        token_type: "Bearer",
+        profile: { sub: "s", iss: issuer, aud: "navbook-web", exp: 0, iat: 0 },
+        expires_at: 1,
+      }),
+    );
+    assert.equal(await manager.renewalsSettled(), false, "nothing in flight");
+
+    let open = (): void => {};
+    tokenGate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    // Bare, as the library's own renewal timer calls it.
+    const renewal = manager.signinSilent().catch(() => null);
+    let settled = false;
+    const waiting = manager.renewalsSettled().then((waited) => {
+      settled = true;
+      return waited;
+    });
+    // Until the token endpoint answers, the renewal is still out.
+    while (tokenRequests.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(settled, false);
+    open();
+    assert.equal(await waiting, true);
+    await renewal;
+    assert.equal(await manager.renewalsSettled(), false);
+  });
+
   it("knows whether the provider can end its session", async () => {
     assert.equal(await new ApiUserManager(settings(), AUDIENCE).endsSessions(), true);
     assert.equal(

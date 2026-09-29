@@ -29,6 +29,12 @@ const props = defineProps<{
   saving: boolean;
   /** The save covering plugin fields, so this reads as a built-in editor does. */
   fieldSave?: FieldSave;
+  /**
+   * Set when the server cannot take the write at all — a pull request whose
+   * branch it does not hold — so the chips read but are not offered for
+   * editing, as the milestone's beside them are not.
+   */
+  disabled?: boolean;
 }>();
 
 const emit = defineEmits<{ save: [Partial<EntityEdit>] }>();
@@ -52,6 +58,7 @@ function save(features: string[]): void {
     :values="values"
     :suggestions="slugs"
     :save="props.fieldSave"
+    :disabled="props.disabled"
     @save="save"
   />
 </template>

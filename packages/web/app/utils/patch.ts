@@ -80,6 +80,25 @@ export function resetPatchFields(): void {
   PATCH_EXTENSIONS.length = 0;
 }
 
+/**
+ * A mutation's input with plugin fields added, the format's own winning.
+ *
+ * A form's plugin fields (the new-issue page's) arrive as an open map, since
+ * the host cannot know what a layer will add. A key in it that names one of
+ * the format's own fields — a plugin's `parent`, say — is dropped rather than
+ * sent: it is either a mistake or a plugin quietly replacing what the person
+ * set in the host's own field, and neither should reach the server. The rest
+ * go in before the format's fields, so even a key missed here could not win.
+ */
+export function withPluginFields<T extends object>(
+  core: T,
+  extra: Record<string, unknown>,
+): T & Record<string, unknown> {
+  const own = new Set(Object.keys(core));
+  const added = Object.fromEntries(Object.entries(extra).filter(([key]) => !own.has(key)));
+  return { ...added, ...core };
+}
+
 export class PatchError extends Error {}
 
 /**
@@ -241,6 +260,25 @@ export function fieldLabel(field: string): string {
   const built = FIELD_LABELS[field as Exclude<keyof EntityEdit, "ext">];
   if (built !== undefined) return built;
   return PATCH_EXTENSIONS.find((entry) => entry.field === field)?.label ?? field;
+}
+
+/**
+ * What the toast calls a save: "Title updated", "Features updated".
+ *
+ * Read off the patch that went out rather than the edit that asked for it. A
+ * plugin's panel hands over its whole `ext` map, so the edit's own keys would
+ * say "Ext updated" — a name nobody on the page has seen — and its `ext`
+ * would name every plugin field, changed or not. The patch names exactly the
+ * fields that moved, a plugin's under the input field its SDL added, which
+ * `fieldLabel` turns into what its layer registered.
+ */
+export function describeWrite(patch: EntityPatch): string {
+  const labels = Object.keys(patch).map(fieldLabel);
+  const said =
+    labels.length <= 1
+      ? (labels[0] ?? "field")
+      : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+  return `${said.charAt(0).toUpperCase()}${said.slice(1)} updated`;
 }
 
 /**

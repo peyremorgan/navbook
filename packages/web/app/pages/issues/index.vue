@@ -23,7 +23,7 @@ useHead({ title: pageTitle("Issues") });
 const route = useRoute();
 const router = useRouter();
 const filter = useEntityFilter(
-  { statuses: ISSUE_STATUSES, deadlines: DEADLINE_STATES },
+  { statuses: ISSUE_STATUSES, deadlines: DEADLINE_STATES, noun: "issue" },
   toIssueFilter,
 );
 

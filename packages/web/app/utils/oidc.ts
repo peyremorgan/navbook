@@ -32,6 +32,9 @@ import { SIGNED_OUT } from "~/utils/navigation";
  * both that timer and `useAuth` pass through.
  */
 export class ApiUserManager extends UserManager {
+  /** The renewals in flight, from either caller; see `renewalsSettled`. */
+  private readonly renewals = new Set<Promise<User | null>>();
+
   constructor(
     settings: UserManagerSettings,
     private readonly audience: string,
@@ -40,7 +43,31 @@ export class ApiUserManager extends UserManager {
   }
 
   override signinSilent(args: SigninSilentArgs = {}): Promise<User | null> {
-    return super.signinSilent({ resource: this.audience, ...args });
+    const renewal = super.signinSilent({ resource: this.audience, ...args });
+    this.renewals.add(renewal);
+    const done = (): void => {
+      this.renewals.delete(renewal);
+    };
+    renewal.then(done, done);
+    return renewal;
+  }
+
+  /**
+   * Wait until no renewal is in flight; true if there was one to wait for.
+   *
+   * For signing out. A renewal ends by storing the user it got, so one that
+   * finishes after the token was forgotten would store it again — and the
+   * person who signed out would still be signed in. Waiting here is the only
+   * way to see it: oidc-client-ts's own timer starts renewals too, and it
+   * tells nobody.
+   */
+  async renewalsSettled(): Promise<boolean> {
+    let waited = false;
+    while (this.renewals.size > 0) {
+      waited = true;
+      await Promise.allSettled([...this.renewals]);
+    }
+    return waited;
   }
 
   /**

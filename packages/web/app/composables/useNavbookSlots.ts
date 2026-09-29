@@ -46,6 +46,12 @@ export interface NavLinkSlot {
  * values go in `ext` under the field name its SDL added
  * ({@link EntityFieldSlot}).
  *
+ * It is also given `disabled`, set when the server has already said it cannot
+ * take a write to this entity — a pull request whose branch this checkout
+ * does not hold — and a panel that edits withdraws its offer to, as the
+ * built-in editors beside it do. A panel must declare it even if it only
+ * reads: a prop a component does not declare lands on its root element.
+ *
  * Kept to one shape for issues and pull requests, because a plugin that has
  * something to say about one usually has the same thing to say about the
  * other.
@@ -88,6 +94,11 @@ export interface FilterSlot {
   apiField: string;
   label: string;
   icon: string;
+  /**
+   * The listings it belongs to. Only these offer the chip, read the parameter
+   * or send the field, so a field added to one noun's filter alone is never
+   * sent to the other's, which would refuse it.
+   */
   nouns: ("issue" | "pr")[];
   /** The values to offer; called when the menu opens. */
   options: () => string[];
@@ -228,7 +239,7 @@ export function useNavbookSlots() {
         slots.filters.push(filter);
         // The pure filter functions keep their own list, so they stay testable
         // without an app; this is the one place the two are kept in step.
-        registerFilterParam(filter.param, filter.apiField);
+        registerFilterParam(filter.param, filter.apiField, filter.nouns);
       }
       for (const badge of registration.rowBadges ?? []) slots.rowBadges.push(badge);
       for (const group of registration.inboxGroups ?? []) {

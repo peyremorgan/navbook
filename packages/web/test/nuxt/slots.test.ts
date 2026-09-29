@@ -125,7 +125,9 @@ describe("a registered filter", () => {
 
   it("reaches the pure query-string functions", () => {
     registerReports();
-    assert.deepEqual(FILTER_EXTENSIONS, [{ param: "report", apiField: "reports" }]);
+    assert.deepEqual(FILTER_EXTENSIONS, [
+      { param: "report", apiField: "reports", nouns: ["issue"] },
+    ]);
   });
 
   it("is read out of a query string", () => {
@@ -146,11 +148,39 @@ describe("a registered filter", () => {
   });
 
   it("is sent to the API under the field its plugin's schema added", () => {
-    registerReports();
+    useNavbookSlots().register({
+      filters: [
+        {
+          param: "report",
+          apiField: "reports",
+          label: "Report",
+          icon: "i-lucide-flask",
+          nouns: ["issue", "pr"],
+          options: () => [],
+        },
+      ],
+    });
     const filter = { ...emptyFilter(), ext: { report: ["failing"] } };
     for (const sent of [toIssueFilter(filter), toPrFilter(filter)]) {
       assert.deepEqual((sent as Record<string, unknown>).reports, ["failing"]);
     }
+  });
+
+  it("is neither read nor sent on a listing it was not registered for", () => {
+    // Its SDL may have added the field to `IssueFilter` alone, and the API
+    // refuses a field its input does not have.
+    registerReports();
+    const filter = { ...emptyFilter(), ext: { report: ["failing"] } };
+    assert.deepEqual((toIssueFilter(filter) as Record<string, unknown>).reports, ["failing"]);
+    assert.equal((toPrFilter(filter) as Record<string, unknown>).reports, undefined);
+    assert.deepEqual(
+      queryToFilter({ report: "failing" }, { ...ISSUES, noun: "issue" }).ext.report,
+      ["failing"],
+    );
+    assert.deepEqual(
+      queryToFilter({ report: "failing" }, { statuses: ["OPEN"], noun: "pr" }).ext,
+      {},
+    );
   });
 
   it("counts towards whether a filter is empty", () => {
