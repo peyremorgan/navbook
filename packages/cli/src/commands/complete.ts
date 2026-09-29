@@ -120,7 +120,7 @@ async function pluginListValues(
 ): Promise<string[]> {
   if (plugins === undefined) return [];
   const out: string[] = [];
-  for (const handlers of await plugins.handlersFor(ctx, `${kind} list`)) {
+  for (const handlers of await plugins.handlersFor(ctx, `${kind} list`, { completing: true })) {
     out.push(...(handlers.listCompletions?.() ?? []));
   }
   return out;

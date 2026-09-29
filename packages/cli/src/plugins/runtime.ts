@@ -13,7 +13,7 @@
  * remembering to.
  */
 
-import type { CoreExtensions, EntityKind, QueryKeySpec } from "@navbook/core";
+import type { CoreExtensions, EntityKind, QueryKeySpec, VerbContribution } from "@navbook/core";
 import { commitReport } from "@navbook/core";
 import { composeFile } from "../commands/compose.ts";
 import type { Ctx } from "../context.ts";
@@ -58,7 +58,9 @@ export class PluginRuntime {
    * The four cases that answer true:
    *
    * - a plugin noun is the first word, and its declaration asks for core;
-   * - a plugin contributes to this exact `noun verb`;
+   * - a plugin contributes to this exact `noun verb` something a run of it
+   *   uses — an option, a column, a section, JSON keys — or it is being
+   *   completed and the plugin offers candidates;
    * - a term on the line names a query key a plugin declared;
    * - the command is `doctor`, which runs every registered check.
    */
@@ -92,7 +94,10 @@ export class PluginRuntime {
       const leaf = (declared.spec.commands ?? []).find((child) => child.name === verb);
       return (leaf ?? declared.spec).needsCore !== false;
     }
-    if (verb !== undefined && this.commands.contributions.has(`${noun} ${verb}`)) return true;
+    if (verb !== undefined) {
+      const contributed = this.commands.contributions.get(`${noun} ${verb}`) ?? [];
+      if (contributed.some(({ spec }) => completing || changesTheRun(spec))) return true;
+    }
 
     const keys = new Set(this.queryKeys().map((key) => `${key.key}:`));
     return argv.some((word) => {
@@ -135,9 +140,21 @@ export class PluginRuntime {
     return ext;
   }
 
-  /** What a plugin registered for a verb, loading its `./cli` entry if needed. */
-  async handlersFor(ctx: Ctx, verb: string): Promise<VerbHandlers[]> {
-    const declared = this.commands.contributions.get(verb) ?? [];
+  /**
+   * What a plugin registered for a verb, loading its `./cli` entry if needed.
+   *
+   * Only the plugins whose contribution changes a run of the verb, unless
+   * `completing`: a plugin that offers nothing but completion candidates is
+   * not loaded to run `nav pr list`, only to complete it.
+   */
+  async handlersFor(
+    ctx: Ctx,
+    verb: string,
+    opts: { completing?: boolean } = {},
+  ): Promise<VerbHandlers[]> {
+    const declared = (this.commands.contributions.get(verb) ?? []).filter(
+      ({ spec }) => opts.completing === true || changesTheRun(spec),
+    );
     const out: VerbHandlers[] = [];
     for (const { plugin } of declared) {
       const activated = await this.#activate(ctx, plugin);
@@ -247,6 +264,20 @@ export class PluginRuntime {
     this.#activated.set(plugin.name, activated);
     return activated;
   }
+}
+
+/**
+ * Whether a contribution changes what a run of its verb does — an option, a
+ * column, a section, JSON keys — rather than only offering completion
+ * candidates, which change nothing until somebody presses tab.
+ */
+function changesTheRun(spec: VerbContribution): boolean {
+  return (
+    (spec.options?.length ?? 0) > 0 ||
+    spec.columns === true ||
+    spec.showSection === true ||
+    spec.jsonExtra === true
+  );
 }
 
 interface ActivatedCli {

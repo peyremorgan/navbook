@@ -277,6 +277,21 @@ describe("the loading rule of spec 04 §4.3", () => {
     }
   });
 
+  it("imports nothing for a listing it only completes", () => {
+    const repo = probeRepo();
+    try {
+      const listed = repo.nav(["pr", "list"], withProbe(repo));
+      assert.equal(listed.code, 0, listed.stderr);
+      assert.deepEqual(repo.log(), []);
+      // Completing it is what the contribution is for, and that does load it.
+      const completed = repo.nav(["__complete", "pr", "list", ""], withProbe(repo));
+      assert.ok(completed.stdout.split("\n").includes("ptag:flaky"), completed.stdout);
+      assert.ok(repo.log().includes("cli:activate"));
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("imports nothing for an unrelated verb", () => {
     const repo = probeRepo();
     try {

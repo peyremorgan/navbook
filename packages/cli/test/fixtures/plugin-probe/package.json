@@ -97,6 +97,10 @@
         {
           "on": "issue show",
           "showSection": true
+        },
+        {
+          "on": "pr list",
+          "completions": true
         }
       ]
     }

@@ -54,6 +54,10 @@ export function activate(host) {
     listCompletions: () => ["ptag:flaky", "ptag:slow"],
   });
 
+  // Completion candidates and nothing else: a run of `pr list` must not
+  // load the plugin for them.
+  host.contribute("pr list", { listCompletions: () => ["ptag:flaky"] });
+
   host.contribute("issue show", {
     showSection: (entity) => {
       const tags = tagsOf(entity);
