@@ -151,9 +151,15 @@ const ESCAPABLE = /[!-/:-@[-`{-~]/;
  * A span is a run of backticks, then anything up to a run of exactly as many,
  * within the one paragraph: it goes on to the next line only when that line
  * starts no block of its own. A run with no partner is literal text.
+ *
+ * Linear, because a body is untrusted input: where each paragraph ends is
+ * worked out once, and the search for a partner never looks at a run twice.
  */
 function withoutCodeSpans(text: string): string {
   const out = text.split("");
+  const ends = paragraphEnds(text);
+  const partners = new Partners(text);
+  let line = 0;
   let i = 0;
   while (i < text.length) {
     const char = text[i] as string;
@@ -162,55 +168,77 @@ function withoutCodeSpans(text: string): string {
       i += 2;
       continue;
     }
+    if (char === "\n") line++;
     if (char !== "`") {
       i++;
       continue;
     }
     let length = 1;
     while (text[i + length] === "`") length++;
-    const close = closingRun(text, i + length, length, paragraphEnd(text, i));
-    if (close === -1) {
+    const close = partners.after(i + length, length);
+    if (close === -1 || close + length > (ends[line] as number)) {
       i += length;
       continue;
     }
-    for (let k = i; k < close + length; k++) if (out[k] !== "\n") out[k] = " ";
+    for (let k = i; k < close + length; k++) {
+      if (out[k] === "\n") line++;
+      else out[k] = " ";
+    }
     i = close + length;
   }
   return out.join("");
 }
 
 /**
- * Where the paragraph holding `from` ends: before the next line that starts a
- * block, or with its own line when that is a heading, which is one line long.
+ * For each line of `text`, where the paragraph holding it ends: before the
+ * next line that starts a block, or with its own line when that is a heading,
+ * which is one line long.
  */
-function paragraphEnd(text: string, from: number): number {
-  let end = text.indexOf("\n", from);
-  const start = text.lastIndexOf("\n", from - 1) + 1;
-  if (HEADING.test(text.slice(start, end === -1 ? undefined : end))) {
-    return end === -1 ? text.length : end;
+function paragraphEnds(text: string): number[] {
+  const lines = text.split("\n");
+  const ends: number[] = new Array(lines.length);
+  let end = text.length;
+  for (let k = lines.length - 1; k >= 0; k--) {
+    const line = lines[k] as string;
+    const next = lines[k + 1];
+    if (next === undefined || BLOCK_START.test(next) || HEADING.test(line)) {
+      ends[k] = end;
+    } else {
+      ends[k] = ends[k + 1] as number;
+    }
+    end -= line.length + 1;
   }
-  while (end !== -1) {
-    const next = text.indexOf("\n", end + 1);
-    if (BLOCK_START.test(text.slice(end + 1, next === -1 ? undefined : next))) return end;
-    end = next;
-  }
-  return text.length;
+  return ends;
 }
 
-/** The start of the first run of exactly `length` backticks in `[from, end)`, or -1. */
-function closingRun(text: string, from: number, length: number, end: number): number {
-  let i = from;
-  while (i < end) {
-    if (text[i] !== "`") {
-      i++;
-      continue;
+/**
+ * The runs of backticks in a text, by length, for finding the partner of one.
+ *
+ * Asked in the order the text is read, so each length's list is walked once:
+ * a run before the one asked about can never be a later run's partner either.
+ */
+class Partners {
+  private readonly runs = new Map<number, { starts: number[]; next: number }>();
+
+  constructor(text: string) {
+    let i = text.indexOf("`");
+    while (i !== -1) {
+      let length = 1;
+      while (text[i + length] === "`") length++;
+      const runs = this.runs.get(length) ?? { starts: [], next: 0 };
+      runs.starts.push(i);
+      this.runs.set(length, runs);
+      i = text.indexOf("`", i + length);
     }
-    let run = 1;
-    while (text[i + run] === "`") run++;
-    if (run === length && i + run <= end) return i;
-    i += run;
   }
-  return -1;
+
+  /** The start of the first run of exactly `length` backticks at or after `from`, or -1. */
+  after(from: number, length: number): number {
+    const runs = this.runs.get(length);
+    if (runs === undefined) return -1;
+    while (runs.next < runs.starts.length && (runs.starts[runs.next] as number) < from) runs.next++;
+    return runs.starts[runs.next] ?? -1;
+  }
 }
 
 /**

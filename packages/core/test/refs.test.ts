@@ -43,6 +43,15 @@ describe("extractProseRefs", () => {
     assert.deepEqual(extractProseRefs("a ` here\n\n#mz4kq1rv and ` there"), ["mz4kq1rv"]);
   });
 
+  it("reads a long paragraph full of code spans in linear time", () => {
+    // Untrusted input: a body that made the search for a span's end rescan
+    // the paragraph from every backtick took seconds at this size.
+    const lines = Array.from({ length: 20000 }, (_, i) => `line \`${i}\` and \`\` open #mz4kq1rv`);
+    const started = performance.now();
+    assert.deepEqual(extractProseRefs(lines.join("\n")), ["mz4kq1rv"]);
+    assert.ok(performance.now() - started < 2000, "took too long");
+  });
+
   it("ignores references inside a fenced code block", () => {
     const markdown = [
       "Before #mz4kq1rv.",
