@@ -65,11 +65,13 @@ import {
   warnMergePolicyProblems,
   warnPolicyProblems,
 } from "./policy.ts";
-import { type PrWriteOptions, withPrWriteSite } from "./pr-elsewhere.ts";
+import { type PrWriteOptions, withBranchWriteSite, withPrWriteSite } from "./pr-elsewhere.ts";
 
 /* --------------------------------------------------------------------- open */
 
-export interface PrOpenOptions extends GlobalFlags {
+export interface PrOpenOptions extends GlobalFlags, PrWriteOptions {
+  /** The branch carrying the work, when it is not the one checked out here. */
+  source?: string;
   target?: string;
   title?: string;
   message?: string;
@@ -88,7 +90,29 @@ export interface PrOpenOptions extends GlobalFlags {
 }
 
 export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
-  const draft = preparePrOpen(ctx, { target: opts.target, title: opts.title });
+  if (opts.source === undefined) {
+    openPrAt(ctx, ctx, opts);
+    return;
+  }
+  // A pull request is written on its source branch (spec 03 §3.5), so one on
+  // a branch not checked out here is written in a worktree that has it.
+  const source = opts.source;
+  withBranchWriteSite(ctx, source, opts, (at) => openPrAt(ctx, at, { ...opts, source }));
+}
+
+/**
+ * Open the pull request in `at`, which has its source branch checked out.
+ *
+ * The text is composed from `ctx`, the checkout the command was run in, so an
+ * editor opened for it keeps its buffer where it always does; everything the
+ * pull request records is read from `at`.
+ */
+function openPrAt(ctx: Ctx, at: Ctx, opts: PrOpenOptions): void {
+  const draft = preparePrOpen(at, {
+    ...(opts.source === undefined ? {} : { source: opts.source }),
+    target: opts.target,
+    title: opts.title,
+  });
 
   const composed = composeFile(ctx, {
     message: opts.message,
@@ -97,7 +121,7 @@ export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
     render: (body) =>
       newPrFile({
         title: draft.title,
-        author: currentAuthor(ctx),
+        author: currentAuthor(at),
         created: draft.created,
         target: draft.target,
         source: draft.source,
@@ -114,7 +138,7 @@ export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
   });
 
   const { id, dirPath, run } = openPr(
-    ctx,
+    at,
     { content: composed.content, fallbackTitle: draft.title },
     { commit: opts.commit },
   );

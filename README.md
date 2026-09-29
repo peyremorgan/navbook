@@ -195,7 +195,7 @@ usually enough. A full directory name works too.
 | `nav issue open <title> --parent <id>` | File it as a subtask. `nav issue link`/`unlink` do the same for issues that already exist; trees nest as deep as you like. |
 | `nav issue show <id> [--depth N]` | Render it, with the title and status of its parent and of the subtasks beneath it. |
 | `nav issue delete <id>` | Remove its directory entirely — for the duplicate you filed twice. Its subtasks survive as top-level issues unless you pass `--recursive`. Asks first if it holds uncommitted changes; `--force` skips that. |
-| `nav pr open [--target BRANCH]` | Open a PR from the current branch, pinning the exact head and merge base under review. |
+| `nav pr open [--target BRANCH] [--source BRANCH]` | Open a PR from the current branch (or another local branch, written in a worktree on it), pinning the exact head and merge base under review. |
 | `nav pr request <id> <email>` | Ask someone to review it. Being listed is the request; nothing records it answered, and a new revision asks again. |
 | `nav pr review <id> --approve` | Record a verdict bound to a specific revision. Without a flag the verdict is `comment`: a review that judges nothing. |
 | `nav pr list awaiting:me@example.com` | Pull requests waiting on one person. `reviewer:` and `review:approved` filter the same listing. |

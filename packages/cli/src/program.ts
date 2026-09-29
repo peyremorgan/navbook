@@ -52,7 +52,7 @@ import {
   cmdPrReview,
   cmdPrUpdate,
 } from "./commands/pr.ts";
-import { YES_HELP } from "./commands/pr-elsewhere.ts";
+import { SOURCE_YES_HELP, YES_HELP } from "./commands/pr-elsewhere.ts";
 import type { Ctx, GetCtx } from "./context.ts";
 import {
   applyOption,
@@ -399,15 +399,17 @@ function buildPrCommand(getCtx: () => Ctx, plugins?: PluginRuntime): Command {
   const pr = withoutHelpVerb(new Command("pr")).description("work with pull requests");
 
   pr.command("open")
-    .description("open a pull request from the current branch")
+    .description("open a pull request from the current branch, or another one")
+    .option("--source <branch>", "local branch carrying the work (default: the current branch)")
     .option("--target <branch>", "branch to merge into (default: the repository's default branch)")
-    .option("--title <text>", "one-line summary (default: the last commit's subject)")
+    .option("--title <text>", "one-line summary (default: the source's last commit subject)")
     .option("-m, --message <text>", "description text; without it $EDITOR is opened")
     .option("--draft", "not yet requesting review")
     .option("--label <label>", "add a label (repeatable)", collect, [])
     .option("--assignee <email>", "assign to a person (repeatable)", collect, [])
     .option("--reviewer <email>", "ask a person to review it (repeatable)", collect, [])
     .option("--milestone <name>", "milestone")
+    .option("-y, --yes", SOURCE_YES_HELP)
     .option("--commit", commitHelp("pr"))
     .action(async (opts) =>
       cmdPrOpen(getCtx(), { ...opts, ext: await openFields(getCtx(), plugins, "pr open", opts) }),

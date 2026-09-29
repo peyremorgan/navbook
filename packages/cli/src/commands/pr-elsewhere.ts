@@ -18,11 +18,12 @@
  * unchanged.
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   addWorktree,
+  currentBranch,
   type EntityRecord,
   findPrToWrite,
   gitRun,
@@ -31,6 +32,8 @@ import {
   type PrElsewhere,
   refusePrWrite,
   removeWorktree,
+  resolveSha,
+  worktreeHolding,
 } from "@navbook/core";
 import type { Ctx } from "../context.ts";
 import { makeContext } from "../context.ts";
@@ -44,6 +47,10 @@ import { askYesNo, isInteractive } from "../prompt.ts";
  */
 export const YES_HELP =
   "accept the offer to write in a worktree on the source branch — the clean one that has it, or a temporary one";
+
+/** Help for `-y` on `nav pr open`, whose question is about `--source`. */
+export const SOURCE_YES_HELP =
+  "with --source, write it in a worktree on that branch — the clean one that has it, or a temporary one";
 
 export interface PrWriteOptions {
   /** `-y`: accept either offer in advance, and ask nobody. */
@@ -74,8 +81,13 @@ function destination(where: PrElsewhere): Destination | null {
   return where.worktreeClean ? { branch: where.branch, worktree: where.worktree } : null;
 }
 
-/** Ask whether to write there, unless `-y` already said yes. */
-function agreed(ctx: Ctx, entity: EntityRecord, to: Destination, opts: PrWriteOptions): boolean {
+/**
+ * Ask whether to write there, unless `-y` already said yes.
+ *
+ * `what` is what is being written to, as the question names it: a pull
+ * request by its ID, or the pull request about to be opened.
+ */
+function agreed(ctx: Ctx, what: string, to: Destination, opts: PrWriteOptions): boolean {
   if (opts.yes) return true;
   // Only ever asked, never assumed. A run with nothing to answer the question
   // keeps the refusal it has always had: a pipeline that started writing into
@@ -83,11 +95,11 @@ function agreed(ctx: Ctx, entity: EntityRecord, to: Destination, opts: PrWriteOp
   if (!isInteractive(ctx)) return false;
   if (to.worktree !== null) {
     ctx.stdout.write(
-      `#${entity.id} is on '${to.branch}', checked out in ${to.worktree} ${ctx.colors.dim("(clean)")}\n`,
+      `${what} is on '${to.branch}', checked out in ${to.worktree} ${ctx.colors.dim("(clean)")}\n`,
     );
     return askYesNo(ctx, "Write it there? [y/N] ");
   }
-  ctx.stdout.write(`#${entity.id} is on '${to.branch}', which no worktree has checked out\n`);
+  ctx.stdout.write(`${what} is on '${to.branch}', which no worktree has checked out\n`);
   return askYesNo(ctx, "Check it out in a temporary worktree and write it there? [y/N] ");
 }
 
@@ -109,22 +121,6 @@ function contextIn(ctx: Ctx, worktree: string): Ctx {
     navDir: ctx.navDir,
     ext: ctx.ext,
   });
-}
-
-/**
- * Run `write` in `worktree`, refusing if that checkout does not hold the pull
- * request after all — the branch moved since we looked, say. Without this the
- * write would land beside no `pr.md`, the stranded comment the refusal exists
- * to prevent.
- */
-function writeIn<T>(
-  ctx: Ctx,
-  worktree: string,
-  prefix: string,
-  write: (at: Ctx, entity: EntityRecord) => T,
-): T {
-  const there = contextIn(ctx, worktree);
-  return write(there, findPrToWrite(there, prefix));
 }
 
 /**
@@ -208,6 +204,31 @@ function sheltered<T>(body: () => T): T {
 }
 
 /**
+ * Run `write` at `to`: in the clean worktree that has the branch, or in a
+ * temporary one made for the purpose and taken away again afterwards.
+ */
+function writeAt<T>(ctx: Ctx, to: Destination, write: (at: Ctx) => T): T {
+  if (to.worktree !== null) {
+    const result = write(contextIn(ctx, to.worktree));
+    ctx.stderr.write(`${ctx.colors.dim(`written in ${to.worktree}`)}\n`);
+    return result;
+  }
+
+  const { branch } = to;
+  return sheltered(() => {
+    const dir = checkOutTemporarily(ctx, branch);
+    let failed = true;
+    try {
+      const result = write(contextIn(ctx, dir));
+      failed = false;
+      return result;
+    } finally {
+      release(ctx, dir, branch, failed);
+    }
+  });
+}
+
+/**
  * Run a pull-request write where it belongs, asking first when that is not here.
  *
  * `write` gets the context to write in and the pull request as that context
@@ -226,24 +247,57 @@ export function withPrWriteSite<T>(
 
   const to = destination(elsewhere);
   // Built from what was just found, rather than scanning every ref again.
-  if (to === null || !agreed(ctx, entity, to, opts)) refusePrWrite(entity, elsewhere);
+  if (to === null || !agreed(ctx, `#${entity.id}`, to, opts)) refusePrWrite(entity, elsewhere);
 
-  if (to.worktree !== null) {
-    const result = writeIn(ctx, to.worktree, prefix, write);
-    ctx.stderr.write(`${ctx.colors.dim(`written in ${to.worktree}`)}\n`);
-    return result;
+  // Found again there, refusing if that checkout does not hold the pull
+  // request after all — the branch moved since we looked, say. Without this
+  // the write would land beside no `pr.md`, the stranded comment the refusal
+  // exists to prevent.
+  return writeAt(ctx, to, (at) => write(at, findPrToWrite(at, prefix)));
+}
+
+/**
+ * Run a write on `branch`, asking first when that is not the branch checked
+ * out here — the write that opens a pull request on a branch the caller is not
+ * standing on, which has no pull request yet to be found on it.
+ *
+ * Only a local branch: a remote-tracking one would have to become a local
+ * branch first, which is more than opening a pull request should do. A
+ * worktree that has the branch is used when it is clean, and refused when it
+ * is not, or is registered and gone.
+ */
+export function withBranchWriteSite<T>(
+  ctx: Ctx,
+  branch: string,
+  opts: PrWriteOptions,
+  write: (at: Ctx) => T,
+): T {
+  if (branch === currentBranch(ctx.repoRoot)) return write(ctx);
+  if (resolveSha(ctx.repoRoot, `refs/heads/${branch}`) === null) {
+    fail(`'${branch}' is not a local branch`, [
+      `create it first, e.g. 'git switch -c ${branch}' or 'git branch ${branch} origin/${branch}'`,
+    ]);
   }
 
-  const { branch } = to;
-  return sheltered(() => {
-    const dir = checkOutTemporarily(ctx, branch);
-    let failed = true;
-    try {
-      const result = writeIn(ctx, dir, prefix, write);
-      failed = false;
-      return result;
-    } finally {
-      release(ctx, dir, branch, failed);
-    }
-  });
+  const worktree = worktreeHolding(ctx.repoRoot, branch);
+  if (worktree !== null && !existsSync(worktree)) {
+    fail(`'${branch}' is registered to a worktree at ${worktree}, which no longer exists`, [
+      "clear it with 'git worktree prune', then try again",
+    ]);
+  }
+  if (worktree !== null && !isTreeClean(worktree, { untracked: false })) {
+    fail(`'${branch}' is checked out in ${worktree}, which has uncommitted changes`, [
+      "commit or stash them there, or run the command there",
+    ]);
+  }
+  const to: Destination = { branch, worktree };
+  if (!agreed(ctx, "The pull request", to, opts)) {
+    fail(`'${branch}' is not checked out here`, [
+      "a pull request is written on its source branch, beside the files it proposes to merge",
+      worktree === null
+        ? `check it out first, or pass -y to write in a temporary worktree`
+        : `run the command in ${worktree}, or pass -y to write there`,
+    ]);
+  }
+  return writeAt(ctx, to, write);
 }

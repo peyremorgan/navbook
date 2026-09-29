@@ -38,6 +38,15 @@ export function activate(host) {
     ctx.stdout.write(`reports: ${model?.reports.length ?? 0}\n`);
   });
 
+  // A write beside a pull request, wherever its branch is checked out.
+  host.command("probe note", ([id, text], opts) => {
+    const written = host.ui.withPrWriteSite(id, { assumeYes: opts.yes === true }, (at, entity) => {
+      const content = core.newCommentFile({ author: core.currentAuthor(at), body: text });
+      return core.applyComment(at, entity, { content }, { commit: true });
+    });
+    ctx.stdout.write(`${host.ui.commitReport(written.run)}\n`);
+  });
+
   host.contribute("issue open", {
     openFields: (opts) => (opts.probeTag?.length ? { "probe-tag": opts.probeTag } : {}),
   });

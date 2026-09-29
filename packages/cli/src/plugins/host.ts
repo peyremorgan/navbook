@@ -143,4 +143,24 @@ export interface CliPluginUi {
   commitReport(result: { committed: boolean; subject: string }): string;
   /** Collect a repeatable option's values, for a manifest that declares one. */
   collect(value: string, previous: string[]): string[];
+  /**
+   * Write to a pull request where it lives, as `nav pr comment` does.
+   *
+   * Its files are on its source branch (spec 03 §3.5). When this checkout does
+   * not have that branch, the write happens in the clean worktree that does,
+   * or in a temporary one — after asking, unless `assumeYes` answered already.
+   * `write` gets the context to write in and the pull request as read there;
+   * when the write cannot move, this fails naming the branch.
+   */
+  withPrWriteSite<T>(
+    prefix: string,
+    opts: { assumeYes?: boolean },
+    write: (at: Ctx, entity: EntityRecord) => T,
+  ): T;
+  /**
+   * Write on a local branch that may not be the one checked out here, as
+   * `nav pr open --source` does: here, in the clean worktree that has it, or in
+   * a temporary one, asking first unless `assumeYes` answered already.
+   */
+  withBranchWriteSite<T>(branch: string, opts: { assumeYes?: boolean }, write: (at: Ctx) => T): T;
 }

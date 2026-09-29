@@ -240,11 +240,15 @@ Implementations MUST NOT use the `nav-` prefix for anything else.
 
 The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
 
-- `nav pr open [--target BRANCH] [--title T] [--draft] [--reviewer EMAIL]... [--feature SLUG]...` — on the current
-  branch: mint an ID, create `prs/open/<id>-<slug>/pr.md` with `source` = the
-  current branch, `target` (default: the default branch), and one revision
-  entry pinning `head` = current `HEAD` SHA and `base` = `git merge-base HEAD
-  <target>`.
+- `nav pr open [--source BRANCH [-y]] [--target BRANCH] [--title T] [--draft] [--reviewer EMAIL]... [--feature SLUG]...` —
+  on the current branch: mint an ID, create `prs/open/<id>-<slug>/pr.md` with
+  `source` = the current branch, `target` (default: the default branch), and
+  one revision entry pinning `head` = current `HEAD` SHA and `base` = `git
+  merge-base HEAD <target>`. `--source` names another local branch: the pull
+  request is then written on that branch, whose tip is the `head` pinned, in
+  the clean worktree that has it checked out or in a temporary one, after
+  asking — or without asking under `-y` — exactly as a write to a pull request
+  held by another branch is.
 - `nav pr list [query]... [--all-refs]` — open PRs found on the current
   branch; `--all-refs` scans all local and fetched remote branches, skipping
   any PR that the branch answering for it — its `target`, or the default

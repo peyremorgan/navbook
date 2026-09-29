@@ -73,6 +73,26 @@
               "name": "ask",
               "description": "ask two questions and say what was answered",
               "needsCore": false
+            },
+            {
+              "name": "note",
+              "description": "comment on a pull request where it lives",
+              "arguments": [
+                {
+                  "name": "id",
+                  "description": "the pull request"
+                },
+                {
+                  "name": "text",
+                  "description": "what to say"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-y, --yes",
+                  "description": "write in a worktree on its branch without asking"
+                }
+              ]
             }
           ]
         }

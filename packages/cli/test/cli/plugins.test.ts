@@ -232,7 +232,12 @@ describe("a plugin's commands", () => {
     const repo = probeRepo();
     try {
       const result = repo.nav(["__complete", "probe"], withProbe(repo));
-      assert.deepEqual(result.stdout.split("\n").filter(Boolean).sort(), ["ask", "hello", "tags"]);
+      assert.deepEqual(result.stdout.split("\n").filter(Boolean).sort(), [
+        "ask",
+        "hello",
+        "note",
+        "tags",
+      ]);
       assert.deepEqual(repo.log(), []);
     } finally {
       repo.cleanup();
@@ -244,6 +249,49 @@ describe("a plugin's commands", () => {
     try {
       const result = repo.nav(["__complete"], withProbe(repo));
       assert.ok(result.stdout.split("\n").includes("probe"));
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
+describe("a plugin writing to a pull request", () => {
+  /** The probe's repository, with a pull request open on `feat/x` and `main` checked out. */
+  function withPr(): TempRepo & { log(): string[] } {
+    const repo = probeRepo();
+    repo.write("app.txt", "original\n");
+    repo.commitAll("feat: initial code");
+    repo.git(["checkout", "--quiet", "-b", "feat/x"]);
+    repo.write("x.txt", "x\n");
+    repo.commitAll("feat: x");
+    const opened = repo.nav(["pr", "open", "-m", "Body.", "--commit"], {
+      ...withProbe(repo),
+      NAV_IDS: "prbe1111",
+    });
+    assert.equal(opened.code, 0, opened.stderr);
+    repo.git(["checkout", "--quiet", "main"]);
+    return repo;
+  }
+
+  it("writes where its branch is, when told it may", () => {
+    const repo = withPr();
+    try {
+      const result = repo.nav(["probe", "note", "prbe1111", "Noted.", "-y"], withProbe(repo));
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /Committed docs\(pr\): comment on #prbe1111/);
+      assert.match(repo.git(["log", "-1", "--format=%s", "feat/x"]).stdout, /comment on #prbe1111/);
+      assert.equal(repo.git(["worktree", "list"]).stdout.trim().split("\n").length, 1);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses as the built-in verbs do, naming the branch, when nobody said it may", () => {
+    const repo = withPr();
+    try {
+      const result = repo.nav(["probe", "note", "prbe1111", "Noted."], withProbe(repo));
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /#prbe1111 is on 'feat\/x', which is not checked out here/);
     } finally {
       repo.cleanup();
     }

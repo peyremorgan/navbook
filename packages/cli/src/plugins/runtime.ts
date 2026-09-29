@@ -252,7 +252,10 @@ export class PluginRuntime {
         activated.handlers.set(on, handlers);
       },
       completer: (id, complete) => void activated.completers.set(id, complete),
-      ui: makeUi(ctx),
+      // The write sites are the one part of the UI with a module of their own,
+      // imported only once a plugin is actually being activated: a listing
+      // that loads no plugin must not pay for them (spec 05 §5.2).
+      ui: makeUi(ctx, await import("../commands/pr-elsewhere.ts")),
     };
 
     try {
@@ -309,7 +312,13 @@ async function coreModule(): Promise<CliPluginHost["core"]> {
   return await import("@navbook/core");
 }
 
-function makeUi(ctx: Ctx): CliPluginUi {
+function makeUi(
+  ctx: Ctx,
+  sites: Pick<
+    typeof import("../commands/pr-elsewhere.ts"),
+    "withPrWriteSite" | "withBranchWriteSite"
+  >,
+): CliPluginUi {
   return {
     fail: (message, details) => fail(message, details ?? []),
     failFormat: (message, details) => failFormat(message, details ?? []),
@@ -325,6 +334,10 @@ function makeUi(ctx: Ctx): CliPluginUi {
     pad,
     commitReport,
     collect: (value: string, previous: string[] = []) => [...previous, value],
+    withPrWriteSite: (prefix, opts, write) =>
+      sites.withPrWriteSite(ctx, prefix, { yes: opts.assumeYes === true }, write),
+    withBranchWriteSite: (branch, opts, write) =>
+      sites.withBranchWriteSite(ctx, branch, { yes: opts.assumeYes === true }, write),
   };
 }
 

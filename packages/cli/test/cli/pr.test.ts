@@ -169,6 +169,136 @@ describe("nav pr open", () => {
   });
 });
 
+describe("nav pr open --source", () => {
+  /** `main` with a commit, and `feat/work` one commit ahead of it; standing on `main`. */
+  function withBranch(): TempRepo {
+    const repo = makeNavRepo();
+    repo.write("app.txt", "original\n");
+    repo.commitAll("feat: initial code");
+    repo.git(["checkout", "--quiet", "-b", "feat/work"]);
+    repo.write("work.txt", "the work\n");
+    repo.commitAll("feat: the work itself");
+    repo.git(["checkout", "--quiet", "main"]);
+    return repo;
+  }
+
+  const OPEN = ["pr", "open", "--source", "feat/work", "-m", "Body."];
+
+  it("opens it on that branch in a temporary worktree, and leaves this checkout alone", () => {
+    const repo = withBranch();
+    try {
+      const tmp = join(repo.home, "tmp");
+      mkdirSync(tmp, { recursive: true });
+      const tip = repo.git(["rev-parse", "feat/work"]).stdout.trim();
+      const opened = repo.nav([...OPEN, "-y", "--commit"], { NAV_IDS: "src11111", TMPDIR: tmp });
+      assert.equal(opened.code, 0, opened.stderr);
+      assert.match(opened.stdout, /\(#src11111\)/);
+      assert.match(opened.stdout, new RegExp(`from feat/work at ${tip.slice(0, 12)}`));
+      // The title falls back to the source's last subject, not this branch's.
+      const file = repo
+        .git(["ls-tree", "-r", "--name-only", "feat/work", ".navbook/prs/open"])
+        .stdout.split("\n")
+        .find((path) => path.endsWith("/pr.md"));
+      assert.match(
+        repo.git(["show", `feat/work:${file}`]).stdout,
+        /^title: "?feat: the work itself/m,
+      );
+      assert.match(
+        repo.git(["log", "-1", "--format=%s", "feat/work"]).stdout,
+        /docs\(pr\): open #src11111/,
+      );
+      assert.match(repo.git(["log", "-1", "--format=%s", "main"]).stdout, /feat: initial code/);
+      assert.match(opened.stderr, /temporary worktree on 'feat\/work', since removed/);
+      assert.deepEqual(readdirSync(tmp), []);
+      assert.equal(repo.git(["status", "--porcelain"]).stdout.trim(), "");
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("writes in the clean worktree that already has the branch", () => {
+    const repo = withBranch();
+    const tree = join(repo.dir, "..", "worktree-open");
+    try {
+      repo.git(["worktree", "add", "--quiet", tree, "feat/work"]);
+      const opened = repo.nav([...OPEN, "-y", "--commit"], { NAV_IDS: "src22222" });
+      assert.equal(opened.code, 0, opened.stderr);
+      assert.match(opened.stderr, new RegExp(`written in ${tree.replaceAll("/", "\\/")}`));
+      assert.match(repo.git(["-C", tree, "log", "-1", "--format=%s"]).stdout, /open #src22222/);
+    } finally {
+      repo.git(["worktree", "remove", "--force", tree]);
+      repo.cleanup();
+    }
+  });
+
+  it("opens it here when the source is the branch checked out", () => {
+    const repo = withBranch();
+    try {
+      repo.git(["checkout", "--quiet", "feat/work"]);
+      const opened = repo.nav([...OPEN, "--commit"], { NAV_IDS: "src33333" });
+      assert.equal(opened.code, 0, opened.stderr);
+      assert.equal(repo.git(["worktree", "list"]).stdout.trim().split("\n").length, 1);
+      assert.match(repo.git(["log", "-1", "--format=%s"]).stdout, /open #src33333/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("asks nobody and refuses without -y when nothing can answer", () => {
+    const repo = withBranch();
+    try {
+      const refused = repo.nav([...OPEN, "--commit"]);
+      assert.equal(refused.code, 1);
+      assert.match(refused.stderr, /'feat\/work' is not checked out here/);
+      assert.match(refused.stderr, /pass -y to write in a temporary worktree/);
+      assert.match(repo.git(["log", "-1", "--format=%s", "feat/work"]).stdout, /the work itself/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses a source that is not a local branch", () => {
+    const repo = withBranch();
+    try {
+      const refused = repo.nav(["pr", "open", "--source", "nowhere", "-y", "-m", "Body."]);
+      assert.equal(refused.code, 1);
+      assert.match(refused.stderr, /'nowhere' is not a local branch/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses a worktree with uncommitted changes", () => {
+    const repo = withBranch();
+    const tree = join(repo.dir, "..", "worktree-dirty-open");
+    try {
+      repo.git(["worktree", "add", "--quiet", tree, "feat/work"]);
+      writeFileSync(join(tree, "work.txt"), "half-finished\n", "utf8");
+      const refused = repo.nav([...OPEN, "-y", "--commit"]);
+      assert.equal(refused.code, 1);
+      assert.match(refused.stderr, /which has uncommitted changes/);
+    } finally {
+      repo.git(["worktree", "remove", "--force", tree]);
+      repo.cleanup();
+    }
+  });
+
+  it("refuses a source that is its own target, and removes the worktree it made", () => {
+    const repo = withBranch();
+    try {
+      const tmp = join(repo.home, "tmp");
+      mkdirSync(tmp, { recursive: true });
+      const refused = repo.nav([...OPEN, "--target", "feat/work", "-y"], { TMPDIR: tmp });
+      assert.equal(refused.code, 1);
+      assert.match(refused.stderr, /cannot target its own branch/);
+      assert.deepEqual(readdirSync(tmp), []);
+      assert.equal(repo.git(["worktree", "list"]).stdout.trim().split("\n").length, 1);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
+
 describe("nav pr review", () => {
   it("binds to the latest revision, and an older one on request", () => {
     const { repo, head } = withOpenPr();
