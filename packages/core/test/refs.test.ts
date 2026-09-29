@@ -139,6 +139,20 @@ describe("extractProseRefs", () => {
     assert.deepEqual(extractProseRefs("Use `foo\n---\nprose #bbbb2222 `x"), ["bbbb2222"]);
   });
 
+  it("reads each cell of a table on its own, as markdown-it does", () => {
+    // A code span cannot run from one cell, or one row, into the next.
+    const table = "| cmd | ref |\n|---|---|\n| `a | #bbbb2222 |\n| b` | c |";
+    assert.deepEqual(extractProseRefs(table), ["bbbb2222"]);
+    // A cell past the head's columns is dropped, and never shown.
+    assert.deepEqual(extractProseRefs("| a |\n|---|\n| b | #bbbb2222 |"), []);
+    // A table interrupts a paragraph, and the span that paragraph opened.
+    assert.deepEqual(extractProseRefs("para `x\n| a #bbbb2222 |\n| --- |\nb` c"), ["bbbb2222"]);
+    // The next item of a list comes before a table.
+    assert.deepEqual(extractProseRefs("- a\n- b \\| `\n--\n#bbbb2222 `"), []);
+    // A lazy line can head one, ending the paragraph in the item above.
+    assert.deepEqual(extractProseRefs("2) ` #aaaa1111\n|`\n\t-:"), ["aaaa1111"]);
+  });
+
   it("does not take a run whose info string holds a backtick for a block", () => {
     assert.deepEqual(extractProseRefs("a `b\n```x` c #aaaa1111` d"), ["aaaa1111"]);
   });

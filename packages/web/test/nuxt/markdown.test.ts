@@ -180,6 +180,8 @@ describe("renderMarkdown", () => {
       "text\n2) ``` #mz4kq1rv",
       "a `b\n***\n#mz4kq1rv and `c`",
       "Use `foo\n===\nprose #mz4kq1rv `x",
+      "| cmd | ref |\n|---|---|\n| `a | #mz4kq1rv |\n| b` | c |",
+      "| a |\n|---|\n| b | #bqlybac0 |\n\n#mz4kq1rv",
     ]) {
       assert.deepEqual(linked(source).sort(), extractProseRefs(source).sort(), source);
       assert.ok(linked(source).includes("mz4kq1rv"), source);

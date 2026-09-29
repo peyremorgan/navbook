@@ -35,12 +35,15 @@ export function extractProseRefs(markdown: string): string[] {
  *
  * It reads as markdown-it does, a line at a time. Each line first gets past
  * the quotes and list items it is still inside, then may open new ones, and
- * what is left is code, a fence, a heading, a rule or prose. Only prose, which
- * is what paragraphs and headings hold, can name a reference.
+ * what is left is code, a fence, a heading, a rule, a table row or prose.
+ * Only prose, which is what paragraphs, headings and table cells hold, can
+ * name a reference.
  *
  * Known to differ: text inside a link is counted, where the web client leaves
- * it alone rather than nest one link in another, and so is text in a table.
- * Neither is code.
+ * it alone rather than nest one link in another, and so is a link reference
+ * definition, which it does not show. Neither is code. And where a tab
+ * follows a list marker inside a quote inside another, markdown-it counts its
+ * columns from the inner quote rather than the start of the line.
  */
 
 /** Past this many quotes and list items inside one another, a marker is text. */
@@ -65,13 +68,17 @@ const LIST_MARKER = /^(?:[-+*]|(\d{1,9})[.)])(?= |$)/;
  * Where a quote or a list item ends, a line has to say so: a quote goes on for
  * as long as its lines start with `>`, and a list item for as long as they are
  * indented to where its content starts. `width` is how far that is from where
- * the item itself starts.
+ * the item itself starts, `marker` the character that ends its marker, which
+ * the next item in the same list ends with too, and `emptyAt` the line it
+ * began on when nothing followed its marker there, -1 otherwise.
  */
-type Container = { kind: "quote" } | { kind: "item"; width: number; emptyAt: number };
+type Container =
+  | { kind: "quote" }
+  | { kind: "item"; width: number; emptyAt: number; marker: string };
 
 /**
- * The prose of `markdown`, a paragraph or heading at a time, with the quote
- * markers and indentation of its container taken off each line.
+ * The prose of `markdown`, a paragraph, heading or table cell at a time, with
+ * the quote markers and indentation of its container taken off each line.
  *
  * A fence is a run of three or more backticks or tildes (see {@link opensFence})
  * indented less than four columns past its container. It closes on a run of
@@ -84,38 +91,21 @@ type Container = { kind: "quote" } | { kind: "item"; width: number; emptyAt: num
 function paragraphs(markdown: string): string[] {
   const out: string[] = [];
   const stack: Container[] = [];
+  const lines = markdown.split("\n").map(expandTabs);
   let fence: { char: string; length: number } | null = null;
   let code = false;
   let paragraph: string[] | null = null;
+  // How many columns the table being read has; 0 outside one.
+  let columns = 0;
   const endParagraph = () => {
     if (paragraph !== null) out.push(paragraph.join("\n"));
     paragraph = null;
+    columns = 0;
   };
 
-  const lines = markdown.split("\n");
   for (let index = 0; index < lines.length; index++) {
-    const line = expandTabs(lines[index] as string);
-    let pos = 0;
-    let matched = 0;
-    for (const container of stack) {
-      const indent = spaces(line, pos);
-      if (container.kind === "quote") {
-        // However far in, as markdown-it has it: only a quote's first `>`
-        // must be indented less than four.
-        if (line[pos + indent] !== ">") break;
-        pos += indent + 1;
-        if (line[pos] === " ") pos++;
-      } else if (pos + indent === line.length) {
-        // A blank line stays in a list item, unless the item began blank:
-        // then it has no content, and this ends it.
-        if (container.emptyAt === index - 1) break;
-      } else if (indent >= container.width) {
-        pos += container.width;
-      } else {
-        break;
-      }
-      matched++;
-    }
+    const line = lines[index] as string;
+    let { pos, matched } = enter(line, stack, index);
 
     if (fence !== null || code) {
       const rest = line.slice(pos);
@@ -134,21 +124,49 @@ function paragraphs(markdown: string): string[] {
       code = false;
     }
 
-    if (matched < stack.length) {
-      // A line that opens no block of its own carries on the paragraph above,
-      // whatever it sits in: CommonMark's lazy continuation.
-      if (paragraph !== null && !interrupts(line.slice(pos), stack.slice(matched))) {
-        paragraph.push(line.slice(pos).trimStart());
+    if (columns > 0 && matched === stack.length) {
+      // A table goes on for as long as its lines start no other block. Each
+      // cell is read on its own, and past the head's columns there are none.
+      const indent = spaces(line, pos);
+      const text = line.slice(pos + indent);
+      if (indent < 4 && text !== "" && !startsBlock(text)) {
+        out.push(...cells(text).slice(0, columns));
         continue;
       }
       endParagraph();
+    }
+
+    // The marker of the list item this line has just left.
+    let left: string | null = null;
+    if (matched < stack.length) {
+      // A line that opens no block of its own carries on the paragraph above,
+      // whatever it sits in: CommonMark's lazy continuation.
+      const rest = line.slice(pos);
+      const heads = () => tableHead(rest.trimStart(), lines[index + 1], stack, index + 1) !== null;
+      if (paragraph !== null && !interrupts(rest, stack.slice(matched), heads)) {
+        paragraph.push(rest.trimStart());
+        continue;
+      }
+      endParagraph();
+      const container = stack[matched];
+      if (container?.kind === "item") left = container.marker;
       stack.length = matched;
     }
 
-    while (stack.length < MAX_NESTING) {
+    let table: string[] | null = null;
+    while (table === null) {
       const indent = spaces(line, pos);
       const text = line.slice(pos + indent);
       if (indent > 3) break;
+      const marker = LIST_MARKER.exec(text);
+      // A table comes first, before even a quote or a list item, and can
+      // interrupt a paragraph; its head is whatever this line holds. Only the
+      // next item of a list the line has just left goes before it.
+      if (!(left !== null && marker?.[0].endsWith(left))) {
+        table = tableHead(text, lines[index + 1], stack, index + 1);
+      }
+      left = null;
+      if (table !== null || stack.length >= MAX_NESTING) break;
       if (text[0] === ">") {
         endParagraph();
         stack.push({ kind: "quote" });
@@ -156,7 +174,6 @@ function paragraphs(markdown: string): string[] {
         if (line[pos] === " ") pos++;
         continue;
       }
-      const marker = LIST_MARKER.exec(text);
       if (marker === null || THEMATIC_BREAK.test(text)) break;
       const after = pos + indent + marker[0].length;
       const gap = spaces(line, after);
@@ -170,8 +187,16 @@ function paragraphs(markdown: string): string[] {
       // The content starts a column past the marker when the item is blank
       // or when what follows the marker is code, indented four or more.
       const width = after + (empty || gap > 4 ? 1 : gap) - pos;
-      stack.push({ kind: "item", width, emptyAt: empty ? index : -1 });
+      stack.push({ kind: "item", width, emptyAt: empty ? index : -1, marker: marker[0].slice(-1) });
       pos = Math.min(pos + width, line.length);
+    }
+    if (table !== null) {
+      endParagraph();
+      out.push(...table);
+      columns = table.length;
+      // The delimiter row under the head says nothing.
+      index++;
+      continue;
     }
 
     const rest = line.slice(pos);
@@ -203,32 +228,91 @@ function paragraphs(markdown: string): string[] {
 }
 
 /**
+ * Where `line` gets to past the containers on `stack` it is still inside, and
+ * how many of them that is.
+ */
+function enter(line: string, stack: Container[], index: number) {
+  let pos = 0;
+  let matched = 0;
+  for (const container of stack) {
+    const indent = spaces(line, pos);
+    if (container.kind === "quote") {
+      // However far in, as markdown-it has it: only a quote's first `>`
+      // must be indented less than four.
+      if (line[pos + indent] !== ">") break;
+      pos += indent + 1;
+      if (line[pos] === " ") pos++;
+    } else if (pos + indent === line.length) {
+      // A blank line stays in a list item, unless the item began blank:
+      // then it has no content, and this ends it.
+      if (container.emptyAt === index - 1) break;
+    } else if (indent >= container.width) {
+      pos += container.width;
+    } else {
+      break;
+    }
+    matched++;
+  }
+  return { pos, matched };
+}
+
+/**
+ * The cells of `head` when it heads a table, or null. It does when it has a
+ * `|`, and the next line, inside everything this one is, is a delimiter row
+ * like `| --- | :-: |` that marks out as many columns.
+ */
+function tableHead(
+  head: string,
+  next: string | undefined,
+  stack: Container[],
+  index: number,
+): string[] | null {
+  if (next === undefined || !head.includes("|") || !next.includes("-")) return null;
+  const { pos, matched } = enter(next, stack, index);
+  const indent = spaces(next, pos);
+  const delimiter = next.slice(pos + indent);
+  if (matched < stack.length || indent > 3) return null;
+  if (!/^[-:|][-:| ]+$/.test(delimiter) || delimiter.startsWith("- ")) return null;
+  const parts = delimiter.split("|");
+  let count = 0;
+  for (const [i, part] of parts.entries()) {
+    const cell = part.trim();
+    if (cell === "" && (i === 0 || i === parts.length - 1)) continue;
+    if (!/^:?-+:?$/.test(cell)) return null;
+    count++;
+  }
+  const header = cells(head);
+  return header.length > 0 && header.length === count ? header : null;
+}
+
+/**
  * Whether `line`, which has `left` the containers the paragraph above it is
  * in, starts a block and so ends that paragraph rather than carrying it on.
  *
  * Each quote it left asks in turn, from inside whatever holds that quote, and
- * then the paragraph itself. A list marker may start a list there, even one
+ * then the paragraph itself, for which the line might also be the head of a
+ * table; `heads` says whether it is. A list marker may start a list there, even one
  * that could not interrupt a paragraph from inside it, and whether the line
  * is indented too far to start anything is judged from where the content of
  * what asks begins, as markdown-it has it: a list item's content begins past
  * the line's start, and to anything inside a quote the line has already left,
  * the line is not indented at all.
  */
-function interrupts(line: string, left: Container[]): boolean {
+function interrupts(line: string, left: Container[], heads: () => boolean): boolean {
   const indent = spaces(line, 0);
   const text = line.slice(indent);
   if (text === "") return true;
   const list = LIST_MARKER.test(text);
-  const block =
-    text[0] === ">" || HEADING.test(text) || THEMATIC_BREAK.test(text) || opensFence(text) !== null;
+  const block = startsBlock(text);
   // Where the content of what asks begins, and of what holds that.
   let from = 0;
   let listFrom = 0;
   let quoted = false;
   const asks = () => {
-    if (quoted) return list || block;
+    if (quoted) return block;
     if (indent - from >= 4) return false;
-    return block || (list && !(indent - listFrom >= 4 && indent < from));
+    if (list && indent - listFrom >= 4 && indent < from) return THEMATIC_BREAK.test(text);
+    return block;
   };
   for (const container of left) {
     if (container.kind === "item") {
@@ -239,7 +323,42 @@ function interrupts(line: string, left: Container[]): boolean {
     if (asks()) return true;
     quoted = true;
   }
-  return !quoted && asks();
+  return !quoted && (asks() || heads());
+}
+
+/**
+ * The cells of a table row: split at each `|` a backslash does not escape,
+ * with the backslash dropped from one it does, and an empty cell before the
+ * first `|` or after the last left out.
+ */
+function cells(row: string): string[] {
+  const out: string[] = [];
+  let cell = "";
+  let escaped = false;
+  for (const char of row.trim()) {
+    if (char !== "|") cell += char;
+    else if (escaped) cell = `${cell.slice(0, -1)}|`;
+    else {
+      out.push(cell);
+      cell = "";
+    }
+    escaped = char === "\\";
+  }
+  out.push(cell);
+  if (out[0] === "") out.shift();
+  if (out[out.length - 1] === "") out.pop();
+  return out;
+}
+
+/** Whether `text`, with its indentation taken off, starts a block other than a paragraph. */
+function startsBlock(text: string): boolean {
+  return (
+    text[0] === ">" ||
+    LIST_MARKER.test(text) ||
+    HEADING.test(text) ||
+    THEMATIC_BREAK.test(text) ||
+    opensFence(text) !== null
+  );
 }
 
 /**
