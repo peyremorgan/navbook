@@ -302,6 +302,30 @@ describe("attaching work to a feature", () => {
       .map((line) => JSON.parse(line))
       .find((issue) => issue.title === "Bill by seat");
     assert.deepEqual(both.feature, ["auth", "billing"]);
+
+    // A flag given twice names one feature, written once.
+    assert.equal(
+      repo.nav([
+        "issue",
+        "open",
+        "Named twice",
+        "--feature",
+        "billing",
+        "--feature",
+        "billing",
+        "-m",
+        "Body.",
+        "--commit",
+      ]).code,
+      0,
+    );
+    const twice = repo
+      .nav(["issue", "list", "--json"])
+      .stdout.trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .find((issue) => issue.title === "Named twice");
+    assert.equal(twice.feature, "billing");
   });
 
   it("filters a listing by feature, and ANDs two terms", () => {

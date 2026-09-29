@@ -434,6 +434,20 @@ describe("features", () => {
     ).openIssue;
     assert.deepEqual(opened.issue.features, []);
 
+    const twice = ok<Payload>(
+      await h.gql(OPEN_ISSUE, {
+        input: {
+          title: "Twice",
+          body: "Body.",
+          features: ["billing-invoices", "billing-invoices"],
+        },
+      }),
+    ).openIssue;
+    assert.match(
+      fileOf(`.navbook/issues/open/${twice.issue.id}-twice/issue.md`),
+      /^feature: billing-invoices$/m,
+    );
+
     const attached = ok<Payload>(
       await h.gql(UPDATE_ISSUE, {
         input: { ref: opened.issue.id, features: ["auth", "billing-invoices"] },
@@ -441,8 +455,16 @@ describe("features", () => {
     ).updateIssue;
     assert.deepEqual(attached.issue.features, ["auth", "billing-invoices"]);
 
+    // A slug named twice is one feature, and is written once.
+    const repeated = ok<Payload>(
+      await h.gql(UPDATE_ISSUE, {
+        input: { ref: opened.issue.id, features: ["auth", "billing-invoices", "auth"] },
+      }),
+    ).updateIssue;
+    assert.deepEqual(repeated.issue.features, ["auth", "billing-invoices"]);
+
     const narrowed = ok<Payload>(
-      await h.gql(UPDATE_ISSUE, { input: { ref: opened.issue.id, features: ["auth"] } }),
+      await h.gql(UPDATE_ISSUE, { input: { ref: opened.issue.id, features: ["auth", "auth"] } }),
     ).updateIssue;
     assert.deepEqual(narrowed.issue.features, ["auth"]);
     assert.match(

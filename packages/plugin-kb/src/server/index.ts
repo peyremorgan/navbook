@@ -27,6 +27,7 @@ import {
   newSpecFile,
   readFeatures,
   specFileName,
+  uniqueSlugs,
   useCore,
   validateFeature,
   validateSpec,
@@ -97,13 +98,17 @@ export function activate(host: ServerPluginHost): void {
   host.entityInput({
     openFields: (input): Record<string, string | readonly string[]> => {
       const values = input.features;
-      return Array.isArray(values) && values.length > 0 ? { feature: values as string[] } : {};
+      return Array.isArray(values) && values.length > 0
+        ? { feature: uniqueSlugs(values as string[]) }
+        : {};
     },
     patchFields: (input) => {
       // Present-and-null clears the key, as it does for the format's own
-      // multi-valued fields; absent leaves it alone.
+      // multi-valued fields; absent leaves it alone. A list is written with
+      // each slug once (`uniqueSlugs`).
       const values = input.features;
-      return values === undefined ? {} : { feature: values };
+      if (values === undefined) return {};
+      return { feature: Array.isArray(values) ? uniqueSlugs(values as string[]) : values };
     },
     filterTerms: (filter): Record<string, string[]> => {
       const values = filter.features;
