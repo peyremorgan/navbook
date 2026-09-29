@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { GitTimeoutError } from "@navbook/core";
+import { GitStoppedError, GitTimeoutError } from "@navbook/core";
 import { RepoSync, type SyncGit } from "../../src/sync.ts";
 
 const ROOT = "/clone";
@@ -63,7 +63,23 @@ function recorder(script: Scripted = {}): Recorder {
   const git: SyncGit = {
     fetchRemote: async (_cwd, remote, opts) => {
       timeouts.push(opts?.timeoutMs);
-      await script.fetchGate;
+      // As the real one does: an aborted signal stops the fetch where it stands.
+      const signal = opts?.signal;
+      const stopped = (): GitStoppedError => {
+        calls.push(`fetch ${remote} -> stopped`);
+        return new GitStoppedError(["fetch", remote]);
+      };
+      if (signal?.aborted) throw stopped();
+      if (script.fetchGate) {
+        await new Promise<void>((resolve, reject) => {
+          const onAbort = (): void => reject(stopped());
+          signal?.addEventListener("abort", onAbort, { once: true });
+          script.fetchGate?.then(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+          });
+        });
+      }
       calls.push(`fetch ${remote}`);
       if (script.fetchThrows) throw script.fetchThrows;
     },
@@ -371,23 +387,51 @@ describe("RepoSync background pull", () => {
     assert.deepEqual(calls, ["fetch origin"]);
   });
 
-  it("stops, waiting for a pull in flight and starting no other", async () => {
+  it("stops a fetch in flight rather than waiting for it, quietly, and starts no other", async () => {
+    // A fetch that would never finish on its own: a remote that has stopped answering.
     const fetch = gate();
-    const { sync, calls } = makeSync({ fetchGate: fetch.closed }, { ttl: 5 });
+    const { sync, calls, reported } = makeSync({ fetchGate: fetch.closed }, { ttl: 5 });
     sync.start();
     await settle();
 
-    let stopped = false;
-    const stopping = sync.stop().then(() => {
-      stopped = true;
-    });
+    await sync.stop();
     await settle();
-    assert.equal(stopped, false);
+    assert.deepEqual(calls, ["fetch origin -> stopped"]);
+    // Stopped on request is not a failure, so the log says nothing of it.
+    assert.deepEqual(reported, []);
+  });
 
-    fetch.open();
-    await stopping;
+  it("merges nothing once stopped, even a merge queued behind a write", async () => {
+    // The background fetch lands while a write holds the clone, so its merge
+    // waits for the clone; the stop arrives while it waits.
+    const fetch = gate();
+    const push = gate();
+    const { sync, calls } = makeSync(
+      { fetchGate: fetch.closed, pushGate: push.closed, behind: [true] },
+      { ttl: 5 },
+    );
+    sync.start();
     await settle();
-    assert.deepEqual(calls, ["fetch origin"]);
+    const write = sync.write(
+      () => undefined,
+      () => true,
+    );
+    fetch.open();
+    await settle();
+
+    const stopping = sync.stop();
+    await settle();
+    push.open();
+    await Promise.all([write, stopping]);
+    await settle();
+    // Both fetches, and the write's merge and push: but no merge of the background's.
+    assert.deepEqual(calls, [
+      "fetch origin",
+      "fetch origin",
+      "merge -> staged",
+      "commit-merge",
+      "push origin main -> ok",
+    ]);
   });
 });
 
