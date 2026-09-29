@@ -139,6 +139,44 @@ describe("the pre-commit hook", () => {
     }
   });
 
+  it("replaces a block an older nav wrote, keeping the rest of the hook", () => {
+    // The block before the `set -e` fix: its marker is there, so a check for
+    // the marker alone left every existing install with it for good.
+    const old = [
+      "# >>> navbook >>>",
+      "# Validate staged Navbook files.",
+      "if command -v nav >/dev/null 2>&1; then",
+      "  nav doctor --staged",
+      "  if [ $? -eq 2 ]; then",
+      "    exit 1",
+      "  fi",
+      "fi",
+      "# <<< navbook <<<",
+    ].join("\n");
+    const repo = makeNavRepo();
+    try {
+      writeFileSync(
+        join(repo.dir, HOOK),
+        `#!/bin/sh\nset -e\necho before\n\n${old}\necho after\n`,
+        { mode: 0o755 },
+      );
+      const result = repo.nav(["install", "--hooks", "-y"]);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /update the navbook block in .*pre-commit/);
+      const text = hookText(repo);
+      assert.match(text, /navbook_status=\$\?/);
+      assert.equal(text.includes("if [ $? -eq 2 ]"), false, "the old block is gone");
+      assert.equal((text.match(/>>> navbook >>>/g) ?? []).length, 1);
+      assert.match(text, /^set -e\necho before\n/m);
+      assert.match(text, /# <<< navbook <<<\necho after\n$/);
+
+      const again = repo.nav(["install", "--hooks", "-y"]);
+      assert.match(again.stdout, /already installed/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("deletes a hook it created outright", () => {
     const repo = makeNavRepo();
     try {
