@@ -8,9 +8,12 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { parse as parseYaml } from "yaml";
 import { REPO_ROOT } from "../../packages/cli/test/helpers/temprepo.ts";
 import { ENTRYPOINT, WEB_CONFIG_SCRIPT } from "./helpers.ts";
 
@@ -77,22 +80,51 @@ interface Workspace {
   deps: Map<string, string[]>;
 }
 
+/**
+ * The workspace's packages, from the globs `pnpm-workspace.yaml` lists.
+ *
+ * Only the shapes a glob there takes today — `dir/*` and a plain path — and a
+ * refusal of any other, so a new shape fails here rather than leaving packages
+ * out of what the tests below check.
+ */
+function workspaceDirs(): string[] {
+  const globs = (parseYaml(read("pnpm-workspace.yaml")) as { packages?: string[] }).packages ?? [];
+  return globs.flatMap((glob) => {
+    if (/^[\w.-]+(\/[\w.-]+)*\/\*$/.test(glob)) {
+      const parent = glob.slice(0, -2);
+      return readdirSync(join(REPO_ROOT, parent)).map((dir) => `${parent}/${dir}`);
+    }
+    assert.match(
+      glob,
+      /^[\w.-]+(\/[\w.-]+)*$/,
+      `pnpm-workspace.yaml glob '${glob}' is not read here`,
+    );
+    return [glob];
+  });
+}
+
 function workspace(): Workspace {
   const dirs = new Map<string, string>();
   const manifests = new Map<string, Record<string, Record<string, string> | undefined>>();
-  for (const dir of readdirSync(join(REPO_ROOT, "packages"))) {
-    const path = `packages/${dir}/package.json`;
+  for (const dir of workspaceDirs()) {
+    const path = `${dir}/package.json`;
     if (!existsSync(join(REPO_ROOT, path))) continue;
     const manifest = JSON.parse(read(path));
-    dirs.set(manifest.name, `packages/${dir}`);
+    dirs.set(manifest.name, dir);
     manifests.set(manifest.name, manifest);
   }
   const deps = new Map<string, string[]>();
   for (const [name, manifest] of manifests) {
-    const named = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]
-      .flatMap((field) => Object.keys(manifest[field] ?? {}))
-      .filter((dep) => dirs.has(dep));
-    deps.set(name, [...new Set(named)]);
+    const fields = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
+    const named = fields.flatMap((field) => Object.entries(manifest[field] ?? {}));
+    // A `workspace:` dependency that is not a package found above means the
+    // globs were misread, and dropping it would hide exactly what is checked.
+    for (const [dep, range] of named) {
+      if (range.startsWith("workspace:")) {
+        assert.ok(dirs.has(dep), `${name} depends on ${dep}, which no workspace glob finds`);
+      }
+    }
+    deps.set(name, [...new Set(named.map(([dep]) => dep).filter((dep) => dirs.has(dep)))]);
   }
   return { dirs, deps };
 }
@@ -115,8 +147,14 @@ function installed(ws: Workspace, dockerfile: string): Set<string> {
   const install = instructions(dockerfile).find((line) => /^RUN pnpm install\s/.test(line));
   assert.ok(install, `${dockerfile} has no pnpm install`);
   const selected = new Set<string>();
-  for (const [, filter = ""] of install.matchAll(/--filter\s+"?([^"\s]+)"?/g)) {
+  for (const [, filter = ""] of install.matchAll(/--filter(?:\s+|=)"?([^"\s]+)"?/g)) {
     const name = filter.replace(/\.\.\.$/, "");
+    // `name` and `name...` only: a path, a `{dir}` or a `^...` selector would
+    // be read here as a name and checked against a selection pnpm never makes.
+    assert.ok(
+      name === "navbook-workspace" || ws.dirs.has(name),
+      `${dockerfile}: the filter '${filter}' is not a selector this test reads`,
+    );
     for (const pkg of filter.endsWith("...") ? closure(ws, name) : [name]) selected.add(pkg);
   }
   return selected;
@@ -199,17 +237,70 @@ describe("the Dockerfiles", () => {
     const ws = workspace();
     const copied = new Set(copiedFromContext(DOCKERFILES.api));
 
+    // The whole directory, or its `src/` beside the manifest copied earlier:
+    // what `tsc` reads through a workspace package's exports is its source.
     const missing = new Set(
       packed(DOCKERFILES.api)
         .flatMap((name) => [...closure(ws, name)])
         .map((pkg) => ws.dirs.get(pkg) as string)
-        .filter((dir) => !copied.has(dir)),
+        .filter((dir) => !copied.has(dir) && !copied.has(`${dir}/src`)),
     );
     assert.deepEqual(
       [...missing],
       [],
       "the build stage copies only the manifest of a package tsc reads",
     );
+  });
+
+  it("installs plugins as the CLI store does, and checks their core range itself", () => {
+    // Without `--legacy-peer-deps` npm refuses plugin-kb over its web half's
+    // optional peers (#uniyh2hy); with it, npm no longer checks a plugin's
+    // `@navbook/core` range, so the image must.
+    const install = instructions(DOCKERFILES.api).find((line) =>
+      /npm install --omit=dev/.test(line),
+    );
+    assert.ok(install, "the API image has no runtime npm install");
+    assert.match(install, /--legacy-peer-deps/);
+    assert.match(install, /&& node check-plugin-peers\.mjs/);
+    assert.ok(existsSync(join(REPO_ROOT, "packages/server/docker/check-plugin-peers.mjs")));
+  });
+
+  it("installs a workspace plugin from its tarball, and anything else as written", () => {
+    // The Dockerfile's own loop, run in `sh` beside stand-in tarballs.
+    const install = instructions(DOCKERFILES.api).find((line) =>
+      /for spec in \$NAVBOOK_PLUGINS/.test(line),
+    );
+    assert.ok(install, "the API image has no NAVBOOK_PLUGINS loop");
+    const loop = /(for spec in \$NAVBOOK_PLUGINS;.*?\bdone)\s+&&/.exec(install)?.[1];
+    assert.ok(loop, "the loop could not be read out of the RUN");
+    const dir = mkdtempSync(join(tmpdir(), "navbook-plugin-loop-"));
+    try {
+      for (const file of ["navbook-core-0.5.0.tgz", "navbook-plugin-kb-0.5.0.tgz"]) {
+        writeFileSync(join(dir, file), "");
+      }
+      const plugins = [
+        "@navbook/plugin-kb",
+        "@navbook/plugin-kb@^0.5",
+        "@navbook/plugin-foo",
+        "navbook-plugin-jira@^2",
+        "@acme/navbook-plugin-x@1.2.0",
+      ];
+      const run = spawnSync("sh", ["-c", `${loop}; printf '%s\\n' "$@"`], {
+        cwd: dir,
+        encoding: "utf8",
+        env: { PATH: process.env.PATH, NAVBOOK_PLUGINS: plugins.join(" ") },
+      });
+      assert.equal(run.status, 0, run.stderr);
+      assert.deepEqual(run.stdout.trim().split("\n"), [
+        "./navbook-plugin-kb-0.5.0.tgz",
+        "./navbook-plugin-kb-0.5.0.tgz",
+        "@navbook/plugin-foo",
+        "navbook-plugin-jira@^2",
+        "@acme/navbook-plugin-x@1.2.0",
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("copies the very scripts the rest of these tests run", () => {

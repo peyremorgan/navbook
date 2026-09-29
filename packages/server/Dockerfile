@@ -1,7 +1,7 @@
 # The API server, packaged the way it is published.
 #
-# The build stage packs the two tarballs `pnpm publish` would upload and the
-# runtime stage installs them, so the image runs `dist/` through the same
+# The build stage packs the tarballs `pnpm publish` would upload — core, the
+# server and the workspace's plugins — and the runtime stage installs them, so the image runs `dist/` through the same
 # `publishConfig.exports` rewrite the registry gets rather than a private
 # arrangement that only holds inside the workspace. What ships here is what
 # `npx @navbook/server` would give anyone.
@@ -31,19 +31,22 @@ COPY packages/server/package.json packages/server/
 COPY packages/plugin-kb/package.json packages/plugin-kb/
 
 # The root project is not scenery: `typescript` is a devDependency of the
-# workspace rather than of either package, and `prepack` runs `tsc`. Every
-# package packed below is selected here with what it depends on, because its
+# workspace rather than of any package packed here, and `prepack` runs `tsc`.
+# Every package packed below is selected with what it depends on, because its
 # `prepack` compiles against them: plugin-kb depends on the server, not the
 # other way round, so selecting the server alone never installs it (#uniyh2hy).
+# The server is still named on its own: that plugin-kb's development happens to
+# pull it in is not something the server's own build should rest on.
 RUN pnpm install --frozen-lockfile --filter navbook-workspace \
       --filter "@navbook/server..." --filter "@navbook/plugin-kb..."
 
 # Sources, for every workspace package a packed one compiles against. plugin-kb
 # imports `@navbook/cli/plugin`, which resolves to cli's TypeScript source in the
-# workspace, so cli is here although it is never packed. web stays a manifest:
-# nothing packed here imports it.
+# workspace, so cli's `src/` is here although it is never packed — its source
+# alone, so a change to cli's tests does not repack the rest. web stays a
+# manifest: nothing packed here imports it.
 COPY script script
-COPY packages/cli packages/cli
+COPY packages/cli/src packages/cli/src
 COPY packages/core packages/core
 COPY packages/server packages/server
 COPY packages/plugin-kb packages/plugin-kb
@@ -92,31 +95,43 @@ WORKDIR /app
 # how a mismatch between the two is found at deploy time rather than later.
 ARG NAVBOOK_PLUGINS=""
 
-# Both tarballs in one install: npm satisfies the server's `@navbook/core`
+# Core and the server in one install: npm satisfies the server's `@navbook/core`
 # dependency from the core tarball beside it, so the version it names never has
 # to exist on a registry. Plugins join the same install, so a plugin's
 # `@navbook/core` peer is satisfied by that same tarball rather than by a
 # second copy fetched from the registry — the one thing that must not happen.
 COPY --from=build /out/*.tgz ./
-# `NAVBOOK_PLUGINS` names packages; a workspace one resolves to the tarball
-# beside it and anything else to the registry, which is why the two are
-# installed together rather than in two steps.
+# `NAVBOOK_PLUGINS` names packages as npm installs them. One this workspace
+# packed resolves to its tarball beside the server — by its name, any version
+# range dropped, since the tarball is the version this image is built from —
+# and anything else goes to npm as written. That is why they are installed
+# together rather than in two steps.
 #
 # `--legacy-peer-deps` for the reason `nav plugin install` passes it: npm
 # otherwise resolves a plugin's optional peers, and refuses plugin-kb over its
 # web half's, whose own optional `@vue/composition-api` peer wants a Vue 2
-# (#uniyh2hy). The image provides every peer a server half needs: core is the
-# tarball named here, never a second copy.
+# (#uniyh2hy). That also stops npm checking `@navbook/core` against a plugin's
+# peer range, so `check-plugin-peers.mjs` checks it once the install is done.
+COPY packages/server/docker/check-plugin-peers.mjs ./
 RUN npm init -y > /dev/null \
- && for name in $NAVBOOK_PLUGINS; do \
-      case "$name" in \
-        @navbook/plugin-*) set -- "$@" "./navbook-plugin-${name#@navbook/plugin-}-"*.tgz ;; \
-        *) set -- "$@" "$name" ;; \
+ && for spec in $NAVBOOK_PLUGINS; do \
+      case "$spec" in \
+        @*) rest="${spec#@}"; name="@${rest%%@*}" ;; \
+        *) name="${spec%%@*}" ;; \
       esac; \
+      tarball=""; \
+      case "$name" in \
+        @navbook/plugin-*) \
+          for file in "./navbook-plugin-${name#@navbook/plugin-}-"[0-9]*.tgz; do \
+            [ -e "$file" ] && tarball="$file"; \
+          done ;; \
+      esac; \
+      set -- "$@" "${tarball:-$spec}"; \
     done \
  && npm install --omit=dev --ignore-scripts --legacy-peer-deps \
       ./navbook-core-*.tgz ./navbook-server-*.tgz "$@" \
- && rm -f ./*.tgz \
+ && node check-plugin-peers.mjs \
+ && rm -f ./*.tgz check-plugin-peers.mjs \
  && npm cache clean --force
 
 # A named volume takes its ownership from the directory it covers, so this is
