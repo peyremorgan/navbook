@@ -13,6 +13,9 @@ revisions:
   - head: 97487e8ef603765348e351556426da1a6b0b795d
     base: 7083ddd12cb4c77d958683a4540c86f9613f9391
     date: 2026-09-29T09:16:17Z
+merged:
+  date: 2026-09-29T10:28:37Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 A release review of everything `dev` carries since v0.4.0 (`b93ca76`), pinned at `6842e4d`, and a fix for every issue it found that could be fixed without a decision. Seven reviewers covered core, CLI, server and ops, plugin-kb, web, and spec, docs and packaging. Each finding was reproduced before it was fixed, and each fix has a test that fails without it, except where noted.
