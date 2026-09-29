@@ -256,7 +256,7 @@ export function cmdEdit(ctx: Ctx, kind: EntityKind, prefix: string, opts: EditOp
     const path = absPath(at, entity.filePath);
     openInEditor(at, path);
 
-    for (const problem of revalidateEntityFile(path, kind)) {
+    for (const problem of revalidateEntityFile(at, path, kind)) {
       ctx.stderr.write(`${ctx.colors.yellow("warning:")} ${entity.filePath}: ${problem}\n`);
     }
 

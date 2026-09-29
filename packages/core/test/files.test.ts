@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { NO_EXTENSIONS } from "../src/core/extensions.ts";
 import {
   newCommentFile,
   newIssueFile,
@@ -38,11 +39,11 @@ Login POST aborts after 5 s.
 `;
 
   it("accepts the spec's example", () => {
-    assert.deepEqual(validateIssue(parseFile(valid)), []);
+    assert.deepEqual(validateIssue(parseFile(valid), NO_EXTENSIONS), []);
   });
 
   it("requires title, author, created and a non-empty description", () => {
-    const problems = validateIssue(parseFile("---\n---\n\n"));
+    const problems = validateIssue(parseFile("---\n---\n\n"), NO_EXTENSIONS);
     const text = messages(problems);
     assert.match(text, /missing required key 'title'/);
     assert.match(text, /missing required key 'author'/);
@@ -53,18 +54,22 @@ Login POST aborts after 5 s.
   it("treats a whitespace-only description as empty", () => {
     const problems = validateIssue(
       parseFile("---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\n---\n\n   \n\n"),
+      NO_EXTENSIONS,
     );
     assert.match(messages(problems), /description must not be empty/);
   });
 
   it("rejects a status key, since status is the path", () => {
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\nstatus: open\n---\n\nbody\n`;
-    assert.match(messages(validateIssue(parseFile(text))), /must not carry a 'status' key/);
+    assert.match(
+      messages(validateIssue(parseFile(text), NO_EXTENSIONS)),
+      /must not carry a 'status' key/,
+    );
   });
 
   it("rejects malformed authors, timestamps, labels and assignees", () => {
     const text = `---\ntitle: t\nauthor: not-an-address\ncreated: someday\nlabels: [ok, ""]\nassignee: [nope]\n---\n\nbody\n`;
-    const problems = messages(validateIssue(parseFile(text)));
+    const problems = messages(validateIssue(parseFile(text), NO_EXTENSIONS));
     assert.match(problems, /'author' must be an RFC 5322 address/);
     assert.match(problems, /'created' must be an ISO 8601 timestamp/);
     assert.match(problems, /'labels' must be a list of non-empty strings/);
@@ -73,13 +78,16 @@ Login POST aborts after 5 s.
 
   it("requires duplicate-of to be a Navbook ID", () => {
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\nduplicate-of: 12\n---\n\nbody\n`;
-    assert.match(messages(validateIssue(parseFile(text))), /'duplicate-of' must be a Navbook ID/);
+    assert.match(
+      messages(validateIssue(parseFile(text), NO_EXTENSIONS)),
+      /'duplicate-of' must be a Navbook ID/,
+    );
   });
 
   it("accepts decomposition links and reads them back", () => {
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\nparent: bqlybac0\nsubtasks: [mz4kq1rv, t5kr1gq6]\n---\n\nbody\n`;
     const parsed = parseFile(text);
-    assert.deepEqual(validateIssue(parsed), []);
+    assert.deepEqual(validateIssue(parsed, NO_EXTENSIONS), []);
     assert.equal(readParent(parsed.fm), "bqlybac0");
     assert.deepEqual(readSubtasks(parsed.fm), ["mz4kq1rv", "t5kr1gq6"]);
   });
@@ -87,13 +95,13 @@ Login POST aborts after 5 s.
   it("accepts a block-style subtasks list, which is the same YAML", () => {
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\nsubtasks:\n  - mz4kq1rv\n  - t5kr1gq6\n---\n\nbody\n`;
     const parsed = parseFile(text);
-    assert.deepEqual(validateIssue(parsed), []);
+    assert.deepEqual(validateIssue(parsed, NO_EXTENSIONS), []);
     assert.deepEqual(readSubtasks(parsed.fm), ["mz4kq1rv", "t5kr1gq6"]);
   });
 
   it("rejects link keys that are not Navbook IDs", () => {
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\nparent: [a]\nsubtasks: mz4kq1rv\n---\n\nbody\n`;
-    const problems = messages(validateIssue(parseFile(text)));
+    const problems = messages(validateIssue(parseFile(text), NO_EXTENSIONS));
     assert.match(problems, /'parent' must be a Navbook ID/);
     assert.match(problems, /'subtasks' must be a list of Navbook IDs/);
     assert.match(
@@ -102,6 +110,7 @@ Login POST aborts after 5 s.
           parseFile(
             `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\nsubtasks: [mz4kq1rv, NOPE]\n---\n\nbody\n`,
           ),
+          NO_EXTENSIONS,
         ),
       ),
       /'subtasks' must be a list of Navbook IDs/,
@@ -118,17 +127,17 @@ Login POST aborts after 5 s.
 
   it("accepts unknown keys and unusual but legal hand edits", () => {
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\nsome-tool-key: {a: 1}\nassignee: [a@b.co, c@d.co]\n---\n\nbody\n`;
-    assert.deepEqual(validateIssue(parseFile(text)), []);
+    assert.deepEqual(validateIssue(parseFile(text), NO_EXTENSIONS), []);
     assert.deepEqual(readAssignees(parseFile(text).fm), ["a@b.co", "c@d.co"]);
   });
 
   it("distinguishes a missing key from an empty one", () => {
     assert.match(
-      messages(validateIssue(parseFile("---\ntitle:\n---\n\nbody\n"))),
+      messages(validateIssue(parseFile("---\ntitle:\n---\n\nbody\n"), NO_EXTENSIONS)),
       /'title' must be a non-empty string/,
     );
     assert.match(
-      messages(validateIssue(parseFile("---\n---\n\nbody\n"))),
+      messages(validateIssue(parseFile("---\n---\n\nbody\n"), NO_EXTENSIONS)),
       /missing required key 'title'/,
     );
   });
@@ -148,7 +157,7 @@ Login POST aborts after 5 s.
       ["rank: 1e3", 1000],
     ] as const) {
       const parsed = parseFile(withKey(line));
-      assert.deepEqual(validateIssue(parsed), [], line);
+      assert.deepEqual(validateIssue(parsed, NO_EXTENSIONS), [], line);
       assert.equal(readRank(parsed.fm), expected, line);
     }
   });
@@ -157,7 +166,7 @@ Login POST aborts after 5 s.
     // The mirror of what `STRING_KEYS` does for a SHA YAML made an integer of:
     // a hand-written file should be usable and not merely diagnosable.
     const parsed = parseFile(withKey('rank: "10"'));
-    assert.deepEqual(validateIssue(parsed), []);
+    assert.deepEqual(validateIssue(parsed, NO_EXTENSIONS), []);
     assert.equal(readRank(parsed.fm), 10);
   });
 
@@ -176,7 +185,7 @@ Login POST aborts after 5 s.
       'rank: ""',
     ]) {
       assert.match(
-        messages(validateIssue(parseFile(withKey(line)))),
+        messages(validateIssue(parseFile(withKey(line)), NO_EXTENSIONS)),
         /'rank' must be a number/,
         line,
       );
@@ -187,13 +196,13 @@ Login POST aborts after 5 s.
   it("accepts a deadline that is a real calendar day", () => {
     for (const day of ["2026-10-01", "2024-02-29", "0001-01-01"]) {
       const parsed = parseFile(withKey(`deadline: ${day}`));
-      assert.deepEqual(validateIssue(parsed), [], day);
+      assert.deepEqual(validateIssue(parsed, NO_EXTENSIONS), [], day);
       assert.equal(readDeadline(parsed.fm), day, day);
     }
   });
 
   it("accepts a deadline in the past, which is information rather than a fault", () => {
-    assert.deepEqual(validateIssue(parseFile(withKey("deadline: 1999-01-01"))), []);
+    assert.deepEqual(validateIssue(parseFile(withKey("deadline: 1999-01-01")), NO_EXTENSIONS), []);
   });
 
   it("rejects a deadline that carries a time, a zone or a day that does not exist", () => {
@@ -209,7 +218,7 @@ Login POST aborts after 5 s.
       "deadline: someday",
     ]) {
       assert.match(
-        messages(validateIssue(parseFile(withKey(line)))),
+        messages(validateIssue(parseFile(withKey(line)), NO_EXTENSIONS)),
         /'deadline' must be a calendar date as YYYY-MM-DD/,
         line,
       );
@@ -243,26 +252,26 @@ Replaces the ad-hoc token cache.
 `;
 
   it("accepts the spec's example", () => {
-    assert.deepEqual(validatePr(parseFile(valid)), []);
+    assert.deepEqual(validatePr(parseFile(valid), NO_EXTENSIONS), []);
   });
 
   it("requires target and at least one revision", () => {
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\n---\n\nbody\n`;
-    const problems = messages(validatePr(parseFile(text)));
+    const problems = messages(validatePr(parseFile(text), NO_EXTENSIONS));
     assert.match(problems, /missing required key 'target'/);
     assert.match(problems, /'revisions' must be a list with at least one entry/);
   });
 
   it("rejects a rank and a deadline, which schedule work rather than propose a change", () => {
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\ntarget: main\nrank: 1\ndeadline: 2026-10-01\nrevisions:\n  - head: ${SHA_A}\n    base: ${SHA_B}\n    date: 2026-01-01\n---\n\nbody\n`;
-    const problems = messages(validatePr(parseFile(text)));
+    const problems = messages(validatePr(parseFile(text), NO_EXTENSIONS));
     assert.match(problems, /'rank' is an issue-only key/);
     assert.match(problems, /'deadline' is an issue-only key/);
   });
 
   it("rejects decomposition links, which relate issues only", () => {
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\ntarget: main\nparent: bqlybac0\nsubtasks: [mz4kq1rv]\nrevisions:\n  - head: ${SHA_A}\n    base: ${SHA_B}\n    date: 2026-01-01\n---\n\nbody\n`;
-    const problems = messages(validatePr(parseFile(text)));
+    const problems = messages(validatePr(parseFile(text), NO_EXTENSIONS));
     assert.match(problems, /'parent' is an issue-only key/);
     assert.match(problems, /'subtasks' is an issue-only key/);
   });
@@ -271,7 +280,7 @@ Replaces the ad-hoc token cache.
     const one = parseFile(
       valid.replace("source: feat/auth-refactor", "source: x\nreviewer: alice@example.com"),
     );
-    assert.deepEqual(validatePr(one), []);
+    assert.deepEqual(validatePr(one, NO_EXTENSIONS), []);
     assert.deepEqual(readReviewers(one.fm), ["alice@example.com"]);
 
     const many = parseFile(
@@ -280,14 +289,14 @@ Replaces the ad-hoc token cache.
         "source: x\nreviewer: [alice@example.com, Bo <bo@example.com>]",
       ),
     );
-    assert.deepEqual(validatePr(many), []);
+    assert.deepEqual(validatePr(many, NO_EXTENSIONS), []);
     assert.deepEqual(readReviewers(many.fm), ["alice@example.com", "Bo <bo@example.com>"]);
   });
 
   it("rejects a reviewer that is not a person", () => {
     const text = valid.replace("source: feat/auth-refactor", "reviewer: nobody");
     assert.match(
-      messages(validatePr(parseFile(text))),
+      messages(validatePr(parseFile(text), NO_EXTENSIONS)),
       /'reviewer' must be a person or list of persons/,
     );
   });
@@ -295,7 +304,7 @@ Replaces the ad-hoc token cache.
   it("rejects an empty reviewer list, which says nothing at all", () => {
     const text = valid.replace("source: feat/auth-refactor", "reviewer: []");
     assert.match(
-      messages(validatePr(parseFile(text))),
+      messages(validatePr(parseFile(text), NO_EXTENSIONS)),
       /'reviewer' must be a person or list of persons/,
     );
   });
@@ -306,12 +315,12 @@ Replaces the ad-hoc token cache.
 
   it("rejects an empty revisions list", () => {
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\ntarget: main\nrevisions: []\n---\n\nbody\n`;
-    assert.match(messages(validatePr(parseFile(text))), /at least one entry/);
+    assert.match(messages(validatePr(parseFile(text), NO_EXTENSIONS)), /at least one entry/);
   });
 
   it("requires 40-hex SHAs and timestamps in every revision", () => {
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\ntarget: main\nrevisions:\n  - head: abc\n    base: ${SHA_B}\n    date: nope\n---\n\nbody\n`;
-    const problems = messages(validatePr(parseFile(text)));
+    const problems = messages(validatePr(parseFile(text), NO_EXTENSIONS));
     assert.match(problems, /revisions\[0\]\.head must be a 40-hex commit SHA/);
     assert.match(problems, /revisions\[0\]\.date must be an ISO 8601 timestamp/);
   });
@@ -320,13 +329,13 @@ Replaces the ad-hoc token cache.
     const digits = "4".repeat(40);
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\ntarget: main\nrevisions:\n  - head: ${digits}\n    base: ${SHA_B}\n    date: 2026-01-01\n---\n\nbody\n`;
     const parsed = parseFile(text);
-    assert.deepEqual(validatePr(parsed), []);
+    assert.deepEqual(validatePr(parsed, NO_EXTENSIONS), []);
     assert.equal(readRevisions(parsed.fm)[0]?.head, digits);
   });
 
   it("validates the merged block when present", () => {
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\ntarget: main\nrevisions:\n  - head: ${SHA_A}\n    base: ${SHA_B}\n    date: 2026-01-01\nmerged:\n  date: nope\n  by: not-an-address\n  commit: xyz\n---\n\nbody\n`;
-    const problems = messages(validatePr(parseFile(text)));
+    const problems = messages(validatePr(parseFile(text), NO_EXTENSIONS));
     assert.match(problems, /'merged.date' must be an ISO 8601 timestamp/);
     assert.match(problems, /'merged.by' must be an RFC 5322 address/);
     assert.match(problems, /'merged.commit' must be a 40-hex commit SHA/);
@@ -334,7 +343,7 @@ Replaces the ad-hoc token cache.
 
   it("rejects a non-boolean draft", () => {
     const text = `---\ntitle: t\nauthor: a@b.co\ncreated: 2026-01-01\ntarget: main\ndraft: yes-please\nrevisions:\n  - head: ${SHA_A}\n    base: ${SHA_B}\n    date: 2026-01-01\n---\n\nbody\n`;
-    assert.match(messages(validatePr(parseFile(text))), /'draft' must be a boolean/);
+    assert.match(messages(validatePr(parseFile(text), NO_EXTENSIONS)), /'draft' must be a boolean/);
   });
 });
 
@@ -428,7 +437,7 @@ describe("constructors", () => {
       milestone: "v1",
     });
     const parsed = parseFile(text);
-    assert.deepEqual(validateIssue(parsed), []);
+    assert.deepEqual(validateIssue(parsed, NO_EXTENSIONS), []);
     assert.deepEqual(readLabels(parsed.fm), ["bug", "auth"]);
     assert.deepEqual(readAssignees(parsed.fm), ["ked@example.com"]);
     assert.equal(parsed.fm.milestone, "v1");
@@ -465,7 +474,7 @@ describe("constructors", () => {
       deadline: "2026-10-01",
     });
     const parsed = parseFile(dated);
-    assert.deepEqual(validateIssue(parsed), []);
+    assert.deepEqual(validateIssue(parsed, NO_EXTENSIONS), []);
     assert.equal(readRank(parsed.fm), 20);
     assert.equal(readDeadline(parsed.fm), "2026-10-01");
   });
@@ -485,7 +494,7 @@ describe("constructors", () => {
       parent: "bqlybac0",
     });
     assert.match(text, /^parent: bqlybac0$/m);
-    assert.deepEqual(validateIssue(parseFile(text)), []);
+    assert.deepEqual(validateIssue(parseFile(text), NO_EXTENSIONS), []);
     // The parent's side of the link is the operation's business, not the file's.
     assert.equal(text.includes("subtasks"), false);
   });
@@ -502,7 +511,7 @@ describe("constructors", () => {
       draft: true,
     });
     const parsed = parseFile(text);
-    assert.deepEqual(validatePr(parsed), []);
+    assert.deepEqual(validatePr(parsed, NO_EXTENSIONS), []);
     assert.equal(parsed.fm.draft, true);
     assert.deepEqual(readRevisions(parsed.fm), [
       { head: SHA_A, base: SHA_B, date: "2026-08-04T16:40:00Z" },
@@ -527,7 +536,10 @@ describe("constructors", () => {
       /^reviewer: \[alice@example\.com, bo@example\.com\]$/m,
     );
     assert.equal(render([]).includes("reviewer"), false);
-    assert.deepEqual(validatePr(parseFile(render(["alice@example.com", "bo@example.com"]))), []);
+    assert.deepEqual(
+      validatePr(parseFile(render(["alice@example.com", "bo@example.com"])), NO_EXTENSIONS),
+      [],
+    );
   });
 
   it("renders a review comment that validates", () => {

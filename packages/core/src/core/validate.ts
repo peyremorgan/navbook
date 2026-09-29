@@ -7,7 +7,7 @@
  */
 
 import { parseCommentFileName } from "./comments.ts";
-import type { CoreExtensions } from "./extensions.ts";
+import { type CoreExtensions, NO_EXTENSIONS } from "./extensions.ts";
 import {
   type Revision,
   readRevisions,
@@ -222,7 +222,9 @@ function checkFrontmatter(repo: Repo, ext?: CoreExtensions): Diagnostic[] {
   const out: Diagnostic[] = [];
   for (const entity of allEntities(repo)) {
     const problems =
-      entity.kind === "issue" ? validateIssue(entity.parsed, ext) : validatePr(entity.parsed, ext);
+      entity.kind === "issue"
+        ? validateIssue(entity.parsed, ext ?? NO_EXTENSIONS)
+        : validatePr(entity.parsed, ext ?? NO_EXTENSIONS);
     for (const problem of problems) {
       out.push({ check: "D2", level: "error", path: entity.filePath, message: problem.message });
     }

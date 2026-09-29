@@ -501,7 +501,7 @@ export function readMerged(fm: Record<string, unknown>): Record<string, unknown>
 /* --------------------------------------------------------------- validation */
 
 /** Validate an `issue.md` (§2.5). */
-export function validateIssue(parsed: ParsedFile, ext?: CoreExtensions): Problem[] {
+export function validateIssue(parsed: ParsedFile, ext: CoreExtensions): Problem[] {
   const problems = [...parsed.problems];
   requireString(parsed, "title", problems);
   checkPerson(parsed, "author", problems);
@@ -524,7 +524,7 @@ export function validateIssue(parsed: ParsedFile, ext?: CoreExtensions): Problem
 }
 
 /** Validate a `pr.md` (§2.7). */
-export function validatePr(parsed: ParsedFile, ext?: CoreExtensions): Problem[] {
+export function validatePr(parsed: ParsedFile, ext: CoreExtensions): Problem[] {
   const problems = [...parsed.problems];
   requireString(parsed, "title", problems);
   checkPerson(parsed, "author", problems);

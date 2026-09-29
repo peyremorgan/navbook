@@ -110,7 +110,7 @@ export function cmdPrOpen(ctx: Ctx, opts: PrOpenOptions): void {
         milestone: opts.milestone,
         ...(opts.ext ? { ext: opts.ext } : {}),
       }),
-    validate: validatePr,
+    validate: (parsed) => validatePr(parsed, ctx.ext),
   });
 
   const { id, dirPath, run } = openPr(
