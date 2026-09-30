@@ -132,7 +132,8 @@ describe("the deployment descriptor", () => {
       scripts: Record<string, string>;
     };
     for (const [name, script] of Object.entries(web.scripts)) {
-      const assignment = /^(NAVBOOK_WEB_PLUGINS=\S+)\s/.exec(script)?.[1];
+      // One shell word: bare, or double-quoted when its default holds a space.
+      const assignment = /^(NAVBOOK_WEB_PLUGINS=(?:"[^"]*"|\S+))\s/.exec(script)?.[1];
       if (assignment === undefined) {
         assert.doesNotMatch(script, /NAVBOOK_WEB_PLUGINS=/, `${name} sets it mid-command`);
         continue;
