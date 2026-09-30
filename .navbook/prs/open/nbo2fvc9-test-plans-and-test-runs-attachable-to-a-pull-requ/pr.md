@@ -40,7 +40,7 @@ Adds `@navbook/plugin-tests`: manual test plans kept in the repository, and runs
 
 ## Things to know when merging
 
-- **API image.** The #uniyh2hy fix is on dev now, and this branch adds `--filter "@navbook/plugin-tests..."` to its install step. Both images build with both plugins, and the API image loads both at 0.5.0. Against a signed token, it served plans, finished and pushed a run, and returned an attachment.
+- **API image.** The #uniyh2hy fix is on dev now, and this branch adds `--filter "@navbook/plugin-tests..."` to its install step. Both images build with both plugins, and the API image loads both at 0.5.0. Before the rebase, an image built with that fix applied by hand served plans, finished and pushed a run, and returned an attachment against a signed token.
 - **Coordination with #yp56dc43.** It replaces `writeTarget` with `writeEntity`. If it lands first, this plugin's server half moves to the new call.
 - **Not declared here.** This repository's own `navbook.json` does not declare the plugin. Declaring it would make the deployed API refuse to start until its image carries it.
 - **Follow-ups.** Two deferred items are filed separately: #l2xyp1u5 (plans attached to features) and #w5m6r8im (CTRF and Xray export).
