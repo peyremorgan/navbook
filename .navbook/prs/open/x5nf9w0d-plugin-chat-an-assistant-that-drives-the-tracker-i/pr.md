@@ -15,6 +15,9 @@ revisions:
   - head: f73eb67becccf5018cd3ad8989c753a94c2c2b26
     base: 71a0111d4a058212fe8e75b0c6fa2e1f41b103fc
     date: 2026-09-30T14:12:09Z
+  - head: 2f7bfe83e459d0267a26ddd0aa6c7659efdcf79b
+    base: 71a0111d4a058212fe8e75b0c6fa2e1f41b103fc
+    date: 2026-09-30T14:14:41Z
 ---
 
 Closes #s86nic83, the third of three steps towards #c43a2w7e.
