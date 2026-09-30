@@ -153,6 +153,17 @@ describe("the deployment descriptor", () => {
           `${name} replaces NAVBOOK_WEB_PLUGINS=${JSON.stringify(value)}`,
         );
       }
+      // Unset, as in a checkout: the script's own default, every workspace plugin.
+      const { NAVBOOK_WEB_PLUGINS: _unset, ...without } = process.env;
+      const defaulted = spawnSync("sh", ["-c", `${assignment} printenv NAVBOOK_WEB_PLUGINS`], {
+        encoding: "utf8",
+        env: without,
+      });
+      assert.equal(
+        defaulted.stdout,
+        "@navbook/plugin-kb @navbook/plugin-chat\n",
+        `${name} defaults to the workspace plugins`,
+      );
     }
   });
 
