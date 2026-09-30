@@ -9,6 +9,9 @@ revisions:
   - head: 11b2a0f05081a7df1be8708a5e908eae807121e5
     base: d576c77713d71b04f266bde7b9b50718df4af151
     date: 2026-09-29T02:41:16Z
+  - head: 6139a3d6de3515995f60e76b2528866b830f9ac2
+    base: 71a0111d4a058212fe8e75b0c6fa2e1f41b103fc
+    date: 2026-09-30T14:11:50Z
 ---
 
 Closes #kw6afa4a, the second of three steps towards #c43a2w7e (plugin-chat).
