@@ -10,6 +10,9 @@ revisions:
   - head: f80e8089f6a02f816d35b3cc63490a9dc40f8005
     base: 7083ddd12cb4c77d958683a4540c86f9613f9391
     date: 2026-09-29T03:50:02Z
+  - head: ee8018a8119a2237844c3887bd9c084044402693
+    base: 71a0111d4a058212fe8e75b0c6fa2e1f41b103fc
+    date: 2026-09-30T13:46:37Z
 ---
 
 Adds `@navbook/plugin-tests`: manual test plans kept in the repository, and runs that record executing them, standalone or attached to a pull request. Closes #z9yqtsbv.
