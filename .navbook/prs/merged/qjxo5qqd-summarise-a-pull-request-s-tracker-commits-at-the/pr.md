@@ -13,6 +13,9 @@ revisions:
   - head: a0692f00d54cc27977cbc7b3225b09b2f67d0ef1
     base: 2208dead61ce11d704f3709075783cf41f8b7131
     date: 2026-09-30T10:12:33Z
+merged:
+  date: 2026-09-30T10:19:04Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Closes #tj3a28x6. The Changes tab now shows only the code at the top. A pull request's tracker commits move into a folded **Navbook activity** timeline at the bottom, one sentence per commit. This is design B of the mockups (https://claude.ai/artifact/9hFaeaztxRbnSvDcRLweJp).
