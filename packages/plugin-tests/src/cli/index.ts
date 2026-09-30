@@ -172,8 +172,8 @@ export function activate(host: CliPluginHost): void {
   /* ------------------------------------------------------------------ show */
 
   host.command("test show", ([ref], opts) => {
+    // A whole number already: the manifest declares it `int`.
     const limit = opts.runs === undefined ? 5 : Number(opts.runs);
-    if (!Number.isInteger(limit) || limit < 0) ui.fail("--runs takes a whole number of runs");
     const repo = loadTree(core, ctx);
     const plan = testsOf(repo).planBySlug.get(ref as string);
     if (plan !== undefined) showPlan(repo, plan, limit, opts.json === true);
@@ -551,9 +551,9 @@ export function activate(host: CliPluginHost): void {
 
   host.command("test attach", ([ref, files], opts) => {
     const run = resolveRun(core, allRuns(loadTree(core, ctx)), ref as string);
+    // A whole number already (`int` in the manifest); 0 is the one it lets by.
     const step = opts.step === undefined ? undefined : Number(opts.step);
-    if (step !== undefined && (!Number.isInteger(step) || step < 1))
-      ui.fail("--step takes the number of a recorded step");
+    if (step === 0) ui.fail("--step takes the number of a recorded step, from 1");
     const attachments = ((files as unknown as string[] | undefined) ?? []).map((file) => {
       const path = resolve(ctx.cwd, file);
       try {

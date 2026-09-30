@@ -157,9 +157,11 @@ describe("nav test list and show", () => {
     assert.equal(missing.code, 1);
     assert.match(missing.stderr, /no test plan or run matches 'logn'/);
     assert.match(missing.stderr, /^ {2}login$/m);
-    const bad = repo.nav(["test", "show", "login", "--runs", "two"]);
-    assert.equal(bad.code, 1);
-    assert.match(bad.stderr, /--runs takes a whole number of runs/);
+    for (const value of ["two", "2.5", "-1", "0x10", "1e1", "9007199254740993"]) {
+      const bad = repo.nav(["test", "show", "login", "--runs", value]);
+      assert.equal(bad.code, 1, value);
+      assert.match(bad.stderr, /'--runs <n>' argument .* is invalid\. Expected a whole number\./);
+    }
   });
 });
 

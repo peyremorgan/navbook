@@ -430,6 +430,15 @@ describe("attachments", () => {
     const unrecorded = repo.nav(["test", "attach", id, "log.txt", "--step", "3"]);
     assert.equal(unrecorded.code, 1);
     assert.match(unrecorded.stderr, /step 3 of test run .* is not recorded yet/);
+    const zero = repo.nav(["test", "attach", id, "log.txt", "--step", "0"]);
+    assert.equal(zero.code, 1);
+    assert.match(zero.stderr, /--step takes the number of a recorded step, from 1/);
+    const half = repo.nav(["test", "attach", id, "log.txt", "--step", "1.5"]);
+    assert.equal(half.code, 1);
+    assert.match(
+      half.stderr,
+      /'--step <n>' argument '1\.5' is invalid\. Expected a whole number\./,
+    );
     const taken = repo.nav(["test", "attach", id, "screen shot.png"]);
     assert.equal(taken.code, 1);
     assert.match(taken.stderr, /already has an attachment named 'screen-shot\.png'/);
