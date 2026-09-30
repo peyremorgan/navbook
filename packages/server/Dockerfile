@@ -43,9 +43,9 @@ RUN pnpm install --frozen-lockfile --filter navbook-workspace \
       --filter "@navbook/plugin-tests..."
 
 # Sources, for every workspace package a packed one compiles against. The
-# plugins import `@navbook/cli/plugin`, which resolves to cli's TypeScript source in the
-# workspace, so cli's `src/` is here although it is never packed — its source
-# alone, so a change to cli's tests does not repack the rest. web stays a
+# plugins import `@navbook/cli/plugin`, which resolves to cli's TypeScript
+# source in the workspace, so cli's `src/` is here although it is never packed
+# — its source alone, so a change to cli's tests does not repack the rest. web stays a
 # manifest: nothing packed here imports it.
 COPY script script
 COPY packages/cli/src packages/cli/src
