@@ -387,6 +387,28 @@ test("shows no tracker section for a revision without tracker commits", async ({
   await expect(signedIn.getByTestId("tracker-activity")).toHaveCount(0);
 });
 
+test("says a revision that changes only the tracker has no code changes", async ({
+  signedIn,
+  stack,
+}) => {
+  // No pull request in the fixture has such a revision, so the answer is
+  // made one: the real diff, with every file marked as the tracker's.
+  await signedIn.route(stack.apiUrl, async (route) => {
+    if (!(route.request().postData() ?? "").includes("query PrChanges(")) return route.continue();
+    const response = await route.fetch();
+    const json = await response.json();
+    for (const file of json.data.pr.changes.files) file.tracker = true;
+    await route.fulfill({ response, json });
+  });
+  await signedIn.goto(`${stack.appUrl}/prs/bbbb0001?tab=changes`);
+  await expect(signedIn.getByTestId("pr-changes")).toContainText(
+    "No code changes: this revision changes only the tracker, below.",
+  );
+  await expect(signedIn.getByTestId("changes-summary")).toContainText("0 files changed");
+  // The tab counts what the summary counts.
+  await expect(signedIn.getByTestId("pr-tab-changes")).toContainText("0");
+});
+
 test("keeps a half-written review while the other tabs are visited", async ({
   signedIn,
   stack,

@@ -216,6 +216,42 @@ describe("summariseTrackerCommit", () => {
     );
   });
 
+  it("says a record was deleted, without listing every field it took", () => {
+    const summary = summariseTrackerCommit(
+      "docs(issue): delete #bqlybac0",
+      [file(`${OPEN}/issue.md`, "deleted")],
+      NAV,
+      reader({ [`before:${OPEN}/issue.md`]: issue() }),
+    );
+    assert.deepEqual(summary, {
+      verb: "delete",
+      kind: "issue",
+      entity: "bqlybac0",
+      title: "Login times out",
+      facts: [],
+    });
+  });
+
+  it("notices a map that changed where its chip does not look", () => {
+    const merged = (commit: string): string =>
+      pr(
+        1,
+        `merged:\n  date: 2026-08-05T10:00:00Z\n  by: A <a@example.invalid>\n  commit: ${commit}\n`,
+      );
+    const summary = summariseTrackerCommit(
+      "docs(pr): edit #dk3mp2x9",
+      [file(`${PR}/pr.md`, "modified")],
+      NAV,
+      reader({
+        [`before:${PR}/pr.md`]: merged("1".repeat(40)),
+        [`after:${PR}/pr.md`]: merged("2".repeat(40)),
+      }),
+    );
+    assert.deepEqual(summary?.facts, [
+      { field: "merged", before: "A <a@example.invalid>", after: "changed" },
+    ]);
+  });
+
   it("is about the record the subject names, when the commit touches several", () => {
     const summary = summariseTrackerCommit(
       "docs(pr): open #dk3mp2x9",

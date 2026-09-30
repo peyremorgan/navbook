@@ -721,7 +721,11 @@ export type TrackerCommit = {
   date: Scalars['String']['output'];
   entity?: Maybe<Scalars['String']['output']>;
   facts: Array<TrackerFact>;
-  /** What the commit changed in the tracker's directory, with every patch. */
+  /**
+   * What the commit changed in the tracker's directory. Patches come until the
+   * whole activity has spent the diff's inline budget; after that a file is
+   * listed with its counts and `patch: null`.
+   */
   files: Array<ChangedFile>;
   /**
    * The issue or pull request the commit is about. Null when it touched

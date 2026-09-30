@@ -145,6 +145,7 @@ const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" 
               :file="file"
               :index="index"
               :anchor="`tracker-${commit.sha}-${index}`"
+              :loadable="false"
             />
           </div>
         </li>

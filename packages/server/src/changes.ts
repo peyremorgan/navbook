@@ -121,6 +121,9 @@ export const ACTIVITY_LIMIT = 250;
 /** How many of those summaries are worked out at once. */
 const ACTIVITY_CONCURRENCY = 8;
 
+/** Git's empty tree, which a root commit is diffed against. */
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
 export interface ChangesView {
   base: string;
   head: string;
@@ -157,7 +160,7 @@ export class RevisionCache {
   private readonly diffs = new Map<string, Entry>();
   private readonly inflight = new Map<string, Promise<Entry>>();
   private readonly commits = new Map<string, Promise<CommitRange>>();
-  private readonly activity = new Map<string, Promise<TrackerCommitView[]>>();
+  private readonly activity = new Map<string, Promise<TrackerActivityView>>();
   private chars = 0;
   private readonly opts: RevisionCacheOptions;
   private readonly readDiff: typeof diffBetweenAsync;
@@ -215,36 +218,60 @@ export class RevisionCache {
       this.activity.set(key, pending);
       pending.catch(() => this.activity.delete(key));
     }
-    const commits = await pending;
-    return { total: commits.length, commits: commits.slice(0, limit) };
+    const activity = await pending;
+    return { total: activity.total, commits: activity.commits.slice(0, limit) };
   }
 
   private async readActivity(
     base: string,
     head: string,
     navDir: string,
-  ): Promise<TrackerCommitView[]> {
+  ): Promise<TrackerActivityView> {
     const cwd = this.opts.repoRoot;
-    const touching = (await commitsTouchingAsync(cwd, base, head, [navDir])).slice(
-      0,
-      ACTIVITY_LIMIT,
-    );
-    const out: TrackerCommitView[] = [];
-    for (let i = 0; i < touching.length; i += ACTIVITY_CONCURRENCY) {
-      const batch = touching.slice(i, i + ACTIVITY_CONCURRENCY);
-      out.push(...(await Promise.all(batch.map((commit) => this.summarise(commit, navDir)))));
+    const touching = await commitsTouchingAsync(cwd, base, head, [navDir]);
+    const kept = touching.slice(0, ACTIVITY_LIMIT);
+    const commits: TrackerCommitView[] = [];
+    for (let i = 0; i < kept.length; i += ACTIVITY_CONCURRENCY) {
+      const batch = kept.slice(i, i + ACTIVITY_CONCURRENCY);
+      commits.push(...(await Promise.all(batch.map((commit) => this.summarise(commit, navDir)))));
     }
-    return out;
+    // One budget for the whole activity, as for a diff: a tracker commit
+    // can be thousands of imported comments, and only the patches that fit
+    // are kept, here and on the wire.
+    let spent = 0;
+    for (const commit of commits) {
+      commit.files = commit.files.map((file) => {
+        if (file.patch === null) return file;
+        if (file.lines > INLINE_FILE_LINES || spent + file.lines > INLINE_LINE_BUDGET) {
+          return { ...file, patch: null, truncated: false };
+        }
+        spent += file.lines;
+        return file;
+      });
+    }
+    return { total: touching.length, commits };
   }
 
-  /** One commit: its own tracker diff, the files the summary reads, the summary. */
+  /**
+   * One commit: its own tracker diff, the files the summary reads, the summary.
+   *
+   * A commit with no parent is diffed against the empty tree, which is what it
+   * added. One that cannot be read at all is listed by its subject alone
+   * rather than taking the others down with it.
+   */
   private async summarise(commit: CommitSummary, navDir: string): Promise<TrackerCommitView> {
     const cwd = this.opts.repoRoot;
     const parent = `${commit.sha}^`;
-    const diff = await this.readDiff(cwd, parent, commit.sha, {
-      paths: [navDir],
-      timeoutMs: DIFF_TIMEOUT_MS,
-    });
+    const opts = { paths: [navDir], timeoutMs: DIFF_TIMEOUT_MS };
+    let diff: Diff;
+    try {
+      diff = await this.readDiff(cwd, parent, commit.sha, opts).catch((error: unknown) => {
+        if (error instanceof GitError) return this.readDiff(cwd, EMPTY_TREE, commit.sha, opts);
+        throw error;
+      });
+    } catch {
+      return { ...commit, summary: null, files: [] };
+    }
     const texts = new Map<string, string | null>();
     for (const read of trackerReads(commit.subject, diff.files, navDir)) {
       const rev = read.side === "before" ? parent : commit.sha;

@@ -275,7 +275,11 @@ type TrackerCommit {
   "The record's title after the commit, or before it for a deletion."
   title: String
   facts: [TrackerFact!]!
-  "What the commit changed in the tracker's directory, with every patch."
+  """
+  What the commit changed in the tracker's directory. Patches come until the
+  whole activity has spent the diff's inline budget; after that a file is
+  listed with its counts and `patch: null`.
+  """
   files: [ChangedFile!]!
 }
 

@@ -18,15 +18,23 @@
 import { countsLabel, type DiffRow, estimatedHeight, parseHunks } from "~/utils/diff";
 import type { ChangedFileFieldsFragment, ChangeStatus } from "~~/src/generated/gql/graphql";
 
-const props = defineProps<{
-  file: ChangedFileFieldsFragment;
-  /** Where this file sits in the listing, for the anchor the file list points at. */
-  index: number;
-  /** True while the patch this file lacks is on its way. */
-  loading?: boolean;
-  /** The element's id, when `file-<index>` would name another list's file. */
-  anchor?: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    file: ChangedFileFieldsFragment;
+    /** Where this file sits in the listing, for the anchor the file list points at. */
+    index: number;
+    /** True while the patch this file lacks is on its way. */
+    loading?: boolean;
+    /** The element's id, when `file-<index>` would name another list's file. */
+    anchor?: string;
+    /**
+     * False where nothing answers `load`: a withheld patch is then only said to
+     * be. Defaulted, because Vue reads an absent boolean prop as `false`.
+     */
+    loadable?: boolean;
+  }>(),
+  { loadable: true },
+);
 
 const emit = defineEmits<{ load: [path: string] }>();
 
@@ -142,8 +150,9 @@ const empty = computed<string | null>(() => {
       <p v-if="empty !== null" class="px-3 py-3 text-sm text-muted">{{ empty }}</p>
 
       <div v-else-if="file.patch === null" class="flex items-center gap-3 px-3 py-3 text-sm text-muted">
-        <span>Large diff not shown by default ({{ countsLabel(file.additions, file.deletions) }}, {{ file.lines }} lines).</span>
+        <span>{{ !loadable ? "Too large to show here" : "Large diff not shown by default" }} ({{ countsLabel(file.additions, file.deletions) }}, {{ file.lines }} lines).</span>
         <button
+          v-if="loadable"
           type="button"
           class="rounded-md border border-default bg-elevated px-2 py-1 text-xs font-medium text-default hover:bg-accented disabled:opacity-60"
           :disabled="loading"

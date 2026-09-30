@@ -254,6 +254,12 @@ describe("a pull request's tracker commits", () => {
       "---\nauthor: Someone <someone@example.invalid>\n---\n\nConfirmed on 3G.\n",
     );
     peer.commitAll("Add a note by hand");
+    // An old thread imported in one go: past the size a patch is sent inline.
+    peer.write(
+      `${issueDir}/comments/2026-08-01T110000Z-cm222222.md`,
+      `---\nauthor: Someone <someone@example.invalid>\n---\n\n${Array.from({ length: 1_200 }, (_, i) => `line ${i + 1}`).join("\n")}\n`,
+    );
+    peer.commitAll("Import the old thread");
     peer.filePr("Fix the login timeout", "Closes #is111111.", "pr444444", "fix-timeout");
     peer.git(["checkout", "--quiet", "fix-timeout"]);
     updatePr(makeWsCtx({ cwd: peer.dir, env: h.fixture.env }), "pr444444", { commit: true });
@@ -276,13 +282,14 @@ describe("a pull request's tracker commits", () => {
       await h.gql(query, { ref: "pr444444", limit: 100 }),
     );
     const { total, commits } = data.pr.activity;
-    assert.equal(total, 3);
+    assert.equal(total, 4);
     assert.deepEqual(
       commits.map((c) => [c.subject, c.verb, c.kind, c.entity, c.title]),
       [
         ["docs(issue): close #is111111", "close", "ISSUE", "is111111", "Login is broken"],
         // No grammar in the subject: the added comment file says what it was.
         ["Add a note by hand", "comment", "ISSUE", "is111111", "Login is broken"],
+        ["Import the old thread", "comment", "ISSUE", "is111111", "Login is broken"],
         ["docs(pr): open #pr444444", "open", "PR", "pr444444", "Fix the login timeout"],
       ],
     );
@@ -291,7 +298,7 @@ describe("a pull request's tracker commits", () => {
       { field: "resolution", before: null, after: "fixed" },
     ]);
     assert.deepEqual(
-      commits[2]?.facts.find((f) => f.field === "target"),
+      commits[3]?.facts.find((f) => f.field === "target"),
       { field: "target", before: null, after: "main" },
     );
     assert.match(commits[0]?.date ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
@@ -309,13 +316,17 @@ describe("a pull request's tracker commits", () => {
     assert.match(close?.files[0]?.patch ?? "", /\+resolution: fixed/);
     const note = data.pr.activity.commits[1];
     assert.match(note?.files[0]?.patch ?? "", /\+Confirmed on 3G\./);
+    // Past the per-file budget, as in a diff: listed, without its lines.
+    const imported = data.pr.activity.commits[2]?.files[0];
+    assert.equal(imported?.patch, null);
+    assert.equal(imported?.status, "ADDED");
   });
 
   it("keeps the oldest when limited, and says how many there are", async () => {
     const data = ok<{ pr: { activity: Activity } }>(
       await h.gql(query, { ref: "pr444444", limit: 1 }),
     );
-    assert.equal(data.pr.activity.total, 3);
+    assert.equal(data.pr.activity.total, 4);
     assert.deepEqual(
       data.pr.activity.commits.map((c) => c.verb),
       ["close"],

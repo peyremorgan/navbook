@@ -243,7 +243,8 @@ export function summariseTrackerCommit(
   const to = moved?.after?.status ?? null;
   if (moved) facts.push({ field: "status", before: from, after: to });
 
-  if (beforeFm !== null || afterFm !== null) facts.push(...frontmatterFacts(beforeFm, afterFm));
+  // A deletion is its own news; every field it took with it is not.
+  if (afterFm !== null) facts.push(...frontmatterFacts(beforeFm, afterFm));
 
   const added = touches.filter((t) => t.file.status === "added" && isComment(t.after));
   const verdicts: string[] = [];
@@ -318,7 +319,7 @@ function revisionCount(value: unknown): number {
 }
 
 /** Each frontmatter key whose value changed, and the body when it did. */
-function frontmatterFacts(before: Frontmatter | null, after: Frontmatter | null): TrackerFact[] {
+function frontmatterFacts(before: Frontmatter | null, after: Frontmatter): TrackerFact[] {
   const facts: TrackerFact[] = [];
   const keys = new Set([...Object.keys(before?.fm ?? {}), ...Object.keys(after?.fm ?? {})]);
   for (const key of keys) {
@@ -327,18 +328,23 @@ function frontmatterFacts(before: Frontmatter | null, after: Frontmatter | null)
     if (key === "title" && before === null) continue;
     // A new record's first revision is what opening it is, not news.
     if (key === "revisions" && before === null) continue;
-    const was = show(key, before?.fm[key]);
-    const is = show(key, after?.fm[key]);
-    if (was !== is) facts.push({ field: key, before: was, after: is });
+    const old = before?.fm[key];
+    const now = after.fm[key];
+    if (JSON.stringify(old) === JSON.stringify(now)) continue;
+    const was = show(key, old);
+    const is = show(key, now);
+    if (was === null && is === null) continue;
+    // A map shown by one part of it may change elsewhere: say that it did.
+    facts.push({ field: key, before: was, after: was === is ? "changed" : is });
   }
-  if (before === null && after !== null && after.body.trim() !== "") {
+  if (before === null && after.body.trim() !== "") {
     const lines = after.body.trim().split("\n").length;
     facts.push({
       field: "description",
       before: null,
       after: `${lines} line${lines === 1 ? "" : "s"}`,
     });
-  } else if (before !== null && after !== null && before.body !== after.body) {
+  } else if (before !== null && before.body !== after.body) {
     facts.push({ field: "description", before: null, after: "edited" });
   }
   return facts;

@@ -481,7 +481,11 @@ const branchHint = computed(() => refusedOn.value);
         >
           <DiffView v-if="changes" :pr-ref="pr.id" :changes="changes" />
         </QueryState>
-        <TrackerActivity :pr-ref="pr.id" :branch="pr.merged ? pr.target : (pr.source || pr.target)" />
+        <TrackerActivity
+          v-if="!changesError"
+          :pr-ref="pr.id"
+          :branch="pr.merged ? pr.target : (pr.source || pr.target)"
+        />
       </div>
 
       <div v-show="tab === 'conversation'" class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
