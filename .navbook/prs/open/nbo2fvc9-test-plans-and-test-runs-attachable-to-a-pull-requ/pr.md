@@ -37,7 +37,7 @@ Adds `@navbook/plugin-tests`: manual test plans kept in the repository, and runs
 
 ## Things to know when merging
 
-- **API image.** The image still fails at plugin-kb's pack until `fix/uniyh2hy-api-image-plugin-kb` lands (#uniyh2hy). Whichever branch lands second adds `--filter "@navbook/plugin-tests..."` to the build stage's install. With that fix applied, both images built here with both plugins. Against a signed token, the API image served plans, finished and pushed a run, and round-tripped an attachment.
+- **API image.** The #uniyh2hy fix is on dev now, and this branch adds `--filter "@navbook/plugin-tests..."` to its install step. Both images build with both plugins, and the API image loads both at 0.5.0. Against a signed token, it served plans, finished and pushed a run, and returned an attachment.
 - **Coordination with #yp56dc43.** It replaces `writeTarget` with `writeEntity`. If it lands first, this plugin's server half moves to the new call.
 - **Not declared here.** This repository's own `navbook.json` does not declare the plugin. Declaring it would make the deployed API refuse to start until its image carries it.
 - **Follow-ups.** Two deferred items are filed separately: #l2xyp1u5 (plans attached to features) and #w5m6r8im (CTRF and Xray export).
@@ -46,15 +46,15 @@ Adds `@navbook/plugin-tests`: manual test plans kept in the repository, and runs
 
 | Suite | Result |
 |---|---|
-| core | 899 passed |
-| cli | 401 passed |
-| server | 427 passed |
-| plugin-kb | 138 passed |
+| core | 933 passed |
+| cli | 416 passed |
+| server | 436 passed |
+| plugin-kb | 145 passed |
 | plugin-tests | 120 passed |
 | conformance | 128 passed |
-| deploy | 75 passed |
-| web vitest | 410 passed |
-| Playwright | 179 passed, 10 of them the plugin's |
+| deploy | 81 passed |
+| web vitest | 426 passed |
+| Playwright | 182 passed, 10 of them the plugin's |
 
 Under heavy load, two server timing tests failed once in a full run: the maintenance stop and the plugin service stop. Both passed on rerun alone, and neither involves this branch's code.
 
