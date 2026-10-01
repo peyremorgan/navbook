@@ -11,7 +11,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { GitError, GitStoppedError, GitTimeoutError, git } from "../src/git/exec.ts";
-import { PID_OF_SELF } from "./helpers/platform.ts";
 import {
   fetchRemote,
   fetchRemoteAsync,
@@ -20,6 +19,7 @@ import {
   pushBranch,
   pushBranchAsync,
 } from "../src/git/remote.ts";
+import { PID_OF_SELF } from "./helpers/platform.ts";
 
 const IDENTITY = { name: "Nav Test", email: "nav@test.invalid" };
 

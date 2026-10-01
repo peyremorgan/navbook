@@ -1,10 +1,12 @@
 /**
  * What a test needs to know about the platform it runs on.
  *
- * The suite runs on Linux, macOS and Windows (Git Bash). Most of it means the
- * same thing on all three; these are the few places where the filesystem
- * itself differs, gathered so that each test says *why* it does something
- * different rather than testing `process.platform` inline.
+ * The suites run on Linux, macOS and Windows (Git Bash). Most of them mean the
+ * same thing on all three; these are the few places where the platform itself
+ * differs, gathered so that each test says *why* it does something different
+ * rather than testing `process.platform` inline. Every package's tests take
+ * them from here — `@navbook/core/test-helpers`, a workspace export like the
+ * other packages' — so that one reason is stated once.
  */
 
 import { mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
@@ -70,6 +72,13 @@ export const NO_GIT_SHIM: string | false =
   process.platform === "win32" ? "Windows will not launch a shell script named git" : false;
 
 /**
+ * Why a test cannot signal a process group as a terminal's Ctrl-C does, or
+ * false when it can. Windows has neither process groups nor `kill -INT 0`.
+ */
+export const NO_PROCESS_GROUPS: string | false =
+  process.platform === "win32" ? "Windows has no process groups for Ctrl-C to signal" : false;
+
+/**
  * Whether a process can be asked to stop before it is made to.
  *
  * POSIX sends SIGTERM and waits a grace period before SIGKILL. Windows has no
@@ -98,9 +107,11 @@ export const ORPHANS_OUTLIVE_STOP: string | false =
  * Git for Windows runs scripts under its MSYS shell, whose `$!` and `$$` are
  * MSYS's own numbers; the Windows one is in `/proc/<pid>/winpid`. Everywhere
  * else that file does not exist, and the number is the one the shell gave.
+ * Read with the `read` builtin rather than `cat`: starting a process costs a
+ * Windows shell long enough to matter to a test timing a stop in milliseconds.
  */
-export const PID_OF_LAST = '{ cat "/proc/$!/winpid" 2>/dev/null || echo $!; }';
-export const PID_OF_SELF = '{ cat "/proc/$$/winpid" 2>/dev/null || echo $$; }';
+export const PID_OF_LAST = '{ read -r w 2>/dev/null < "/proc/$!/winpid" && echo "$w" || echo $!; }';
+export const PID_OF_SELF = '{ read -r w 2>/dev/null < "/proc/$$/winpid" && echo "$w" || echo $$; }';
 
 /**
  * Put a file in a repository's index without writing it to disk.

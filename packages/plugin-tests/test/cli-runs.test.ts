@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import type { TempRepo } from "@navbook/cli/test-helpers";
+import { editInPlace, type TempRepo } from "@navbook/cli/test-helpers";
 import { commitCount, idOf, makeTestsRepo, openLoginPlan, read, runFiles } from "./helpers.ts";
 
 const RUNS = ".navbook/tests/login/runs";
@@ -368,7 +368,8 @@ describe("listing and showing runs", () => {
   });
 
   it("shows the steps a run followed after the plan changed, and says when it cannot", () => {
-    const editor = repo.editor("rename.sh", `sed -i 's/### Sign in/### Sign in with SSO/' "$1"`);
+    const rename = editInPlace("s/### Sign in/### Sign in with SSO/", '"$1"');
+    const editor = repo.editor("rename.sh", rename);
     assert.equal(repo.nav(["test", "edit", "login", "--commit"], { EDITOR: editor }).code, 0);
     const shown = repo.nav(["test", "show", ids[1] as string]);
     assert.match(shown.stdout, /^ {2}2\. Sign in {2}failed$/m);

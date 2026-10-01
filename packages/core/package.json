@@ -35,7 +35,8 @@
     "dist"
   ],
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./test-helpers": "./test/helpers/platform.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

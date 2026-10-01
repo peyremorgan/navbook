@@ -4,10 +4,11 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { recordInIndex } from "@navbook/core/test-helpers";
 
 export const FIXTURE_IDENTITY = { name: "Nav Test", email: "nav@test.invalid" };
 export const FIXTURE_DATE = "2026-08-01T10:00:00Z";
@@ -126,21 +127,7 @@ export function makeTempRepo(): TempRepo {
       writeFileSync(target, content, "utf8");
     },
     record(relativePath, content) {
-      const blob = runIn(["git"], ["hash-object", "-w", "--stdin"], {}, content).stdout.trim();
-      // Git for Windows refuses such a name by default, to protect a checkout;
-      // nothing recorded this way is checked out.
-      const staged = runIn(
-        ["git"],
-        [
-          "-c",
-          "core.protectNTFS=false",
-          "update-index",
-          "--add",
-          "--cacheinfo",
-          `100644,${blob},${relativePath}`,
-        ],
-      );
-      if (staged.code !== 0) throw new Error(`could not stage ${relativePath}: ${staged.stderr}`);
+      recordInIndex(dir, relativePath, content);
     },
     editor(name, body) {
       return shellWord(repo.script(name, body));
@@ -180,44 +167,28 @@ export function shellWord(path: string): string {
   return `'${native.replaceAll("'", `'\\''`)}'`;
 }
 
+/**
+ * A shell line that applies a sed script to a file in place.
+ *
+ * Not `sed -i`: GNU takes the suffix as an optional attached argument and BSD
+ * (so macOS) takes it as a separate required one, which makes the bare form
+ * mean different things on the two. Writing to a temporary file and moving it
+ * over is what every sed agrees on.
+ */
+export function editInPlace(script: string, file: string): string {
+  // Staged through $HOME, which the fixture pins: a scratch file inside the
+  // repository would be a stray path in the very tree under test.
+  const scratch = '"$HOME/sed-edit.$$"';
+  return `sed ${JSON.stringify(script)} ${file} > ${scratch} && mv ${scratch} ${file}`;
+}
+
 /** `PATH` with `dir` searched first, separated as the platform separates it. */
 export function pathWith(dir: string, path = process.env.PATH ?? ""): string {
   return `${dir}${delimiter}${path}`;
 }
 
-/**
- * Why symbolic links cannot be made here, or false when they can.
- *
- * Windows lets an ordinary account create them only in Developer Mode; a test
- * that needs one is skipped with this reason, rather than failing on `EPERM`.
- */
-export const NO_SYMLINKS: string | false = (() => {
-  const dir = mkdtempSync(join(tmpdir(), "navbook-symlink-probe-"));
-  try {
-    symlinkSync(dir, join(dir, "link"), "dir");
-    return false;
-  } catch {
-    return "this account cannot create symbolic links (on Windows, enable Developer Mode)";
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-})();
-
-/**
- * Why git cannot be replaced by a script for one test, or false when it can.
- *
- * Windows launches only programs it recognises by extension, so a shell
- * script named `git` first on `PATH` is never the `git` that runs there.
- */
-export const NO_GIT_SHIM: string | false =
-  process.platform === "win32" ? "Windows will not launch a shell script named git" : false;
-
-/**
- * Why a test cannot signal a process group as a terminal's Ctrl-C does, or
- * false when it can. Windows has neither process groups nor `kill -INT 0`.
- */
-export const NO_PROCESS_GROUPS: string | false =
-  process.platform === "win32" ? "Windows has no process groups for Ctrl-C to signal" : false;
+// Why a test cannot run on this platform, stated once for every package.
+export { NO_GIT_SHIM, NO_PROCESS_GROUPS, NO_SYMLINKS } from "@navbook/core/test-helpers";
 
 /** A repository that already has `.navbook/` and one commit. */
 export function makeNavRepo(): TempRepo {

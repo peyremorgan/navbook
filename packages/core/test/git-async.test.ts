@@ -32,7 +32,7 @@ import {
   mergeNoCommitAsync,
 } from "../src/git/merge.ts";
 import { currentBranch, currentBranchAsync, resolveSha, resolveShaAsync } from "../src/git/repo.ts";
-import { ORPHANS_OUTLIVE_STOP, PID_OF_LAST, POLITE_STOP } from "./helpers/platform.ts";
+import { ORPHANS_OUTLIVE_STOP, PID_OF_LAST, PID_OF_SELF, POLITE_STOP } from "./helpers/platform.ts";
 
 async function inRepo(use: (dir: string) => Promise<void>): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "navbook-async-"));
@@ -137,12 +137,22 @@ describe("gitRunAsync", () => {
  * A git that hangs on something it started: `credential fill` waits for its
  * helper, and the helper waits for a `sleep` whose pid it writes down — the
  * shape of `maintenance` waiting on `repack` waiting on `pack-objects`.
- * `ignoreTerm` makes the helper and its `sleep` deaf to SIGTERM.
+ * `ignoreTerm` makes the helper and its `sleep` deaf to SIGTERM. The helper's
+ * own shell — git's child — writes its pid in `<pidFile>.shell` first, so that
+ * once `pidFile` is there both are.
  */
 function hanging(pidFile: string, ignoreTerm = false): string[] {
   const deaf = ignoreTerm ? "trap '' TERM; " : "";
-  const body = `${deaf}sleep 30 & ${PID_OF_LAST} > '${pidFile}'; wait`;
+  const shell = `${PID_OF_SELF} > '${pidFile}.shell'`;
+  const body = `${deaf}sleep 30 & ${shell}; ${PID_OF_LAST} > '${pidFile}'; wait`;
   return ["-c", `credential.helper=!f() { ${body}; }; f`, "credential", "fill"];
+}
+
+/** The pid of the helper's shell, which `hanging` wrote beside `pidFile`. */
+function helperShell(pidFile: string): number {
+  const shell = Number(readFileSync(`${pidFile}.shell`, "utf8").trim());
+  assert.ok(shell > 0, "the helper's shell never said who it was");
+  return shell;
 }
 
 const HANGING_INPUT = {
@@ -161,18 +171,19 @@ function alive(pid: number): boolean {
 }
 
 /**
- * That a group stop reached the helper's `sleep`, wherever a stop can reach it.
- *
- * Where it cannot (see {@link ORPHANS_OUTLIVE_STOP}), what the test still
- * proves is that the call answered in time, git and all; the orphan is ended
- * here so it does not outlive the suite.
+ * That a group stop reached what git started: the helper's shell, git's own
+ * child, everywhere; and its backgrounded `sleep`, wherever a stop can reach
+ * it. Where it cannot (see {@link ORPHANS_OUTLIVE_STOP}) the orphan is ended
+ * here, so it does not outlive the suite.
  */
-function assertReached(pid: number, message: string): void {
+function assertReached(pidFile: string, sleep: number, message: string): void {
+  const shell = helperShell(pidFile);
+  assert.equal(alive(shell), false, "the helper's shell, git's child, outlived the stop");
   if (ORPHANS_OUTLIVE_STOP) {
-    if (alive(pid)) process.kill(pid);
+    if (alive(sleep)) process.kill(sleep);
     return;
   }
-  assert.equal(alive(pid), false, message);
+  assert.equal(alive(sleep), false, message);
 }
 
 /** The pid the hanging helper wrote, once it has. */
@@ -211,9 +222,17 @@ describe("stopping a command on request, and everything it started", () => {
         return true;
       });
       assert.ok(Date.now() - started < 1500, "an abort should not wait for the kill");
-      // Only git was told: without a group, its helper is left to finish.
-      assert.ok(alive(pid), "without a group, what git started is not signalled");
-      process.kill(pid, "SIGKILL");
+      const shell = helperShell(pidFile);
+      if (POLITE_STOP) {
+        // Only git was told: without a group, its helper is left to finish.
+        assert.ok(alive(shell), "without a group, what git started is not signalled");
+        assert.ok(alive(pid), "without a group, what git started is not signalled");
+      } else {
+        // Windows has no gentler stop than the tree, and git's helper ends with
+        // it: left to finish, a `receive-pack` would land a stopped push.
+        assert.equal(alive(shell), false, "the helper's shell, git's child, outlived the stop");
+      }
+      for (const left of [pid, shell]) if (alive(left)) process.kill(left, "SIGKILL");
     });
   });
 
@@ -239,7 +258,7 @@ describe("stopping a command on request, and everything it started", () => {
       });
       const pid = await grandchild(pidFile);
       await assert.rejects(running, GitTimeoutError);
-      assertReached(pid, "the group's sleep outlived the stop");
+      assertReached(pidFile, pid, "the group's sleep outlived the stop");
     });
   });
 
@@ -263,7 +282,7 @@ describe("stopping a command on request, and everything it started", () => {
         assert.ok(elapsed >= 1900, `answered after ${elapsed} ms, before the kill was due`);
       }
       assert.ok(elapsed < 5000, `answered after ${elapsed} ms`);
-      assertReached(pid, "a sleep deaf to SIGTERM survived the kill");
+      assertReached(pidFile, pid, "a sleep deaf to SIGTERM survived the kill");
     });
   });
 

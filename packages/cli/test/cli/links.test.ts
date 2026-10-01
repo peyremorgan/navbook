@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { makeNavRepo, type TempRepo } from "../helpers/temprepo.ts";
+import { editInPlace, makeNavRepo, type TempRepo } from "../helpers/temprepo.ts";
 
 /**
  * A repository holding a two-generation tree, each issue in its own commit:
@@ -23,21 +23,6 @@ function seeded(): TempRepo {
   open(repo, "ccc33333", "Build", "aaa11111");
   open(repo, "ddd44444", "Details", "bbb22222");
   return repo;
-}
-
-/**
- * A shell line that applies a sed script to a file in place.
- *
- * Not `sed -i`: GNU takes the suffix as an optional attached argument and BSD
- * (so macOS) takes it as a separate required one, which makes the bare form
- * mean different things on the two platforms Navbook supports. Writing to a
- * temporary file and moving it over is what both agree on.
- */
-function editInPlace(script: string, file: string): string {
-  // Staged through $HOME, which the fixture pins: a scratch file inside the
-  // repository would be a stray path in the very tree under test.
-  const scratch = '"$HOME/sed-edit.$$"';
-  return `sed ${JSON.stringify(script)} ${file} > ${scratch} && mv ${scratch} ${file}`;
 }
 
 function open(repo: TempRepo, id: string, title: string, parent?: string): void {
