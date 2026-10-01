@@ -9,8 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { FrontmatterError } from "../src/core/frontmatter.ts";
@@ -30,12 +29,11 @@ import {
   readReviewPolicy,
   WorkspaceError,
 } from "../src/workspace/index.ts";
+import { NO_SYMLINKS, realTempDir } from "./helpers/platform.ts";
 
 /** A fresh repository with one commit, so the index and HEAD both exist. */
 function inRepo(use: (dir: string) => void): void {
-  // Resolved, because `git rev-parse --show-toplevel` reports a real path and
-  // the platform temporary directory is a symlink on macOS.
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), "navbook-root-")));
+  const dir = realTempDir("navbook-root-");
   try {
     git(["init", "--quiet", "-b", "main", dir]);
     git(["config", "user.name", "Nav Test"], { cwd: dir });
@@ -186,7 +184,7 @@ describe("discoverNavDir", () => {
     });
   });
 
-  it("follows a symlinked directory", () => {
+  it("follows a symlinked directory", { skip: NO_SYMLINKS }, () => {
     inRepo((dir) => {
       mkdirSync(join(dir, "real"), { recursive: true });
       writeFileSync(join(dir, "real", NAV_MARKER), "{}\n", "utf8");

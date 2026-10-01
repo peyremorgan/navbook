@@ -6,10 +6,11 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { git } from "../src/git/exec.ts";
 import { stagedTree } from "../src/git/index-ops.ts";
+import { recordInIndex } from "./helpers/platform.ts";
 
 function inRepo(use: (dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "navbook-staged-"));
@@ -24,16 +25,20 @@ function inRepo(use: (dir: string) => void): void {
   }
 }
 
+/**
+ * Stage files under `nav/` without writing them to disk: what is under test
+ * reads the index, and a name with a newline in it cannot be written to a
+ * Windows disk.
+ */
 function stage(dir: string, files: Record<string, string>): void {
   for (const [name, content] of Object.entries(files)) {
-    writeFileSync(join(dir, "nav", name), content);
+    recordInIndex(dir, `nav/${name}`, content);
   }
-  git(["add", "--", "nav"], { cwd: dir });
 }
 
 /** The git commands `use` ran, from a `GIT_TRACE` log. */
 function traced(dir: string, use: () => void): string[] {
-  const log = join(dir, "..", `${dir.split("/").pop()}.trace`);
+  const log = join(dirname(dir), `${basename(dir)}.trace`);
   process.env.GIT_TRACE = log;
   try {
     use();

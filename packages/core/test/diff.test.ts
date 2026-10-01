@@ -21,10 +21,19 @@ import {
   unquote,
 } from "../src/git/diff.ts";
 import { git } from "../src/git/exec.ts";
+import { recordInIndex } from "./helpers/platform.ts";
 
 interface Repo {
   dir: string;
   write(path: string, content: string | Buffer): void;
+  /**
+   * Put a file in the index without writing it to disk.
+   *
+   * For names a repository can hold and a filesystem cannot — `"`, `:` and `*`
+   * on Windows. What is under test is how git spells them in its output, which
+   * does not depend on any working tree having held them.
+   */
+  record(path: string, content: string): void;
   remove(path: string): void;
   commit(message: string): string;
 }
@@ -42,11 +51,15 @@ function inRepo(use: (repo: Repo) => void | Promise<void>): void | Promise<void>
       mkdirSync(dirname(join(dir, path)), { recursive: true });
       writeFileSync(join(dir, path), content);
     },
+    record(path, content) {
+      recordInIndex(dir, path, content);
+    },
     remove(path) {
-      rmSync(join(dir, path));
+      git(["rm", "--quiet", "--", path], { cwd: dir });
     },
     commit(message) {
-      git(["add", "-A"], { cwd: dir });
+      // Not `-A`: that would also stage the absence of every recorded file.
+      git(["add", "--ignore-removal", "."], { cwd: dir });
       git(["commit", "--quiet", "-m", message], {
         cwd: dir,
         env: {
@@ -94,7 +107,7 @@ function story(repo: Repo): { base: string; head: string } {
   repo.write("pic.bin", Buffer.from([9, 9, 9, 0, 0, 0]));
   repo.write("no-newline.txt", "last line");
   repo.commit("middle");
-  repo.write('odd "name".txt', "x\n");
+  repo.record('odd "name".txt', "x\n");
   repo.write("café.txt", "é\n");
   const head = repo.commit("head");
   return { base, head };
@@ -175,8 +188,8 @@ describe("diffBetween", () => {
         ["src/gone.ts", "src/new.ts"],
       );
       // A name that would be pathspec magic if it were read as a pattern.
-      repo.write(":colon.txt", "x\n");
-      repo.write("star*.txt", "y\n");
+      repo.record(":colon.txt", "x\n");
+      repo.record("star*.txt", "y\n");
       const odd = repo.commit("odd names");
       assert.deepEqual(
         diffBetween(repo.dir, head, odd, { paths: [":colon.txt", "star*.txt"] }).files.map(

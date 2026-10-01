@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { GitError, GitStoppedError, GitTimeoutError, git } from "../src/git/exec.ts";
+import { PID_OF_SELF } from "./helpers/platform.ts";
 import {
   fetchRemote,
   fetchRemoteAsync,
@@ -215,10 +216,11 @@ describe("remotes, without blocking", () => {
       // saying where it is so the test can tell whether it was left running.
       const pidFile = join(clone, "..", "upload-pack.pid");
       const script = join(clone, "..", "slow-upload-pack");
-      writeFileSync(script, `#!/bin/sh\necho $$ > '${pidFile}'\nexec sleep 30\n`, "utf8");
+      writeFileSync(script, `#!/bin/sh\n${PID_OF_SELF} > '${pidFile}'\nexec sleep 30\n`, "utf8");
       chmodSync(script, 0o755);
       git(["remote", "add", "slow", origin], { cwd: clone });
-      git(["config", "remote.slow.uploadpack", script], { cwd: clone });
+      // Run by a shell, which reads a backslash as an escape: `/` on every platform.
+      git(["config", "remote.slow.uploadpack", script.replaceAll("\\", "/")], { cwd: clone });
 
       const stop = new AbortController();
       const fetching = fetchRemoteAsync(clone, "slow", { signal: stop.signal });

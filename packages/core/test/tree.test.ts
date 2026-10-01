@@ -17,6 +17,10 @@ import {
 import { git } from "../src/git/exec.ts";
 import { makeWsCtx } from "../src/workspace/ctx.ts";
 import { loadRepo, readNavTree, withComments } from "../src/workspace/workspace.ts";
+import { NO_UNREADABLE_FILES } from "./helpers/platform.ts";
+
+/** Why a file cannot be made unreadable here: where it cannot, a test of reading proves nothing. */
+const noRead = NO_UNREADABLE_FILES;
 
 const SHA_A = "4f2c9d1e8a7b3c5d9e0f1a2b3c4d5e6f7a8b9c0d";
 const SHA_B = "91d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0";
@@ -495,10 +499,9 @@ describe("readNavTree reads only what parseTree parses", () => {
     write("specs/auth/diagram.png", Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe)),
   ];
   for (const path of unread) chmodSync(path, 0o000);
-  // Permissions do not stop root, so there the test would prove nothing.
-  const asRoot = process.getuid?.() === 0;
+  // Where a mode cannot stop a read, the test would prove nothing.
 
-  it("lists them without opening them", { skip: asRoot }, () => {
+  it("lists them without opening them", { skip: noRead }, () => {
     const repo = parseTree(readNavTree(root));
     assert.deepEqual(repo.problems, []);
     // No plugin owns `specs/` here, so it is as uninterpreted as `reports/`:
@@ -511,7 +514,7 @@ describe("readNavTree reads only what parseTree parses", () => {
     assert.deepEqual(repo.issues[0]?.extraFiles, ["issues/open/bqlybac0-x/reports.json"]);
   });
 
-  it("opens only what the plugin owning a location asks for", { skip: asRoot }, () => {
+  it("opens only what the plugin owning a location asks for", { skip: noRead }, () => {
     const opened: string[] = [];
     const ext = mergeExtensions([
       {
@@ -552,7 +555,7 @@ describe("readNavTree reads only what parseTree parses", () => {
     }
   });
 
-  it("still fails on a file it must parse and cannot read", { skip: asRoot }, () => {
+  it("still fails on a file it must parse and cannot read", { skip: noRead }, () => {
     // Not a problem to record and carry on from: the entity would be missing
     // from a tree the server caches until HEAD moves.
     const dir = mkdtempSync(join(tmpdir(), "navbook-unreadable-"));
@@ -567,7 +570,7 @@ describe("readNavTree reads only what parseTree parses", () => {
     }
   });
 
-  it("fails on a directory it cannot list, rather than leaving it out", { skip: asRoot }, () => {
+  it("fails on a directory it cannot list, rather than leaving it out", { skip: noRead }, () => {
     // The same reason as a file: the issue inside would be missing, and not
     // even a structural problem would say so.
     const dir = mkdtempSync(join(tmpdir(), "navbook-unlistable-"));
@@ -656,7 +659,7 @@ describe("withComments", () => {
     assert.deepEqual(read.comments, []);
     assert.equal(read.commentsLoaded, true);
   });
-  it("fails on a comments directory it cannot read, as a full load does", () => {
+  it("fails on a comments directory it cannot read, as a full load does", { skip: noRead }, () => {
     const bare = loadRepo(ws, { comments: "none" }).byId.get("bqlybac0") as EntityRecord;
     const comments = join(dir, ".navbook", "issues/open/bqlybac0-x/comments");
     chmodSync(comments, 0o000);

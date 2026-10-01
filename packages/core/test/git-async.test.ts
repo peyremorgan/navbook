@@ -32,6 +32,7 @@ import {
   mergeNoCommitAsync,
 } from "../src/git/merge.ts";
 import { currentBranch, currentBranchAsync, resolveSha, resolveShaAsync } from "../src/git/repo.ts";
+import { ORPHANS_OUTLIVE_STOP, PID_OF_LAST, POLITE_STOP } from "./helpers/platform.ts";
 
 async function inRepo(use: (dir: string) => Promise<void>): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "navbook-async-"));
@@ -139,7 +140,8 @@ describe("gitRunAsync", () => {
  * `ignoreTerm` makes the helper and its `sleep` deaf to SIGTERM.
  */
 function hanging(pidFile: string, ignoreTerm = false): string[] {
-  const body = `${ignoreTerm ? "trap '' TERM; " : ""}sleep 30 & echo $! > '${pidFile}'; wait`;
+  const deaf = ignoreTerm ? "trap '' TERM; " : "";
+  const body = `${deaf}sleep 30 & ${PID_OF_LAST} > '${pidFile}'; wait`;
   return ["-c", `credential.helper=!f() { ${body}; }; f`, "credential", "fill"];
 }
 
@@ -156,6 +158,21 @@ function alive(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * That a group stop reached the helper's `sleep`, wherever a stop can reach it.
+ *
+ * Where it cannot (see {@link ORPHANS_OUTLIVE_STOP}), what the test still
+ * proves is that the call answered in time, git and all; the orphan is ended
+ * here so it does not outlive the suite.
+ */
+function assertReached(pid: number, message: string): void {
+  if (ORPHANS_OUTLIVE_STOP) {
+    if (alive(pid)) process.kill(pid);
+    return;
+  }
+  assert.equal(alive(pid), false, message);
 }
 
 /** The pid the hanging helper wrote, once it has. */
@@ -222,7 +239,7 @@ describe("stopping a command on request, and everything it started", () => {
       });
       const pid = await grandchild(pidFile);
       await assert.rejects(running, GitTimeoutError);
-      assert.equal(alive(pid), false, "the group's sleep outlived the stop");
+      assertReached(pid, "the group's sleep outlived the stop");
     });
   });
 
@@ -241,9 +258,12 @@ describe("stopping a command on request, and everything it started", () => {
       stop.abort();
       await assert.rejects(running, GitStoppedError);
       const elapsed = Date.now() - started;
-      assert.ok(elapsed >= 1900, `answered after ${elapsed} ms, before the kill was due`);
+      // Asked first, then killed after the grace; where a stop cannot ask, at once.
+      if (POLITE_STOP) {
+        assert.ok(elapsed >= 1900, `answered after ${elapsed} ms, before the kill was due`);
+      }
       assert.ok(elapsed < 5000, `answered after ${elapsed} ms`);
-      assert.equal(alive(pid), false, "a sleep deaf to SIGTERM survived the kill");
+      assertReached(pid, "a sleep deaf to SIGTERM survived the kill");
     });
   });
 

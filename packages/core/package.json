@@ -40,7 +40,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"test/**/*.test.ts\"",
+    "test": "node --import ./test/helpers/hermetic.ts --test \"test/**/*.test.ts\"",
     "prepack": "node ../../script/require-pnpm.js && pnpm build",
     "prepublishOnly": "node ../../script/require-pnpm.js"
   },

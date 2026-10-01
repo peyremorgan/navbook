@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, describe, it } from "node:test";
 import { blobSizes, catObjects, MAX_READ_BYTES, readBlobsBySha } from "../src/git/blobs.ts";
 import { GitError, git, gitRun } from "../src/git/exec.ts";
 import { lsTreeEntries } from "../src/git/refscan.ts";
+import { NO_GIT_SHIM } from "./helpers/platform.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "navbook-blobs-"));
 after(() => rmSync(dir, { recursive: true, force: true }));
@@ -86,7 +87,9 @@ describe("catObjects framing", () => {
     );
   });
 
-  it("throws on an answer that does not frame as asked, rather than misfiling it", () => {
+  it("throws on an answer that does not frame as asked, rather than misfiling it", {
+    skip: NO_GIT_SHIM,
+  }, () => {
     const bin = mkdtempSync(join(tmpdir(), "navbook-shim-"));
     // Answers every request with the first file's header and body, whatever
     // was asked: a reply that belongs to another name.
@@ -178,12 +181,12 @@ describe("readBlobsBySha", () => {
 
 describe("a git that exits before reading its input", () => {
   it("is reported by what git said, not by the broken pipe", () => {
-    const bin = mkdtempSync(join(tmpdir(), "navbook-shim-"));
-    writeFileSync(join(bin, "git"), '#!/bin/sh\necho "fatal: not today" >&2\nexit 128\n', {
-      mode: 0o755,
-    });
-    const path = process.env.PATH;
-    process.env.PATH = `${bin}:${path}`;
+    // Outside any repository git stops before it reads a byte of its input,
+    // which is the early exit under test, with no stand-in for git needed. The
+    // ceiling keeps git from finding one above the temporary directory.
+    const nowhere = mkdtempSync(join(tmpdir(), "navbook-norepo-"));
+    const ceiling = process.env.GIT_CEILING_DIRECTORIES;
+    process.env.GIT_CEILING_DIRECTORIES = dirname(nowhere);
     try {
       // Far more than a pipe holds, so the write is still going when git exits.
       const many = Array.from({ length: 5000 }, (_, index) => ({
@@ -191,15 +194,19 @@ describe("a git that exits before reading its input", () => {
         size: 1,
       }));
       assert.throws(
-        () => readBlobsBySha(dir, many),
-        (error: unknown) => error instanceof GitError && /fatal: not today/.test(error.message),
+        () => readBlobsBySha(nowhere, many),
+        (error: unknown) => error instanceof GitError && /not a git repository/.test(error.message),
       );
-      const run = gitRun(["cat-file", "--batch-check"], { cwd: dir, input: "x\n".repeat(100_000) });
+      const run = gitRun(["cat-file", "--batch-check"], {
+        cwd: nowhere,
+        input: "x\n".repeat(100_000),
+      });
       assert.equal(run.code, 128);
-      assert.match(run.stderr, /fatal: not today/);
+      assert.match(run.stderr, /not a git repository/);
     } finally {
-      process.env.PATH = path;
-      rmSync(bin, { recursive: true, force: true });
+      if (ceiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
+      else process.env.GIT_CEILING_DIRECTORIES = ceiling;
+      rmSync(nowhere, { recursive: true, force: true });
     }
   });
 });

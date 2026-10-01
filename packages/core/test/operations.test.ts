@@ -65,6 +65,7 @@ import {
   WorkspaceError,
   type WsCtx,
 } from "../src/workspace/index.ts";
+import { NO_GIT_SHIM, NO_SYMLINKS } from "./helpers/platform.ts";
 
 const IDENTITY = { name: "Nav Test", email: "nav@test.invalid" };
 const NOW = "2026-08-04T16:40:00Z";
@@ -399,7 +400,9 @@ describe("ops: the seams a plugin writes and reads through", () => {
     });
   });
 
-  it("will not write through a symbolic link a push could have put in the tree", () => {
+  it("will not write through a symbolic link a push could have put in the tree", {
+    skip: NO_SYMLINKS,
+  }, () => {
     inWorkspace((ws, dir) => {
       const outside = mkdtempSync(join(tmpdir(), "navbook-outside-"));
       try {
@@ -845,8 +848,8 @@ describe("ops: updating and merging a pull request", () => {
         const result = executePrMerge(ws, planPrMerge(ws, "ppp1"));
         assert.equal(result.source.outcome, "checked-out");
         assert.equal(
-          realpathSync(result.source.worktree ?? ""),
-          realpathSync(elsewhere),
+          realpathSync.native(result.source.worktree ?? ""),
+          realpathSync.native(elsewhere),
           "the caller is told where the branch is checked out",
         );
         // Moving the ref under a checked-out tree would strand its index and
@@ -927,7 +930,9 @@ describe("ops: updating and merging a pull request", () => {
     }
   }
 
-  it("never reads an open pull request's extension namespace off other refs", () => {
+  it("never reads an open pull request's extension namespace off other refs", {
+    skip: NO_GIT_SHIM,
+  }, () => {
     inPrWorkspace((ws, dir) => {
       const prDir = openPrDir(dir);
       writeFileSync(join(dir, prDir, "reports.json"), '{"runs": [1, 2, 3]}\n');
@@ -991,7 +996,9 @@ describe("ops: updating and merging a pull request", () => {
     }
   });
 
-  it("reports a batch it could not read, rather than finding no pull request", () => {
+  it("reports a batch it could not read, rather than finding no pull request", {
+    skip: NO_GIT_SHIM,
+  }, () => {
     inPrWorkspace((ws, dir) => {
       git(["checkout", "-q", "main"], { cwd: dir });
       // Resolving the refs' trees, then reading their blobs: either failing is
@@ -1013,7 +1020,8 @@ describe("ops: updating and merging a pull request", () => {
   it("passes over a branch whose prs/open is not a directory", () => {
     // Anyone can push such a branch; it holds no pull request, and must not
     // stop the listing, the merge's lookup or the hint for everyone else.
-    for (const make of ["file", "symlink"] as const) {
+    // A symbolic link where this account can make one; a file everywhere.
+    for (const make of NO_SYMLINKS ? (["file"] as const) : (["file", "symlink"] as const)) {
       inPrWorkspace((ws, dir) => {
         git(["checkout", "-q", "main"], { cwd: dir });
         git(["checkout", "-qb", "odd"], { cwd: dir });
