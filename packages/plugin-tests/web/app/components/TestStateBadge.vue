@@ -10,8 +10,8 @@ import { stateLook, stateOf } from "../utils/tests";
 
 const props = defineProps<{ state: string | null | undefined; size?: "sm" | "md" }>();
 
-const state = computed(() => stateOf(props.state));
-const look = computed(() => stateLook(state.value));
+const normalized = computed(() => stateOf(props.state));
+const look = computed(() => stateLook(normalized.value));
 </script>
 
 <template>
@@ -20,7 +20,7 @@ const look = computed(() => stateLook(state.value));
     variant="subtle"
     :size="props.size ?? 'sm'"
     :icon="look.icon"
-    :data-state="state"
+    :data-state="normalized"
   >
     {{ look.label }}
   </UBadge>
