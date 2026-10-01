@@ -4,7 +4,7 @@ author: Claude <noreply@anthropic.com>
 created: 2026-09-30T14:15:52Z
 labels: [enhancement, plugin]
 feature: plugins
-subtasks: [q85rhz8l, zbw7nh43]
+subtasks: [q85rhz8l, zbw7nh43, ulukw5vr]
 ---
 
 Today each plugin stands alone: it contributes to the core through its
