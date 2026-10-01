@@ -42,6 +42,13 @@ const allRefs = computed({
 });
 
 /**
+ * Where the empty listing's suggestion goes: this same filter, with the switch
+ * on. It is a link rather than a click handler so it reads as one, and lands
+ * in the address bar the same way the switch does.
+ */
+const allRefsLink = computed(() => ({ query: { ...route.query, refs: "all" } }));
+
+/**
  * The reviews this person owes, from the identity the token carries.
  *
  * `awaiting` is not part of the shared filter because it is not a value anybody
@@ -123,13 +130,17 @@ const suggestions = computed(() => ({
       :error="error"
       :empty="prs.length === 0"
       empty-title="No pull requests match this filter"
-      :empty-description="
-        allRefs
-          ? 'Nothing on any fetched branch matches.'
-          : 'Nothing on this checkout matches. A pull request lives on its own branch — try every fetched branch.'
-      "
       @retry="refetch()"
     >
+      <template #empty-description>
+        <template v-if="allRefs">Nothing on any fetched branch matches.</template>
+        <template v-else>
+          Nothing on this checkout matches. A pull request lives on its own branch —
+          <NuxtLink :to="allRefsLink" replace class="text-primary hover:underline" data-testid="empty-all-refs"
+            >try every fetched branch</NuxtLink
+          >.
+        </template>
+      </template>
       <div class="rounded-lg border border-default" data-testid="pr-list">
         <PrRow v-for="pr in page.shown.value" :key="pr.id" :pr="pr" />
       </div>

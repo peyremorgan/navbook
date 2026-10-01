@@ -42,6 +42,19 @@ test("puts the branch toggle in the address bar", async ({ signedIn, stack }) =>
   await expect(signedIn.getByTestId("pr-row-bbbb0002")).toHaveCount(0);
 });
 
+test("offers every fetched branch from an empty listing", async ({ signedIn, stack }) => {
+  // Its ID finds it, but only on the branch this clone has merely fetched.
+  await signedIn.goto(`${stack.appUrl}/prs?q=bbbb0002`);
+  await expect(signedIn.getByText("No pull requests match this filter")).toBeVisible();
+
+  // The empty state says where else to look, and is the way to get there.
+  await signedIn.getByRole("link", { name: "try every fetched branch" }).click();
+  await expect(signedIn).toHaveURL(/refs=all/);
+  await expect(signedIn).toHaveURL(/q=bbbb0002/);
+  await expect(signedIn.getByTestId("all-refs")).toBeChecked();
+  await expect(signedIn.getByTestId("pr-row-bbbb0002")).toBeVisible();
+});
+
 test("marks a draft as one", async ({ signedIn, stack }) => {
   await signedIn.goto(`${stack.appUrl}/prs?refs=all`);
   await expect(signedIn.getByTestId("pr-row-bbbb0002")).toContainText("Draft");

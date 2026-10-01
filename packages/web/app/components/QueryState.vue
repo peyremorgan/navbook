@@ -14,6 +14,7 @@ const props = defineProps<{
   /** True when the query succeeded and there is nothing to show. */
   empty?: boolean;
   emptyTitle?: string;
+  /** Plain text; the `empty-description` slot replaces it when a view needs markup. */
   emptyDescription?: string;
   /** Skeleton rows to draw while the first answer is on its way. */
   skeletonRows?: number;
@@ -47,7 +48,9 @@ const failure = computed(() => (props.error ? describeApiError(props.error) : nu
 
   <div v-else-if="empty" class="rounded-lg border border-dashed border-default p-10 text-center">
     <p class="font-medium">{{ emptyTitle ?? "Nothing here" }}</p>
-    <p class="mt-1 text-sm text-muted">{{ emptyDescription ?? "No entries match this view." }}</p>
+    <p class="mt-1 text-sm text-muted">
+      <slot name="empty-description">{{ emptyDescription ?? "No entries match this view." }}</slot>
+    </p>
     <slot name="empty-actions" />
   </div>
 
