@@ -252,9 +252,11 @@ judged, so a force-push can never inherit a stale approval.
 
 ## Platforms
 
-Developed and tested on Linux and macOS. Windows is not guaranteed; use
-[Git Bash](https://gitforwindows.org/) or WSL, where Navbook works because both
-provide the POSIX shell the hooks and completions expect.
+Developed and tested on Linux and macOS. On Windows, use
+[Git Bash](https://gitforwindows.org/) or WSL, which provide the POSIX shell the
+hooks and completions expect. Under Git Bash the suites of `core`, `cli` and
+`plugin-kb` pass, short of the few tests the platform cannot host, each skipped
+with its reason (see [Developing on Windows](#developing-on-windows)).
 
 ## Deploying
 
@@ -381,6 +383,42 @@ is its TypeScript source, and Node runs it directly.
 The [conformance fixtures](doc/spec/fixtures/README.md) are golden repositories
 that any implementation must pass; they run against `$NAV_BIN`, so the same
 suite validates the planned Rust rewrite.
+
+### Developing on Windows
+
+Work in Git Bash, with Node 24 on its `PATH`. Three settings differ from Linux:
+
+- **pnpm through Corepack.** `corepack enable` installs the pinned pnpm, and
+  needs an administrator's shell. Without one, run `corepack pnpm` wherever
+  this file says `pnpm`.
+- **A POSIX shell for package scripts.** The scripts are written for `sh`,
+  and pnpm on Windows runs them with `cmd.exe` unless told otherwise:
+
+  ```sh
+  pnpm config set script-shell "C:\\Program Files\\Git\\bin\\bash.exe"
+  ```
+
+- **Developer Mode, for symbolic links.** Windows lets an ordinary account
+  create them only in Developer Mode (Settings → System → For developers).
+  Without it, the tests that need one are skipped and say why.
+
+Line endings need nothing: `.gitattributes` keeps every checkout LF, whatever
+Git for Windows' `core.autocrlf` says.
+
+`nav` runs `$EDITOR` with the shell Git for Windows ships, exactly as
+`git commit` does, so the same value works for both: a program on `PATH`
+(`EDITOR=vim`, `EDITOR="code -w"`), or a path written for that shell
+(`EDITOR="'/c/Program Files/Notepad++/notepad++.exe' -multiInst"`), not a
+`C:\…` path with backslashes.
+
+A few tests cannot run on Windows at all, and are skipped with their reason:
+those that make a file unreadable with `chmod` (Windows modes cannot take a
+read away from its owner), those that put a shell script named `git` first on
+`PATH` (Windows launches only programs it knows by extension), and the one
+that signals a process group as a terminal's Ctrl-C does. Stopping a git
+command and what it started reaches git and every process still parented to
+it; a job Git Bash backgrounded is orphaned by its emulation of `fork`, and
+outlives the stop.
 
 ### Running the web client
 

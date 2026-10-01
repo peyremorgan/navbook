@@ -1,0 +1,10 @@
+# Line endings are LF in every checkout, whatever `core.autocrlf` says.
+#
+# Git for Windows sets `core.autocrlf=true` system-wide by default, and a
+# checkout made under it has CRLF everywhere: biome then reports every file,
+# and anything that compares bytes on disk sees a difference that is not
+# there. The repository is LF; this keeps working trees so on every platform.
+* text=auto eol=lf
+
+# Batch files are the exception: cmd.exe reads them line by line, and wants CRLF.
+*.cmd text eol=crlf
