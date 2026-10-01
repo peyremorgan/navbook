@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { makeNavRepo, makeTempRepo, type TempRepo } from "../helpers/temprepo.ts";
+import { makeNavRepo, makeTempRepo, NO_GIT_SHIM, type TempRepo } from "../helpers/temprepo.ts";
 
 /** Put an issue in `closed/` with a comment stranded under `open/`. */
 function strandedComment(repo: TempRepo): void {
@@ -96,7 +96,9 @@ describe("nav doctor", () => {
     }
   });
 
-  it("--staged leaves a large file nothing parses unread, and reads one it parses", () => {
+  it("--staged leaves a large file nothing parses unread, and reads one it parses", {
+    skip: NO_GIT_SHIM,
+  }, () => {
     const repo = makeNavRepo();
     try {
       // Extension data (§2.12) and an issue file, both over a megabyte.
@@ -144,8 +146,7 @@ describe("nav doctor", () => {
       repo.nav(["issue", "open", "Gone", "-m", "Body.", "--commit"], { NAV_IDS: "gne11111" });
       repo.git(["rm", "-r", "--cached", "--quiet", ".navbook/issues/open/gne11111-gone"]);
       // A newline is legal in a git path, and the batch protocol is line-based.
-      repo.write(".navbook/reports/a\nb.json", "{}\n");
-      repo.git(["add", "--", ".navbook/reports"]);
+      repo.record(".navbook/reports/a\nb.json", "{}\n");
 
       const result = repo.nav(["doctor", "--staged", "--json"]);
       assert.equal(result.code, 0, result.stdout);

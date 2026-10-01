@@ -13,7 +13,8 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { CLI_ENTRY, navCommand } from "../helpers/temprepo.ts";
+import { pathToFileURL } from "node:url";
+import { CLI_ENTRY, NO_SYMLINKS, navCommand } from "../helpers/temprepo.ts";
 
 /** The file the `nav` bin entry points at, whether source or build. */
 function entryPath(): string {
@@ -41,7 +42,7 @@ describe("the nav entry point", () => {
     assert.match(result.stdout, /^\d+\.\d+\.\d+/);
   });
 
-  it("runs when invoked through a symlink, as npm installs it", () => {
+  it("runs when invoked through a symlink, as npm installs it", { skip: NO_SYMLINKS }, () => {
     const binDir = join(dir, "bin");
     mkdirSync(binDir, { recursive: true });
     const link = join(binDir, "nav");
@@ -56,7 +57,9 @@ describe("the nav entry point", () => {
     );
   });
 
-  it("runs through a symlink to a symlink, as a global install can produce", () => {
+  it("runs through a symlink to a symlink, as a global install can produce", {
+    skip: NO_SYMLINKS,
+  }, () => {
     const first = join(dir, "first-nav");
     const second = join(dir, "second-nav");
     symlinkSync(entryPath(), first);
@@ -70,7 +73,9 @@ describe("the nav entry point", () => {
   it("does not run its command tree when imported as a module", () => {
     const importer = join(dir, "importer.mjs");
     const target = CLI_ENTRY;
-    const script = `import { run } from ${JSON.stringify(target)};\nconsole.log("imported", typeof run);\n`;
+    // A URL, which an import takes on every platform; a Windows path is not one.
+    const url = pathToFileURL(target).href;
+    const script = `import { run } from ${JSON.stringify(url)};\nconsole.log("imported", typeof run);\n`;
     writeFileSync(importer, script, "utf8");
 
     const result = spawnSync(process.execPath, [importer], {

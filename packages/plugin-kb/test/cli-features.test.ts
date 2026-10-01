@@ -33,11 +33,11 @@ const read = (repo: TempRepo, path: string): string =>
 
 /** An "editor" that appends a body to whatever file it is handed. */
 const editorAppending = (repo: TempRepo, name: string, text: string): string =>
-  repo.script(name, `printf '%s\\n' ${JSON.stringify(text)} >> "$1"`);
+  repo.editor(name, `printf '%s\\n' ${JSON.stringify(text)} >> "$1"`);
 
 /** An "editor" that replaces the file it is handed, escapes and all. */
 const editorReplacing = (repo: TempRepo, name: string, text: string): string =>
-  repo.script(name, `printf '%b' ${JSON.stringify(text)} > "$1"`);
+  repo.editor(name, `printf '%b' ${JSON.stringify(text)} > "$1"`);
 
 describe("nav feature open", () => {
   let repo: TempRepo;
@@ -172,7 +172,7 @@ describe("nav feature spec", () => {
   });
 
   it("refuses before opening an editor when the feature does not exist", () => {
-    const editor = repo.script("editor-never.sh", "exit 1");
+    const editor = repo.editor("editor-never.sh", "exit 1");
     const result = repo.nav(["feature", "spec", "add", "nope", "X"], { EDITOR: editor });
     assert.equal(result.code, 1);
     assert.match(result.stderr, /no feature named 'nope'/);

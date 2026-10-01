@@ -6,14 +6,22 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { CLI_ENTRY, makeNavRepo, makeTempRepo, type TempRepo } from "../helpers/temprepo.ts";
+import {
+  CLI_ENTRY,
+  makeNavRepo,
+  makeTempRepo,
+  pathWith,
+  shellWord,
+  type TempRepo,
+} from "../helpers/temprepo.ts";
 
 const HOOK = ".git/hooks/pre-commit";
 
 /** A PATH on which `nav` resolves to this working copy, as a real install would. */
 function pathWithNav(repo: TempRepo): string {
-  const script = repo.script("nav", `exec ${process.execPath} ${CLI_ENTRY} "$@"`);
-  return `${dirname(script)}:${process.env.PATH}`;
+  const node = shellWord(process.execPath);
+  const script = repo.script("nav", `exec ${node} ${shellWord(CLI_ENTRY)} "$@"`);
+  return pathWith(dirname(script));
 }
 
 function hookText(repo: TempRepo): string {

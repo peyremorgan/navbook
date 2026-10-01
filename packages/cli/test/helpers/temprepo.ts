@@ -4,9 +4,9 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const FIXTURE_IDENTITY = { name: "Nav Test", email: "nav@test.invalid" };
@@ -31,8 +31,22 @@ export interface TempRepo {
   nav(args: string[], env?: NodeJS.ProcessEnv, input?: string): RunResult;
   git(args: string[], env?: NodeJS.ProcessEnv): RunResult;
   write(relativePath: string, content: string): void;
+  /**
+   * Stage a file without writing it to disk.
+   *
+   * For a name a repository can hold and a filesystem cannot: a newline, or
+   * `"`, `:` and `*` on Windows. What reads the index never needs the file.
+   */
+  record(relativePath: string, content: string): void;
   /** Write an executable shell script outside the repo and return its path. */
   script(name: string, body: string): string;
+  /**
+   * Write a script for `$EDITOR`, returned as the shell word `$EDITOR` holds.
+   *
+   * `$EDITOR` is a command a shell reads, as git reads it, not a file name: a
+   * Windows path in it needs quoting and forward slashes (see {@link shellWord}).
+   */
+  editor(name: string, body: string): string;
   commitAll(message: string, date?: string): void;
   cleanup(): void;
 }
@@ -111,6 +125,26 @@ export function makeTempRepo(): TempRepo {
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, content, "utf8");
     },
+    record(relativePath, content) {
+      const blob = runIn(["git"], ["hash-object", "-w", "--stdin"], {}, content).stdout.trim();
+      // Git for Windows refuses such a name by default, to protect a checkout;
+      // nothing recorded this way is checked out.
+      const staged = runIn(
+        ["git"],
+        [
+          "-c",
+          "core.protectNTFS=false",
+          "update-index",
+          "--add",
+          "--cacheinfo",
+          `100644,${blob},${relativePath}`,
+        ],
+      );
+      if (staged.code !== 0) throw new Error(`could not stage ${relativePath}: ${staged.stderr}`);
+    },
+    editor(name, body) {
+      return shellWord(repo.script(name, body));
+    },
     script(name, body) {
       const path = join(home, name);
       writeFileSync(path, `#!/bin/sh\n${body}\n`, { encoding: "utf8", mode: 0o755 });
@@ -134,6 +168,56 @@ export function makeTempRepo(): TempRepo {
   repo.git(["config", "commit.gpgsign", "false"]);
   return repo;
 }
+
+/**
+ * A path as a word a shell script can use: quoted, and on Windows with `/`.
+ *
+ * Git Bash reads a backslash as an escape and a space as the end of a word,
+ * and Windows paths have both — `C:\Program Files\nodejs\node.exe`.
+ */
+export function shellWord(path: string): string {
+  const native = process.platform === "win32" ? path.replaceAll("\\", "/") : path;
+  return `'${native.replaceAll("'", `'\\''`)}'`;
+}
+
+/** `PATH` with `dir` searched first, separated as the platform separates it. */
+export function pathWith(dir: string, path = process.env.PATH ?? ""): string {
+  return `${dir}${delimiter}${path}`;
+}
+
+/**
+ * Why symbolic links cannot be made here, or false when they can.
+ *
+ * Windows lets an ordinary account create them only in Developer Mode; a test
+ * that needs one is skipped with this reason, rather than failing on `EPERM`.
+ */
+export const NO_SYMLINKS: string | false = (() => {
+  const dir = mkdtempSync(join(tmpdir(), "navbook-symlink-probe-"));
+  try {
+    symlinkSync(dir, join(dir, "link"), "dir");
+    return false;
+  } catch {
+    return "this account cannot create symbolic links (on Windows, enable Developer Mode)";
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+})();
+
+/**
+ * Why git cannot be replaced by a script for one test, or false when it can.
+ *
+ * Windows launches only programs it recognises by extension, so a shell
+ * script named `git` first on `PATH` is never the `git` that runs there.
+ */
+export const NO_GIT_SHIM: string | false =
+  process.platform === "win32" ? "Windows will not launch a shell script named git" : false;
+
+/**
+ * Why a test cannot signal a process group as a terminal's Ctrl-C does, or
+ * false when it can. Windows has neither process groups nor `kill -INT 0`.
+ */
+export const NO_PROCESS_GROUPS: string | false =
+  process.platform === "win32" ? "Windows has no process groups for Ctrl-C to signal" : false;
 
 /** A repository that already has `.navbook/` and one commit. */
 export function makeNavRepo(): TempRepo {

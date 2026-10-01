@@ -152,7 +152,7 @@ describe("walking a run", () => {
   });
 
   it("takes an actual result from the editor, and leaves a run open when asked", () => {
-    const editor = repo.script("actual.sh", `printf 'Seen in the editor.\\n' > "$1"`);
+    const editor = repo.editor("actual.sh", `printf 'Seen in the editor.\\n' > "$1"`);
     const result = repo.nav(
       ["test", "run", "login", "--interactive"],
       { EDITOR: editor },
@@ -192,7 +192,7 @@ describe("walking a run", () => {
       path,
       readFileSync(path, "utf8").replace(/^plan-sha: .*$/m, `plan-sha: ${"e".repeat(40)}`),
     );
-    const grow = repo.script(
+    const grow = repo.editor(
       "grow.sh",
       `printf '\\n### Four\\n\\n#### Actions\\n\\nDo four.\\n' >> "$1"`,
     );
@@ -368,7 +368,7 @@ describe("listing and showing runs", () => {
   });
 
   it("shows the steps a run followed after the plan changed, and says when it cannot", () => {
-    const editor = repo.script("rename.sh", `sed -i 's/### Sign in/### Sign in with SSO/' "$1"`);
+    const editor = repo.editor("rename.sh", `sed -i 's/### Sign in/### Sign in with SSO/' "$1"`);
     assert.equal(repo.nav(["test", "edit", "login", "--commit"], { EDITOR: editor }).code, 0);
     const shown = repo.nav(["test", "show", ids[1] as string]);
     assert.match(shown.stdout, /^ {2}2\. Sign in {2}failed$/m);

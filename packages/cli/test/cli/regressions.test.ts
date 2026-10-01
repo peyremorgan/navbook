@@ -36,7 +36,7 @@ describe("edit --commit", () => {
   it("commits the file it just edited instead of calling it unrelated", () => {
     const repo = withIssue();
     try {
-      const editor = repo.script("editor.sh", 'printf "More detail.\\n" >> "$1"');
+      const editor = repo.editor("editor.sh", 'printf "More detail.\\n" >> "$1"');
       const result = repo.nav(["issue", "edit", "edt1", "--commit"], { EDITOR: editor });
       assert.equal(result.code, 0, result.stderr);
 
@@ -54,7 +54,7 @@ describe("edit --commit", () => {
     try {
       repo.write("app.py", "print('hi')\n");
       repo.git(["add", "app.py"]);
-      const editor = repo.script("editor.sh", 'printf "More.\\n" >> "$1"');
+      const editor = repo.editor("editor.sh", 'printf "More.\\n" >> "$1"');
       const result = repo.nav(["issue", "edit", "edt1", "--commit"], { EDITOR: editor });
       assert.equal(result.code, 1);
       assert.match(result.stderr, /unrelated changes already staged/);

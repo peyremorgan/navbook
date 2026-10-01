@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { pathToFileURL } from "node:url";
 import type { TempRepo } from "@navbook/cli/test-helpers";
 import { makeTestsRepo, openLoginPlan, PLUGIN, read, runFiles } from "./helpers.ts";
 
@@ -179,9 +180,12 @@ describe("the plugin, when it is not needed", () => {
     rmSync(path, { force: true });
     return lines;
   };
+  // A URL: what `--import` takes on every platform, and with no spaces in it
+  // for `NODE_OPTIONS` to split on.
+  const tracer = pathToFileURL(join(PLUGIN, "test", "trace-imports.mjs")).href;
   const traced = (...args: string[]) =>
     repo.nav(args, {
-      NODE_OPTIONS: `--import=${join(PLUGIN, "test", "trace-imports.mjs")}`,
+      NODE_OPTIONS: `--import=${tracer}`,
       TRACE_LOG: join(repo.home, "trace.log"),
     });
   before(() => {

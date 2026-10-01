@@ -20,6 +20,8 @@ import {
   deterministicEnv,
   FIXTURE_IDENTITY,
   makeNavRepo,
+  NO_GIT_SHIM,
+  NO_PROCESS_GROUPS,
   navCommand,
   type RunResult,
   type TempRepo,
@@ -767,7 +769,9 @@ describe("nav pr list points at --all-refs", () => {
     }
   });
 
-  it("still lists, without the hint, when the other branches cannot be read", () => {
+  it("still lists, without the hint, when the other branches cannot be read", {
+    skip: NO_GIT_SHIM,
+  }, () => {
     const { repo } = withOpenPr();
     try {
       // A git that fails every `cat-file`: the checked-out tree is read from
@@ -1077,12 +1081,11 @@ describe("a pull request that only another branch holds", () => {
       assert.equal(written.code, 0, written.stderr);
       assert.match(written.stdout, /Commented on #dk3mp2x9/);
       // As git records it: on macOS the temporary directory is reached through
-      // a symlink (/var → /private/var), and git names the resolved path.
-      const recorded = realpathSync(tree);
-      assert.match(
-        written.stderr,
-        new RegExp(`written in ${recorded.replace(/[.*+?^$()|[\]\\]/g, "\\$&")}`),
-      );
+      // a symlink (/var → /private/var), and git names the resolved path; on
+      // Windows it expands 8.3 names, and writes `/` where Windows writes `\`.
+      const recorded = realpathSync.native(tree).replaceAll("\\", "/");
+      const said = written.stderr.replaceAll("\\", "/");
+      assert.match(said, new RegExp(`written in ${recorded.replace(/[.*+?^$()|[\]\\]/g, "\\$&")}`));
 
       // The comment is on the source branch, and the checkout that asked for it
       // is exactly as it was: no file, no commit, nothing staged.
@@ -1248,14 +1251,16 @@ describe("a pull request that only another branch holds", () => {
     }
   });
 
-  it("removes the temporary worktree when Ctrl-C interrupts the editor", async () => {
+  it("removes the temporary worktree when Ctrl-C interrupts the editor", {
+    skip: NO_PROCESS_GROUPS,
+  }, async () => {
     const { repo } = withOpenPr();
     try {
       const tmp = privateTmp(repo);
       // What the terminal does on Ctrl-C: signal the whole foreground process
       // group, editor and nav alike. Detached, so the group is nav's own and
       // the signal cannot reach the test runner.
-      const editor = repo.script("ctrl-c", "kill -INT 0\nsleep 1");
+      const editor = repo.editor("ctrl-c", "kill -INT 0\nsleep 1");
       const command = navCommand();
       const child = spawn(
         command[0] as string,

@@ -28,7 +28,7 @@ describe("nav test open", () => {
   });
 
   it("opens the editor on a skeleton that shows the grammar, and keeps what was saved", () => {
-    const copy = repo.script("keep.sh", `cp "$1" "${repo.home}/buffer.md"`);
+    const copy = repo.editor("keep.sh", `cp "$1" "${repo.home}/buffer.md"`);
     const result = repo.nav(["test", "open", "Search"], { EDITOR: copy });
     assert.equal(result.code, 0, result.stderr);
     const buffer = read({ ...repo, dir: repo.home } as TempRepo, "buffer.md");
@@ -174,7 +174,7 @@ describe("nav test edit", () => {
   after(() => repo.cleanup());
 
   it("records an edit made in the editor", () => {
-    const editor = repo.script(
+    const editor = repo.editor(
       "add-step.sh",
       `printf '\\n### Check the logs\\n\\n#### Actions\\n\\nRead them.\\n' >> "$1"`,
     );
@@ -188,7 +188,7 @@ describe("nav test edit", () => {
   });
 
   it("leaves an edit that breaks the plan as it was saved, and says what is wrong", () => {
-    const editor = repo.script("break.sh", `printf '\\n## Stray\\n' >> "$1"`);
+    const editor = repo.editor("break.sh", `printf '\\n## Stray\\n' >> "$1"`);
     const result = repo.nav(["test", "edit", "login"], { EDITOR: editor });
     assert.equal(result.code, 1);
     assert.match(

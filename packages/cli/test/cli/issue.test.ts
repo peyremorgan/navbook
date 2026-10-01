@@ -11,12 +11,12 @@ import { makeNavRepo, makeTempRepo, type TempRepo } from "../helpers/temprepo.ts
 
 /** An "editor" that appends a body to whatever file it is handed. */
 function editorAppending(repo: TempRepo, name: string, text: string): string {
-  return repo.script(name, `printf '%s\\n' ${JSON.stringify(text)} >> "$1"`);
+  return repo.editor(name, `printf '%s\\n' ${JSON.stringify(text)} >> "$1"`);
 }
 
 /** An "editor" that fails, as if the user aborted. */
 function failingEditor(repo: TempRepo): string {
-  return repo.script("editor-fail.sh", "exit 1");
+  return repo.editor("editor-fail.sh", "exit 1");
 }
 
 /** An "editor" that changes nothing. */
@@ -120,7 +120,7 @@ describe("$EDITOR flows", () => {
   });
 
   it("lets a title edited in the buffer decide the slug", () => {
-    const rewrite = repo.script(
+    const rewrite = repo.editor(
       "editor-retitle.sh",
       'sed "s/^title: .*/title: Renamed in buffer/" "$1" > "$1.tmp" && mv "$1.tmp" "$1" && printf "Body text.\\n" >> "$1"',
     );

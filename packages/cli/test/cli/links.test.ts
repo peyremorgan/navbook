@@ -120,7 +120,7 @@ describe("nav issue open --parent", () => {
     const repo = seeded();
     try {
       // The author is given `parent: aaa11111` to edit and rewrites it.
-      const editor = repo.script(
+      const editor = repo.editor(
         "editor-reparent.sh",
         `${editInPlace("s/^parent: aaa11111$/parent: ccc33333/", '"$1"')}\n` +
           `printf 'A body.\\n' >> "$1"`,
@@ -142,7 +142,7 @@ describe("nav issue open --parent", () => {
   it("leaves no half-link when the author deletes the parent key outright", () => {
     const repo = seeded();
     try {
-      const editor = repo.script(
+      const editor = repo.editor(
         "editor-unparent.sh",
         `${editInPlace("/^parent: /d", '"$1"')}\nprintf 'A body.\\n' >> "$1"`,
       );
@@ -163,7 +163,7 @@ describe("nav issue open --parent", () => {
     const repo = seeded();
     try {
       // Something else retitles the parent while the editor session is open.
-      const editor = repo.script(
+      const editor = repo.editor(
         "editor-meddle.sh",
         `${editInPlace(
           "s/^title: Root$/title: Root, retitled/",

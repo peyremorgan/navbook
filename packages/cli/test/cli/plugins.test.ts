@@ -13,11 +13,13 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
+import { npmInvocation } from "../../src/plugins/store.ts";
 import {
   deterministicEnv,
   makeTempRepo,
   navCommand,
   PACKAGE_ROOT,
+  pathWith,
   type RunResult,
   type TempRepo,
 } from "../helpers/temprepo.ts";
@@ -72,7 +74,7 @@ function fakeNpm(repo: TempRepo): {
   };
   return {
     env: {
-      PATH: `${join(PACKAGE_ROOT, "test", "fixtures", "fake-npm")}:${process.env.PATH}`,
+      PATH: pathWith(join(PACKAGE_ROOT, "test", "fixtures", "fake-npm")),
       FAKE_NPM_REGISTRY: registry,
       FAKE_NPM_LOG: logPath,
       PROBE_LOG: join(repo.home, "probe.log"),
@@ -865,9 +867,11 @@ describe("nav plugin", () => {
       writeFileSync(join(pkg, "package.json"), JSON.stringify(manifest, null, 2));
       // A tarball, as a release smoke-tests and a registry serves: npm only
       // links a directory, and never looks at a linked package's peers.
-      const packed = spawnSync("npm", ["pack", "--silent", "--pack-destination", repo.home], {
+      const npm = npmInvocation(["pack", "--silent", "--pack-destination", repo.home]);
+      const packed = spawnSync(npm.file, npm.args, {
         cwd: pkg,
         encoding: "utf8",
+        windowsVerbatimArguments: npm.verbatim,
         env: { PATH: process.env.PATH, HOME: repo.home, npm_config_offline: "true" },
       });
       assert.equal(packed.status, 0, packed.stderr);
@@ -931,6 +935,23 @@ describe("nav plugin", () => {
       const rebuilt = repo.nav(["plugin", "install", v2, "-y"], npm.env);
       assert.equal(rebuilt.code, 0, rebuilt.stderr);
       assert.deepEqual(listed(repo, npm.env), ["@navbook/plugin-probe@3.0.0"]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("hands npm a folder's path exactly, whatever a shell would make of it", () => {
+    // On Windows npm is a batch file run by cmd.exe, which reads `&`, `%`,
+    // `^`, `!`, quotes and spaces as instructions unless they are escaped.
+    const repo = probeRepo({ declare: false });
+    const npm = fakeNpm(repo);
+    try {
+      const odd = npm.copy("1.0.0", join(repo.home, "odd & 100% (^caret!) 'q' plug"));
+      const result = repo.nav(["plugin", "install", odd, "-y"], npm.env);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /Installed @navbook\/plugin-probe@1\.0\.0/);
+      assert.equal(npm.log().at(-1)?.split(" ").includes("--save-exact"), true);
+      assert.ok(npm.log().at(-1)?.endsWith(` ${odd}`), npm.log().at(-1));
     } finally {
       repo.cleanup();
     }
