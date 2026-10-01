@@ -45,6 +45,12 @@ export function fileVersions(cwd: string, path: string): FileVersion[] {
  * against the parent that lacks a file pairs it with any similar file that
  * parent holds. So only a history that opens on an add or a copy is taken as
  * whole, and any other is resumed by hand from just before its oldest commit.
+ *
+ * Newer gits do follow that rename through the merge, but still without
+ * listing the merge: the record before it names the file by its old path, with
+ * nothing in between to say where the new one came from. So each record must
+ * name the path the record after it came from, and the history stops at the
+ * first that does not, to be resumed through the merge like any other.
  */
 function followFrom(cwd: string, rev: string, path: string): FileVersion[] {
   // `-z` for paths as they are, never C-quoted: one resumed from is read back.
@@ -67,6 +73,8 @@ function followFrom(cwd: string, rev: string, path: string): FileVersion[] {
     if (Number.isNaN(date.getTime())) continue;
     const named = paths.filter(Boolean);
     const current = named.at(-1) || path;
+    // A rename this listing does not show, which only a merge can hide.
+    if (current !== opening.from) break;
     versions.push({ sha, path: current, authored: date });
     opening = { status: (status ?? "").trim(), from: named[0] || current };
     if (opening.status.startsWith("C")) break;
