@@ -7,7 +7,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { gitDir, gitMaybe } from "@navbook/core";
 import type { Ctx } from "./context.ts";
 import { fail } from "./errors.ts";
@@ -32,15 +32,27 @@ export function editorInvocation(
   return { file: `${editor} "${path}"`, args: [], shell: true };
 }
 
-/** The POSIX shell to run an editor with, or null on a Windows without one. */
-export function posixShell(platform: NodeJS.Platform = process.platform): string | null {
+/**
+ * The POSIX shell to run an editor with, or null on a Windows without one.
+ *
+ * On Windows, the one beside git first: Git for Windows reports its exec path
+ * as `<git>/<mingw64 or ucrt64>/libexec/git-core`, three levels below where it
+ * keeps `bin/sh.exe`. A git that reports it some other way — an MSYS2 git says
+ * `/mingw64/libexec/git-core`, which names no Windows directory — has its
+ * shell on `PATH` instead, so that is searched next.
+ */
+export function posixShell(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
   if (platform !== "win32") return "/bin/sh";
-  // `<git>/<mingw64 or ucrt64>/libexec/git-core`, three levels below where
-  // the installation keeps `bin/sh.exe`.
   const execPath = gitMaybe(["--exec-path"]);
-  if (execPath === null) return null;
-  const sh = join(execPath, "..", "..", "..", "bin", "sh.exe");
-  return existsSync(sh) ? sh : null;
+  const beside = execPath === null ? null : join(execPath, "..", "..", "..", "bin", "sh.exe");
+  if (beside !== null && existsSync(beside)) return beside;
+  for (const dir of (env.PATH ?? "").split(delimiter)) {
+    if (dir !== "" && existsSync(join(dir, "sh.exe"))) return join(dir, "sh.exe");
+  }
+  return null;
 }
 
 /** The editor command to use, or null when none can be determined. */

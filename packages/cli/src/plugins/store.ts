@@ -181,15 +181,17 @@ function runNpm(env: NodeJS.ProcessEnv, args: readonly string[]): NpmResult {
  * once for the command line, and once more for the batch file reading `%*`.
  * Without that, a spec carrying `&` or `%` — a URL, a path — would be read by
  * cmd as something to do. It is the quoting `cross-spawn` uses, after
- * https://qntm.org/cmd, kept to the one command that needs it.
+ * https://qntm.org/cmd, kept to the one command that needs it. The command
+ * interpreter is `%ComSpec%`, as there, and `cmd.exe` where that is unset.
  */
 export function npmInvocation(
   args: readonly string[],
   platform: NodeJS.Platform = process.platform,
+  comspec: string = process.env.ComSpec || "cmd.exe",
 ): { file: string; args: string[]; verbatim: boolean } {
   if (platform !== "win32") return { file: "npm", args: [...args], verbatim: false };
   const line = ["npm", ...args.map(cmdArgument)].join(" ");
-  return { file: "cmd.exe", args: ["/d", "/s", "/c", `"${line}"`], verbatim: true };
+  return { file: comspec, args: ["/d", "/s", "/c", `"${line}"`], verbatim: true };
 }
 
 /** The characters cmd.exe gives a meaning to, which `^` makes literal. */

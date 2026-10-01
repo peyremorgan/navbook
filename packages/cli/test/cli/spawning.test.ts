@@ -9,6 +9,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { hasScheme, looksLocal } from "../../src/commands/plugin.ts";
 import { editorInvocation, posixShell } from "../../src/editor.ts";
 import { npmInvocation } from "../../src/plugins/store.ts";
 
@@ -24,7 +25,7 @@ describe("npmInvocation", () => {
   });
 
   it("hands Windows one cmd.exe command line, every argument quoted", () => {
-    const run = npmInvocation(["install", "--save-exact", "plain"], "win32");
+    const run = npmInvocation(["install", "--save-exact", "plain"], "win32", "cmd.exe");
     assert.equal(run.file, "cmd.exe");
     assert.equal(run.verbatim, true, "Node must not quote it a second time");
     assert.deepEqual(run.args.slice(0, 3), ["/d", "/s", "/c"]);
@@ -33,13 +34,18 @@ describe("npmInvocation", () => {
     assert.equal(run.args[3], '"npm ^^^"install^^^" ^^^"--save-exact^^^" ^^^"plain^^^""');
   });
 
+  it("runs the command interpreter %ComSpec% names, as cross-spawn does", () => {
+    const comspec = "C:\\Windows\\System32\\cmd.exe";
+    assert.equal(npmInvocation(["install"], "win32", comspec).file, comspec);
+  });
+
   it("escapes what cmd.exe would act on, and doubles backslashes before a quote", () => {
     const args = ["a&b", "100%", 'say "hi"\\', "C:\\dir\\"];
     const [, , , line = ""] = npmInvocation(args, "win32").args;
     // Each special character carries two escapes, so none of them is live:
     // `&`, `%`, a space and a quote alike.
-    assert.ok(line.includes(String.raw`^^^"a^^^&b^^^"`), line);
-    assert.ok(line.includes(String.raw`^^^"100^^^%^^^"`), line);
+    assert.ok(line.includes(`^^^"a^^^&b^^^"`), line);
+    assert.ok(line.includes(`^^^"100^^^%^^^"`), line);
     // A quote inside is escaped for the C runtime too, and a backslash before
     // the closing quote is doubled, so the program gets back what it was given.
     assert.ok(line.includes(String.raw`^^^"say^^^ \^^^"hi\^^^"\\^^^"`), line);
@@ -70,6 +76,30 @@ describe("editorInvocation", () => {
     if (process.platform === "win32") {
       // Git for Windows ships the shell it runs editors with.
       assert.match(posixShell("win32") ?? "", /sh\.exe$/);
+    }
+  });
+});
+
+describe("what nav plugin install takes for a path or a URL", () => {
+  it("reads a URL by its scheme, which a drive letter is not", () => {
+    for (const spec of ["https://example.com/p.tgz", "git+ssh://host/p.git", "github:a/b"]) {
+      assert.equal(hasScheme(spec), true, spec);
+    }
+    for (const spec of ["C:\\plugins\\probe", "c:/plugins/probe", "file:../probe", "probe"]) {
+      assert.equal(hasScheme(spec), false, spec);
+    }
+  });
+
+  it("takes an absolute path by the platform's own rules", () => {
+    for (const spec of ["C:\\plugins\\probe", "c:/plugins/probe", "\\\\server\\share\\probe"]) {
+      assert.equal(looksLocal(spec, "win32"), true, spec);
+      assert.equal(looksLocal(spec, "linux"), false, `${spec} names no file on Linux`);
+    }
+    for (const platform of ["win32", "linux"] as const) {
+      for (const spec of ["/srv/probe", "./probe", "../probe", "file:probe", "p.tgz"]) {
+        assert.equal(looksLocal(spec, platform), true, `${spec} on ${platform}`);
+      }
+      assert.equal(looksLocal("@navbook/plugin-kb@^0.5", platform), false);
     }
   });
 });
