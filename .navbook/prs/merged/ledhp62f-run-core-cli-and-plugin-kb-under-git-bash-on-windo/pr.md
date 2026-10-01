@@ -12,6 +12,9 @@ revisions:
   - head: a375907961dad41105e86f297ea92c1ecff56934
     base: 2fb77de3322ffdfe644b51044703029d1d89aaf5
     date: 2026-10-01T22:58:02Z
+merged:
+  date: 2026-10-01T22:58:34Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 The core, cli, plugin-kb and plugin-tests suites now pass under Git Bash on Windows. Five real bugs that only Windows exposed are fixed along the way, and the dev machine is set up to run them.
