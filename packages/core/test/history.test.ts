@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { git } from "../src/git/exec.ts";
-import { commitAuthors, fileVersions } from "../src/git/history.ts";
+import { commitAuthors, fileVersions, readFollowLog } from "../src/git/history.ts";
 
 /** A repository nobody has committed to, and a way to write its history. */
 function inRepo(use: (dir: string, commit: Commit) => void): void {
@@ -321,6 +321,82 @@ describe("fileVersions", () => {
     inRepo((dir, commit) => {
       commit("Alice", "alice@example.com");
       assert.deepEqual(shas(dir, merged), []);
+    });
+  });
+});
+
+describe("readFollowLog", () => {
+  const open = ".navbook/prs/open/ab12cd34-x/pr.md";
+  const merged = ".navbook/prs/merged/ab12cd34-x/pr.md";
+  /** One record as `git log -z --follow --name-status` writes it. */
+  const record = (sha: string, ...fields: string[]): string =>
+    `\u0001${sha}\u00022026-08-01T10:00:00Z\u0000\n${fields.join("\u0000")}\u0000`;
+  /** What is read from `records`, newest first, as `sha path` lines. */
+  const read = (...records: string[]) => {
+    const { versions, opening } = readFollowLog(records.join(""), merged);
+    return { versions: versions.map((v) => `${v.sha} ${v.path}`), opening };
+  };
+
+  it("takes a history that reaches its add whole, renames and all", () => {
+    const answer = read(
+      record("c3", "M", merged),
+      record("c2", "R091", open, merged),
+      record("c1", "A", open),
+    );
+    assert.deepEqual(answer, {
+      versions: [`c1 ${open}`, `c2 ${merged}`, `c3 ${merged}`],
+      opening: { status: "A", from: open },
+    });
+  });
+
+  it("stops where a git that cannot see into a merge stops: at the edit after it", () => {
+    // Before 2.56: the merge that moved the file is not listed, and nothing
+    // older is either.
+    assert.deepEqual(read(record("c3", "M", merged)), {
+      versions: [`c3 ${merged}`],
+      opening: { status: "M", from: merged },
+    });
+  });
+
+  it("stops where a git that follows through a merge goes on without saying so", () => {
+    // 2.56: the add on the branch comes next, under its old path, with no
+    // record of the merge that moved it. Taken as whole, the history would
+    // lose the version the merge committed.
+    assert.deepEqual(read(record("c3", "M", merged), record("c1", "A", open)), {
+      versions: [`c3 ${merged}`],
+      opening: { status: "M", from: merged },
+    });
+    assert.deepEqual(read(record("c1", "A", open)), {
+      versions: [],
+      opening: { status: "", from: merged },
+    });
+  });
+
+  it("keeps a listed merge that changed nothing of the file, under the path it had", () => {
+    // A record naming no path is no rename, hidden or otherwise. After a real
+    // rename it keeps the path the history had reached, not the one asked for.
+    const answer = read(
+      record("c4", "M", merged),
+      record("m2"),
+      record("c2", "R091", open, merged),
+      record("m1"),
+      record("c1", "A", open),
+    );
+    assert.deepEqual(answer, {
+      versions: [`c1 ${open}`, `m1 ${open}`, `c2 ${merged}`, `m2 ${merged}`, `c4 ${merged}`],
+      opening: { status: "A", from: open },
+    });
+  });
+
+  it("stops at a copy, which is where a file begins", () => {
+    const answer = read(
+      record("c2", "M", merged),
+      record("c1", "C054", open, merged),
+      record("c0", "A", open),
+    );
+    assert.deepEqual(answer, {
+      versions: [`c1 ${merged}`, `c2 ${merged}`],
+      opening: { status: "C054", from: open },
     });
   });
 });

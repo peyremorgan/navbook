@@ -60,8 +60,35 @@ function followFrom(cwd: string, rev: string, path: string): FileVersion[] {
   );
   if (output === null) return [];
 
+  const { versions, opening } = readFollowLog(output, path);
+  if (/^[AC]/.test(opening.status)) return versions;
+  // The oldest commit `--follow` lists is never a merge, so `^` is its one
+  // parent, and `from` is the path the file had there.
+  const oldest = versions[0];
+  const before = oldest
+    ? throughMerge(cwd, `${oldest.sha}^`, opening.from)
+    : throughMerge(cwd, rev, path);
+  return [...before, ...versions];
+}
+
+/**
+ * What `git log -z --follow --name-status` says about `path`, as far as it can
+ * be taken at its word: the versions, oldest first, and the oldest one's
+ * change — its status, and the path the file had before it.
+ *
+ * Each record names the file as that commit left it, and must name the path
+ * the record after it came from. One that names another path is a rename this
+ * listing does not show, which only a merge can hide, and the history stops
+ * there. A record naming no path at all is a listed merge that changed nothing
+ * of the file's, which keeps the path it had. A copy is where a file begins.
+ *
+ * Pure, so that what it does with either git's answer can be shown on any git.
+ */
+export function readFollowLog(
+  output: string,
+  path: string,
+): { versions: FileVersion[]; opening: { status: string; from: string } } {
   const versions: FileVersion[] = [];
-  // The oldest record's change: its status, and the path it had before it.
   let opening = { status: "", from: path };
   for (const record of output.split(RECORD_SEPARATOR)) {
     // `sha STX date NUL`, a newline, then NUL-terminated fields: `M`, path;
@@ -72,23 +99,14 @@ function followFrom(cwd: string, rev: string, path: string): FileVersion[] {
     const date = new Date(authored);
     if (Number.isNaN(date.getTime())) continue;
     const named = paths.filter(Boolean);
-    const current = named.at(-1) || path;
-    // A rename this listing does not show, which only a merge can hide.
+    const current = named.at(-1) || opening.from;
     if (current !== opening.from) break;
     versions.push({ sha, path: current, authored: date });
     opening = { status: (status ?? "").trim(), from: named[0] || current };
     if (opening.status.startsWith("C")) break;
   }
   versions.reverse();
-
-  if (/^[AC]/.test(opening.status)) return versions;
-  // The oldest commit `--follow` lists is never a merge, so `^` is its one
-  // parent, and `from` is the path the file had there.
-  const oldest = versions[0];
-  const before = oldest
-    ? throughMerge(cwd, `${oldest.sha}^`, opening.from)
-    : throughMerge(cwd, rev, path);
-  return [...before, ...versions];
+  return { versions, opening };
 }
 
 /**
