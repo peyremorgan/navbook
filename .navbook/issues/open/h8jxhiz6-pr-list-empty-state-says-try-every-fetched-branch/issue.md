@@ -2,6 +2,7 @@
 title: PR list empty state says "try every fetched branch" but offers no link to do it
 author: Claude <noreply@anthropic.com>
 created: 2026-10-01T00:43:22Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug]
 feature: [web, pull-requests]
 ---
