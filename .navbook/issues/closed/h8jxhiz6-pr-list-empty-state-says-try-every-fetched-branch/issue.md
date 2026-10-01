@@ -5,6 +5,7 @@ created: 2026-10-01T00:43:22Z
 assignee: Claude <noreply@anthropic.com>
 labels: [bug]
 feature: [web, pull-requests]
+resolution: fixed
 ---
 
 On the pull request list (`/prs`), when the filter matches nothing and the
