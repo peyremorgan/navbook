@@ -48,6 +48,41 @@ jobs:
           git config --global init.defaultBranch main
       - run: pnpm test
 
+  # Under Git Bash, as the README's "Developing on Windows" describes: the
+  # suites whose code runs on a developer's machine, where `nav` meets npm as a
+  # batch file, an editor run through Git for Windows' sh, `taskkill` for a
+  # process tree, and paths with drive letters. The server and the web client
+  # are deployed as Linux containers, and are tested there.
+  test-windows:
+    name: test (node 24, windows-latest, Git Bash)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      # Package scripts are written for sh; pnpm on Windows would hand them to
+      # cmd.exe, which reads none of them.
+      - run: pnpm config set script-shell "C:\\Program Files\\Git\\bin\\bash.exe"
+      - run: pnpm install --frozen-lockfile
+      - name: configure git identity
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@example.invalid"
+          git config --global init.defaultBranch main
+      # One package at a time: several of these suites bound how long a stop
+      # may take, and a Windows runner shared four ways misses those bounds.
+      - run: >-
+          pnpm --workspace-concurrency=1
+          --filter @navbook/core --filter @navbook/cli
+          --filter @navbook/plugin-kb --filter @navbook/plugin-tests test
+      - run: pnpm test:conformance
+
   web-e2e:
     name: web end-to-end
     runs-on: ubuntu-latest
