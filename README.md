@@ -254,9 +254,10 @@ judged, so a force-push can never inherit a stale approval.
 
 Developed and tested on Linux and macOS. On Windows, use
 [Git Bash](https://gitforwindows.org/) or WSL, which provide the POSIX shell the
-hooks and completions expect. Under Git Bash the suites of `core`, `cli` and
-`plugin-kb` pass, short of the few tests the platform cannot host, each skipped
-with its reason (see [Developing on Windows](#developing-on-windows)).
+hooks and completions expect. Under Git Bash the suites of `core`, `cli`,
+`plugin-kb` and `plugin-tests` pass, short of the few tests the platform cannot
+host, each skipped with its reason (see
+[Developing on Windows](#developing-on-windows)); CI runs them there too.
 
 ## Deploying
 

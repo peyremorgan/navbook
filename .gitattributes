@@ -7,4 +7,6 @@
 * text=auto eol=lf
 
 # Batch files are the exception: cmd.exe reads them line by line, and wants CRLF.
+# PowerShell reads LF scripts as they are, so `.ps1` needs no line of its own.
 *.cmd text eol=crlf
+*.bat text eol=crlf
