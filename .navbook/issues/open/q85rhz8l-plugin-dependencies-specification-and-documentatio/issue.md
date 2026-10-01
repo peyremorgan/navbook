@@ -3,7 +3,7 @@ title: "Plugin dependencies: specification and documentation"
 author: Claude <noreply@anthropic.com>
 created: 2026-10-01T00:59:31Z
 labels: [enhancement, plugin]
-assignee: noreply@anthropic.com
+assignee: Claude <noreply@anthropic.com>
 feature: plugins
 parent: f1nv9ud2
 ---
