@@ -145,11 +145,13 @@ export function spawnFailure(
  * input — a `cat-file --batch` refusing a broken repository, say. Writing the
  * rest then fails with `EPIPE`, but git did run and did say why, so it is its
  * exit status and stderr that answer, not the pipe.
+ *
+ * On Windows the same write fails with `EOF`: libuv's name for the pipe being
+ * closed at the far end there.
  */
 export function exitedEarly(result: { error?: Error; status: number | null }): boolean {
-  return (
-    (result.error as NodeJS.ErrnoException | undefined)?.code === "EPIPE" && result.status !== null
-  );
+  const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  return (code === "EPIPE" || code === "EOF") && result.status !== null;
 }
 
 /** Run git and return its result without throwing. */
@@ -213,6 +215,8 @@ export function gitRunAsync(args: string[], opts: GitAsyncOptions = {}): Promise
     let rejecting = false;
     let timer: NodeJS.Timeout | undefined;
     let killer: NodeJS.Timeout | undefined;
+    // Windows only: the tree kill standing in for a group signal, once sent.
+    let treeKilled: Promise<void> | undefined;
 
     const settle = (outcome: () => void): void => {
       if (settled) return;
@@ -225,6 +229,10 @@ export function gitRunAsync(args: string[], opts: GitAsyncOptions = {}): Promise
     const send = (signal: NodeJS.Signals): void => {
       if (!group || child.pid === undefined) {
         child.kill(signal);
+        return;
+      }
+      if (WINDOWS) {
+        treeKilled ??= killTree(child.pid);
         return;
       }
       try {
@@ -289,7 +297,7 @@ export function gitRunAsync(args: string[], opts: GitAsyncOptions = {}): Promise
       // Git gone is not its group gone: what it started may still be on its
       // way out, and settling now would tell the caller it was over.
       if (group && child.pid !== undefined) {
-        void groupGone(child.pid).then(() => settle(() => reject(error)));
+        void (treeKilled ?? groupGone(child.pid)).then(() => settle(() => reject(error)));
       } else {
         settle(() => reject(error));
       }
@@ -354,6 +362,36 @@ function groupAlive(pgid: number): boolean {
     // EPERM: there is somebody, just not somebody this process may signal.
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
+}
+
+const WINDOWS = process.platform === "win32";
+
+/**
+ * Kill a process and everything it started, on Windows, and resolve once done.
+ *
+ * Windows has neither process groups nor signals: `kill(-pid)` names no group,
+ * and git's helpers outlive git when git alone is terminated. `taskkill /T`
+ * walks the tree by parentage and ends every process in it. There is no polite
+ * way to ask a console process to stop either, so this is the kill and the
+ * request at once. When `taskkill` cannot be run, git alone is ended, which is
+ * what a stop without a group does anyway.
+ */
+function killTree(pid: number): Promise<void> {
+  return new Promise((resolve) => {
+    const killer = spawn("taskkill", ["/pid", String(pid), "/t", "/f"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    killer.on("error", () => {
+      try {
+        process.kill(pid);
+      } catch {
+        // Already gone.
+      }
+      resolve();
+    });
+    killer.on("exit", () => resolve());
+  });
 }
 
 /** Stop reading a child's output, so nothing it left running holds us. */
