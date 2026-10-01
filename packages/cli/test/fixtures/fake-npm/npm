@@ -22,7 +22,7 @@ function split(spec) {
 }
 
 function local(spec) {
-  return spec.startsWith("/") || spec.startsWith(".") || spec.startsWith("file:");
+  return path.isAbsolute(spec) || spec.startsWith(".") || spec.startsWith("file:");
 }
 
 if (command === "install") {

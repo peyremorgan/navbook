@@ -156,11 +156,12 @@ export function npmRemove(env: NodeJS.ProcessEnv, names: readonly string[]): Npm
 
 function runNpm(env: NodeJS.ProcessEnv, args: readonly string[]): NpmResult {
   const dir = ensureStore(env);
-  const result = spawnSync("npm", [...args], {
+  const npm = npmInvocation(args);
+  const result = spawnSync(npm.file, npm.args, {
     cwd: dir,
     encoding: "utf8",
-    // npm is a shell script on Windows; everywhere Navbook supports it is not.
     shell: false,
+    windowsVerbatimArguments: npm.verbatim,
     env: { ...env },
   });
   if (result.error) return { ok: false, output: result.error.message };
@@ -168,6 +169,39 @@ function runNpm(env: NodeJS.ProcessEnv, args: readonly string[]): NpmResult {
     ok: result.status === 0,
     output: `${result.stdout ?? ""}${result.stderr ?? ""}`.trim(),
   };
+}
+
+/**
+ * How to run `npm <args>` on this platform, without a shell to interpret them.
+ *
+ * Everywhere but Windows npm is an executable, run directly. On Windows it is
+ * `npm.cmd`, a batch file, which only `cmd.exe` can run, and which Node will
+ * not launch without a shell. So there `cmd.exe /d /s /c` runs it, with every
+ * argument quoted and every character cmd treats specially escaped, twice:
+ * once for the command line, and once more for the batch file reading `%*`.
+ * Without that, a spec carrying `&` or `%` — a URL, a path — would be read by
+ * cmd as something to do. It is the quoting `cross-spawn` uses, after
+ * https://qntm.org/cmd, kept to the one command that needs it.
+ */
+export function npmInvocation(
+  args: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+): { file: string; args: string[]; verbatim: boolean } {
+  if (platform !== "win32") return { file: "npm", args: [...args], verbatim: false };
+  const line = ["npm", ...args.map(cmdArgument)].join(" ");
+  return { file: "cmd.exe", args: ["/d", "/s", "/c", `"${line}"`], verbatim: true };
+}
+
+/** The characters cmd.exe gives a meaning to, which `^` makes literal. */
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
+
+/** One argument as cmd.exe will hand it, unchanged, to a batch file's `%*`. */
+function cmdArgument(arg: string): string {
+  // Backslashes before a quote double, and the quote is escaped, as the C
+  // runtime unquotes them; backslashes before the closing quote double too.
+  // The lookahead keeps the match linear, whatever the input.
+  const inner = arg.replace(/(?=(\\+?)?)\1"/g, '$1$1\\"').replace(/(?=(\\+?)?)\1$/, "$1$1");
+  return `"${inner}"`.replace(CMD_META, "^$1").replace(CMD_META, "^$1");
 }
 
 /**

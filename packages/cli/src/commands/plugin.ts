@@ -15,7 +15,7 @@
  */
 
 import { readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { expandPluginName, hasPluginKeyword, isPluginPackageName } from "@navbook/core";
 import type { Ctx } from "../context.ts";
 import { fail } from "../errors.ts";
@@ -272,16 +272,17 @@ function resolveName(ctx: Ctx, name: string): string[] {
 /**
  * True for a URL — `https:`, `git+ssh:` — which npm fetches as typed. `file:`
  * is the one scheme that names a path here, and is made absolute like one.
+ * A scheme is two characters at least: `C:` is a Windows drive, not a URL.
  */
 function hasScheme(spec: string): boolean {
-  return /^[a-z][a-z0-9+.-]*:/i.test(spec) && !spec.startsWith("file:");
+  return /^[a-z][a-z0-9+.-]+:/i.test(spec) && !spec.startsWith("file:");
 }
 
 /** True for a specifier npm reads as a path or a URL rather than a package name. */
 function looksLocal(spec: string): boolean {
   return (
     spec.startsWith(".") ||
-    spec.startsWith("/") ||
+    isAbsolute(spec) ||
     spec.startsWith("file:") ||
     spec.startsWith("git+") ||
     spec.endsWith(".tgz")
