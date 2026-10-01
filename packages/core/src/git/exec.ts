@@ -53,6 +53,9 @@ export interface GitAsyncOptions extends GitOptions {
    * which runs `pack-objects` — and a signal sent to the first one only is
    * never passed on. With this, stopping reaches every one of them, and the
    * call settles only once all of them are gone.
+   *
+   * Windows has no groups, and no signal a console process can heed: there a
+   * stop always ends the whole process tree, with or without this.
    */
   processGroup?: boolean;
 }
@@ -215,7 +218,7 @@ export function gitRunAsync(args: string[], opts: GitAsyncOptions = {}): Promise
     let rejecting = false;
     let timer: NodeJS.Timeout | undefined;
     let killer: NodeJS.Timeout | undefined;
-    // Windows only: the tree kill standing in for a group signal, once sent.
+    // Windows only: the tree kill standing in for every signal, once sent.
     let treeKilled: Promise<void> | undefined;
 
     const settle = (outcome: () => void): void => {
@@ -227,12 +230,19 @@ export function gitRunAsync(args: string[], opts: GitAsyncOptions = {}): Promise
       outcome();
     };
     const send = (signal: NodeJS.Signals): void => {
-      if (!group || child.pid === undefined) {
+      if (child.pid === undefined) {
         child.kill(signal);
         return;
       }
+      // Windows, group or not: ending git alone there leaves what it started
+      // running to the end — a `receive-pack` lands the push this call was
+      // stopping — where POSIX would have them die with it.
       if (WINDOWS) {
         treeKilled ??= killTree(child.pid);
+        return;
+      }
+      if (!group) {
+        child.kill(signal);
         return;
       }
       try {
@@ -242,12 +252,13 @@ export function gitRunAsync(args: string[], opts: GitAsyncOptions = {}): Promise
       }
     };
     // Ask first, insist later: what `spawnSync` does by default, and what lets
-    // git remove its lock files on the way out.
+    // git remove its lock files on the way out. Windows can only insist, which
+    // the first send already did.
     const stop = (): void => {
       if (stopping) return;
       stopping = true;
       send("SIGTERM");
-      killer = setTimeout(() => send("SIGKILL"), KILL_GRACE_MS);
+      if (!WINDOWS) killer = setTimeout(() => send("SIGKILL"), KILL_GRACE_MS);
     };
     const fail = (error: Error): void => {
       if (failure === null) failure = error;
@@ -296,8 +307,10 @@ export function gitRunAsync(args: string[], opts: GitAsyncOptions = {}): Promise
           : new GitStoppedError(args));
       // Git gone is not its group gone: what it started may still be on its
       // way out, and settling now would tell the caller it was over.
-      if (group && child.pid !== undefined) {
-        void (treeKilled ?? groupGone(child.pid)).then(() => settle(() => reject(error)));
+      if (treeKilled !== undefined) {
+        void treeKilled.then(() => settle(() => reject(error)));
+      } else if (group && child.pid !== undefined) {
+        void groupGone(child.pid).then(() => settle(() => reject(error)));
       } else {
         settle(() => reject(error));
       }
@@ -373,11 +386,18 @@ const WINDOWS = process.platform === "win32";
  * and git's helpers outlive git when git alone is terminated. `taskkill /T`
  * walks the tree by parentage and ends every process in it. There is no polite
  * way to ask a console process to stop either, so this is the kill and the
- * request at once. When `taskkill` cannot be run, git alone is ended, which is
- * what a stop without a group does anyway.
+ * request at once. When `taskkill` cannot be run, git alone is ended, the best
+ * that is left. A `taskkill` that does not finish
+ * within the grace a POSIX stop allows is not waited for: the caller asked to
+ * stop waiting, and a hung tool must not turn that into a hang of its own.
  */
 function killTree(pid: number): Promise<void> {
   return new Promise((resolve) => {
+    const deadline = setTimeout(resolve, KILL_GRACE_MS + GROUP_REAP_MS);
+    const done = (): void => {
+      clearTimeout(deadline);
+      resolve();
+    };
     const killer = spawn("taskkill", ["/pid", String(pid), "/t", "/f"], {
       stdio: "ignore",
       windowsHide: true,
@@ -388,9 +408,9 @@ function killTree(pid: number): Promise<void> {
       } catch {
         // Already gone.
       }
-      resolve();
+      done();
     });
-    killer.on("exit", () => resolve());
+    killer.on("exit", done);
   });
 }
 
