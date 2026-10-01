@@ -16,6 +16,9 @@ revisions:
   - head: 937fe5a47542f909b54a5891628dda861513a29f
     base: 9097617bd4d24690684bab67cc0d8c7d717f6546
     date: 2026-10-01T01:00:06Z
+merged:
+  date: 2026-10-01T01:00:27Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Adds `@navbook/plugin-tests`: manual test plans kept in the repository, and runs that record executing them, standalone or attached to a pull request. Closes #z9yqtsbv.
