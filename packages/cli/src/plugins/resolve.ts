@@ -13,7 +13,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { isAbsolute, resolve as resolvePath } from "node:path";
+import { delimiter, isAbsolute, resolve as resolvePath } from "node:path";
 import {
   PLUGIN_API_VERSION,
   type PluginDeclarationReading,
@@ -123,7 +123,8 @@ function pathPlugins(env: NodeJS.ProcessEnv): {
 
   const active: IndexedPlugin[] = [];
   const skipped: { name: string; reason: string }[] = [];
-  for (const entry of raw.split(":")) {
+  // Separated as `PATH` is: `:`, or `;` on Windows, where `:` is in every path.
+  for (const entry of raw.split(delimiter)) {
     const dir = entry.trim();
     if (dir === "") continue;
     const path = isAbsolute(dir) ? dir : resolvePath(dir);

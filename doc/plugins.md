@@ -338,9 +338,10 @@ even its own plugin's format half stays unloaded.
 
 ### Developing one
 
-`NAVBOOK_PLUGIN_PATH` is a colon-separated list of directories, each a plugin
-package, loaded ahead of the store — so a plugin you are writing shadows an
-installed copy of itself. Nothing has to be installed or published:
+`NAVBOOK_PLUGIN_PATH` is a list of directories, separated as `PATH` is (`:`,
+or `;` on Windows), each a plugin package, loaded ahead of the store — so a
+plugin you are writing shadows an installed copy of itself. Nothing has to be
+installed or published:
 
 ```console
 $ NAVBOOK_PLUGIN_PATH=~/code/navbook-plugin-jira nav jira sync

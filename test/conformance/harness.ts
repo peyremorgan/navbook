@@ -20,7 +20,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, relative, sep } from "node:path";
+import { delimiter, dirname, join, relative, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
   FIXTURE_DATE,
@@ -130,7 +130,7 @@ function pluginEnv(manifest: CaseManifest): Record<string, string> {
   const dirs = (manifest.plugins ?? [])
     .map((name) => PLUGIN_DIRS[name])
     .filter((dir): dir is string => dir !== undefined);
-  return dirs.length === 0 ? {} : { NAVBOOK_PLUGIN_PATH: dirs.join(":") };
+  return dirs.length === 0 ? {} : { NAVBOOK_PLUGIN_PATH: dirs.join(delimiter) };
 }
 
 /** Every fixture case directory (a directory containing `case.yaml`). */

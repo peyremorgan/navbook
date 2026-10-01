@@ -18,7 +18,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import {
   hasPluginKeyword,
   isPluginPackageName,
@@ -174,7 +174,8 @@ function pathPlugins(env: NodeJS.ProcessEnv): Map<string, Found> {
   const raw = env[PLUGIN_PATH_ENV];
   if (raw === undefined || raw.trim() === "") return out;
 
-  for (const entry of raw.split(":")) {
+  // Separated as `PATH` is: `:`, or `;` on Windows, where `:` is in every path.
+  for (const entry of raw.split(delimiter)) {
     const dir = entry.trim();
     if (dir === "") continue;
     const path = isAbsolute(dir) ? dir : resolvePath(dir);

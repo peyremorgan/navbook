@@ -17,7 +17,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_AUDIENCE, DEFAULT_CLIENT_ID, startDevIssuer } from "./dev-issuer.ts";
 import { createFixtureRepo, SERVED_BRANCH } from "./fixture-repo.ts";
@@ -38,12 +38,12 @@ const SERVER_ENTRY = join(PACKAGE_ROOT, "..", "server", "src", "main.ts");
  */
 const OWN_PLUGINS = ["plugin-kb", "plugin-tests"]
   .map((name) => join(PACKAGE_ROOT, "..", name))
-  .join(":");
+  .join(delimiter);
 
 /** `NAVBOOK_PLUGIN_PATH` with this repository's own plugins on it. */
 function pluginPath(): string {
   const given = process.env.NAVBOOK_PLUGIN_PATH;
-  return given === undefined || given === "" ? OWN_PLUGINS : `${given}:${OWN_PLUGINS}`;
+  return given === undefined || given === "" ? OWN_PLUGINS : `${given}${delimiter}${OWN_PLUGINS}`;
 }
 
 /** Ports `public/config.json` names, so the defaults need no configuration. */

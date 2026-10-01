@@ -17,7 +17,7 @@ import { type ChildProcessByStdio, spawn } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, extname, join, normalize, resolve, sep } from "node:path";
+import { delimiter, dirname, extname, join, normalize, resolve, sep } from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { type DevIssuer, startDevIssuer } from "../../script/dev-issuer.ts";
@@ -26,7 +26,7 @@ import { createFixtureRepo, type FixtureRepo } from "../../script/fixture-repo.t
 /** The plugins this suite's tree needs to be readable: features, and test plans. */
 const PLUGINS = ["plugin-kb", "plugin-tests"]
   .map((name) => join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", name))
-  .join(":");
+  .join(delimiter);
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 export const PACKAGE_ROOT = resolve(HERE, "..", "..");
