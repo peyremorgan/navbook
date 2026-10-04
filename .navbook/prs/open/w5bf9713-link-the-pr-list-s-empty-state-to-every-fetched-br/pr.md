@@ -18,24 +18,32 @@ On `/prs`, with the **Every fetched branch** switch off, an empty listing said
 same filter with `refs=all` added, so clicking it turns the switch on and
 reruns the search across every fetched branch. The rest of the filter is kept.
 
+The scan finds open pull requests only, so the link is offered only when the
+status filter lets an open one through. With `status=merged` or `closed`, the
+description is just "Nothing on this checkout matches."
+
 ## Changes
 
 - `QueryState` wraps its empty description in an `empty-description` slot that
-  defaults to the `emptyDescription` prop. Every other view is unchanged.
+  defaults to the `emptyDescription` prop. It sits in a paragraph, so it takes
+  inline content only. Every other view is unchanged.
 - `pages/prs/index.vue` fills that slot. With the switch off, the suggestion is
-  a `NuxtLink` to the current query plus `refs=all`, with `replace` so it
-  behaves like the switch in history. With the switch on, the text is the same
+  a `NuxtLink` to the current address plus `refs=all`, with `replace` so it
+  behaves like the switch in history. The switch and the link build that
+  address with one helper, which keeps the fragment too. With the switch on, the text is the same
   as before and has no link.
 - A new e2e case in `pull-requests.spec.ts` opens `/prs?q=bbbb0002`, which
   only a fetched branch can satisfy, clicks the link, and checks the address
-  bar, the switch and the row.
+  bar, the switch, the row and that history did not grow. A second case checks
+  that there is no link with the switch on, or with `status=merged`.
 
 ## Testing
 
-- The new e2e case fails on `dev`: no link named "try every fetched branch".
-  It passes with the fix.
+- The first new case fails on `dev`: no link named "try every fetched branch".
+  Both new cases fail on a build without `replace` and without the status
+  guard, and pass with them.
 - `pull-requests`, `filter-memory` and `inbox` e2e specs: 57 passed.
-- Full web e2e suite: 173 passed.
+- Full web e2e suite: 174 passed.
 - Web unit suite (vitest): 426 passed. `nuxi typecheck` and `biome check`
   are clean.
 
