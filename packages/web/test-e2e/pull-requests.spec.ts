@@ -47,12 +47,30 @@ test("offers every fetched branch from an empty listing", async ({ signedIn, sta
   await signedIn.goto(`${stack.appUrl}/prs?q=bbbb0002`);
   await expect(signedIn.getByText("No pull requests match this filter")).toBeVisible();
 
-  // The empty state says where else to look, and is the way to get there.
+  // The empty state says where else to look, and is the way to get there. It
+  // replaces the address as the switch does, rather than adding to history.
+  const before = await signedIn.evaluate(() => history.length);
   await signedIn.getByRole("link", { name: "try every fetched branch" }).click();
   await expect(signedIn).toHaveURL(/refs=all/);
   await expect(signedIn).toHaveURL(/q=bbbb0002/);
   await expect(signedIn.getByTestId("all-refs")).toBeChecked();
   await expect(signedIn.getByTestId("pr-row-bbbb0002")).toBeVisible();
+  expect(await signedIn.evaluate(() => history.length)).toBe(before);
+});
+
+test("offers no further branches when they could not help", async ({ signedIn, stack }) => {
+  const link = signedIn.getByRole("link", { name: "try every fetched branch" });
+
+  // Already scanning every branch: there is nowhere else to look.
+  await signedIn.goto(`${stack.appUrl}/prs?q=nothing-is-called-this&refs=all`);
+  await expect(signedIn.getByText("Nothing on any fetched branch matches.")).toBeVisible();
+  await expect(link).toHaveCount(0);
+
+  // The scan finds open pull requests only, so a filter that excludes them
+  // would be sent to a listing that is empty by construction.
+  await signedIn.goto(`${stack.appUrl}/prs?q=bbbb0002&status=merged`);
+  await expect(signedIn.getByText("Nothing on this checkout matches.")).toBeVisible();
+  await expect(link).toHaveCount(0);
 });
 
 test("marks a draft as one", async ({ signedIn, stack }) => {

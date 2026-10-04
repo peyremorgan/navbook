@@ -14,7 +14,11 @@ const props = defineProps<{
   /** True when the query succeeded and there is nothing to show. */
   empty?: boolean;
   emptyTitle?: string;
-  /** Plain text; the `empty-description` slot replaces it when a view needs markup. */
+  /**
+   * Plain text. The `empty-description` slot replaces it when a view needs a
+   * link in the sentence; it sits in a paragraph, so it takes inline content
+   * only. Buttons and lists go in `empty-actions`.
+   */
   emptyDescription?: string;
   /** Skeleton rows to draw while the first answer is on its way. */
   skeletonRows?: number;

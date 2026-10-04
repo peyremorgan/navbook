@@ -31,22 +31,33 @@ const route = useRoute();
 const router = useRouter();
 const filter = useEntityFilter({ statuses: PR_STATUSES, reviewers: true, noun: "pr" }, toPrFilter);
 
+/** This address with the switch set as asked, and everything else in it kept. */
+function withAllRefs(value: boolean) {
+  const query = { ...route.query };
+  if (value) query.refs = "all";
+  else delete query.refs;
+  return { query, hash: route.hash };
+}
+
 const allRefs = computed({
   get: () => route.query.refs === "all",
-  set: (value: boolean) => {
-    const query = { ...route.query };
-    if (value) query.refs = "all";
-    else delete query.refs;
-    void router.replace({ query });
-  },
+  set: (value: boolean) => void router.replace(withAllRefs(value)),
 });
 
 /**
  * Where the empty listing's suggestion goes: this same filter, with the switch
- * on. It is a link rather than a click handler so it reads as one, and lands
- * in the address bar the same way the switch does.
+ * on. It is a link rather than a click handler so it reads as one, and it
+ * replaces the address just as the switch does.
+ *
+ * The scan finds open pull requests only, so the suggestion is made only when
+ * the filter lets an open one through; otherwise it would lead to a listing
+ * that is empty by construction.
  */
-const allRefsLink = computed(() => ({ query: { ...route.query, refs: "all" } }));
+const allRefsLink = computed(() => withAllRefs(true));
+const allRefsCanHelp = computed(() => {
+  const status = filter.filter.value.status;
+  return status.length === 0 || status.includes("OPEN");
+});
 
 /**
  * The reviews this person owes, from the identity the token carries.
@@ -134,12 +145,11 @@ const suggestions = computed(() => ({
     >
       <template #empty-description>
         <template v-if="allRefs">Nothing on any fetched branch matches.</template>
-        <template v-else>
+        <template v-else-if="allRefsCanHelp">
           Nothing on this checkout matches. A pull request lives on its own branch —
-          <NuxtLink :to="allRefsLink" replace class="text-primary hover:underline" data-testid="empty-all-refs"
-            >try every fetched branch</NuxtLink
-          >.
+          <NuxtLink :to="allRefsLink" replace class="text-primary hover:underline">try every fetched branch</NuxtLink>.
         </template>
+        <template v-else>Nothing on this checkout matches.</template>
       </template>
       <div class="rounded-lg border border-default" data-testid="pr-list">
         <PrRow v-for="pr in page.shown.value" :key="pr.id" :pr="pr" />
