@@ -495,21 +495,42 @@ export function scanRefsForOpenPrs(ws: WsCtx): FoundPr[] {
     parsed.set(key, parseTree(tree, { ext: ws.ext }).prs);
   }
 
+  const rankOf = new Map<string, number>();
   for (const ref of refs) {
     const tree = treeOf.get(`${ref.full}:${dir}`);
     const keys = tree === undefined ? [] : (dirsOfTree.get(tree) ?? []);
     for (const entity of keys.flatMap((key) => parsed.get(key) ?? [])) {
+      const rank = copyRank(entity, ref);
       const existing = byId.get(entity.id);
       if (!existing) {
         byId.set(entity.id, { entity, refs: [ref] });
+        rankOf.set(entity.id, rank);
       } else {
-        // Prefer the copy on a local branch: it is the one you can act on.
-        if (!ref.remote && existing.refs.every((seen) => seen.remote)) existing.entity = entity;
+        if (rank < (rankOf.get(entity.id) ?? Number.POSITIVE_INFINITY)) {
+          existing.entity = entity;
+          rankOf.set(entity.id, rank);
+        }
         existing.refs.push(ref);
       }
     }
   }
   return [...byId.values()];
+}
+
+/**
+ * How well a branch's copy of a pull request answers for it, lowest best.
+ *
+ * First the branch its `source:` names: where its revisions are pinned and its
+ * reviews are written, so the copy that has them. A branch that merged the
+ * source in — or was stacked on it — carries the directory too, as it stood
+ * then, and a review or an edit since is missing from it; read from there, an
+ * approval would go uncounted. Then a local branch, the one you can act on,
+ * then a remote's.
+ */
+function copyRank(entity: EntityRecord, ref: Ref): number {
+  const branch = ref.remote ? branchOf(ref.short) : ref.short;
+  if (branch === stringField(entity, "source")) return ref.remote ? 1 : 0;
+  return ref.remote ? 3 : 2;
 }
 
 /**

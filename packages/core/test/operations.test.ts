@@ -1213,6 +1213,36 @@ describe("ops: updating and merging a pull request", () => {
     });
   });
 
+  it("reads a pull request from its own branch, not a stale copy one that took it carries", () => {
+    inPrWorkspace((ws, dir) => {
+      // `alpha` sorts first and took `feature` in; `feature` then moved on.
+      git(["checkout", "-q", "-b", "alpha", "main"], { cwd: dir });
+      git(["merge", "-q", "--no-ff", "-m", "take feature", "feature"], { cwd: dir });
+      git(["checkout", "-q", "feature"], { cwd: dir });
+      const open = join(dir, ".navbook", "prs", "open");
+      const prFile = join(
+        open,
+        readdirSync(open).find((name) => name.startsWith("ppp11111")) ?? "",
+        "pr.md",
+      );
+      writeFileSync(
+        prFile,
+        readFileSync(prFile, "utf8").replace(/^title: .*$/m, "title: Moved on"),
+      );
+      git(["commit", "-qam", "edit the pull request"], { cwd: dir });
+      git(["checkout", "-q", "main"], { cwd: dir });
+
+      const located = locatePr(ws, "ppp1");
+      assert.equal(located.sourceRef, "feature");
+      assert.equal(located.entity.fm.title, "Moved on", "the copy on its own branch answers");
+      const listed = listPrsAcrossRefs(ws, parseListQuery(ws, [], "pr"));
+      assert.deepEqual(
+        listed.map((entry) => entry.entity.fm.title),
+        ["Moved on"],
+      );
+    });
+  });
+
   it("brings a pull request onto the target branch so it can be declined", () => {
     inPrWorkspace((ws, dir) => {
       git(["checkout", "-q", "main"], { cwd: dir });
