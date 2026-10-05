@@ -12,6 +12,9 @@ revisions:
   - head: 68228098b310b16034084a9a47af279eb33e1887
     base: 71a0111d4a058212fe8e75b0c6fa2e1f41b103fc
     date: 2026-09-30T14:11:31Z
+  - head: fa12d443964196b41c30c00729fc856f2bb820e7
+    base: 8fdb571322ac2d6cebc3adff32468e04eabbc08b
+    date: 2026-10-05T00:57:25Z
 ---
 
 Closes #yp56dc43, the first of three steps towards #c43a2w7e (plugin-chat).
