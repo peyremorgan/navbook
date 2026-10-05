@@ -28,9 +28,16 @@ export function isGone(error: unknown): boolean {
   return error instanceof DiscordError && (error.code === 10003 || error.code === 10008);
 }
 
+/** The refusal to touch an archived thread's messages, which reopening it answers. */
+function isArchived(error: unknown): boolean {
+  return error instanceof DiscordError && error.code === 50083;
+}
+
 export class Threads {
   private readonly rest: DiscordRest;
   private readonly channels = new Map<string, { channel: Channel; at: number }>();
+  /** How many changes were sent to Discord: a run that sent none has nothing new to save. */
+  writes = 0;
 
   constructor(rest: DiscordRest) {
     this.rest = rest;
@@ -53,6 +60,7 @@ export class Threads {
     tags: (available: Channel["available_tags"]) => string[],
   ): Promise<ThreadRef> {
     const channel = await this.channel(parent);
+    this.writes++;
     if (channel.type === ChannelType.GuildForum) {
       const applied = tags(channel.available_tags);
       const thread = await this.rest.post<Channel>(`/channels/${parent}/threads`, {
@@ -77,13 +85,26 @@ export class Threads {
   post(thread: ThreadRef, body: MessageBody): Promise<Message> {
     // Posting brings an archived thread back, as Discord does on its own.
     thread.archived = false;
+    this.writes++;
     return this.rest.post<Message>(`/channels/${thread.thread}/messages`, body);
   }
 
-  /** Redraw the card: in the thread for a forum post, in the parent channel otherwise. */
+  /**
+   * Redraw the card: in the thread for a forum post, in the parent channel
+   * otherwise. A forum post Discord archived on its own after a quiet week
+   * refuses the edit; it is reopened and the edit made again.
+   */
   async editCard(thread: ThreadRef, body: MessageBody): Promise<void> {
     const where = thread.forum ? thread.thread : thread.parent;
-    await this.rest.patch(`/channels/${where}/messages/${thread.thread}`, body);
+    const route = `/channels/${where}/messages/${thread.thread}`;
+    this.writes++;
+    try {
+      await this.rest.patch(route, body);
+    } catch (error) {
+      if (!thread.forum || !isArchived(error)) throw error;
+      await this.patch(thread, { archived: false });
+      await this.rest.patch(route, body);
+    }
   }
 
   /** Change what is given about the thread itself, and remember it. */
@@ -92,6 +113,7 @@ export class Threads {
     change: { name?: string; applied_tags?: string[]; archived?: boolean },
   ): Promise<void> {
     if (Object.keys(change).length === 0) return;
+    this.writes++;
     await this.rest.patch(`/channels/${thread.thread}`, change);
     if (change.name !== undefined) {
       thread.name = change.name;
@@ -106,11 +128,21 @@ export class Threads {
    * active ones from the guild's list, archived ones page by page — for when
    * the bridge's state was lost and its threads must be found again.
    */
-  async find(guild: string, parents: readonly string[]): Promise<Map<string, ThreadRef>> {
+  async find(guild: string, named: readonly string[]): Promise<Map<string, ThreadRef>> {
     const found = new Map<string, ThreadRef>();
     const forums = new Set<string>();
-    for (const parent of parents) {
-      if ((await this.channel(parent)).type === ChannelType.GuildForum) forums.add(parent);
+    // A channel that cannot be read holds no thread the bridge can use; what
+    // is wrong with it is said when the bridge connects (`checkChannels`).
+    const parents: string[] = [];
+    for (const parent of named) {
+      try {
+        if ((await this.channel(parent)).type === ChannelType.GuildForum) forums.add(parent);
+        parents.push(parent);
+      } catch (error) {
+        if (!(error instanceof DiscordError) || error.status >= 500 || error.status === 429) {
+          throw error;
+        }
+      }
     }
     const take = (thread: Channel): void => {
       const id = idOfThreadName(thread.name);
@@ -124,9 +156,6 @@ export class Threads {
         thread.applied_tags ?? [],
       );
       held.archived = thread.thread_metadata?.archived === true;
-      // Named before the bridge last knew; a rename now is no rename too soon.
-      held.renamedAt = 0;
-      held.card = null;
       found.set(id, held);
     };
     const active = await this.rest.get<{ threads: Channel[] }>(`/guilds/${guild}/threads/active`);
@@ -160,7 +189,8 @@ function ref(
     parent,
     forum,
     name,
-    renamedAt: Date.now(),
+    // Naming a thread as it is made is no rename: the first one may come at once.
+    renamedAt: 0,
     archived: false,
     tags,
     card: null,

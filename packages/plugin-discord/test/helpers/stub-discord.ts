@@ -86,6 +86,8 @@ export interface StubDiscord {
   posts(thread: string): StubMessage[];
   /** Deliver an interaction over the gateway, as Discord does when somebody uses a command. */
   interact(interaction: Partial<Interaction> & { type: number }): Interaction;
+  /** Delete a thread and its messages, as a moderator in Discord would. */
+  deleteThread(thread: string): void;
   /** Wait for the bridge's answers to an interaction: the callback, then any edits of it. */
   answers(interaction: string, count?: number): Promise<StubResponse[]>;
   /** Close every gateway connection with this code, as Discord does when it reconnects a bot. */
@@ -161,6 +163,18 @@ export async function startStubDiscord(
     },
     posts(thread) {
       return (messages.get(thread) ?? []).filter((message) => message.id !== thread);
+    },
+    deleteThread(thread) {
+      const channel = channels.get(thread);
+      channels.delete(thread);
+      messages.delete(thread);
+      if (channel?.parent_id) {
+        const list = messages.get(channel.parent_id) ?? [];
+        messages.set(
+          channel.parent_id,
+          list.filter((message) => message.id !== thread),
+        );
+      }
     },
     interact(partial) {
       const interaction: Interaction = {

@@ -18,7 +18,7 @@ import { Bridge } from "./bridge.ts";
 import { Commands } from "./commands.ts";
 import { DiscordGateway } from "./discord/gateway.ts";
 import { DiscordRest } from "./discord/rest.ts";
-import { INTENT_GUILDS, type Interaction, type Ready } from "./discord/types.ts";
+import { type Channel, INTENT_GUILDS, type Interaction, type Ready } from "./discord/types.ts";
 import { LinkCodes, writePeople } from "./link.ts";
 import { StateFile } from "./state.ts";
 
@@ -156,6 +156,7 @@ function startBridge(
     onDispatch: (event, data) => {
       switch (event) {
         case "READY":
+          void bridge.checkChannels();
           commands
             .register((data as Ready).application.id)
             .then(() =>
@@ -174,6 +175,9 @@ function startBridge(
           return;
         case "THREAD_DELETE":
           bridge.forget((data as { id: string }).id);
+          return;
+        case "THREAD_UPDATE":
+          bridge.noteThread(data as Channel);
           return;
         default:
           return;

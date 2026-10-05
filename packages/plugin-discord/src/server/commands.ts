@@ -546,7 +546,16 @@ export class Commands {
     try {
       answer = await run(this.host.api.contextFor(person));
     } catch (error) {
-      answer = `That did not work: ${error instanceof Error ? error.message : String(error)}`;
+      const text = error instanceof Error ? error.message : String(error);
+      if ((error as { extensions?: { code?: unknown } }).extensions?.code === "FORBIDDEN") {
+        // The server's log says which rule refused them; this says who asked.
+        this.host.report(
+          `refused to act for ${JSON.stringify(person.email)}, linked to Discord user ${user.id}`,
+        );
+        answer = `${person.email} is not allowed on this repository, so nothing was done.`;
+      } else {
+        answer = `That did not work: ${text}`;
+      }
     }
     await this.edit(interaction, answer);
   }

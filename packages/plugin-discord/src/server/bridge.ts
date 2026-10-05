@@ -20,7 +20,7 @@ import type { ServerPluginHost } from "@navbook/server/plugin";
 import type { IssueRule, Settings } from "../core/settings.ts";
 import { PLUGIN_NAME, parseSettings, peopleOf } from "../core/settings.ts";
 import { DiscordError, type DiscordRest } from "./discord/rest.ts";
-import type { MessageBody } from "./discord/types.ts";
+import { type Channel, ChannelType, type MessageBody } from "./discord/types.ts";
 import {
   type Core,
   diffSeen,
@@ -73,6 +73,10 @@ export class Bridge {
   private forced = true;
   private stopped = false;
   private lastRefs: string | null = null;
+  /** Whether the threads were looked for in Discord, for a bridge that knew of none. */
+  private searched = false;
+  /** Whether a run has finished since the bridge started. */
+  private caughtUp = false;
   private retry: NodeJS.Timeout | null = null;
   private readonly retryMs: number;
   /** What was last said about each recurring fault, so the log says it once. */
@@ -112,6 +116,18 @@ export class Bridge {
   forget(thread: string): void {
     for (const [id, held] of Object.entries(this.state.threads)) {
       if (held.thread === thread) delete this.state.threads[id];
+    }
+  }
+
+  /**
+   * What Discord says a thread now is: archived by itself after a quiet week,
+   * say, which the bridge must know before it edits a forum post's card.
+   */
+  noteThread(channel: Channel): void {
+    for (const held of Object.values(this.state.threads)) {
+      if (held.thread !== channel.id) continue;
+      if (channel.thread_metadata !== undefined) held.archived = channel.thread_metadata.archived;
+      if (channel.name !== undefined) held.name = channel.name;
     }
   }
 
@@ -228,6 +244,7 @@ export class Bridge {
       const view = await this.readView();
       this.view = view;
       this.reloadSettings(view.settings);
+      await this.findThreads();
       const { failed, waiting } = await this.reconcile(view);
       this.file.save(this.state);
       // A failure is tried again at the next sync as well as on the timer; a
@@ -235,11 +252,73 @@ export class Bridge {
       this.lastRefs = failed ? null : refs;
       this.clear("run");
       if (failed || waiting) this.retryLater();
+      if (!this.caughtUp) {
+        this.caughtUp = true;
+        this.host.report(
+          `following ${view.records.size} issues and pull requests, ${Object.keys(this.state.threads).length} with a thread`,
+        );
+      }
     } catch (error) {
       this.lastRefs = null;
       this.say("run", `could not bring Discord up to date: ${messageOf(error)}`);
       this.retryLater();
     }
+  }
+
+  /**
+   * Say, once each, what is wrong with the channels the settings name: one
+   * Discord does not know, one in another guild, one that is neither a forum
+   * nor a text channel. Better told when the bridge connects than when the
+   * first thread is due.
+   */
+  async checkChannels(): Promise<void> {
+    const named = [
+      ...(this.settings.prs === null ? [] : [this.settings.prs.channel]),
+      ...this.settings.issues.map((rule) => rule.channel),
+    ];
+    for (const id of new Set(named)) {
+      try {
+        const channel = await this.threads.channel(id, true);
+        if (channel.guild_id !== undefined && channel.guild_id !== this.settings.guild) {
+          this.say(
+            `channel ${id}`,
+            `channel ${id} is in another guild than ${this.settings.guild}`,
+          );
+        } else if (
+          channel.type !== ChannelType.GuildForum &&
+          channel.type !== ChannelType.GuildText
+        ) {
+          this.say(`channel ${id}`, `channel ${id} is neither a forum nor a text channel`);
+        } else {
+          this.clear(`channel ${id}`);
+        }
+      } catch (error) {
+        this.say(`channel ${id}`, `channel ${id} cannot be used: ${messageOf(error)}`);
+      }
+    }
+  }
+
+  /**
+   * Find the bridge's threads in Discord, once, when it knows of none: its
+   * state was lost, or this is its first start. Each is known by its name,
+   * which begins with the record's id, so none is made twice.
+   */
+  private async findThreads(): Promise<void> {
+    if (this.searched) return;
+    if (Object.keys(this.state.threads).length > 0) {
+      this.searched = true;
+      return;
+    }
+    const parents = [
+      ...new Set([
+        ...(this.settings.prs === null ? [] : [this.settings.prs.channel]),
+        ...this.settings.issues.map((rule) => rule.channel),
+      ]),
+    ];
+    const found = await this.threads.find(this.settings.guild, parents);
+    for (const [id, thread] of found) this.state.threads[id] = thread;
+    if (found.size > 0) this.host.report(`found ${found.size} threads the bridge made before`);
+    this.searched = true;
   }
 
   /** Every branch and remote-tracking branch, and its commit: what a run compares. */
@@ -308,9 +387,6 @@ export class Bridge {
       this.state.seen = Object.fromEntries(
         [...view.records].map(([id, record]) => [id, seenOf(record)]),
       );
-      this.host.report(
-        `following ${view.records.size} issues and pull requests; what happens to them from now on is posted`,
-      );
       return { failed: false, waiting: false };
     }
     const seen = this.state.seen;
@@ -325,10 +401,13 @@ export class Bridge {
       const thread = this.state.threads[id];
       const tidy = thread !== undefined && record !== undefined && this.untidy(thread, record);
       if (events.length === 0 && !tidy) continue;
+      const writes = this.threads.writes;
       try {
         await this.deliver(id, before, record, after, events, view);
       } catch (error) {
-        if (isGone(error)) {
+        // Only a thread the bridge had can be gone; a 404 for a channel it
+        // was making one in is a setting to fix, and said so below.
+        if (thread !== undefined && isGone(error)) {
           // Deleted in Discord: forgotten, and made again only if a rule fires again.
           delete this.state.threads[id];
           this.host.report(`the thread of #${id} is gone from Discord; it will not be told again`);
@@ -345,7 +424,9 @@ export class Bridge {
       this.clear(`record ${id}`);
       if (after === undefined) delete seen[id];
       else seen[id] = after;
-      this.file.save(this.state);
+      // Saved as soon as Discord was told something, so a restart does not
+      // tell it again; a record that told Discord nothing waits for the run's end.
+      if (this.threads.writes !== writes) this.file.save(this.state);
     }
     return { failed, waiting: this.renamesWaiting(view) };
   }
@@ -409,7 +490,12 @@ export class Bridge {
     const fresh = events.filter(
       (event) => !(event.type === "comment" && this.state.mirrored.includes(event.id)),
     );
-    const bodies = fresh.flatMap((event) => {
+    // Seen for the first time, yet already with a thread: one made by a run
+    // that stopped before it told the people the record asks for something.
+    const told = fresh.some((event) => event.type === "opened")
+      ? [...fresh, ...asked(this.core, record)]
+      : fresh;
+    const bodies = told.flatMap((event) => {
       const message = messageFor(ctx, record, after, event, this.watched);
       return message === null ? [] : [{ event, message }];
     });

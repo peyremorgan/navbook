@@ -53,10 +53,16 @@ export async function startBridged(opts: BridgedOptions = {}): Promise<Bridged> 
       ...opts.env,
     },
   });
-  await eventually(
-    () => /following \d+ issues and pull requests/.test(harness.stderr()),
-    () => harness.stderr(),
-  );
+  try {
+    await eventually(
+      () => /following \d+ issues and pull requests, \d+ with a thread/.test(harness.stderr()),
+      () => harness.stderr(),
+    );
+  } catch (error) {
+    await harness.stop();
+    if (opts.stub === undefined) await stub.close();
+    throw error;
+  }
   return {
     stub,
     harness,
