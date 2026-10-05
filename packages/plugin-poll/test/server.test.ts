@@ -95,7 +95,7 @@ describe("polls over the API", () => {
    */
   const statesBy = (votes: Payload[]): Record<string, string[]> => {
     const out: Record<string, string[]> = {};
-    for (const vote of votes) (out[vote.author] ??= []).push(vote.state);
+    for (const vote of votes) out[vote.author] = [...(out[vote.author] ?? []), vote.state];
     return out;
   };
   const refused = (response: GraphQLResponse<unknown>, code: string, pattern: RegExp): void => {
