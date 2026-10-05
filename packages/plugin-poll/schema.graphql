@@ -268,7 +268,7 @@ input VotePollInput {
   fingerprint: String!
   "A question left out, or answered with nothing, is skipped. None at all withdraws."
   answers: [PollAnswerInput!]!
-  "Why, in Markdown."
+  "Why, in Markdown. Left out, the viewer's last note is kept; an empty one removes it."
   note: String
 }
 

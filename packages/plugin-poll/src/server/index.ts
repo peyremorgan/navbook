@@ -9,17 +9,31 @@
 
 import type { EntityRecord, RunPlanResult } from "@navbook/core";
 import type { GraphQLCtx, ServerPluginHost } from "@navbook/server/plugin";
-import { type BallotReading, ballotOf, prefill, voterState } from "../core/ballot.ts";
+import { type BallotState, ballotOf, prefill } from "../core/ballot.ts";
 import type { Answer, Answers, DraftQuestion, PollChanges, Results } from "../core/files.ts";
 import { useCore } from "../core/files.ts";
-import { POLL_STATES } from "../core/index.ts";
-import { castVote, closePoll, editPoll, openPoll, reopenPoll, resolvePoll } from "../core/ops.ts";
-import { allPolls, type PollRecord, pollsOf, type VoteRecord } from "../core/tree.ts";
+import { awaitedOf, POLL_STATES, pollStateOf } from "../core/index.ts";
+import {
+  castVote,
+  closePoll,
+  editPoll,
+  issueOf,
+  openPoll,
+  reopenPoll,
+  resolvePoll,
+} from "../core/ops.ts";
+import { allPolls, type PollRecord, pollsOf, stateOf, type VoteRecord } from "../core/tree.ts";
 
 const COMMIT = { commit: true } as const;
 
 /** A state as the SDL's enums spell it. */
 const toEnum = (state: string): string => state.toUpperCase();
+
+/** A vote as `PollVote` resolves it: the record, and what became of it. */
+interface VoteParent {
+  vote: VoteRecord;
+  state: BallotState | "invalid";
+}
 
 interface AnswerInput {
   question: string;
@@ -81,13 +95,12 @@ export function activate(host: ServerPluginHost): void {
   const viewer = (ctx: GraphQLCtx): string => ctx.viewer.email;
 
   /**
-   * A poll to write to: in the served tree, and on an issue this server can
-   * write to — which the host's own `writeTarget` says, as for a comment.
+   * A poll to write to, in the served tree. Its issue is there too — a poll is
+   * read out of its issue's directory — so, unlike a pull request's, it needs
+   * no `writeTarget` to find where to write.
    */
   function pollToWrite(ctx: GraphQLCtx, ref: string): PollRecord {
-    const poll = resolvePoll(core, allPolls(ctx.loadRepo("none")), ref);
-    api.writeTarget(ctx, "issue", poll.issue.id);
-    return poll;
+    return resolvePoll(core, allPolls(ctx.loadRepo("none")), ref);
   }
 
   /** The poll as a write has just left it, read back inside the transaction, and its issue. */
@@ -95,8 +108,7 @@ export function activate(host: ServerPluginHost): void {
     ctx.invalidateRepo();
     const repo = ctx.loadRepo("none");
     const poll = resolvePoll(core, allPolls(repo), id);
-    const issue = repo.issues.find((candidate) => candidate.id === poll.issue.id) as EntityRecord;
-    return { poll, issue };
+    return { poll, issue: issueOf(repo, poll) as EntityRecord };
   }
 
   /** A write and its payload: the transaction, the read-back, the commit. */
@@ -122,6 +134,10 @@ export function activate(host: ServerPluginHost): void {
 
   /* ------------------------------------------------------ host's inputs */
 
+  const fail = (message: string): never => {
+    throw api.invalidInput(message);
+  };
+
   // The fields this plugin's SDL adds to `IssueFilter`, onto the query terms
   // the core half registered. Checked here, because a filter never passes
   // through the terms' own parsers.
@@ -130,22 +146,19 @@ export function activate(host: ServerPluginHost): void {
       const terms: Record<string, string[]> = {};
       const states = filter.polls;
       if (Array.isArray(states) && states.length > 0) {
-        terms.poll = states.map((value) => {
-          const word = String(value).toLowerCase();
-          if (!(POLL_STATES as readonly string[]).includes(word))
-            throw api.invalidInput(
-              `'${word}' is not a poll state; expected one of ${POLL_STATES.join(", ")}`,
-            );
-          return word;
-        });
+        terms.poll = states.map(
+          (value) =>
+            pollStateOf(String(value)) ??
+            fail(
+              `'${String(value)}' is not a poll state; expected one of ${POLL_STATES.join(", ")}`,
+            ),
+        );
       }
       const people = filter.pollAwaiting;
       if (Array.isArray(people) && people.length > 0) {
-        terms["poll-awaiting"] = people.map((value) => {
-          const person = core.parsePerson(String(value));
-          if (person === null) throw api.invalidInput(`'${String(value)}' is not an address`);
-          return person.email.toLowerCase();
-        });
+        terms["poll-awaiting"] = people.map(
+          (value) => awaitedOf(String(value)) ?? fail(`'${String(value)}' needs an email address`),
+        );
       }
       return terms;
     },
@@ -168,9 +181,6 @@ export function activate(host: ServerPluginHost): void {
 
   /* ---------------------------------------------------------- resolvers */
 
-  const readingOf = (poll: PollRecord, vote: VoteRecord): BallotReading<VoteRecord> | undefined =>
-    poll.ballots.find((reading) => reading.vote === vote);
-
   host.resolvers({
     Query: {
       poll: (_parent: unknown, { id }: { id: string }, ctx: GraphQLCtx) =>
@@ -183,7 +193,7 @@ export function activate(host: ServerPluginHost): void {
 
     Poll: {
       issue: async (poll: PollRecord, _args: unknown, ctx: GraphQLCtx) =>
-        (await ctx.repo()).issues.find((issue) => issue.id === poll.issue.id),
+        issueOf(await ctx.repo(), poll),
       path: (poll: PollRecord, _args: unknown, ctx: GraphQLCtx) =>
         `${ctx.ws.navDir}/${poll.dirPath}`,
       baseSha: (poll: PollRecord) => poll.blobSha,
@@ -191,12 +201,16 @@ export function activate(host: ServerPluginHost): void {
       status: (poll: PollRecord) => toEnum(poll.status),
       outcome: (poll: PollRecord) => answerList(poll.outcome),
       proposed: (poll: PollRecord) => answerList(poll.proposed),
-      votes: (poll: PollRecord) => poll.votes.map((vote) => ({ poll, vote })),
+      votes: (poll: PollRecord) => {
+        // Each vote's state once, not a search per vote.
+        const states = new Map(poll.ballots.map((reading) => [reading.vote, reading.state]));
+        return poll.votes.map((vote) => ({ vote, state: states.get(vote) ?? "invalid" }));
+      },
       myState: (poll: PollRecord, _args: unknown, ctx: GraphQLCtx) =>
-        toEnum(voterState(poll.ballots, viewer(ctx))),
+        toEnum(stateOf(poll, viewer(ctx))),
       myBallot: (poll: PollRecord, _args: unknown, ctx: GraphQLCtx) => {
         const mine = ballotOf(poll.ballots, viewer(ctx));
-        return mine === undefined ? null : { poll, vote: mine.vote };
+        return mine === undefined ? null : { vote: mine.vote, state: mine.state };
       },
       myDraft: (poll: PollRecord, _args: unknown, ctx: GraphQLCtx) => {
         const draft = prefill(poll.questions, poll.ballots, viewer(ctx));
@@ -206,16 +220,15 @@ export function activate(host: ServerPluginHost): void {
     },
 
     PollVote: {
-      id: ({ vote }: { vote: VoteRecord }) => vote.id,
-      path: ({ vote }: { vote: VoteRecord }, _args: unknown, ctx: GraphQLCtx) =>
+      id: ({ vote }: VoteParent) => vote.id,
+      path: ({ vote }: VoteParent, _args: unknown, ctx: GraphQLCtx) =>
         `${ctx.ws.navDir}/${vote.path}`,
-      author: ({ vote }: { vote: VoteRecord }) => vote.author,
-      cast: ({ vote }: { vote: VoteRecord }) => vote.cast,
-      state: ({ poll, vote }: { poll: PollRecord; vote: VoteRecord }) =>
-        toEnum(readingOf(poll, vote)?.state ?? "invalid"),
-      answers: ({ vote }: { vote: VoteRecord }) => answerList(vote.answers),
-      note: ({ vote }: { vote: VoteRecord }) => vote.note,
-      problems: ({ vote }: { vote: VoteRecord }) => vote.problems.map((problem) => problem.message),
+      author: ({ vote }: VoteParent) => vote.author,
+      cast: ({ vote }: VoteParent) => vote.cast,
+      state: ({ state }: VoteParent) => toEnum(state),
+      answers: ({ vote }: VoteParent) => answerList(vote.answers),
+      note: ({ vote }: VoteParent) => vote.note,
+      problems: ({ vote }: VoteParent) => vote.problems.map((problem) => problem.message),
     },
 
     Mutation: {
@@ -316,11 +329,15 @@ export function activate(host: ServerPluginHost): void {
           const answers = answersFrom(input.answers);
           return written(ctx, () => {
             const poll = pollToWrite(ctx, input.poll);
+            // As `nav poll vote` does: a ballot that says nothing of its note
+            // keeps the last one, and a withdrawal needs none.
+            const kept = prefill(poll.questions, poll.ballots, viewer(ctx)).note ?? "";
+            const note = input.note ?? (answers.size === 0 ? "" : kept);
             const cast = castVote(
               core,
               ctx.ws,
               poll,
-              { answers, note: input.note ?? "" },
+              { answers, note },
               { ...COMMIT, fingerprint: input.fingerprint },
             );
             return { id: poll.id, run: cast.run };

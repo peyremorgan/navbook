@@ -89,6 +89,15 @@ describe("polls over the API", () => {
     h.gql(query, variables, token);
   const current = async (token?: string): Promise<Payload> =>
     ok<Payload>(await h.gql(POLL, { id: poll }, token)).poll;
+  /**
+   * Each voter's votes' states, in the order they cast them: one person's
+   * votes sort as they were cast, two people's in the same second by ID.
+   */
+  const statesBy = (votes: Payload[]): Record<string, string[]> => {
+    const out: Record<string, string[]> = {};
+    for (const vote of votes) (out[vote.author] ??= []).push(vote.state);
+    return out;
+  };
   const refused = (response: GraphQLResponse<unknown>, code: string, pattern: RegExp): void => {
     assert.equal(errorCode(response), code, JSON.stringify(response.errors));
     assert.match(response.errors[0]?.message ?? "", pattern);
@@ -307,8 +316,35 @@ describe("polls over the API", () => {
     refused(
       await h.gql(`{ issues(filter: { pollAwaiting: ["bob"] }) { id } }`),
       "INVALID_INPUT",
-      /not an address/,
+      /'bob' needs an email address/,
     );
+  });
+
+  it("keeps a voter's note when a new ballot says nothing of it", async () => {
+    const { fingerprint } = await current();
+    const changed = ok<Payload>(
+      await as(alice)(VOTE, {
+        input: { poll, fingerprint, answers: [{ question: "backend", picks: ["local-disk"] }] },
+      }),
+    ).votePoll;
+    assert.equal(changed.poll.myBallot.note, "We run S3.");
+    const back = ok<Payload>(
+      await as(alice)(VOTE, {
+        input: {
+          poll,
+          fingerprint,
+          answers: [
+            { question: "backend", picks: ["s3"] },
+            { question: "q2", picks: ["size", "max-files-per-issue"] },
+          ],
+        },
+      }),
+    ).votePoll;
+    assert.equal(back.poll.myBallot.note, "We run S3.");
+    assert.deepEqual(statesBy(back.poll.votes), {
+      "Alice <alice@example.com>": ["SUPERSEDED", "SUPERSEDED", "COUNTED"],
+      "Bob <bob@example.com>": ["COUNTED"],
+    });
   });
 
   it("edits a title without revoking anything, and revokes every ballot when the questions change", async () => {
@@ -350,6 +386,29 @@ describe("polls over the API", () => {
     assert.equal(edited.revoked, 2);
     assert.equal(edited.poll.voters, 0);
     assert.equal(edited.poll.deadline, null);
+    assert.deepEqual(statesBy(edited.poll.votes), {
+      "Alice <alice@example.com>": ["SUPERSEDED", "SUPERSEDED", "REVOKED"],
+      "Bob <bob@example.com>": ["REVOKED"],
+    });
+    const shown = ok<Payload>(
+      await h.gql(EDIT, {
+        input: {
+          poll,
+          results: "VISIBLE",
+          preamble: "Where, and how much.",
+          deadline: "",
+          baseSha: edited.poll.baseSha,
+        },
+      }),
+    ).editPoll;
+    assert.deepEqual(
+      [shown.poll.results, shown.poll.preamble, shown.poll.deadline, shown.revoked],
+      ["VISIBLE", "Where, and how much.", null, 0],
+    );
+    const hidden = ok<Payload>(
+      await h.gql(EDIT, { input: { poll, results: null, baseSha: shown.poll.baseSha } }),
+    ).editPoll;
+    assert.equal(hidden.poll.results, "HIDDEN");
     const hers = await current(alice);
     assert.equal(hers.myState, "REVOKED");
     assert.deepEqual(hers.myDraft, {

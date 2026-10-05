@@ -24,6 +24,17 @@ type Found = { check: string; level: "error" | "warning"; path: string; message:
 /** What `poll:` takes (§6.2), and `none` for an issue with no poll. */
 export const POLL_STATES = ["open", "closed", "none"] as const;
 
+/** A `poll:` value as the term matches it, or null when it is not one. */
+export function pollStateOf(value: string): string | null {
+  const word = value.toLowerCase();
+  return (POLL_STATES as readonly string[]).includes(word) ? word : null;
+}
+
+/** A `poll-awaiting:` value as the term matches it — an address, lowercased — or null. */
+export function awaitedOf(value: string): string | null {
+  return runningCore().parsePerson(value)?.email.toLowerCase() ?? null;
+}
+
 export function activate(host: CorePluginHost): void {
   const { core } = host;
   // Before anything else: the format helpers take the running core from here.
@@ -43,14 +54,10 @@ export function activate(host: CorePluginHost): void {
       {
         key: "poll",
         kinds: ["issue"],
-        parse: (value) => {
-          const word = value.toLowerCase();
-          return (POLL_STATES as readonly string[]).includes(word)
-            ? word
-            : {
-                message: `'poll:${value}' is not a poll state; expected one of ${POLL_STATES.join(", ")}`,
-              };
-        },
+        parse: (value) =>
+          pollStateOf(value) ?? {
+            message: `'poll:${value}' is not a poll state; expected one of ${POLL_STATES.join(", ")}`,
+          },
         // An issue can hold polls in both states, so repeating the term ORs:
         // `poll:open poll:none` is "nothing decided yet".
         matches: (values, entity) => {
@@ -65,12 +72,8 @@ export function activate(host: CorePluginHost): void {
         kinds: ["issue"],
         // Whether somebody has a hand in an issue reads its comments.
         needsComments: true,
-        parse: (value) => {
-          const person = core.parsePerson(value);
-          return person === null
-            ? { message: `'poll-awaiting:${value}' needs an email address` }
-            : person.email.toLowerCase();
-        },
+        parse: (value) =>
+          awaitedOf(value) ?? { message: `'poll-awaiting:${value}' needs an email address` },
         matches: (values, entity) =>
           values.some((person) => pollsOf(entity).some((poll) => awaits(entity, poll, person))),
       },

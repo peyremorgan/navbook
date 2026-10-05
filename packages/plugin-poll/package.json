@@ -158,7 +158,7 @@
               "options": [
                 {
                   "flags": "--pick <answer>",
-                  "description": "QUESTION=OPTION[,OPTION\u2026], by ID or by number from 1; replaces that question's picks",
+                  "description": "QUESTION=OPTION[,OPTION…], by ID or by number from 1; replaces that question's picks",
                   "repeatable": true
                 },
                 {
@@ -270,7 +270,7 @@
               "options": [
                 {
                   "flags": "--decide <answer>",
-                  "description": "QUESTION=OPTION[,OPTION\u2026] in place of what the votes came to; QUESTION= leaves it undecided",
+                  "description": "QUESTION=OPTION[,OPTION…] in place of what the votes came to; QUESTION= leaves it undecided",
                   "repeatable": true
                 },
                 {
