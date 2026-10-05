@@ -32,6 +32,7 @@ COPY packages/plugin-kb/package.json packages/plugin-kb/
 COPY packages/plugin-tests/package.json packages/plugin-tests/
 COPY packages/plugin-chat/package.json packages/plugin-chat/
 COPY packages/plugin-poll/package.json packages/plugin-poll/
+COPY packages/plugin-discord/package.json packages/plugin-discord/
 
 # The root project is not scenery: `typescript` is a devDependency of the
 # workspace rather than of any package packed here, and `prepack` runs `tsc`.
@@ -43,7 +44,8 @@ COPY packages/plugin-poll/package.json packages/plugin-poll/
 RUN pnpm install --frozen-lockfile --filter navbook-workspace \
       --filter "@navbook/server..." --filter "@navbook/plugin-kb..." \
       --filter "@navbook/plugin-tests..." --filter "@navbook/plugin-chat..." \
-      --filter "@navbook/plugin-poll..."
+      --filter "@navbook/plugin-poll..." \
+      --filter "@navbook/plugin-discord..."
 
 # Sources, for every workspace package a packed one compiles against. The
 # plugins import `@navbook/cli/plugin`, which resolves to cli's TypeScript
@@ -58,6 +60,7 @@ COPY packages/plugin-kb packages/plugin-kb
 COPY packages/plugin-tests packages/plugin-tests
 COPY packages/plugin-chat packages/plugin-chat
 COPY packages/plugin-poll packages/plugin-poll
+COPY packages/plugin-discord packages/plugin-discord
 
 # `pack` runs each package's `prepack`, which builds `dist/` and refuses to run
 # under npm — the check that keeps the exports rewrite honest.
@@ -72,7 +75,8 @@ RUN mkdir -p /out \
  && pnpm --filter @navbook/plugin-kb pack --pack-destination /out \
  && pnpm --filter @navbook/plugin-tests pack --pack-destination /out \
  && pnpm --filter @navbook/plugin-chat pack --pack-destination /out \
- && pnpm --filter @navbook/plugin-poll pack --pack-destination /out
+ && pnpm --filter @navbook/plugin-poll pack --pack-destination /out \
+ && pnpm --filter @navbook/plugin-discord pack --pack-destination /out
 
 
 FROM node:24-alpine

@@ -1,0 +1,48 @@
+extend type Query {
+  """
+  The Discord bridge this server runs, or null when it runs none: no token
+  was configured.
+  """
+  discord: DiscordBridge
+}
+
+type DiscordBridge {
+  "The Discord server (guild) the bridge posts in."
+  guild: String!
+  "Where an issue or pull request is discussed in Discord, when it has a thread."
+  thread(ref: ID!): DiscordThread
+}
+
+type DiscordThread {
+  id: ID!
+  "A link to the thread that opens in Discord."
+  url: String!
+}
+
+extend type Viewer {
+  "The Discord account linked to this person, when there is one."
+  discord: DiscordLink
+}
+
+type DiscordLink {
+  userId: ID!
+  "The account's display name, when the bridge has seen it since it started."
+  username: String
+}
+
+extend type Mutation {
+  """
+  Link the Discord account that asked for `code` (with `/nav link`) to the
+  signed-in person, recording it in navbook.json. A code works once, for ten
+  minutes.
+  """
+  linkDiscord(code: String!): DiscordLinkPayload!
+  "Unlink every Discord account linked to the signed-in person."
+  unlinkDiscord: DiscordLinkPayload!
+}
+
+type DiscordLinkPayload {
+  "The link as it now stands: null after an unlink."
+  link: DiscordLink
+  commit: CommitInfo!
+}

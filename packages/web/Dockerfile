@@ -25,6 +25,7 @@ COPY packages/plugin-kb packages/plugin-kb
 COPY packages/plugin-tests packages/plugin-tests
 COPY packages/plugin-chat packages/plugin-chat
 COPY packages/plugin-poll packages/plugin-poll
+COPY packages/plugin-discord packages/plugin-discord
 
 # The whole package, before the install rather than after it: `postinstall` runs
 # `nuxi prepare`, which reads this configuration and writes the .nuxt/ the build
