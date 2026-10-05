@@ -38,8 +38,11 @@ export type Scalars = {
  *
  * A comment is written beside the entity it belongs to. On a pull request the
  * server's checkout does not hold — one `prs(allRefs: true)` finds on another
- * branch — that is its branch: the comment is written in a temporary worktree
- * there, and the branch is pushed, as `openPr` does.
+ * branch — that is its branch: the one its `source:` names, and not another that
+ * merged it in. The comment is written in a temporary worktree there, and the
+ * branch is pushed, as `openPr` does; a pull request that names no source, or
+ * that the remote's copy of its source no longer carries, is refused with
+ * `PRECONDITION`.
  */
 export type AddCommentInput = {
   body: Scalars['String']['input'];
@@ -393,10 +396,15 @@ export type Mutation = {
   /**
    * Open a pull request on `source`, and push that branch.
    *
-   * Refused with `PRECONDITION` when `source` is not a branch on the remote, is
-   * checked out in a worktree somebody else made, equals `target`, or shares no
-   * history with it; with `SYNC_CONFLICT` when the server's copy of the branch
-   * cannot be merged with the remote's.
+   * Refused with `INVALID_INPUT` when `source` or `target` is not a name git
+   * takes for a branch — a revision like `feat~1` or an option like `--octopus`
+   * is neither. Refused with `PRECONDITION` when `source` is the branch the server
+   * serves or the repository's default branch (anybody signed in may open a pull
+   * request, and opening one commits to its source and pushes it); when `source`
+   * or `target` is not a branch on the remote; when `source` equals `target` or
+   * shares no history with it; and when the server's copy of `source` is checked
+   * out in a worktree somebody else made. With `SYNC_CONFLICT` when the server's
+   * copy of the branch cannot be merged with the remote's.
    */
   openPr: OpenPrPayload;
   reopenIssue: ReopenIssuePayload;
@@ -405,8 +413,9 @@ export type Mutation = {
   /**
    * Patch a pull request's metadata, `reviewers` included.
    *
-   * One on a branch this checkout does not hold is patched on that branch, in a
-   * temporary worktree, and the branch is pushed; see `openPr`.
+   * One on a branch this checkout does not hold is patched on its source branch,
+   * in a temporary worktree, and the branch is pushed; see `addComment` and
+   * `openPr`.
    */
   updatePr: UpdatePrPayload;
 };
@@ -482,10 +491,11 @@ export type OpenIssuePayload = {
  * Fields for a new pull request.
  *
  * `source` is the branch carrying the commits, named without its remote. The
- * server does not need it checked out: it checks the branch out into a temporary
- * worktree of its clone, writes the pull request there — its files live on the
- * branch they propose to merge (spec 03 §3.5) — and pushes the branch. So the
- * branch has to be on the remote already.
+ * server does not need it checked out: it checks out a copy of the remote's
+ * branch into a temporary worktree of its clone, writes the pull request there —
+ * its files live on the branch they propose to merge (spec 03 §3.5) — and pushes
+ * it to the branch. So the branch has to be on the remote already, and it cannot
+ * be the served branch or the default one.
  */
 export type OpenPrInput = {
   assignees?: InputMaybe<Array<Scalars['String']['input']>>;
@@ -497,7 +507,10 @@ export type OpenPrInput = {
   /** Who to ask for a review (spec 02 §2.7). */
   reviewers?: InputMaybe<Array<Scalars['String']['input']>>;
   source: Scalars['String']['input'];
-  /** Branch to merge into; the repository's default branch when omitted. */
+  /**
+   * Branch to merge into, named without its remote and read as the remote has
+   * it; the repository's default branch when omitted.
+   */
   target?: InputMaybe<Scalars['String']['input']>;
   title: Scalars['String']['input'];
 };

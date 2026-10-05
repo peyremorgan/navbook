@@ -10,9 +10,13 @@ import type { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-
  * Review fields are meaningful only on pull requests (§2.6), and `revision` binds
  * the review to one recorded state of the branch — the latest, unless named.
  *
- * A comment is written beside the entity it belongs to, so a pull request the
- * server's checkout does not hold cannot be commented on from here even though
- * `prs(allRefs: true)` can see it: serve a checkout of its branch to review it.
+ * A comment is written beside the entity it belongs to. On a pull request the
+ * server's checkout does not hold — one `prs(allRefs: true)` finds on another
+ * branch — that is its branch: the one its `source:` names, and not another that
+ * merged it in. The comment is written in a temporary worktree there, and the
+ * branch is pushed, as `openPr` does; a pull request that names no source, or
+ * that the remote's copy of its source no longer carries, is refused with
+ * `PRECONDITION`.
  */
 export type AddCommentInput = {
   body: string;
@@ -196,8 +200,9 @@ export type UpdateIssueInput = {
  *
  * The twin of `UpdateIssueInput`, with the same absent-versus-null rules, plus
  * the people it asks to review. What a pull request *is* — its revisions, its
- * target, whether it merged — is not patchable here: those need a branch and a
- * working tree, and the checkout-centric verbs are not exposed (spec 06 §6.3).
+ * target, whether it merged — is not patchable here: appending a revision and
+ * merging need a working tree on the branch and are not exposed (spec 06 §6.3).
+ * Opening one is `openPr`.
  */
 export type UpdatePrInput = {
   assignees?: Array<string> | null | undefined;

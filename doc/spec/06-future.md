@@ -132,11 +132,18 @@ terminal does: it checks the branch out into a temporary worktree of its
 clone, writes there, commits, pushes that branch, and removes the worktree.
 The same mechanism is what lets it *open* a pull request — the one
 checkout-centric verb it exposes, because opening one is writing the first
-file on a branch somebody already pushed. The branch has to exist on the
-remote; the server never creates one anybody would see, and its local copy of
-one is merged with the remote's under the served branch's rules — a conflict
-is surfaced, not resolved. Everything else about the write is the rule above:
-`author:` the person, the committer the gateway.
+file on a branch somebody already pushed. The branch is the one the pull
+request's `source:` names, never another that merged it in and so carries a
+copy of its files. It has to exist on the remote; the server never creates one
+anybody would see, so its push is leased on the commit it fetched, and a
+branch deleted meanwhile is refused rather than made again. It writes on a
+copy of its own, merged with the remote's under the served branch's rules — a
+conflict is surfaced, not resolved — and never on the clone's own branches,
+whose unpushed commits are somebody's and not the server's to publish.
+Opening is refused on the served branch and on the default one: anybody
+signed in may open a pull request, and the branch everybody else builds on is
+not one a request should commit to. Everything else about the write is the
+rule above: `author:` the person, the committer the gateway.
 
 **A plugin's web half is compiled in, and reads its own data off `ext`.** An
 extension ([02 §2.12](02-data-model.md)) that has something to show in a browser

@@ -23,6 +23,7 @@ import {
   type CommentRecord,
   closeEntity,
   currentAuthor,
+  currentBranch,
   defaultBranch,
   type EntityKind,
   type EntityRecord,
@@ -31,6 +32,7 @@ import {
   findEntity,
   findParentIssue,
   findPrToWrite,
+  isValidBranchName,
   loadRepo,
   locatePr,
   locatePrToWrite,
@@ -51,6 +53,7 @@ import {
   resolveComment,
   resolveEntity,
   resolveSha,
+  stringField,
   unlinkIssue,
   validateComment,
   validateIssue,
@@ -144,15 +147,63 @@ function afterWriteAt(ctx: GraphQLCtx, at: WsCtx, site: WriteSite): Repo {
 }
 
 /**
- * Where to read a pull request's target from: the local branch of its name,
- * or else the remote's copy — the server checks out one branch, and a target
- * like `release` exists in its clone only as `origin/release`.
+ * Where to read a pull request's target from, by its full ref name.
+ *
+ * The remote's copy whenever there is a remote, even with a local branch of
+ * the same name beside it: the server keeps only the branch it serves up to
+ * date, so any other local branch in its clone is as old as whoever made it
+ * left it, and a merge base read from that would be older than the truth. A
+ * target that is no branch there is refused, rather than handed to git as a
+ * revision to make sense of.
  */
-function targetRev(ctx: GraphQLCtx, at: WsCtx, target: string): { targetRev?: string } {
+function targetRev(ctx: GraphQLCtx, at: WsCtx, target: string): string {
   const remote = ctx.sync.remote;
-  if (remote === null || resolveSha(at.repoRoot, `refs/heads/${target}`) !== null) return {};
-  const tracking = `refs/remotes/${remote}/${target}`;
-  return resolveSha(at.repoRoot, tracking) === null ? {} : { targetRev: tracking };
+  const ref = remote === null ? `refs/heads/${target}` : `refs/remotes/${remote}/${target}`;
+  if (resolveSha(at.repoRoot, ref) === null) {
+    throw apiError(
+      remote === null
+        ? `there is no branch '${target}' in the server's clone`
+        : `'${target}' is not a branch on '${remote}'`,
+      "PRECONDITION",
+      { branch: target, ...(remote === null ? {} : { remote }) },
+    );
+  }
+  return ref;
+}
+
+/** Refuse, as bad input, a field naming something git would not take for a branch. */
+function requireBranchName(ctx: GraphQLCtx, name: string, what: string): void {
+  if (!isValidBranchName(ctx.ws.repoRoot, name)) {
+    throw invalidInput(`${what} '${name}' is not a branch name git accepts`);
+  }
+}
+
+/**
+ * Refuse to open a pull request on the served branch or the default one.
+ *
+ * Opening one commits on its source branch and pushes it, as the person
+ * asking — and anybody signed in may ask. That is a write to a branch they
+ * chose, which is fine for the branch somebody pushed to propose a change and
+ * not for the ones everybody else builds on: the served branch is the
+ * tracker's, and the default branch is where pull requests land. Neither is
+ * the source of one anybody opens through the API.
+ */
+function refuseSharedSource(ctx: GraphQLCtx, source: string): void {
+  const root = ctx.ws.repoRoot;
+  const which =
+    source === currentBranch(root)
+      ? "the branch this server serves"
+      : source === defaultBranch(root)
+        ? "the repository's default branch"
+        : null;
+  if (which === null) return;
+  throw apiError(`cannot open a pull request on '${source}', ${which}`, "PRECONDITION", {
+    branch: source,
+    details: [
+      "a pull request is written on its source branch, which the server commits to and pushes",
+      "push the work to a branch of its own and open the pull request from that",
+    ],
+  });
 }
 
 /** The branch a payload read from `site` was found on, in `Pr.refs`' terms. */
@@ -357,13 +408,19 @@ export const Mutation: MutationResolvers = {
       const source = requireText(input.source, "source").trim();
       const target = input.target?.trim() || undefined;
       // Settled before anything is checked out: there is nothing to look at.
+      requireBranchName(ctx, source, "source");
+      if (target !== undefined) requireBranchName(ctx, target, "target");
       if (target === source) {
         throw apiError(`a pull request cannot target its own branch (${source})`, "PRECONDITION");
       }
 
       const { result, pushed } = await writeOnBranch(
         ctx,
-        () => source,
+        () => {
+          // Under the lock, after the fetch: the default branch is the remote's say.
+          refuseSharedSource(ctx, source);
+          return source;
+        },
         (at, site) => {
           if (!at.hasNavbook) {
             throw apiError(
@@ -379,8 +436,11 @@ export const Mutation: MutationResolvers = {
           const named = target ?? defaultBranch(at.repoRoot) ?? undefined;
           const draft = preparePrOpen(at, {
             source,
+            // The site's own checkout: the server's copy of the branch, merged
+            // with the remote's a moment ago, which is not a branch of that name.
+            sourceRev: "HEAD",
             title: input.title,
-            ...(named === undefined ? {} : { target: named, ...targetRev(ctx, at, named) }),
+            ...(named === undefined ? {} : { target: named, targetRev: targetRev(ctx, at, named) }),
           });
           const content = newPrFile({
             title: draft.title,
@@ -527,11 +587,57 @@ function writeEntity<T extends { run: RunPlanResult }>(
 ): Promise<WriteResult<T>> {
   return writeOnBranch(
     ctx,
-    () => (kind === "pr" ? (locatePrToWrite(ctx.ws, ref).elsewhere?.branch ?? null) : null),
+    () => (kind === "pr" ? prBranch(ctx, ref) : null),
     (at, site) =>
       body(at, kind === "pr" ? findPrToWrite(at, ref) : findEntity(at, kind, ref), site),
     (result) => result.run.committed,
   );
+}
+
+/**
+ * The branch to write a pull request on, or null when the served checkout holds it.
+ *
+ * The branch its `source:` names, and no other. A branch that merged the
+ * source in carries the pull request's directory too — the scan finds it on
+ * both — but a comment written there lands where nobody reviewing the pull
+ * request looks. So the remote's copy of that branch (the clone's own, with no
+ * remote) has to be among the refs carrying it, and a pull request naming no
+ * source, or one its own branch no longer carries, is refused rather than
+ * written wherever it happens to be found.
+ */
+function prBranch(ctx: GraphQLCtx, ref: string): string | null {
+  const { entity, elsewhere } = locatePrToWrite(ctx.ws, ref);
+  if (elsewhere === null) return null;
+  const source = stringField(entity, "source");
+  if (source === "") {
+    throw apiError(
+      `#${entity.id} names no source branch, so there is no telling which branch to write it on`,
+      "PRECONDITION",
+      { details: ["give it a 'source:' from a checkout of its branch"] },
+    );
+  }
+  const remote = ctx.sync.remote;
+  const own = remote === null ? `refs/heads/${source}` : `refs/remotes/${remote}/${source}`;
+  if (!elsewhere.refs.includes(own)) {
+    const where = remote === null ? "the server's clone" : `'${remote}'`;
+    throw apiError(
+      `#${entity.id} is not on '${source}', its source branch, in ${where}`,
+      "PRECONDITION",
+      {
+        branch: source,
+        details: [
+          `it is on ${elsewhere.refs.map((full) => `'${shortRef(full)}'`).join(", ")}`,
+          "a pull request is written on its own branch; one that merged that branch in carries a copy nobody reviewing it reads",
+        ],
+      },
+    );
+  }
+  return source;
+}
+
+/** A ref's name as `git branch -a` would print it. */
+function shortRef(full: string): string {
+  return full.replace(/^refs\/(heads|remotes)\//, "");
 }
 
 /**

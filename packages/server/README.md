@@ -223,10 +223,16 @@ remote's URL, server-side paths, and hook output.
 Some mutations have a shape worth knowing:
 
 - **`openPr`** takes the branch carrying the work by name (`source`), which
-  must already be pushed. The server checks it out into a temporary worktree of
-  its clone, writes the pull request there — its files live on the branch they
-  propose to merge — and pushes the branch. **`addComment`** and **`updatePr`**
-  on a pull request the served branch does not hold go the same way.
+  must already be pushed. The server checks out a copy of it,
+  `nav-server/<source>`, into a temporary worktree of its clone, writes the pull
+  request there — its files live on the branch they propose to merge — and
+  pushes it to `source`, leased on the tip it fetched, so a branch somebody
+  deleted meanwhile is not made again. It never writes on, pushes from or
+  deletes the clone's own local branches. The served branch and the default
+  branch are refused as a source, and a `source` or `target` that is not a
+  branch name as `INVALID_INPUT`. **`addComment`** and **`updatePr`** on a pull
+  request the served branch does not hold go the same way, on the branch its
+  `source:` names.
 
 - **`linkIssue`** refuses with `REPARENT_REQUIRED` when the issue already has a
   parent, naming the one it has now. Moving a subtask changes a structure

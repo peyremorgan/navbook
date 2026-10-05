@@ -74,6 +74,8 @@ describe("opening a pull request", () => {
     for (const branch of branches) {
       assert.equal(h.fixture.server.git(["branch", "--list", branch]).stdout, "", branch);
     }
+    // No copy of any branch is kept once the remote has everything on it.
+    assert.equal(h.fixture.server.git(["branch", "--list", "nav-server/*"]).stdout, "");
     assert.equal(h.fixture.server.git(["status", "--porcelain"]).stdout, "");
   }
 
@@ -162,6 +164,42 @@ describe("opening a pull request", () => {
     assertTidy("feat/review");
   });
 
+  it("writes on the pull request's own branch, not on one that merged it in", async () => {
+    // `zfeat` carries the pull request; `alpha`, which sorts first, merged it in.
+    pushed("zfeat");
+    const { pr } = ok<Opened>(
+      await h.gql(OPEN, { input: { source: "zfeat", title: "Z", body: "x" } }),
+    ).openPr;
+    const peer = h.fixture.peer;
+    must(peer.git(["fetch", "--quiet", "origin"]));
+    must(peer.git(["checkout", "--quiet", "-b", "alpha", "main"]));
+    must(peer.git(["merge", "--quiet", "--no-ff", "-m", "take zfeat", "origin/zfeat"]));
+    must(peer.git(["push", "--quiet", "origin", "alpha:alpha"]));
+    must(peer.git(["checkout", "--quiet", "main"]));
+    const alphaBefore = originSubjects(h.fixture.origin, "alpha");
+
+    const COMMENT = `mutation C($ref: ID!) {
+      addComment(input: { kind: PR, ref: $ref, body: "Where does this go?" }) {
+        entity { ... on Pr { refs } }
+      }
+    }`;
+    const commented = ok<{ addComment: { entity: { refs: string[] } } }>(
+      await h.gql(COMMENT, { ref: pr.id }),
+    ).addComment;
+    assert.deepEqual(commented.entity.refs, ["zfeat"]);
+    assert.equal(originSubjects(h.fixture.origin, "zfeat")[0], `docs(pr): comment on #${pr.id}`);
+    assert.deepEqual(originSubjects(h.fixture.origin, "alpha"), alphaBefore);
+    assertTidy("zfeat", "alpha");
+
+    // Once its own branch is gone, the copy `alpha` carries is no place to write.
+    must(peer.git(["push", "--quiet", "origin", "--delete", "zfeat"]));
+    const refused = await h.gql(COMMENT, { ref: pr.id });
+    assert.equal(errorCode(refused), "PRECONDITION");
+    assert.match(refused.errors[0]?.message ?? "", /is not on 'zfeat', its source branch/);
+    assert.deepEqual(originSubjects(h.fixture.origin, "alpha"), alphaBefore);
+    assertTidy("zfeat", "alpha");
+  });
+
   it("takes a title from the input, not from the branch's last commit", async () => {
     pushed("feat/title");
     const { pr } = ok<Opened>(
@@ -183,19 +221,60 @@ describe("opening a pull request", () => {
     assertTidy("feat/onto-release", "release");
   });
 
-  it("opens one on the served branch itself without a worktree", async () => {
+  it("reads the target from the remote, not from a stale local branch of its name", async () => {
+    // The clone has its own `rel`, made long ago and never updated since: the
+    // server keeps only the branch it serves up to date.
+    pushed("rel");
+    const server = h.fixture.server;
+    must(server.git(["fetch", "--quiet", "origin"]));
+    must(server.git(["branch", "--quiet", "rel", "origin/rel"]));
+    const peer = h.fixture.peer;
+    must(peer.git(["checkout", "--quiet", "rel"]));
+    peer.write("rel-later.txt", "later\n");
+    peer.commitAll("later work on rel");
+    must(peer.git(["push", "--quiet", "origin", "rel:rel"]));
+    must(peer.git(["checkout", "--quiet", "-b", "feat/on-rel"]));
+    peer.write("on-rel.txt", "x\n");
+    peer.commitAll("work on top of rel");
+    must(peer.git(["push", "--quiet", "origin", "feat/on-rel:feat/on-rel"]));
+    must(peer.git(["checkout", "--quiet", "main"]));
+    const base = peer.git(["rev-parse", "rel"]).stdout.trim();
+
+    try {
+      const { pr } = ok<Opened>(
+        await h.gql(OPEN, {
+          input: { source: "feat/on-rel", target: "rel", title: "On rel", body: "x" },
+        }),
+      ).openPr;
+      assert.equal(pr.revisions[0]?.base, base);
+    } finally {
+      must(server.git(["branch", "--quiet", "-D", "rel"]));
+    }
+  });
+
+  it("refuses the branch it serves, and the default branch, as a source", async () => {
+    const before = originSubjects(h.fixture.origin, "main");
     pushed("stable");
-    const { pr, commit } = ok<Opened>(
-      await h.gql(OPEN, {
-        input: { source: "main", target: "stable", title: "Main into stable", body: "x" },
-      }),
-    ).openPr;
-    assert.equal(pr.source, "main");
-    // A working-tree read, found on no ref in particular.
-    assert.deepEqual(pr.refs, []);
-    assert.equal(commit.pushed, true);
-    assert.equal(originSubjects(h.fixture.origin, "main")[0], `docs(pr): open #${pr.id}`);
-    assertTidy();
+    const served = await h.gql(OPEN, {
+      input: { source: "main", target: "stable", title: "Main into stable", body: "x" },
+    });
+    assert.equal(errorCode(served), "PRECONDITION");
+    assert.match(served.errors[0]?.message ?? "", /'main', the branch this server serves/);
+
+    // A default branch other than the served one, as the remote's HEAD says.
+    const server = h.fixture.server;
+    must(server.git(["remote", "set-head", "origin", "stable"]));
+    try {
+      const fallback = await h.gql(OPEN, {
+        input: { source: "stable", target: "main", title: "Stable into main", body: "x" },
+      });
+      assert.equal(errorCode(fallback), "PRECONDITION");
+      assert.match(fallback.errors[0]?.message ?? "", /'stable', the repository's default branch/);
+    } finally {
+      must(server.git(["remote", "set-head", "origin", "main"]));
+    }
+    assert.deepEqual(originSubjects(h.fixture.origin, "main"), before);
+    assertTidy("stable");
   });
 
   for (const [what, input, code, pattern] of [
@@ -214,8 +293,32 @@ describe("opening a pull request", () => {
     [
       "a name git would not take as a branch",
       { source: "a..b" },
+      "INVALID_INPUT",
+      /source 'a\.\.b' is not a branch name git accepts/,
+    ],
+    [
+      "a revision of a branch rather than the branch",
+      { source: "feat/api~1" },
+      "INVALID_INPUT",
+      /source 'feat\/api~1' is not a branch name git accepts/,
+    ],
+    [
+      "a target git would read as an option",
+      { source: "feat/api", target: "--octopus" },
+      "INVALID_INPUT",
+      /target '--octopus' is not a branch name git accepts/,
+    ],
+    [
+      "a target that is a revision",
+      { source: "feat/api", target: "HEAD~3" },
+      "INVALID_INPUT",
+      /target 'HEAD~3' is not a branch name git accepts/,
+    ],
+    [
+      "a target spelt with its remote",
+      { source: "feat/api", target: "origin/main" },
       "PRECONDITION",
-      /not a branch name git accepts/,
+      /'origin\/main' is not a branch on 'origin'/,
     ],
     [
       "a pull request onto its own branch",
@@ -227,7 +330,7 @@ describe("opening a pull request", () => {
       "a target that is nowhere",
       { source: "feat/api", target: "nowhere" },
       "PRECONDITION",
-      /'nowhere' does not exist/,
+      /'nowhere' is not a branch on 'origin'/,
     ],
     ["an empty title", { source: "feat/api", title: "  " }, "INVALID_INPUT", /title/],
     ["an empty body", { source: "feat/api", body: "" }, "INVALID_INPUT", /body/],
@@ -306,23 +409,38 @@ describe("opening a pull request on a branch the clone already has a copy of", (
     await h.stop();
   });
 
+  /** The server's own copy of `name`, which is what a write there checks out. */
+  const copyOf = (name: string): string => `nav-server/${name}`;
+
   /**
-   * Leave a local copy of `name` in the server's clone, one commit ahead of
-   * the remote — what a refused or stopped push leaves behind.
+   * Run `edit` in a worktree of the server's clone on `branch`, made from the
+   * remote's `name` if it does not exist yet, and commit what it leaves.
    */
-  function localCommitOn(name: string, file: string, content: string): void {
+  function commitOn(branch: string, name: string, message: string, edit: (dir: string) => void) {
     const server = h.fixture.server;
     must(server.git(["fetch", "--quiet", "origin"]));
-    must(server.git(["branch", "--quiet", name, `origin/${name}`]));
-    const dir = join(h.fixture.home, `arrange-${name.replaceAll("/", "-")}`);
-    must(server.git(["worktree", "add", "--quiet", dir, name]));
+    if (server.git(["branch", "--list", branch]).stdout === "") {
+      must(server.git(["branch", "--quiet", branch, `origin/${name}`]));
+    }
+    const dir = join(h.fixture.home, `arrange-${branch.replaceAll("/", "-")}`);
+    must(server.git(["worktree", "add", "--quiet", dir, branch]));
     try {
-      writeFileSync(join(dir, file), content);
+      edit(dir);
       must(server.git(["-C", dir, "add", "--all"]));
-      must(server.git(["-C", dir, "commit", "--quiet", "-m", `local work on ${name}`]));
+      must(server.git(["-C", dir, "commit", "--quiet", "--allow-empty", "-m", message]));
     } finally {
       must(server.git(["worktree", "remove", "--force", dir]));
     }
+  }
+
+  /**
+   * Leave the server's copy of `name` one commit ahead of the remote — what a
+   * refused or stopped push leaves behind.
+   */
+  function localCommitOn(name: string, file: string, content: string): void {
+    commitOn(copyOf(name), name, `local work on ${name}`, (dir) => {
+      writeFileSync(join(dir, file), content);
+    });
   }
 
   function pushedByPeer(name: string): void {
@@ -330,17 +448,9 @@ describe("opening a pull request on a branch the clone already has a copy of", (
     must(h.fixture.peer.git(["push", "--quiet", "origin", `${name}:${name}`]));
   }
 
-  it("carries a commit the copy has and the remote lacks", async () => {
+  it("carries a commit its own copy has and the remote lacks", async () => {
     pushedByPeer("ahead");
-    // Arranged by hand in the clone, which is outside the server's own
-    // writes — a worktree the test makes under the fixture, not a temporary one.
-    const server = h.fixture.server;
-    must(server.git(["fetch", "--quiet", "origin"]));
-    must(server.git(["branch", "--quiet", "ahead", "origin/ahead"]));
-    const dir = join(h.fixture.home, "arrange-ahead");
-    must(server.git(["worktree", "add", "--quiet", dir, "ahead"]));
-    must(server.git(["-C", dir, "commit", "--quiet", "--allow-empty", "-m", "unpushed"]));
-    must(server.git(["worktree", "remove", dir]));
+    commitOn(copyOf("ahead"), "ahead", "unpushed", () => undefined);
 
     const { pr, commit } = ok<Opened>(
       await h.gql(OPEN, { input: { source: "ahead", title: "Ahead", body: "x" } }),
@@ -351,7 +461,31 @@ describe("opening a pull request on a branch the clone already has a copy of", (
       "unpushed",
     ]);
     // Everything reached the remote, so the copy went.
-    assert.equal(server.git(["branch", "--list", "ahead"]).stdout, "");
+    assert.equal(h.fixture.server.git(["branch", "--list", copyOf("ahead")]).stdout, "");
+  });
+
+  it("leaves the clone's own branches alone: never pushed from, never deleted", async () => {
+    // An operator's branch with work nobody meant to publish, and one that is
+    // simply the remote's — the clone's original local branch, say.
+    pushedByPeer("theirs");
+    pushedByPeer("level");
+    commitOn("theirs", "theirs", "not for publishing", () => undefined);
+    const server = h.fixture.server;
+    must(server.git(["branch", "--quiet", "level", "origin/level"]));
+    const theirs = server.git(["rev-parse", "theirs"]).stdout.trim();
+    const level = server.git(["rev-parse", "level"]).stdout.trim();
+
+    for (const name of ["theirs", "level"]) {
+      const { pr, commit } = ok<Opened>(
+        await h.gql(OPEN, { input: { source: name, title: name, body: "x" } }),
+      ).openPr;
+      assert.equal(commit.pushed, true);
+      assert.equal(originSubjects(h.fixture.origin, name)[0], `docs(pr): open #${pr.id}`);
+    }
+    assert.ok(!originSubjects(h.fixture.origin, "theirs").includes("not for publishing"));
+    assert.equal(server.git(["rev-parse", "theirs"]).stdout.trim(), theirs);
+    assert.equal(server.git(["rev-parse", "level"]).stdout.trim(), level);
+    assert.equal(server.git(["branch", "--list", "nav-server/*"]).stdout, "");
   });
 
   it("merges a copy that diverged from the remote before writing", async () => {
@@ -398,25 +532,41 @@ describe("opening a pull request on a branch the clone already has a copy of", (
     assert.deepEqual(worktrees(h.fixture.server.dir), [h.fixture.server.dir]);
     // The copy still carries the server's commit, for an operator to reconcile.
     assert.equal(
-      h.fixture.server.git(["log", "-1", "--format=%s", "clash"]).stdout.trim(),
+      h.fixture.server.git(["log", "-1", "--format=%s", copyOf("clash")]).stdout.trim(),
       "local work on clash",
     );
+    assert.match(h.stderr(), /kept 'nav-server\/clash', the server's copy of 'clash'/);
     // And the served branch was never touched by the aborted merge.
     assert.equal(h.fixture.server.git(["status", "--porcelain"]).stdout, "");
   });
 
-  it("refuses a branch checked out in a worktree somebody else made", async () => {
+  it("refuses when somebody else's worktree holds its copy, and not when one holds theirs", async () => {
     pushedByPeer("held");
     const server = h.fixture.server;
     must(server.git(["fetch", "--quiet", "origin"]));
     const dir = join(h.fixture.home, "somebody-else");
-    must(server.git(["worktree", "add", "--quiet", "-b", "held", dir, "origin/held"]));
+    must(server.git(["worktree", "add", "--quiet", "-b", copyOf("held"), dir, "origin/held"]));
     try {
       const response = await h.gql(OPEN, { input: { source: "held", title: "Held", body: "x" } });
       assert.equal(errorCode(response), "PRECONDITION");
-      assert.match(response.errors[0]?.message ?? "", /'held' is checked out in .*somebody-else/);
+      assert.match(
+        response.errors[0]?.message ?? "",
+        /'nav-server\/held' is checked out in .*somebody-else/,
+      );
       // Theirs is left exactly where it was.
       assert.ok(existsSync(dir));
+    } finally {
+      must(server.git(["worktree", "remove", "--force", dir]));
+      must(server.git(["branch", "--quiet", "-D", copyOf("held")]));
+    }
+
+    // The operator's own checkout of the branch is no business of the server's.
+    must(server.git(["worktree", "add", "--quiet", "-b", "held", dir, "origin/held"]));
+    try {
+      const { commit } = ok<Opened>(
+        await h.gql(OPEN, { input: { source: "held", title: "Held", body: "x" } }),
+      ).openPr;
+      assert.equal(commit.pushed, true);
     } finally {
       must(server.git(["worktree", "remove", "--force", dir]));
     }
@@ -427,7 +577,9 @@ describe("opening a pull request on a branch the clone already has a copy of", (
     const server = h.fixture.server;
     must(server.git(["fetch", "--quiet", "origin"]));
     const dir = join(h.fixture.home, "vanished");
-    must(server.git(["worktree", "add", "--quiet", "-b", "vanished", dir, "origin/vanished"]));
+    must(
+      server.git(["worktree", "add", "--quiet", "-b", copyOf("vanished"), dir, "origin/vanished"]),
+    );
     rmSync(dir, { recursive: true, force: true });
 
     const { commit } = ok<Opened>(

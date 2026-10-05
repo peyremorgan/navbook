@@ -15,7 +15,7 @@ A pull request is `prs/{open,merged,closed}/<id>-<slug>/pr.md` on its own source
 - **Close and reopen** — `nav pr close` records a declined pull request under `prs/closed/`, checking its files out from the branch that carries them when this one does not. A merged pull request cannot be reopened.
 - **Delete** — acts on the checked-out tree alone, by design.
 
-The API reads pull requests, opens them with `openPr`, takes comments and reviews, and patches a pull request's metadata with `updatePr` — the twin of `updateIssue`, carrying `reviewers` as well. A write to a pull request whose branch it does not serve is made on that branch, in a temporary worktree, and the branch is pushed; it is refused, naming the branch, only when that branch is not on the remote or somebody else's worktree holds it. Updating (appending a revision), merging and deleting are checkout-centric and are not exposed (spec 06 §6.3).
+The API reads pull requests, opens them with `openPr`, takes comments and reviews, and patches a pull request's metadata with `updatePr` — the twin of `updateIssue`, carrying `reviewers` as well. A write to a pull request whose branch it does not serve is made on the branch its `source:` names, in a temporary worktree on the server's copy of it, and the branch is pushed; it is refused, naming the branch, when that branch is not on the remote or no longer carries the pull request, or somebody else's worktree holds the copy. `openPr` refuses the served and the default branch as a source. Updating (appending a revision), merging and deleting are checkout-centric and are not exposed (spec 06 §6.3).
 
 ## Where it lives
 
