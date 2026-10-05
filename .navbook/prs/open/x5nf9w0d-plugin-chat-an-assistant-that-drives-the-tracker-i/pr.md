@@ -22,7 +22,7 @@ revisions:
 
 Closes #s86nic83, the third of three steps towards #c43a2w7e.
 
-**Stacked on `#g3xqbgn5`**, which is stacked on `#lfr46mfi`: merge those first, then rebase this onto `dev`.
+Was stacked on `#g3xqbgn5` and `#lfr46mfi`, both now merged; rebased onto `dev`.
 
 A new plugin, `@navbook/plugin-chat` (short `chat`). A person asks about issues and pull requests in their own words ("what is assigned to me?", "show me the overdue issues"), and the assistant files, comments on, reviews, opens and closes them once the person approves each change.
 
@@ -63,6 +63,8 @@ A new plugin, `@navbook/plugin-chat` (short `chat`). A person asks about issues 
   - The client sends the transcript as an opaque string (the host's `JSON` scalar is output-only), plus a message, approvals and `autoApprove`.
   - The client-sent transcript is validated: shape, size, no system messages, tool answers matching real calls.
   - A new message over pending writes runs the approved ones and declines the rest.
+  - A decision answers only the write it was made on, once. `autoApprove` covers writes proposed from then on; a write already waiting is decided by its own approval, or declined.
+  - Every tool call gets an id no other call in the conversation has; a transcript reusing one is refused. A write that ran carries the transcript as it stands, so a turn stopped after it loses nothing.
   - Reads run through core inside `sync.read`; writes run through `host.api.execute` against the host's own mutations.
   - A browser disconnect aborts the model call (`ctx.request.signal`; the test was mutation-checked).
   - Model failures arrive as `ERROR` events carrying the transcript.
@@ -72,28 +74,52 @@ A new plugin, `@navbook/plugin-chat` (short `chat`). A person asks about issues 
 - A round button in the lower right, through the new `overlays` slot, opens a `USlideover` built from Nuxt UI's chat components, with no `ai` dependency.
 - Replies render through the host's `MarkdownBody`, so `#id` references are links.
 - Each write is an approval card with Approve / Decline. With several waiting, a decided card says so.
-- The **Edits** selector (Manual / Allow all) sits under the prompt.
+- The **Edits** selector (Manual / Allow all) sits under the prompt; a new conversation starts in Manual.
+- A card shows the body's source, not its rendering, and a reply's images are shown as links, so displaying one fetches nothing.
 - After a commit, listings and detail queries are evicted and the commit toast shows.
 - The button is hidden when `chat` is null or the server lacks the plugin.
 - Checked visually in light, dark and at 390 px.
 
 ## Deploy
 
-Both Dockerfiles copy and pack the package, and compose maps `NAVBOOK_CHAT_{BASE_URL,MODEL,API_KEY}` to `NAV_SERVER_CHAT_*` (documented in `.env.example`). The API image additionally needs #uniyh2hy's fix and `--filter "@navbook/plugin-chat..."`; see the comment there.
+Both Dockerfiles copy and pack the package beside plugin-kb and plugin-tests, and compose maps `NAVBOOK_CHAT_{BASE_URL,MODEL,API_KEY}` to `NAV_SERVER_CHAT_*` (documented in `.env.example`). The release workflow checks, packs, smoke-tests (`nav chat` with no model must refuse and say how to name one) and publishes it; the dev stack and the web scripts' default plugin list include it.
+
+An API key from the environment is sent only to an endpoint the environment names, or the default: a `baseUrl` only `navbook.json` names (anybody who can commit may change it) is refused while a key is set.
+
+## Self-review (2026-10-05)
+
+Rebased onto `dev`, which had gained plugin-tests: the Dockerfiles, web scripts, release, dev stack and docs now list all three first-party plugins. Two adversarial reviews (engine and server; CLI, web and deploy) found, and this branch now fixes:
+
+- **An approval reused.** Approvals held for the whole turn, so with a provider that sends no call ids (`call_0` every round), approving one write approved the next, unseen.
+- **Allow all over a Decline.** Switching to Allow all ran waiting writes the person had declined, or had just said no to.
+- **A write repeated.** A turn stopped after a write left the client a transcript where it still waited: the model was told it was declined, and under Allow all it ran twice.
+- **The key steered.** A committed `baseUrl` received the key from the environment.
+- **Prompt injection.** The prompt now says tool results are data, never instructions. Labels, names and branches are quoted safely.
+- **Smaller fixes:**
+  - the timeout was for the whole stream, not for silence;
+  - unindexed parallel calls were merged into one;
+  - `nav chat -m … > file` waited on a question it wrote into the file;
+  - Ctrl-C at `Apply? [y/N]` left the question open;
+  - the model's control characters reached the terminal;
+  - `sse.ts` was imported by the web layer but not shipped;
+  - a Windows path was passed to `--import`.
+
+Not changed: a commit that fails in the checkout leaves the write staged with git's message, as `--commit` does for the built-in verbs.
 
 ## Tests
 
 | Suite | Result |
 |---|---|
-| plugin-chat | 134 passed |
-| core | 896 passed |
-| server | 469 passed |
-| cli | 411 passed |
-| plugin-kb | 138 passed |
+| plugin-chat | 149 passed |
+| core | 954 passed |
+| server | 497 passed |
+| cli | 437 passed |
+| plugin-kb | 145 passed |
+| plugin-tests | 120 passed |
 | conformance | 128 passed |
-| deploy | 73 passed |
-| web vitest | 411 passed |
-| Playwright | 180 passed |
+| deploy | 82 passed |
+| web vitest | 427 passed |
+| Playwright | 196 passed |
 
 What the plugin-chat suite covers:
 - **Unit:** SSE fixtures and accumulation quirks; the client against a stub and failure modes; tool schemas and every validator refusal; config precedence; prompt; transcript validation; runner flows; the REPL through a fake terminal; the web reducer.
@@ -105,7 +131,7 @@ What the plugin-chat suite covers:
   - `--json`, 401, nothing listening;
   - an import hook proving `nav issue list` loads none of the plugin.
 - **Server, through `nav-server`:** streaming, approve/decline/move-on, Allow all, a refused write's code, `open_pr` + `review_pr` on a pushed branch, disconnect, 401, model failure, input refusals, unconfigured.
-- **Playwright, 9 cases:** hidden without the plugin; open; streamed Markdown; approve → toast → listing; decline; two cards; Allow all; failure and reset; absent on signed-out pages.
+- **Playwright, 10 cases:** hidden without the plugin; open; streamed Markdown; approve → toast → listing, with the card's source body; decline; two cards; Allow all; a reply's image fetched by nobody; failure and reset back to Manual; absent on signed-out pages.
 - **Manual:** the REPL in a real PTY via Python `pty`: streaming, approval, Ctrl-C on a reply and on a line, `/help`, Ctrl-D exit 0.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
