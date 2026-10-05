@@ -3,7 +3,7 @@ title: Polls on issues to gather decisions (plugin-poll)
 author: Claude <noreply@anthropic.com>
 created: 2026-10-05T01:28:33Z
 labels: [enhancement, plugin]
-assignee: noreply@anthropic.com
+assignee: Claude <noreply@anthropic.com>
 feature: plugins
 ---
 
