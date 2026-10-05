@@ -129,6 +129,7 @@ describe("nav poll vote, by flags", () => {
       /--pick backend= names no option; use --clear backend to skip it/,
     );
     fails(["--pick", "backend"], /--pick takes QUESTION=…, got 'backend'/);
+    fails(["--other", "backend=  "], /--other backend= is empty; use --clear backend to skip it/);
     fails(["--withdraw", "--pick", "backend=s3"], /--withdraw answers nothing/);
     fails(["--fresh"], /this ballot answers no question/);
     fails([], /nothing to vote: pass --pick or --other, or run at a terminal to be asked/);

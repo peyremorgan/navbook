@@ -30,7 +30,6 @@ import {
   loadTree,
   openPoll,
   parseDraft,
-  pollsByIssue,
   reopenPoll,
   requireOpenIssue,
   requireOpenPoll,
@@ -297,6 +296,7 @@ export function activate(host: CliPluginHost): void {
     for (const value of flags.others) {
       const [ref, text] = assignment("--other", value);
       const question = questionByRef(questions, ref);
+      if (text.trim() === "") ui.fail(`--other ${ref}= is empty; use --clear ${ref} to skip it`);
       if (!question.multi && picked.has(question.id)) {
         ui.fail(`question '${question.id}' takes one answer: --pick or --other, not both`);
       }
@@ -333,6 +333,9 @@ export function activate(host: CliPluginHost): void {
     }
     const mine = me === null ? undefined : ballotOf(poll.ballots, me);
     const state: VoterState = mine?.state ?? "none";
+    // Only a ballot that counts answered these questions: a revoked one's
+    // picks may name options that mean something else now.
+    const counting = mine?.state === "counted" ? mine.vote.answers : undefined;
     const shown =
       opts.results === true ||
       poll.results === "visible" ||
@@ -356,7 +359,7 @@ export function activate(host: CliPluginHost): void {
     lines.push(
       ...renderQuestions(poll, c, {
         results: shown,
-        ...(mine === undefined || mine.state === "withdrawn" ? {} : { mine: mine.vote.answers }),
+        ...(counting === undefined ? {} : { mine: counting }),
       }),
     );
     if (poll.outcome !== null) {
@@ -397,17 +400,17 @@ export function activate(host: CliPluginHost): void {
     let issueId: string | null = null;
     if (opts.issue !== undefined)
       issueId = core.resolveEntity(repo, String(opts.issue), "issue").id;
-    const rows = pollsByIssue(repo)
-      .filter(({ issue }) => issueId === null || issue.id === issueId)
-      .filter(({ poll }) => state === null || poll.status === state)
-      .filter(({ issue, poll }) => !awaitingOnly || awaits(issue, poll, me as string))
-      .sort((a, b) =>
-        a.poll.created < b.poll.created ? -1 : a.poll.created > b.poll.created ? 1 : 0,
-      );
+    const rows = allPolls(repo)
+      .filter((poll) => issueId === null || poll.issue.id === issueId)
+      .filter((poll) => state === null || poll.status === state)
+      .filter((poll) => {
+        const issue = awaitingOnly ? issueOf(repo, poll) : undefined;
+        return !awaitingOnly || (issue !== undefined && awaits(issue, poll, me as string));
+      });
 
     if (opts.json) {
       if (rows.length > 0) {
-        const objects = rows.map(({ poll }) => pollSummaryJson(ctx.navDir, poll, me));
+        const objects = rows.map((poll) => pollSummaryJson(ctx.navDir, poll, me));
         write(`${core.toNdjson(objects)}\n`);
       }
       return;
@@ -419,7 +422,7 @@ export function activate(host: CliPluginHost): void {
     write(
       `${ui.renderTable(
         [...POLL_COLUMNS],
-        rows.map(({ poll }) => pollRow(poll, me === null ? null : stateOf(poll, me))),
+        rows.map((poll) => pollRow(poll, me === null ? null : stateOf(poll, me))),
       )}\n`,
     );
   });
@@ -492,9 +495,14 @@ export function activate(host: CliPluginHost): void {
 
   host.command("poll reopen", ([ref], opts) => {
     const poll = findPoll(ref as string);
-    const run = reopenPoll(core, ctx, poll, { commit: opts.commit === true });
+    const reopened = reopenPoll(core, ctx, poll, { commit: opts.commit === true });
     write(`Reopened poll ${poll.id}  ${poll.title}\n`);
-    if (opts.commit) write(`${ui.commitReport(run)}\n`);
+    if (reopened.late > 0) {
+      write(
+        `${c.yellow(`${reopened.late} vote${reopened.late === 1 ? " was" : "s were"} cast while it was closed; ${reopened.late === 1 ? "it counts" : "they count"} now.`)}\n`,
+      );
+    }
+    if (opts.commit) write(`${ui.commitReport(reopened.run)}\n`);
   });
 
   /* ------------------------------------------------------------ the issue */

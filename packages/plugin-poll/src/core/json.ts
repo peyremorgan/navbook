@@ -7,7 +7,7 @@
  * shows a person (§6.4), and a reader of JSON is a program.
  */
 
-import { type BallotReading, ballotOf, type QuestionTally } from "./ballot.ts";
+import { type BallotReading, ballotOf, type QuestionTally, voterState } from "./ballot.ts";
 import type { Answers, PollQuestion } from "./files.ts";
 import type { PollRecord, VoteRecord } from "./tree.ts";
 
@@ -94,7 +94,7 @@ export function pollSummaryJson(
     "closed-by-issue": poll.closedByIssue,
     deadline: poll.deadline,
     voters: poll.voters,
-    ...(me === null ? {} : { me: ballotOf(poll.ballots, me)?.state ?? "none" }),
+    ...(me === null ? {} : { me: voterState(poll.ballots, me) }),
   };
 }
 
@@ -144,7 +144,7 @@ export function pollJson(
       : {
           me: {
             voter: me,
-            state: mine?.state ?? "none",
+            state: voterState(poll.ballots, me),
             ballot: mine === undefined ? null : voteJson(navDir, mine.vote, mine),
           },
         }),

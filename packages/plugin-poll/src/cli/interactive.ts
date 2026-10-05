@@ -35,7 +35,8 @@ export function parseAnswerLine(question: PollQuestion, line: string): Answer | 
   if (other === "") return { error: "write your answer after 'o:'" };
   const picks: string[] = [];
   for (const word of listed.split(/[\s,]+/).filter(Boolean)) {
-    const option = optionByRef(question, word);
+    // The options are listed by number here, so a number is a position.
+    const option = optionByRef(question, word, "position");
     if (option === undefined) return { error: `'${word}' is not one of the options` };
     if (!picks.includes(option)) picks.push(option);
   }
@@ -46,12 +47,19 @@ export function parseAnswerLine(question: PollQuestion, line: string): Answer | 
   return { picks, other };
 }
 
-/** An option by its ID, or by its number from 1. */
-export function optionByRef(question: PollQuestion, ref: string): string | undefined {
-  const byId = question.options.find((option) => option.id === ref.toLowerCase());
-  if (byId !== undefined) return byId.id;
-  if (!/^\d+$/.test(ref)) return undefined;
-  return question.options[Number(ref) - 1]?.id;
+/**
+ * An option by its ID, or by its number from 1. Which comes first matters
+ * only for an option whose ID is a number: a flag names options by ID, as
+ * `--json` does, and the walk by the numbers it shows.
+ */
+export function optionByRef(
+  question: PollQuestion,
+  ref: string,
+  first: "id" | "position" = "id",
+): string | undefined {
+  const byId = question.options.find((option) => option.id === ref.toLowerCase())?.id;
+  const byPosition = /^\d+$/.test(ref) ? question.options[Number(ref) - 1]?.id : undefined;
+  return first === "id" ? (byId ?? byPosition) : (byPosition ?? byId);
 }
 
 /**

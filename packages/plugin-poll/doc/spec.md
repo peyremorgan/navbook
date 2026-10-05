@@ -194,7 +194,9 @@ decision-note: |
   `decision-note` MUST NOT be present without `closed`.
 
 **Reopening** removes all four keys. The poll is open again; the decision it
-had is in the history.
+had is in the history. A vote cast while it was closed — which no tool writes,
+so a race or a hand edit — is no longer late (§6.1), and counts like any other;
+a tool reopening a poll SHOULD say how many there are.
 
 A poll whose issue is closed reads as closed (§6.2) without `closed` being set:
 closing an issue is a statement that the work is over, and a poll still asking
@@ -232,7 +234,10 @@ An empty `answers` (`answers: {}`) is a **withdrawal**: the voter takes back
 their earlier ballot and answers nothing.
 
 A vote is never edited. Voting again writes a new file; the old one stays, and
-is what the history of somebody's opinion is made of.
+is what the history of somebody's opinion is made of. A file name records the
+second, so a tool writing a vote stamps it at least a second after the same
+voter's latest vote in that poll, whatever its clock says: one person's votes
+then sort in the order they were cast.
 
 ### 4.1 Answers
 

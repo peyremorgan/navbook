@@ -289,6 +289,9 @@ describe("nav poll edit, close and reopen", () => {
     assert.equal(json.voters, 0);
     assert.equal(json.title, "Attachment storage", "--from replaces the title too");
     assert.equal((json.me as Record<string, unknown>).state, "revoked");
+    const theirs = repo.nav(["poll", "show", poll], BOB);
+    assert.match(theirs.stdout, /the questions changed since you voted; vote again/);
+    assert.doesNotMatch(theirs.stdout, / \* /, "a revoked ballot's picks are not marked as theirs");
     assert.match(repo.nav(["poll", "list"], BOB).stdout, new RegExp(poll), "it waits on Bob again");
   });
 

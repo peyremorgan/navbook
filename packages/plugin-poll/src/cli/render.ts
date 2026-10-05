@@ -4,7 +4,7 @@
  */
 
 import type { QuestionTally, VoterState } from "../core/ballot.ts";
-import type { Answer, Answers, PollQuestion } from "../core/files.ts";
+import { type Answer, type Answers, type PollQuestion, runningCore } from "../core/files.ts";
 import type { PollRecord } from "../core/tree.ts";
 
 /** The colours a `Ctx` carries; only these are used. */
@@ -23,8 +23,7 @@ export function label(text: string, c: Paint): string {
 
 /** The person part of `Name <address>`, for a column that has little room. */
 export function personName(person: string): string {
-  const match = person.match(/^(.*?)\s*<[^>]*>$/);
-  return match?.[1]?.trim() || person;
+  return runningCore().parsePerson(person)?.name ?? person;
 }
 
 /** A poll's status, coloured: open is what is waiting on somebody. */

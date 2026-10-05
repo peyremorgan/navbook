@@ -16,6 +16,7 @@ import {
   type Answer,
   type Answers,
   answerFaults,
+  answersFaults,
   bodyText,
   CLOSING_KEYS,
   closedPoll,
@@ -34,7 +35,7 @@ import {
   SCOPE,
   validatePoll,
 } from "./files.ts";
-import { allPolls, type PollRecord, pollsOf } from "./tree.ts";
+import { allPolls, type PollRecord } from "./tree.ts";
 
 /** The core this plugin runs against: the host's copy, handed to `activate`. */
 export type Core = typeof NavbookCore;
@@ -218,7 +219,7 @@ export function openPoll(
   const { created } = core.prepareOpen(ws);
   const content = newPollFile(draft, { author: core.currentAuthor(ws), created });
   requireValid(core, content);
-  const id = ws.mintId(core.scanAllIds(ws.navRoot));
+  const id = ws.mintId(takenIds(core, ws));
   const dirPath = `${issue.dirPath}/${POLL_DIR}/${core.dirName(id, core.slugify(draft.title))}`;
   const filePath = `${dirPath}/${POLL_FILE}`;
   const run = change(
@@ -362,30 +363,48 @@ export interface VoteResult {
 }
 
 /**
- * The problems with a ballot, as messages: a question this poll does not
- * have, and every answer that does not fit its question (§4.1). An answer
- * with nothing in it is not a fault here: it is a question skipped.
+ * The answers a ballot is written with, in the poll's order: write-ins trimmed,
+ * and a question with nothing in its answer left out — skipped.
  */
-export function ballotFaults(questions: readonly PollQuestion[], answers: Answers): string[] {
-  const faults: string[] = [];
-  for (const [qid, answer] of answers) {
-    const question = questions.find((candidate) => candidate.id === qid);
-    if (question === undefined) faults.push(`'${qid}' is not a question of this poll`);
-    else if (answer.picks.length > 0 || answer.other !== null)
-      faults.push(...answerFaults(question, answer));
-  }
-  return faults;
-}
-
-/** The answers a ballot is written with: skipped questions left out, in the poll's order. */
-function writtenAnswers(questions: readonly PollQuestion[], answers: Answers): Answers {
+function writtenAnswers(questions: readonly PollQuestion[], given: Answers): Answers {
   const out: Answers = new Map();
   for (const question of questions) {
-    const answer = answers.get(question.id);
-    if (answer === undefined || (answer.picks.length === 0 && answer.other === null)) continue;
-    out.set(question.id, answer);
+    const answer = given.get(question.id);
+    if (answer === undefined) continue;
+    const trimmed = trimmedAnswer(answer);
+    if (trimmed.picks.length > 0 || trimmed.other !== null) out.set(question.id, trimmed);
   }
   return out;
+}
+
+/**
+ * IDs nothing in the tree holds yet: every name `scanAllIds` reads, and every
+ * poll's and vote's — which, in an archived issue, sit deeper than it looks.
+ */
+export function takenIds(core: Core, ws: WsCtx): Set<string> {
+  const taken = core.scanAllIds(ws.navRoot);
+  for (const poll of allPolls(loadTree(core, ws))) {
+    taken.add(poll.id);
+    for (const vote of poll.votes) taken.add(vote.id);
+  }
+  return taken;
+}
+
+/**
+ * When a new vote is cast: now, or a second after the voter's last vote when
+ * that is not earlier — file names are to the second, and a person's votes
+ * must sort in the order they cast them (§4), or a quick second vote could
+ * lose to the first.
+ */
+function castAt(poll: PollRecord, ws: WsCtx, author: string): Date {
+  const now = new Date(Math.floor(ws.now().getTime() / 1000) * 1000);
+  const key = voterKey(author);
+  const last = Math.max(
+    ...poll.votes
+      .filter((vote) => voterKey(vote.author) === key)
+      .map((vote) => vote.date.getTime()),
+  );
+  return last >= now.getTime() ? new Date(last + 1000) : now;
 }
 
 /** Cast a vote (§4): a new ballot for the person acting, replacing their last. */
@@ -402,15 +421,18 @@ export function castVote(
       "reload it, and answer the questions it asks now",
     ]);
   }
-  const given: Answers = new Map(
-    [...input.answers].map(([qid, answer]) => [qid, trimmedAnswer(answer)]),
+  const unknown = [...input.answers.keys()].filter(
+    (qid) => !poll.questions.some((question) => question.id === qid),
   );
-  const faults = ballotFaults(poll.questions, given);
+  const answers = writtenAnswers(poll.questions, input.answers);
+  const faults = [
+    ...unknown.map((qid) => `'${qid}' is not a question of this poll`),
+    ...answersFaults(poll.questions, answers),
+  ];
   if (faults.length > 0) {
     const [first, ...rest] = faults;
     core.wsFail("invalid-input", first as string, rest);
   }
-  const answers = writtenAnswers(poll.questions, given);
   const author = core.currentAuthor(ws);
   const note = bodyText(input.note ?? "");
   const withdrawn = answers.size === 0;
@@ -428,8 +450,8 @@ export function castVote(
   ) {
     core.wsFail("precondition", `your vote on poll ${poll.id} already says exactly this`);
   }
-  const id = ws.mintId(core.scanAllIds(ws.navRoot));
-  const path = `${poll.dirPath}/${core.commentFileName(ws.now(), id)}`;
+  const id = ws.mintId(takenIds(core, ws));
+  const path = `${poll.dirPath}/${core.commentFileName(castAt(poll, ws, author), id)}`;
   const content = newVoteFile({ author, fingerprint: poll.fingerprint, answers, note });
   const run = change(
     core,
@@ -548,13 +570,22 @@ export function closePoll(
   return { decision, run };
 }
 
+export interface ReopenResult {
+  run: RunPlanResult;
+  /**
+   * How many votes cast while it was closed — which only a race or a hand
+   * edit produces — count again now that it is open (§3.2).
+   */
+  late: number;
+}
+
 /** Reopen a closed poll (§3.2): its decision goes, and voting resumes. */
 export function reopenPoll(
   core: Core,
   ws: WsCtx,
   poll: PollRecord,
   opts: EditOptions,
-): RunPlanResult {
+): ReopenResult {
   if (poll.closed === null) {
     core.wsFail(
       "precondition",
@@ -568,7 +599,7 @@ export function reopenPoll(
   }
   assertUnchanged(core, poll.blobSha, `poll ${poll.id}`, opts.baseSha);
   const text = readFileSync(core.absPath(ws, poll.filePath), "utf8");
-  return change(
+  const run = change(
     core,
     ws,
     "reopen",
@@ -577,6 +608,7 @@ export function reopenPoll(
     [{ op: "write", path: poll.filePath, content: reopenedPoll(text) }],
     opts,
   );
+  return { run, late: poll.ballots.filter((ballot) => ballot.state === "late").length };
 }
 
 /* ------------------------------------------------------------------ people */
@@ -589,11 +621,6 @@ export function actingVoter(core: Core, ws: WsCtx): string | null {
     if (error instanceof core.MissingIdentityError) return null;
     throw error;
   }
-}
-
-/** The polls on the issues in `repo`, by issue. */
-export function pollsByIssue(repo: Repo): { issue: EntityRecord; poll: PollRecord }[] {
-  return repo.issues.flatMap((issue) => pollsOf(issue).map((poll) => ({ issue, poll })));
 }
 
 /* ------------------------------------------------------------------- helpers */

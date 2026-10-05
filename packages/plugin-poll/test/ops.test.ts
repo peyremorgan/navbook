@@ -22,6 +22,7 @@ import {
   parseDraft,
   reopenPoll,
   resolvePoll,
+  takenIds,
 } from "../src/core/ops.ts";
 import { allPolls, type PollRecord, stateOf } from "../src/core/tree.ts";
 import { extensions } from "./fixtures.ts";
@@ -357,6 +358,66 @@ describe("voting", () => {
     });
   });
 
+  it("stamps a second vote cast in the same second after the first, so it is the one that counts", () => {
+    inRepo((act, _dir, issueId) => {
+      const id = opened(act, issueId);
+      const vote = (picks: string[]) => {
+        const ws = act(2, "bob@example.com");
+        return castVote(
+          core,
+          ws,
+          pollOf(ws, id),
+          { answers: answers({ q1: { picks } }) },
+          { commit: true },
+        );
+      };
+      const first = vote(["s3-compatible"]);
+      const second = vote(["local-disk"]);
+      assert.match(first.path, /2026-10-04T100200Z-/);
+      assert.match(second.path, /2026-10-04T100201Z-/);
+      const ws = act(2, "bob@example.com");
+      const out = castVote(core, ws, pollOf(ws, id), { answers: new Map() }, { commit: true });
+      assert.match(out.path, /2026-10-04T100202Z-/);
+      const poll = pollOf(ws, id);
+      assert.deepEqual(
+        poll.ballots.map((b) => b.state),
+        ["superseded", "superseded", "withdrawn"],
+      );
+    });
+  });
+
+  it("mints IDs no poll or vote holds, those of archived issues included", () => {
+    inRepo((act, dir, issueId) => {
+      const archived = join(
+        dir,
+        ".navbook/archive/2025/issues/closed/q1w2e3r4-old/poll/e5f6g7h8-x",
+      );
+      execFileSync("mkdir", ["-p", archived]);
+      writeFileSync(
+        join(dir, ".navbook/archive/2025/issues/closed/q1w2e3r4-old/issue.md"),
+        "---\ntitle: Old\nauthor: a@example.com\ncreated: 2025-01-01T00:00:00Z\nresolution: fixed\n---\n\nOld.\n",
+      );
+      writeFileSync(
+        join(archived, "poll.md"),
+        readFileSync(join(dir, ".navbook", pollOf(act(1), opened(act, issueId)).filePath), "utf8"),
+      );
+      writeFileSync(
+        join(archived, "2025-01-02T000000Z-v9v9v9v9.md"),
+        "---\nauthor: a@example.com\nfingerprint: 0123456789abcdef\nanswers: {}\n---\n",
+      );
+      const taken = takenIds(core, act(2));
+      assert.ok(
+        core.scanAllIds(join(dir, ".navbook")).has("e5f6g7h8"),
+        "the scan sees the poll's directory",
+      );
+      assert.ok(
+        !core.scanAllIds(join(dir, ".navbook")).has("v9v9v9v9"),
+        "but not the vote beneath it",
+      );
+      assert.ok(taken.has("e5f6g7h8") && taken.has("v9v9v9v9") && taken.has(issueId));
+    });
+  });
+
   it("refuses a form whose questions changed under it", () => {
     inRepo((act, _dir, issueId) => {
       const id = opened(act, issueId);
@@ -537,7 +598,7 @@ describe("closing and reopening", () => {
       assert.equal(poll.outcome?.size, 0, "nobody voted: nothing to decide");
       const text = readFileSync(join(dir, ".navbook", poll.filePath), "utf8");
       assert.doesNotMatch(text, /^decision:/m);
-      reopenPoll(core, ws, poll, { commit: true });
+      assert.equal(reopenPoll(core, ws, poll, { commit: true }).late, 0);
       assert.equal(lastMessage(dir), `docs(poll): reopen ${id} on #${issueId}\n\nRefs: ${issueId}`);
       const reopened = pollOf(ws, id);
       assert.equal(reopened.status, "open");
@@ -573,6 +634,40 @@ describe("closing and reopening", () => {
       assert.match(
         refusal(() => reopenPoll(core, ws, recorded, {})),
         /is closed; reopen it before its poll/,
+      );
+    });
+  });
+});
+
+describe("reopening a poll with votes cast while it was closed", () => {
+  it("counts them again, and says how many", () => {
+    inRepo((act, dir, issueId) => {
+      const id = opened(act, issueId);
+      const bob = act(2, "bob@example.com");
+      castVote(
+        core,
+        bob,
+        pollOf(bob, id),
+        { answers: answers({ q1: { picks: ["s3-compatible"] } }) },
+        { commit: true },
+      );
+      const ws = act(3);
+      closePoll(core, ws, pollOf(ws, id), {}, { commit: true });
+      // A vote a race left behind: cast on another clone after the close.
+      const poll = pollOf(ws, id);
+      writeFileSync(
+        join(dir, ".navbook", poll.dirPath, "2026-10-04T100500Z-l8l8l8l8.md"),
+        `---\nauthor: bob@example.com\nfingerprint: ${poll.fingerprint}\nanswers:\n  q1: { picks: [local-disk] }\n---\n`,
+      );
+      assert.deepEqual(
+        pollOf(ws, id).ballots.map((b) => b.state),
+        ["counted", "late"],
+      );
+      const reopened = reopenPoll(core, act(6), pollOf(ws, id), {});
+      assert.equal(reopened.late, 1);
+      assert.deepEqual(
+        pollOf(ws, id).ballots.map((b) => b.state),
+        ["superseded", "counted"],
       );
     });
   });
