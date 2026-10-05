@@ -80,7 +80,8 @@ jobs:
       - run: >-
           pnpm --workspace-concurrency=1
           --filter @navbook/core --filter @navbook/cli
-          --filter @navbook/plugin-kb --filter @navbook/plugin-tests test
+          --filter @navbook/plugin-kb --filter @navbook/plugin-tests
+          --filter @navbook/plugin-poll test
       - run: pnpm test:conformance
 
   web-e2e:

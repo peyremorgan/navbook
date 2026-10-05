@@ -1,0 +1,106 @@
+{
+  "name": "@navbook/plugin-poll",
+  "version": "0.5.0",
+  "description": "Polls on issues: questions with options, a ballot per person, and the decision they come to",
+  "keywords": [
+    "navbook-plugin",
+    "issues",
+    "tracker",
+    "git",
+    "polls",
+    "decisions"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peyremorgan/navbook.git",
+    "directory": "packages/plugin-poll"
+  },
+  "homepage": "https://github.com/peyremorgan/navbook#readme",
+  "bugs": "https://github.com/peyremorgan/navbook/issues",
+  "type": "module",
+  "engines": {
+    "node": ">=24",
+    "navbook": "^1.1.0"
+  },
+  "exports": {
+    "./core": "./src/core/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      "./core": {
+        "types": "./dist/core/index.d.ts",
+        "default": "./dist/core/index.js"
+      },
+      "./package.json": "./package.json"
+    }
+  },
+  "files": [
+    "dist",
+    "doc"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "prepack": "node ../../script/require-pnpm.js && pnpm build",
+    "prepublishOnly": "node ../../script/require-pnpm.js"
+  },
+  "peerDependencies": {
+    "@navbook/core": "^0.5.0"
+  },
+  "devDependencies": {
+    "@navbook/cli": "workspace:*",
+    "@navbook/core": "workspace:*"
+  },
+  "navbook": {
+    "short": "poll",
+    "spec": "doc/spec.md",
+    "format": {
+      "entityDirs": [
+        "poll"
+      ]
+    },
+    "core": {
+      "queryKeys": [
+        {
+          "key": "poll",
+          "kinds": [
+            "issue"
+          ],
+          "help": "poll:STATE                   has a poll that is open or closed, or none for no poll (repeatable, ORs)"
+        },
+        {
+          "key": "poll-awaiting",
+          "kinds": [
+            "issue"
+          ],
+          "help": "poll-awaiting:EMAIL           has an open poll waiting on EMAIL: they filed, hold or commented on the issue and have no counting vote (repeatable, ORs)",
+          "needsComments": true
+        }
+      ],
+      "doctorChecks": [
+        {
+          "id": "X-poll-1",
+          "level": "error",
+          "description": "the layout of every issue's poll/, and the schema of every poll and vote"
+        },
+        {
+          "id": "X-poll-2",
+          "level": "warning",
+          "description": "a vote cast after its poll was closed, which is not counted"
+        },
+        {
+          "id": "X-poll-3",
+          "level": "error",
+          "description": "a poll or vote ID that is also another's, an entity's or a comment's"
+        }
+      ],
+      "commitScopes": [
+        "poll"
+      ]
+    }
+  }
+}

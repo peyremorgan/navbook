@@ -114,6 +114,15 @@ importers:
         specifier: ^3.5.40
         version: 3.5.42(typescript@5.9.3)
 
+  packages/plugin-poll:
+    devDependencies:
+      '@navbook/cli':
+        specifier: workspace:*
+        version: link:../cli
+      '@navbook/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/plugin-tests:
     devDependencies:
       '@apollo/client':
