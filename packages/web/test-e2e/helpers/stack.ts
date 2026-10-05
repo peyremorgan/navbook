@@ -67,6 +67,13 @@ export interface StackOptions {
   pluginPaths?: readonly string[];
   /** More environment for the API server: a plugin's `NAV_SERVER_<SHORT>_*`, say. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * Change the fixture before the server starts on it: a plugin whose server
+   * half reads settings from `navbook.json` declares them here. What it
+   * changes it commits on `repo.branch` and pushes, since a server refuses a
+   * dirty clone and pulls from its origin.
+   */
+  prepare?: (repo: FixtureRepo) => void;
 }
 
 export async function startStack(options: StackOptions = {}): Promise<Stack> {
@@ -77,6 +84,7 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
   }
 
   const repo = createFixtureRepo();
+  options.prepare?.(repo);
   // localhost throughout: a token's `iss` claim is compared as a string, so
   // the issuer has to call itself what the browser and the server call it.
   const issuer = await startDevIssuer({
