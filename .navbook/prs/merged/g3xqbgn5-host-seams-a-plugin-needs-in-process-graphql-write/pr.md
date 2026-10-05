@@ -18,6 +18,9 @@ revisions:
   - head: 88abcab982bf241d44ab5677c7104ebe14f0a21e
     base: c52f72ded1a147cb7259d08cb58753e2199c17da
     date: 2026-10-05T01:08:45Z
+merged:
+  date: 2026-10-05T01:09:20Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Closes #kw6afa4a, the second of three steps towards #c43a2w7e (plugin-chat).
