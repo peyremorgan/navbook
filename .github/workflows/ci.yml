@@ -106,9 +106,9 @@ jobs:
       # The generated bundle is what the suite serves, because it is what gets
       # deployed: a dev server has no SPA fallback to prove.
       #
-      # Both scripts name the three first-party plugins in `NAVBOOK_WEB_PLUGINS`.
+      # Both scripts name the four first-party plugins in `NAVBOOK_WEB_PLUGINS`.
       # That makes this job the acceptance test for the plugin system's web
-      # half: the bundle is built with three layers, and Playwright runs each
+      # half: the bundle is built with four layers, and Playwright runs each
       # plugin's own suite beside this package's because the same variable
       # decided both.
       - run: pnpm --filter @navbook/web build

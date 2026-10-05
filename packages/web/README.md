@@ -162,22 +162,23 @@ compiled in, so they cannot be. Changing which plugins the client has is
 therefore `docker compose build`, not a restart, and `compose.yaml` passes
 `NAVBOOK_PLUGINS` through as a build argument for exactly that reason.
 
-This package's own scripts default `NAVBOOK_WEB_PLUGINS` to the three
-first-party plugins, `@navbook/plugin-kb`, `@navbook/plugin-tests` and
-`@navbook/plugin-chat`, when it is unset. The knowledge base is there because
-this repository uses it: `.navbook/navbook.json` declares it, and `specs/` is
-where these documents live. The test plans and the assistant are there so that
-every build and every end-to-end run proves their layers too: the fixture the
-e2e stack serves has plans in it, and the assistant's suite starts a server
-with a model behind it. A value that is set wins, even an empty one: that is
+This package's own scripts default `NAVBOOK_WEB_PLUGINS` to the four
+first-party plugins, `@navbook/plugin-kb`, `@navbook/plugin-tests`,
+`@navbook/plugin-chat` and `@navbook/plugin-poll`, when it is unset. The
+knowledge base is there because this repository uses it: `.navbook/navbook.json`
+declares it, and `specs/` is where these documents live. The others are there so
+that every build and every end-to-end run proves their layers too: the fixture
+the e2e stack serves has plans in it, the assistant's suite starts a server with
+a model behind it, and the polls' suite opens polls on issues it files. A value that is set wins, even an empty one: that is
 how the image builds exactly the plugins `NAVBOOK_PLUGINS` names, and how
 `NAVBOOK_WEB_PLUGINS= pnpm dev` shows a client without any. Nothing here needs
 any of them to build.
 
 A layer's own pages are reachable as soon as it is merged. To appear anywhere
-the host already draws — a tab in the header, a panel on an issue, a field on
-the new-issue form, a chip in a filter bar, a badge on a row, a group in the
-inbox — it registers with `useNavbookSlots()` from one of its own Nuxt plugin
+the host already draws — a tab in the header, a panel on an issue, something
+placed in an issue's discussion, a field on the new-issue form, a chip in a
+filter bar, a badge on a row, a group in the inbox or a reason to be in it — it
+registers with `useNavbookSlots()` from one of its own Nuxt plugin
 files, which run before the first render. `app/composables/useNavbookSlots.ts`
 is the list of slots and what each one is given.
 

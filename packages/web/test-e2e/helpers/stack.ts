@@ -23,8 +23,12 @@ import { fileURLToPath } from "node:url";
 import { type DevIssuer, startDevIssuer } from "../../script/dev-issuer.ts";
 import { createFixtureRepo, type FixtureRepo } from "../../script/fixture-repo.ts";
 
-/** The plugins this suite's tree needs to be readable: features, and test plans. */
-const PLUGINS = ["plugin-kb", "plugin-tests"]
+/**
+ * The plugins this suite's tree needs to be readable — features, and test
+ * plans — and polls, which the poll layer's own suite opens on the issues it
+ * files.
+ */
+const PLUGINS = ["plugin-kb", "plugin-tests", "plugin-poll"]
   .map((name) => join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", name))
   .join(delimiter);
 

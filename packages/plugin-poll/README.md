@@ -151,7 +151,18 @@ has polls in it:
 | Format | `poll/<id>-<slug>/poll.md` and its votes inside issue directories; checks X-poll-1 to X-poll-3 |
 | CLI | `nav poll {open,vote,show,list,edit,close,reopen}`, a "polls" section and `polls` JSON on `nav issue show`, the `poll:` and `poll-awaiting:` terms on `nav issue list` |
 | API | `Poll` and `Query.poll`, `polls` on `Issue`, five mutations (a ballot is the signed-in person's), `myState` and `myDraft` for the viewer, `polls` and `pollAwaiting` issue filters, and `ext.poll` on issue rows |
+| Web | a Nuxt layer: each poll as a card in its issue's discussion, where it was asked — the ballot, the results behind a toggle until you vote, the decision — a polls panel with **New poll** in the issue's sidebar, a badge on its rows, a `poll` chip in the issue filter bar, and **Polls awaiting me** in the inbox |
 | Commits | the `docs(poll): …` scope, with a `Refs:` trailer naming the issue |
+
+The web half is compiled into the client rather than loaded by it, so a
+deployment that wants polls in the browser builds with this package named:
+
+```sh
+NAVBOOK_PLUGINS="@navbook/plugin-poll" docker compose build
+```
+
+That one value sets both images: the API installs the plugin, and the client
+merges the layer.
 
 ## Without it installed
 

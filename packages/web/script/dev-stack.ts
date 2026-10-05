@@ -32,12 +32,13 @@ const SERVER_ENTRY = join(PACKAGE_ROOT, "..", "server", "src", "main.ts");
  * The fixture repository has features and test plans in it, so the server has
  * to have the plugins that define them — exactly as the deployment it stands in for does,
  * and as the end-to-end helper does. The assistant is here too, and shows itself
- * once `NAV_SERVER_CHAT_MODEL` names a model. The client half is `NAVBOOK_WEB_PLUGINS`,
+ * once `NAV_SERVER_CHAT_MODEL` names a model, and polls, which any issue can be asked
+ * in. The client half is `NAVBOOK_WEB_PLUGINS`,
  * which this package's `dev:stack` script sets; a plugin you are writing
  * yourself goes on `NAVBOOK_PLUGIN_PATH` beside this one, since `process.env`
  * is spread whole into both children.
  */
-const OWN_PLUGINS = ["plugin-kb", "plugin-tests", "plugin-chat"]
+const OWN_PLUGINS = ["plugin-kb", "plugin-tests", "plugin-chat", "plugin-poll"]
   .map((name) => join(PACKAGE_ROOT, "..", name))
   .join(delimiter);
 
