@@ -255,7 +255,7 @@ judged, so a force-push can never inherit a stale approval.
 Developed and tested on Linux and macOS. On Windows, use
 [Git Bash](https://gitforwindows.org/) or WSL, which provide the POSIX shell the
 hooks and completions expect. Under Git Bash the suites of `core`, `cli`,
-`plugin-kb` and `plugin-tests` pass, short of the few tests the platform cannot
+`plugin-kb`, `plugin-tests` and `plugin-poll` pass, short of the few tests the platform cannot
 host, each skipped with its reason (see
 [Developing on Windows](#developing-on-windows)); CI runs them there too.
 
@@ -347,6 +347,12 @@ assigned to me?", "which issues are overdue?") and files, reviews and closes
 things once you approve each change, talking to any OpenAI-compatible model you
 configure, a local one included.
 
+Another asks people to decide.
+[`@navbook/plugin-poll`](packages/plugin-poll/README.md) puts polls on issues:
+questions with options, a ballot per person that their next one replaces, and
+the decision each question came to once somebody closes it. It is how a team
+settles a design, and how an agent planning a change asks a person to choose.
+
 ## Documentation
 
 The [specification](doc/spec/README.md) is the normative definition of the file
@@ -367,7 +373,7 @@ pnpm check         # lint and type-check
 pnpm bench         # the performance budget, on its own machine
 ```
 
-The repository is a pnpm workspace of six packages. `packages/core`
+The repository is a pnpm workspace of eight packages. `packages/core`
 (`@navbook/core`) is the whole implementation — format logic, git plumbing,
 workspace I/O, and the operations behind each verb — and knows nothing about
 terminals. `packages/cli` (`@navbook/cli`) adds argument parsing, `$EDITOR`,
@@ -388,6 +394,8 @@ manual test plans, and runs of them kept beside a pull request.
 `packages/plugin-chat` ([`@navbook/plugin-chat`](packages/plugin-chat/README.md))
 is the assistant, the plugin that acts for somebody: it performs its writes
 through the host's own operations rather than its own copies of them.
+`packages/plugin-poll` ([`@navbook/plugin-poll`](packages/plugin-poll/README.md))
+keeps polls inside issue directories, and votes as files beside them.
 Development needs no build step outside the web client: a library's entry point
 is its TypeScript source, and Node runs it directly.
 
