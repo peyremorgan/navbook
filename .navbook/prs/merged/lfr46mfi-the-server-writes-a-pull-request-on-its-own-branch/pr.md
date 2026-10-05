@@ -15,6 +15,9 @@ revisions:
   - head: fa12d443964196b41c30c00729fc856f2bb820e7
     base: 8fdb571322ac2d6cebc3adff32468e04eabbc08b
     date: 2026-10-05T00:57:25Z
+merged:
+  date: 2026-10-05T00:58:02Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Closes #yp56dc43, the first of three steps towards #c43a2w7e (plugin-chat).
