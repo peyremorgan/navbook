@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { git } from "../src/git/exec.ts";
-import { lsTreeEntries } from "../src/git/refscan.ts";
+import { listRefShasAsync, lsTreeEntries } from "../src/git/refscan.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "navbook-refscan-"));
 after(() => rmSync(dir, { recursive: true, force: true }));
@@ -29,5 +29,28 @@ describe("lsTreeEntries", () => {
 
   it("throws on a tree git cannot list, rather than answering nothing", () => {
     assert.throws(() => lsTreeEntries(dir, "0".repeat(40)));
+  });
+});
+
+describe("listRefShasAsync", () => {
+  it("names every ref under the prefixes with its commit, leaving symbolic ones out", async () => {
+    const head = git(["rev-parse", "HEAD"], { cwd: dir }).trim();
+    git(["update-ref", "refs/remotes/origin/main", head], { cwd: dir });
+    git(["update-ref", "refs/remotes/origin/feat/x", head], { cwd: dir });
+    git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], { cwd: dir });
+    const refs = await listRefShasAsync(dir, ["refs/remotes/origin/", "refs/heads/main"]);
+    assert.deepEqual([...refs].sort(), [
+      ["refs/heads/main", head],
+      ["refs/remotes/origin/feat/x", head],
+      ["refs/remotes/origin/main", head],
+    ]);
+  });
+
+  it("answers an empty map when nothing is under the prefixes", async () => {
+    assert.deepEqual(await listRefShasAsync(dir, ["refs/remotes/nowhere/"]), new Map());
+  });
+
+  it("throws where git cannot list refs at all", async () => {
+    await assert.rejects(listRefShasAsync(join(dir, "missing"), ["refs/heads/"]));
   });
 });

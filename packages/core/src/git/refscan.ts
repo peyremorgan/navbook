@@ -8,7 +8,7 @@
  */
 
 import { catObjects, MAX_READ_BYTES } from "./blobs.ts";
-import { GitError, git, gitMaybe, gitRun, splitLines, splitNul } from "./exec.ts";
+import { GitError, git, gitAsync, gitMaybe, gitRun, splitLines, splitNul } from "./exec.ts";
 
 export interface Ref {
   /** Full ref name, e.g. `refs/heads/feat/auth`. */
@@ -38,6 +38,31 @@ export function listBranchRefs(cwd: string): Ref[] {
     // Skip origin/HEAD and friends: they duplicate a branch already listed.
     if (symref !== undefined && symref !== "") continue;
     refs.push({ full, short, remote: full.startsWith("refs/remotes/") });
+  }
+  return refs;
+}
+
+/**
+ * Every ref under `prefixes` and the commit it names, without blocking.
+ *
+ * What a service compares between two moments to learn what moved — a branch
+ * somebody pushed, one that went — so symbolic refs (`origin/HEAD`) are left
+ * out: they only ever repeat a ref already listed. Keyed by full name
+ * (`refs/remotes/origin/main`). Throws a `GitError` when git cannot list them.
+ */
+export async function listRefShasAsync(
+  cwd: string,
+  prefixes: readonly string[],
+): Promise<Map<string, string>> {
+  const output = await gitAsync(
+    ["for-each-ref", "--format=%(refname)%00%(objectname)%00%(symref)", ...prefixes],
+    { cwd },
+  );
+  const refs = new Map<string, string>();
+  for (const line of splitLines(output)) {
+    const [full, sha, symref] = line.split("\0");
+    if (!full || !sha || (symref !== undefined && symref !== "")) continue;
+    refs.set(full, sha);
   }
   return refs;
 }
