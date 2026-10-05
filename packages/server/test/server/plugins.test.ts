@@ -376,6 +376,160 @@ describe("the mutation event", () => {
   });
 });
 
+/** Ask until `probe` answers true, or give up after a few seconds. */
+async function eventually(probe: () => boolean, what: () => string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (!probe()) {
+    if (Date.now() > deadline) assert.fail(`never happened: ${what()}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+describe("what a service hears of, and does, outside any request", () => {
+  it("hears of a push somebody made from a terminal, once the server pulls it", async () => {
+    const log = logFile("sync-pull");
+    const harness = await startHarness({
+      env: probeEnv(log.path, { SRVPROBE_SYNC_READ: "1" }),
+      pullIntervalMs: 200,
+    });
+    try {
+      const { peer } = harness.fixture;
+      peer.fileIssue("Filed at a terminal", "Body.", "iiii1111");
+      assert.equal(peer.git(["push", "--quiet", "origin", "main"]).code, 0);
+      // Told by the background pull, and able to read what it brought — as a
+      // person of its own, through the built-in resolvers, with no request.
+      await eventually(
+        () => log.lines().includes("sync pull titles=Filed at a terminal"),
+        () => log.lines().join("\n"),
+      );
+      // No mutation was made here, so no mutation listener heard of it.
+      assert.deepEqual(
+        log.lines().filter((line) => line.startsWith("mutation ")),
+        [],
+      );
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("reads as the server itself, which no admission rule is about", async () => {
+    const log = logFile("sync-self");
+    const harness = await startHarness({
+      env: probeEnv(log.path, { SRVPROBE_SYNC_READ: "1" }),
+      pullIntervalMs: 200,
+      // Nobody at all would be let in by address; the server's own reads still are.
+      policy: { allowEmailDomains: ["nowhere.invalid"] },
+    });
+    try {
+      const { peer } = harness.fixture;
+      peer.fileIssue("Read by the server", "Body.", "iiii2222");
+      assert.equal(peer.git(["push", "--quiet", "origin", "main"]).code, 0);
+      await eventually(
+        () => log.lines().includes("sync pull titles=Read by the server"),
+        () => log.lines().join("\n"),
+      );
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("hears once of a mutation, as a write", async () => {
+    const log = logFile("sync-write");
+    // No background pull: the only fetches are the ones operations make.
+    const harness = await startHarness({ env: probeEnv(log.path), pullIntervalMs: 0 });
+    try {
+      log.clear();
+      await harness.gql(
+        `mutation { openIssue(input: { title: "One", body: "Body." }) { issue { id title } } }`,
+      );
+      await eventually(
+        () => log.lines().includes("sync write"),
+        () => log.lines().join("\n"),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.deepEqual(
+        log.lines().filter((line) => line.startsWith("sync ")),
+        ["sync write"],
+      );
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("acts as a person from a service: their authorship, the clone's commit, pushed", async () => {
+    const log = logFile("act-as");
+    const harness = await startHarness({
+      env: probeEnv(log.path, { SRVPROBE_ACT_AS: "Bridge User <bridge@example.invalid>" }),
+    });
+    try {
+      const acted = log.lines().find((line) => line.startsWith("acted "));
+      assert.ok(acted, log.lines().join("\n"));
+      assert.match(
+        acted,
+        /^acted docs\(issue\): open #\w{8} pushed=true author=Bridge User <bridge@example\.invalid>$/,
+      );
+      // The same event a client's mutation emits, naming the person.
+      assert.ok(
+        log
+          .lines()
+          .some((line) =>
+            /^mutation docs\(issue\): open #\w{8} pushed=true by=bridge@example\.invalid$/.test(
+              line,
+            ),
+          ),
+        log.lines().join("\n"),
+      );
+      const { origin, server } = harness.fixture;
+      assert.match(originSubjects(origin)[0] ?? "", /^docs\(issue\): open #\w{8}$/);
+      // Committed by the clone's own identity, as every API write is.
+      const committer = server.git(["log", "-1", "--format=%cn <%ce>"]).stdout.trim();
+      const configured = server.git(["config", "user.email"]).stdout.trim();
+      assert.ok(committer.endsWith(`<${configured}>`), committer);
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("refuses a person the server would refuse at the door", async () => {
+    const log = logFile("act-as-domain");
+    const harness = await startHarness({
+      env: probeEnv(log.path, { SRVPROBE_ACT_AS: "bridge@elsewhere.invalid" }),
+      policy: { allowEmailDomains: ["example.invalid"] },
+    });
+    try {
+      const refused = log.lines().find((line) => line.startsWith("refused "));
+      assert.ok(refused, log.lines().join("\n"));
+      assert.match(refused, /^refused FORBIDDEN: bridge@elsewhere\.invalid is not allowed/);
+      assert.deepEqual(
+        originSubjects(harness.fixture.origin).filter((line) => /open/.test(line)),
+        [],
+      );
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("refuses a person the format could not record", async () => {
+    for (const who of ["not an address", "Two\nLines <two@example.invalid>"]) {
+      const log = logFile("act-as-invalid");
+      const harness = await startHarness({ env: probeEnv(log.path, { SRVPROBE_ACT_AS: who }) });
+      try {
+        const lines = log.lines();
+        assert.ok(
+          lines.some((line) => line.startsWith("refused INVALID_INPUT: ")),
+          `${JSON.stringify(who)}: ${lines.join("\n")}`,
+        );
+        assert.equal(
+          lines.some((line) => line.startsWith("acted ")),
+          false,
+        );
+      } finally {
+        await harness.stop();
+      }
+    }
+  });
+});
+
 describe("what the server refuses to start without", () => {
   it("stops when the clone declares a plugin it does not have", async () => {
     // The refusal the CLI does not make. A person at a terminal can read one

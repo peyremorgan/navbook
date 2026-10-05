@@ -34,11 +34,21 @@ function service(
 }
 
 function runtimeWith(...services: PluginService[]): { runtime: PluginRuntime; reported: string[] } {
+  return runtimeTimed({}, ...services);
+}
+
+function runtimeTimed(
+  opts: { stopTimeoutMs?: number },
+  ...services: PluginService[]
+): { runtime: PluginRuntime; reported: string[] } {
   const reported: string[] = [];
-  const runtime = new PluginRuntime((line) => reported.push(line));
+  const runtime = new PluginRuntime((line) => reported.push(line), opts);
   for (const each of services) runtime.addService(each);
   return { runtime, reported };
 }
+
+/** Enough turns of the event loop for anything that is going to run to have run. */
+const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 10));
 
 describe("plugin services", () => {
   it("start in registration order and stop in reverse", async () => {
@@ -81,6 +91,145 @@ describe("plugin services", () => {
     await runtime.stop();
     assert.deepEqual(log, ["start a", "start b", "stop b", "stop a"]);
     assert.ok(reported.some((line) => /'b' did not stop cleanly: b cannot stop/.test(line)));
+  });
+
+  it("go on without a service that does not stop in time, and say so", async () => {
+    const log: string[] = [];
+    let late: () => void = () => undefined;
+    const hung: PluginService = {
+      name: "hung",
+      start: async () => undefined,
+      // Resolves only when the test says, long after the deadline; then fails.
+      stop: () =>
+        new Promise<void>((_resolve, reject) => {
+          late = () => reject(new Error("too late to matter"));
+        }),
+    };
+    const { runtime, reported } = runtimeTimed(
+      { stopTimeoutMs: 20 },
+      service("a", log),
+      hung,
+      service("b", log),
+    );
+    await runtime.start();
+    const started = Date.now();
+    await runtime.stop();
+    assert.ok(Date.now() - started < 1_000, "waited past the deadline");
+    assert.deepEqual(log, ["start a", "start b", "stop b", "stop a"]);
+    assert.ok(
+      reported.includes("plugin service 'hung' did not stop within 20 ms; going on without it"),
+      reported.join("\n"),
+    );
+    // Its failure after the fact is nobody's unhandled rejection.
+    late();
+    await settle();
+  });
+
+  it("wait for a service that stops within the deadline, however slowly", async () => {
+    const log: string[] = [];
+    const slow: PluginService = {
+      name: "slow",
+      start: async () => undefined,
+      stop: () => settle().then(() => void log.push("stop slow")),
+    };
+    const { runtime, reported } = runtimeTimed({ stopTimeoutMs: 1_000 }, slow, service("b", log));
+    await runtime.start();
+    await runtime.stop();
+    assert.deepEqual(log, ["start b", "stop b", "stop slow"]);
+    assert.ok(!reported.some((line) => /did not stop/.test(line)), reported.join("\n"));
+  });
+
+  it("report a stop that throws before it returns a promise", async () => {
+    const log: string[] = [];
+    const rude = {
+      name: "rude",
+      start: async () => undefined,
+      stop: (): Promise<void> => {
+        throw new Error("rude cannot stop");
+      },
+    };
+    const { runtime, reported } = runtimeWith(service("a", log), rude);
+    await runtime.start();
+    await runtime.stop();
+    assert.deepEqual(log, ["start a", "stop a"]);
+    assert.ok(reported.includes("plugin service 'rude' did not stop cleanly: rude cannot stop"));
+  });
+});
+
+describe("telling plugins the clone may have moved", () => {
+  const pulled = { cause: "pull" as const, at: "2026-10-05T00:00:00Z" };
+
+  it("tells every listener, each after the emitter has returned", async () => {
+    const { runtime } = runtimeWith();
+    const told: string[] = [];
+    runtime.onSync((event) => void told.push(`a ${event.cause}`));
+    runtime.onSync(async (event) => {
+      await settle();
+      told.push(`b ${event.at}`);
+    });
+    runtime.emitSync(pulled);
+    assert.deepEqual(told, [], "a listener ran inside the emitter");
+    await settle();
+    await settle();
+    assert.deepEqual(told, ["a pull", "b 2026-10-05T00:00:00Z"]);
+  });
+
+  it("reports a listener that throws or rejects, and tells the others all the same", async () => {
+    const { runtime, reported } = runtimeWith();
+    const told: string[] = [];
+    runtime.onSync(() => {
+      throw new Error("thrown");
+    });
+    runtime.onSync(async () => {
+      throw new Error("rejected");
+    });
+    runtime.onSync(() => void told.push("third"));
+    runtime.emitSync({ cause: "write", at: pulled.at });
+    await settle();
+    assert.deepEqual(told, ["third"]);
+    assert.deepEqual(reported.sort(), [
+      "plugin sync listener failed after a write: rejected",
+      "plugin sync listener failed after a write: thrown",
+    ]);
+  });
+
+  it("says nothing to nobody", async () => {
+    const { runtime, reported } = runtimeWith();
+    runtime.emitSync(pulled);
+    await settle();
+    assert.deepEqual(reported, []);
+  });
+});
+
+describe("a context for a person, outside a request", () => {
+  it("is not there while plugins are activating", () => {
+    const { runtime } = runtimeWith();
+    assert.throws(
+      () => runtime.contextFor({ email: "person@example.invalid" }),
+      /once every plugin has activated/,
+    );
+  });
+
+  it("is built for the person asked about, afresh each time", () => {
+    const { runtime } = runtimeWith();
+    const asked: unknown[] = [];
+    runtime.setContextFactory((viewer) => {
+      asked.push(viewer);
+      return { viewer } as unknown as GraphQLCtx;
+    });
+    const first = runtime.contextFor({ name: "A Person", email: "a@example.invalid" });
+    const second = runtime.contextFor({ name: "A Person", email: "a@example.invalid" });
+    assert.notEqual(first, second);
+    assert.deepEqual(first.viewer, { name: "A Person", email: "a@example.invalid" });
+    assert.equal(asked.length, 2);
+  });
+
+  it("passes the factory's refusal on", () => {
+    const { runtime } = runtimeWith();
+    runtime.setContextFactory(() => {
+      throw new Error("not allowed here");
+    });
+    assert.throws(() => runtime.contextFor({ email: "a@example.invalid" }), /not allowed here/);
   });
 });
 

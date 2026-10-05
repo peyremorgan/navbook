@@ -128,18 +128,29 @@ export function policyViolation(
     }
   }
 
-  if (policy.allowEmailDomains.length > 0) {
-    const domain = emailDomain(email);
-    if (domain === null || !policy.allowEmailDomains.includes(domain)) {
-      return `the email domain of ${describe(email)} is not one of ${policy.allowEmailDomains.join(", ")}`;
-    }
-  }
+  const domain = domainViolation(email, policy);
+  if (domain !== null) return domain;
 
   if (policy.requireEmailVerified && payload.email_verified !== true) {
     return `the token's 'email_verified' is ${describe(payload.email_verified)}, not true`;
   }
 
   return null;
+}
+
+/**
+ * Why an address fails the domain rule, or null when it passes or there is none.
+ *
+ * The one rule that judges the address alone, and so the one that still
+ * applies where there is no token to read the others from: a plugin acting for
+ * somebody names them by address (`host.api.contextFor`), and an address this
+ * server would refuse at the door must not come in by that one either.
+ */
+export function domainViolation(email: string, policy: AuthPolicy): string | null {
+  if (policy.allowEmailDomains.length === 0) return null;
+  const domain = emailDomain(email);
+  if (domain !== null && policy.allowEmailDomains.includes(domain)) return null;
+  return `the email domain of ${describe(email)} is not one of ${policy.allowEmailDomains.join(", ")}`;
 }
 
 /** A claim as the log shows it: JSON, so it is one line whatever it holds. */

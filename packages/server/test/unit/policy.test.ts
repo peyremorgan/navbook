@@ -12,6 +12,7 @@ import { describe, it } from "node:test";
 import {
   type AuthPolicy,
   claimCarries,
+  domainViolation,
   emailDomain,
   isOpen,
   normalizeDomain,
@@ -152,6 +153,21 @@ describe("policyViolation", () => {
     assert.match(violation({ email: "a@evil.example.com" }, domains) ?? "", /domain/);
     assert.match(violation({ email: "a@other.test" }, domains) ?? "", /domain/);
     assert.match(policyViolation({}, "nobody", domains) ?? "", /domain/);
+  });
+
+  it("judges an address alone by the domain rule, the one rule that needs no token", () => {
+    const domains: AuthPolicy = { ...OPEN, allowEmailDomains: ["example.com"] };
+    assert.equal(domainViolation("a@example.com", domains), null);
+    assert.equal(domainViolation("a@EXAMPLE.com", domains), null);
+    assert.match(domainViolation("a@sub.example.com", domains) ?? "", /domain of "a@sub/);
+    assert.match(domainViolation("no-domain@", domains) ?? "", /domain/);
+    // No rule, nothing to fail — whatever the address.
+    assert.equal(domainViolation("a@anywhere.invalid", MEMBER), null);
+    // And the token check says what the address check says.
+    assert.equal(
+      policyViolation({}, "a@sub.example.com", domains),
+      domainViolation("a@sub.example.com", domains),
+    );
   });
 
   it("quotes the address in the reason, so it cannot break the line", () => {

@@ -8,10 +8,12 @@
 import { createServer, type Server } from "node:http";
 import {
   currentBranch,
+  formatPerson,
   hasRemote,
   type Identity,
   isTreeClean,
   makeWsCtx,
+  parsePerson,
   userIdentity,
   WorkspaceError,
 } from "@navbook/core";
@@ -19,13 +21,15 @@ import { createYoga } from "graphql-yoga";
 import { type Authenticator, makeAuthenticator } from "./auth.ts";
 import { RevisionCache } from "./changes.ts";
 import type { Config } from "./config.ts";
-import { makeGraphQLCtx } from "./context.ts";
+import { type GraphQLCtx, makeGraphQLCtx } from "./context.ts";
+import { apiError, invalidInput } from "./errors.ts";
 import { clearLeftovers, clearLeftoversAtStart, gitDirs } from "./leftovers.ts";
 import { Maintenance } from "./maintenance.ts";
 import { AuthorCache } from "./people.ts";
 import { type LoadedPlugins, loadServerPlugins } from "./plugins/load.ts";
 import { resolveServerPlugins } from "./plugins/resolve.ts";
-import { isOpen } from "./policy.ts";
+import { PluginRuntime } from "./plugins/runtime.ts";
+import { domainViolation, isOpen } from "./policy.ts";
 import { makeSchema } from "./schema.ts";
 import { RepoSync } from "./sync.ts";
 import { TreeCache } from "./trees.ts";
@@ -163,6 +167,9 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     tidy: (since) =>
       sync.exclusive(() => clearLeftovers(dirs, repoRoot, { since, remove: true, report })),
   });
+  // Made before the sync engine, which tells its listeners whenever a pull or
+  // a write may have moved the clone; filled when the plugins load, below.
+  const runtime = new PluginRuntime(report);
   const sync = new RepoSync({
     repoRoot,
     remote,
@@ -172,6 +179,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
     report,
     onWrite: () => trees.invalidate(),
     afterSync: () => maintenance.request(),
+    onChange: (change) => runtime.emitSync(change),
   });
 
   // One per process, beside the clone it describes: the history it walks is
@@ -192,6 +200,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
       sync,
       authors,
       report,
+      runtime,
     });
   } catch (error) {
     throw new StartupError(error instanceof Error ? error.message : String(error));
@@ -200,28 +209,33 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
   const schema = makeSchema({ typeDefs: loaded.typeDefs, resolvers: loaded.runtime.resolvers });
   // Before any service starts: one may check the documents it will run.
   loaded.runtime.setSchema(schema);
+  const contextOf = (viewer: Identity): GraphQLCtx =>
+    makeGraphQLCtx({
+      viewer,
+      config,
+      sync,
+      authors,
+      revisions,
+      trees,
+      env,
+      navDir,
+      ext: loaded.ext,
+      plugins: loaded.runtime,
+      report,
+    });
+  // Likewise before any service starts: a bridge acts for people from its own,
+  // and reads as the server itself, whose own identity no rule is about.
+  loaded.runtime.setContextFactory((person) =>
+    contextOf(person === undefined ? identity : admitted(person, config)),
+  );
   const yoga = createYoga({
     schema,
     graphiql: config.graphiql,
     // Authentication runs here rather than in a resolver, so an unusable token
     // is refused before any operation is planned — and so every field is
     // covered, including ones added later.
-    context: async ({ request }) => {
-      const viewer = await auth.verify(request.headers.get("authorization"));
-      return makeGraphQLCtx({
-        viewer,
-        config,
-        sync,
-        authors,
-        revisions,
-        trees,
-        env,
-        navDir,
-        ext: loaded.ext,
-        plugins: loaded.runtime,
-        report,
-      });
-    },
+    context: async ({ request }) =>
+      contextOf(await auth.verify(request.headers.get("authorization"))),
   });
 
   // Services start before the port opens: a bridge that has not connected is
@@ -283,6 +297,34 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
       await release(housekeeping);
     },
   };
+}
+
+/**
+ * The person a plugin asked to act as, as the format will write them, if this
+ * server would let them in.
+ *
+ * No token vouches for them — the plugin does — so of the admission rules
+ * only the one that reads an address alone can be applied, and is: a domain
+ * the server would refuse at the door is refused here too. The person must
+ * also be one `author:` can carry, which is what a round trip through the
+ * format's own reading checks — an address, and a name with no line break
+ * or angle bracket to end it early.
+ */
+function admitted(person: Identity, config: Config): Identity {
+  const email = typeof person.email === "string" ? person.email.trim() : "";
+  const name = typeof person.name === "string" ? person.name.trim() : "";
+  const wanted: Identity = name === "" ? { email } : { name, email };
+  const read = parsePerson(formatPerson(wanted));
+  if (read === null || read.email !== wanted.email || read.name !== wanted.name) {
+    throw invalidInput(
+      `${JSON.stringify(formatPerson(wanted))} is not a person the format can record`,
+    );
+  }
+  const violation = domainViolation(email, config.policy);
+  if (violation !== null) {
+    throw apiError(`${email} is not allowed on this repository: ${violation}`, "FORBIDDEN");
+  }
+  return wanted;
 }
 
 /**

@@ -274,8 +274,12 @@ A plugin's own settings come from `NAV_SERVER_<SHORT>_*` variables, and a
 required one that is missing is refused at startup like the server's own.
 
 A plugin adds types and fields to the schema, runs long-lived services — started
-before the port opens, stopped before the clone is released — and hears every
-mutation once it has committed, with whether the push went through. `Entity.ext` carries what each
+before the port opens, stopped before the clone is released, and given ten
+seconds to do so — hears every mutation once it has committed, with whether the
+push went through, and hears every pull that fetched, which is how it learns of
+what somebody pushed from a terminal. A service may act for a person with no
+request in flight (`host.api.contextFor`); no token vouches for them, so only
+`--allow-email-domain` among the admission rules applies to them. `Entity.ext` carries what each
 loaded plugin says about an entity, under its short name: an empty object on a
 server with none, so a client can read `ext.kb?.features` without checking.
 

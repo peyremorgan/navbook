@@ -45,6 +45,12 @@ export interface LoadOptions {
   sync: RepoSync;
   authors: AuthorCache;
   report: (line: string) => void;
+  /**
+   * The runtime to fill, when the caller made it first — the server does, so
+   * the clone's sync engine, built before any plugin loads, can tell its
+   * listeners. One is made here otherwise.
+   */
+  runtime?: PluginRuntime;
 }
 
 /**
@@ -54,7 +60,7 @@ export interface LoadOptions {
  * registered before its resolvers could read a tree through it.
  */
 export async function loadServerPlugins(opts: LoadOptions): Promise<LoadedPlugins> {
-  const runtime = new PluginRuntime(opts.report);
+  const runtime = opts.runtime ?? new PluginRuntime(opts.report);
   const registered: ExtensionParts[] = [];
   const typeDefs: string[] = [];
 
@@ -92,6 +98,7 @@ export async function loadServerPlugins(opts: LoadOptions): Promise<LoadedPlugin
       resolvers: (map) => runtime.addResolvers(map),
       service: (service) => runtime.addService(service),
       onMutation: (listener) => runtime.onMutation(listener),
+      onSync: (listener) => runtime.onSync(listener),
       entityInput: (bridge) => runtime.addBridge(bridge),
       entityExt: (read) => runtime.addExtReader(plugin.manifest.short, read),
       api: {
@@ -105,6 +112,7 @@ export async function loadServerPlugins(opts: LoadOptions): Promise<LoadedPlugin
         writeEntity,
         execute: (ctx, source, variables) => runtime.execute(ctx, source, variables),
         schema: () => runtime.schema(),
+        contextFor: (person) => runtime.contextFor(person),
       },
     };
     await serverEntry.activate(host);

@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { GitStoppedError, GitTimeoutError } from "@navbook/core";
-import { RepoSync, type SyncGit } from "../../src/sync.ts";
+import { RepoSync, type SyncChange, type SyncGit } from "../../src/sync.ts";
 
 const ROOT = "/clone";
 /** A worktree of the clone, on another branch. */
@@ -138,6 +138,7 @@ function makeSync(
     timeout?: number;
     onWrite?: () => void;
     afterSync?: () => void;
+    onChange?: (change: SyncChange) => void;
   } = {},
 ) {
   const rec = recorder(script);
@@ -150,6 +151,7 @@ function makeSync(
     ...(opts.timeout === undefined ? {} : { gitTimeoutMs: opts.timeout }),
     ...(opts.onWrite === undefined ? {} : { onWrite: opts.onWrite }),
     ...(opts.afterSync === undefined ? {} : { afterSync: opts.afterSync }),
+    ...(opts.onChange === undefined ? {} : { onChange: opts.onChange }),
     git: rec.git,
     now: () => clock,
     report: (line) => {
@@ -1059,6 +1061,214 @@ describe("RepoSync after git has written", () => {
       ),
     );
     assert.equal(told.count, 2, "its pull, and nothing else");
+  });
+});
+
+describe("RepoSync tells its listener what may have moved", () => {
+  const stoppedPush = new GitTimeoutError(["push", "--quiet", "origin", "main:main"], 500);
+
+  /** A sync whose `onChange` records what it was told, and whether it held the clone. */
+  function listened(script: Scripted = {}, opts: { remote?: string | null; ttl?: number } = {}) {
+    const told: (SyncChange & { underLock: boolean })[] = [];
+    let sync: RepoSync | null = null;
+    const made = makeSync(script, {
+      ttl: 10_000,
+      ...opts,
+      onChange: (change) => {
+        told.push({ ...change, underLock: sync?.underLock ?? false });
+      },
+    });
+    sync = made.sync;
+    return { ...made, told, causes: () => told.map((change) => change.cause) };
+  }
+
+  it("tells it after a background pull, merged or conflicting, and not after a failed fetch", async () => {
+    const script: Scripted = {};
+    const { sync, causes } = listened(script);
+    await sync.refresh();
+    assert.deepEqual(causes(), ["pull"]);
+
+    script.behind = [true];
+    script.merges = ["conflict"];
+    await sync.refresh();
+    assert.deepEqual(causes(), ["pull", "pull"], "the remote's branches moved all the same");
+
+    script.fetchThrows = new Error("remote unreachable");
+    await sync.refresh();
+    assert.deepEqual(causes(), ["pull", "pull"]);
+  });
+
+  it("tells it nothing for a background pull that a stop cut short", async () => {
+    const script: Scripted = {};
+    const { sync, causes } = listened(script);
+    const fetch = gate();
+    script.fetchGate = fetch.closed;
+    const stopper = new AbortController();
+    const refreshed = sync.refresh(stopper.signal);
+    await settle();
+    stopper.abort();
+    await refreshed;
+    assert.deepEqual(causes(), []);
+
+    // Fetched, but stopped before the merge: nobody is left to tell.
+    const late = listened();
+    const stopping = new AbortController();
+    const merged = late.sync.locked(async () => {
+      await settle();
+    });
+    const pulled = late.sync.refresh(stopping.signal);
+    await settle();
+    stopping.abort();
+    await Promise.all([merged, pulled]);
+    assert.deepEqual(late.causes(), []);
+  });
+
+  it("tells it after a read that pulled for itself, and not after one that did not", async () => {
+    const { sync, causes } = listened();
+    assert.equal(await sync.read(() => 42), 42);
+    assert.deepEqual(causes(), ["pull"]);
+    await sync.refresh();
+    await sync.read(() => undefined);
+    assert.deepEqual(
+      causes(),
+      ["pull", "pull"],
+      "a read the background pull kept fresh fetched nothing",
+    );
+  });
+
+  it("tells it after a read whose body threw, having fetched first", async () => {
+    const { sync, causes } = listened();
+    await assert.rejects(
+      sync.read(() => {
+        throw new Error("no such issue");
+      }),
+      /no such issue/,
+    );
+    assert.deepEqual(causes(), ["pull"]);
+  });
+
+  it("tells it once per write, however many fetches the write made", async () => {
+    const { sync, causes } = listened({ pushes: ["rejected", "ok"], behind: [false, true] });
+    await sync.write(
+      () => undefined,
+      () => true,
+    );
+    assert.deepEqual(causes(), ["write"]);
+  });
+
+  it("tells it after a write that committed nothing or threw: its fetch landed", async () => {
+    const { sync, causes } = listened();
+    await sync.write(
+      () => undefined,
+      () => false,
+    );
+    await assert.rejects(
+      sync.write(
+        () => {
+          throw new Error("refused");
+        },
+        () => true,
+      ),
+    );
+    assert.deepEqual(causes(), ["write", "write"]);
+  });
+
+  it("tells it after a write whose push was stopped: the commit is in the clone", async () => {
+    const { sync, causes } = listened({ pushThrows: stoppedPush });
+    await assert.rejects(
+      sync.write(
+        () => undefined,
+        () => true,
+      ),
+    );
+    assert.deepEqual(causes(), ["write"]);
+  });
+
+  it("tells it nothing for a write whose fetch failed: nothing moved", async () => {
+    const { sync, causes } = listened({ fetchThrows: new Error("remote unreachable") });
+    await assert.rejects(
+      sync.write(
+        () => undefined,
+        () => true,
+      ),
+    );
+    assert.deepEqual(causes(), []);
+  });
+
+  it("without a remote, tells it of a commit and of nothing else", async () => {
+    const { sync, causes } = listened({}, { remote: null });
+    await sync.read(() => undefined);
+    await sync.write(
+      () => undefined,
+      () => false,
+    );
+    assert.deepEqual(causes(), []);
+    await sync.write(
+      () => undefined,
+      () => true,
+    );
+    assert.deepEqual(causes(), ["write"]);
+  });
+
+  it("tells it once after a write on another branch's site", async () => {
+    const { sync, causes } = listened();
+    await sync.writeOn({
+      open: () => ({ root: SITE }),
+      body: () => undefined,
+      committed: () => true,
+      close: () => undefined,
+    });
+    assert.deepEqual(causes(), ["write"]);
+  });
+
+  it("tells it once the clone is free, so it can queue an operation of its own", async () => {
+    const reads: Promise<unknown>[] = [];
+    let sync: RepoSync | null = null;
+    const made = makeSync(
+      {},
+      {
+        onChange: () => {
+          assert.equal(sync?.underLock, false);
+          // From under the lock this would wait for the write that is telling it.
+          reads.push((sync as RepoSync).locked(() => "read after"));
+        },
+      },
+    );
+    sync = made.sync;
+    await sync.write(
+      () => undefined,
+      () => true,
+    );
+    await sync.read(() => undefined);
+    assert.deepEqual(await Promise.all(reads), ["read after", "read after"]);
+  });
+
+  it("says when, to the second", async () => {
+    const { sync, told } = listened();
+    await sync.refresh();
+    assert.equal(told[0]?.at, "1970-01-01T00:16:40Z");
+    assert.equal(told[0]?.underLock, false);
+  });
+
+  it("reports a listener that throws, and the operation succeeds all the same", async () => {
+    const { sync, reported } = makeSync(
+      {},
+      {
+        onChange: () => {
+          throw new Error("listener bug");
+        },
+      },
+    );
+    const done = await sync.write(
+      () => "written",
+      () => true,
+    );
+    assert.deepEqual(done, { result: "written", pushed: true });
+    assert.equal(await sync.read(() => "read"), "read");
+    assert.deepEqual(reported, [
+      "nav-server: a sync listener failed: listener bug",
+      "nav-server: a sync listener failed: listener bug",
+    ]);
   });
 });
 

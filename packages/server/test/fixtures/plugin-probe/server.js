@@ -1,10 +1,15 @@
 /**
  * The server probe's API half.
  *
- * It does the three things only a server plugin can: extends the schema,
- * registers something long-running, and subscribes to mutations. The service
- * connects to nothing — what is being tested is that it is started before the
- * port opens and stopped before the clone is released.
+ * It does the things only a server plugin can: extends the schema, registers
+ * something long-running, subscribes to mutations and to pulls, and acts for a
+ * person with no request in flight. The service connects to nothing — what is
+ * being tested is that it is started before the port opens and stopped before
+ * the clone is released, and what it is told and allowed meanwhile.
+ *
+ * `SRVPROBE_ACT_AS` (`Name <address>`, or an address) has the service open an
+ * issue as that person when it starts. `SRVPROBE_SYNC_READ` has it read the
+ * issue titles, as the server itself, whenever it is told of a sync.
  */
 
 import { appendFileSync } from "node:fs";
@@ -26,6 +31,22 @@ export function activate(host) {
     log(`mutation ${event.subject} pushed=${event.pushed} by=${event.viewer.email}`);
   });
 
+  // What somebody else pushed reaches no mutation listener; this hears of it.
+  host.onSync(async (event) => {
+    if (!process.env.SRVPROBE_SYNC_READ) {
+      log(`sync ${event.cause}`);
+      return;
+    }
+    // Nobody to act for: read as the server itself.
+    const ctx = host.api.contextFor();
+    const result = await host.api.execute(
+      ctx,
+      "{ issues(filter: { status: [OPEN, CLOSED] }) { title } }",
+    );
+    const titles = result.data.issues.map((issue) => issue.title).sort();
+    log(`sync ${event.cause} titles=${titles.join("|")}`);
+  });
+
   // The schema is built from every plugin's SDL, so it cannot exist yet.
   try {
     host.api.schema();
@@ -41,6 +62,7 @@ export function activate(host) {
       log(
         `schema at start: ${host.api.schema().getQueryType()?.getFields().srvprobe ? "has srvprobe" : "lacks srvprobe"}`,
       );
+      if (process.env.SRVPROBE_ACT_AS) await actAs(host, process.env.SRVPROBE_ACT_AS);
     },
     async stop() {
       log("service:stop");
@@ -112,4 +134,27 @@ export function activate(host) {
         }),
     },
   });
+}
+
+/** Open an issue as `who` from the service, and log what came of it. */
+async function actAs(host, who) {
+  const person = host.core.parsePerson(who) ?? { email: who };
+  let ctx;
+  try {
+    ctx = host.api.contextFor(person);
+  } catch (error) {
+    log(`refused ${error.extensions?.code ?? "?"}: ${error.message}`);
+    return;
+  }
+  const result = await host.api.execute(
+    ctx,
+    `mutation { openIssue(input: { title: "Opened by a service", body: "Body." }) {
+      issue { author } commit { subject pushed } } }`,
+  );
+  if (result.errors?.length) {
+    log(`failed ${result.errors.map((error) => error.message).join("; ")}`);
+    return;
+  }
+  const { issue, commit } = result.data.openIssue;
+  log(`acted ${commit.subject} pushed=${commit.pushed} author=${issue.author}`);
 }

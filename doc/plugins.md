@@ -286,13 +286,29 @@ that carries it.
 
 A server plugin acting for somebody — an assistant, a chat bridge — needs no
 copy of the built-in operations: `host.api.execute(ctx, document, variables)`
-runs a GraphQL operation against the schema the server serves, as that
-request's viewer, through the same resolvers, transactions and mutation event
-as a client's request. It is called from a resolver, with the context that
-resolver was handed: a context is built for each request, so a service has none
-to pass, and can only check the documents its resolvers will run against
-`host.api.schema()` when it starts — the schema exists once every plugin has
-activated, never during `activate`.
+runs a GraphQL operation against the schema the server serves, as `ctx`'s
+viewer, through the same resolvers, transactions and mutation event as a
+client's request. A resolver passes the context it was handed. A service, with
+no request in flight, asks for one: `host.api.contextFor({ name, email })` is
+the context a request by that person would have had, so `author:` records them
+and the mutation event names them. The plugin is the one vouching for who they
+are, so of the server's admission rules only `--allow-email-domain`, which
+reads the address alone, can still apply — and does. Asked about nobody,
+`host.api.contextFor()` acts as the server itself, the clone's own committer,
+for a service that only reads. Both need the schema,
+which exists once every plugin has activated: from a service's `start` on,
+never during `activate`, and `host.api.schema()` is how a service checks in
+its `start` that the documents it will run are ones this schema answers.
+
+A mutation listener hears of what the API did. A service that has to know
+about everything — a bridge announcing the issue somebody opened from a
+terminal and pushed — subscribes with `host.onSync(listener)` as well: it is
+told after every pull that fetched, background or not, and every write, once
+the clone has let go. It says only that refs may have moved; the listener
+reads what moved against what it saw last, for instance with
+`core.listRefShasAsync` and the tracker commits between two of them. A service
+is given ten seconds to `stop` at shutdown, after which the server goes on
+without it and says so.
 
 Never call `execute` from inside `ctx.sync.read`, `ctx.sync.write`,
 `ctx.sync.locked` or a `writeEntity` body. The operation's own resolvers take

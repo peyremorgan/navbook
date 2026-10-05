@@ -9,9 +9,11 @@
  * and synchronises it with the origin. A second program doing the same thing
  * to the same repository would be racing it.
  *
- * So this host carries three things the CLI's does not: a way to add to the
- * schema, a way to register something long-running, and the event every
- * committed mutation emits.
+ * So this host carries what the CLI's does not: a way to add to the schema, a
+ * way to register something long-running, the event every committed mutation
+ * emits, the one every pull emits — which is how a service hears of what
+ * somebody pushed from a terminal — and a way to act as a person with no
+ * request in flight.
  */
 
 import type * as NavbookCore from "@navbook/core";
@@ -28,7 +30,7 @@ import type { Config } from "../config.ts";
 import type { GraphQLCtx } from "../context.ts";
 import type { AuthorCache } from "../people.ts";
 import type { PluginResolvers } from "../schema.ts";
-import type { RepoSync, WriteResult } from "../sync.ts";
+import type { RepoSync, SyncChange, WriteResult } from "../sync.ts";
 import type { WriteSite } from "../write-site.ts";
 
 /** What every server entry exports. */
@@ -65,10 +67,27 @@ export interface MutationEvent {
 }
 
 /**
+ * The clone's refs may have moved: told after every pull that fetched, and
+ * every write that fetched or committed.
+ *
+ * Changes arrive by more roads than this server's mutations: somebody pushes
+ * from a terminal, and the background pull brings it in. A mutation event
+ * never hears of that one; this does. It says only that something may have
+ * moved — a fetch that brought nothing is still a fetch — because what moved
+ * is the listener's to read against what it last saw: the refs, and the
+ * commits between (`core.listRefShas`, `ctx.revisions.activityOf`).
+ *
+ * Told once the clone has let go, so a listener may read it, or act through
+ * `api.execute`, straight away. A listener that throws is reported.
+ */
+export type SyncEvent = SyncChange;
+
+/**
  * Something that runs for as long as the server does.
  *
  * `stop` is awaited during shutdown, before the clone is released, so a
- * service that holds a socket or a poll loop can close it. A service that
+ * service that holds a socket or a poll loop can close it — for ten seconds,
+ * after which shutdown goes on without it and says so. A service that
  * throws while starting stops the server: it was configured, so it was wanted,
  * and a bridge that silently did not connect is worse than one that refused
  * to come up.
@@ -117,6 +136,8 @@ export interface ServerPluginHost {
   service(service: PluginService): void;
   /** Subscribe to every committed mutation, this plugin's included. */
   onMutation(listener: (event: MutationEvent) => void): void;
+  /** Hear whenever the clone's refs may have moved, whoever moved them: see {@link SyncEvent}. */
+  onSync(listener: (event: SyncEvent) => void | Promise<void>): void;
   /**
    * Bridge the fields a plugin added to an input onto the format.
    *
@@ -217,12 +238,12 @@ export interface ServerPluginHost {
      * request from a client, so a plugin acting for somebody — an assistant, a
      * bridge — needs no copy of any of them.
      *
-     * Called from a resolver, with the context that resolver was handed: a
-     * context is built for each request, so there is none outside one, and a
-     * service has nothing to pass. Never from inside `sync.read`, `sync.write`,
-     * `sync.locked` or a `writeEntity` body — the operation's own resolvers
-     * take the repository lock, which is not re-entrant, so it would wait for
-     * itself and every request after it would wait too. That call is refused.
+     * Called from a resolver with the context that resolver was handed, or
+     * from a service with one {@link contextFor} built. Never from inside
+     * `sync.read`, `sync.write`, `sync.locked` or a `writeEntity` body — the
+     * operation's own resolvers take the repository lock, which is not
+     * re-entrant, so it would wait for itself and every request after it would
+     * wait too. That call is refused.
      */
     execute(
       ctx: GraphQLCtx,
@@ -232,11 +253,34 @@ export interface ServerPluginHost {
     /**
      * The schema this server serves, once every plugin has activated.
      *
-     * What a service can use: it cannot run an operation, having no request's
-     * context, but it can check in its `start` that the documents its
-     * resolvers will run are ones this schema answers.
+     * A service can check in its `start` that the documents it will run are
+     * ones this schema answers.
      */
     schema(): GraphQLSchema;
+    /**
+     * A context acting as `person`, for a service with no request in flight —
+     * a chat bridge acting for whoever sent a message. Pass it to
+     * {@link execute}: `author:` records the person, the clone's identity
+     * commits, and the mutation event names them, as for a signed-in client.
+     *
+     * The plugin vouches for the person: no token says who they are. So the
+     * one admission rule that reads an address alone still applies — an
+     * address outside `--allow-email-domain` is refused with `FORBIDDEN` —
+     * while the rules that read a token's claims cannot, and a deployment
+     * relying on those must judge the plugin that maps people to addresses.
+     * An identity the format cannot write as a person (spec 02 §2.4) is
+     * refused with `INVALID_INPUT`.
+     *
+     * Without a person, the context acts as the server itself — the clone's
+     * own committer identity, which no admission rule is about. For a
+     * service that reads, or acts for nobody in particular; a write made with
+     * it records the machine account as its `author:`.
+     *
+     * A new context each call, as a request's is: one kept across operations
+     * would answer from the tree it first read. Available once every plugin
+     * has activated, from a service's `start` on.
+     */
+    contextFor(person?: Identity): GraphQLCtx;
   };
 }
 

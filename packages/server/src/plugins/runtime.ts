@@ -8,7 +8,7 @@
  * would be a schema that changed shape after the first request.
  */
 
-import type { EntityRecord } from "@navbook/core";
+import type { EntityRecord, Identity } from "@navbook/core";
 import {
   type DocumentNode,
   type ExecutionResult,
@@ -21,7 +21,7 @@ import {
 import type { GraphQLCtx } from "../context.ts";
 import type { PluginField } from "../patch.ts";
 import type { PluginResolvers } from "../schema.ts";
-import type { EntityInputBridge, MutationEvent, PluginService } from "./host.ts";
+import type { EntityInputBridge, MutationEvent, PluginService, SyncEvent } from "./host.ts";
 
 /** One plugin's contribution to `Entity.ext`, under the name it appears at. */
 interface ExtReader {
@@ -32,22 +32,46 @@ interface ExtReader {
 /** How many parsed operations {@link PluginRuntime.execute} remembers. */
 const DOCUMENT_CACHE_LIMIT = 256;
 
+/**
+ * How long shutdown waits for one service to stop before going on without it.
+ *
+ * Well inside the time a container is given to stop (`compose.yaml` gives
+ * 75 s), which also has to cover a push in flight and the clone's release.
+ */
+export const SERVICE_STOP_TIMEOUT_MS = 10_000;
+
+export interface RuntimeOptions {
+  /** {@link SERVICE_STOP_TIMEOUT_MS}, unless a test needs to wait less. */
+  stopTimeoutMs?: number;
+}
+
+/**
+ * Builds the context a request would have, for whoever `contextFor` is asked
+ * about — or, asked about nobody, for the server's own identity.
+ */
+export type ContextFactory = (viewer?: Identity) => GraphQLCtx;
+
 export class PluginRuntime {
   readonly resolvers: PluginResolvers[] = [];
   readonly services: PluginService[] = [];
   readonly bridges: EntityInputBridge[] = [];
   readonly extReaders: ExtReader[] = [];
   #listeners: ((event: MutationEvent) => void)[] = [];
+  #syncListeners: ((event: SyncEvent) => void | Promise<void>)[] = [];
   /** The services running now, in the order they started. */
   #started: PluginService[] = [];
   #report: (line: string) => void;
+  readonly #stopTimeoutMs: number;
   /** The schema the server serves, once it is built from every plugin's SDL. */
   #schema: GraphQLSchema | null = null;
+  /** How a context is made, once everything a request's needs exists. */
+  #contexts: ContextFactory | null = null;
   /** Each operation a plugin runs, parsed and validated once: plugins run the same few. */
   readonly #documents = new Map<string, DocumentNode | readonly GraphQLError[]>();
 
-  constructor(report: (line: string) => void) {
+  constructor(report: (line: string) => void, opts: RuntimeOptions = {}) {
     this.#report = report;
+    this.#stopTimeoutMs = opts.stopTimeoutMs ?? SERVICE_STOP_TIMEOUT_MS;
   }
 
   /** Called once the schema is built, which is after every plugin activated. */
@@ -64,6 +88,28 @@ export class PluginRuntime {
       );
     }
     return this.#schema;
+  }
+
+  /** Called once with the schema, when the server can build a request's context. */
+  setContextFactory(factory: ContextFactory): void {
+    this.#contexts = factory;
+  }
+
+  /**
+   * A context acting as `viewer`, for code that runs outside any request.
+   *
+   * Built afresh per call, as a request's is: a context remembers the tree it
+   * read, so one kept across operations would answer from a tree long gone.
+   * Not available while plugins are activating — what a context carries
+   * includes every plugin's format, which is only known once all of them are.
+   */
+  contextFor(viewer?: Identity): GraphQLCtx {
+    if (this.#contexts === null) {
+      throw new Error(
+        "a context is built once every plugin has activated; ask for one from a service or a resolver",
+      );
+    }
+    return this.#contexts(viewer);
   }
 
   /**
@@ -218,6 +264,33 @@ export class PluginRuntime {
     }
   }
 
+  onSync(listener: (event: SyncEvent) => void | Promise<void>): void {
+    this.#syncListeners.push(listener);
+  }
+
+  /**
+   * Tell every sync listener, each on a turn of its own.
+   *
+   * The clone has already let go when this is called (`RepoSync`'s
+   * `onChange`), and a listener's work — reading what moved, telling a chat
+   * service — must not hold up the pull or write that called it. So each runs
+   * after this returns, and one that throws or rejects is reported, as a
+   * mutation listener is.
+   */
+  emitSync(event: SyncEvent): void {
+    for (const listener of this.#syncListeners) {
+      void Promise.resolve()
+        .then(() => listener(event))
+        .catch((error: unknown) => {
+          this.#report(
+            `plugin sync listener failed after a ${event.cause}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        });
+    }
+  }
+
   /**
    * Start every service, in registration order.
    *
@@ -245,19 +318,39 @@ export class PluginRuntime {
    * ones after it running, nor stop the clone being released, so each is
    * awaited on its own and a failure is news rather than an exception. Only
    * what started is stopped, and only once.
+   *
+   * Nor may one that never returns hold the rest up: a socket that will not
+   * close is a service's bug, and the clone it would keep from being released
+   * is everybody's. After {@link SERVICE_STOP_TIMEOUT_MS} it is left to the
+   * process exit, and the log says so.
    */
   async stop(): Promise<void> {
     const running = this.#started.reverse();
     this.#started = [];
     for (const service of running) {
+      let timer: NodeJS.Timeout | undefined;
+      const abandoned = new Promise<"abandoned">((resolve) => {
+        timer = setTimeout(() => resolve("abandoned"), this.#stopTimeoutMs);
+      });
       try {
-        await service.stop();
+        const stopped = Promise.resolve()
+          .then(() => service.stop())
+          .then(() => "stopped" as const);
+        if ((await Promise.race([stopped, abandoned])) === "abandoned") {
+          this.#report(
+            `plugin service '${service.name}' did not stop within ${this.#stopTimeoutMs} ms; going on without it`,
+          );
+          // Whatever it does later is still news, not an unhandled rejection.
+          stopped.catch(() => undefined);
+        }
       } catch (error) {
         this.#report(
           `plugin service '${service.name}' did not stop cleanly: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
+      } finally {
+        clearTimeout(timer);
       }
     }
   }

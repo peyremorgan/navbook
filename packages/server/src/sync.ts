@@ -119,6 +119,31 @@ export interface SyncOptions {
    * at once and must not throw.
    */
   afterSync?: () => void;
+  /**
+   * Told once an operation that may have moved the clone's refs has let the
+   * clone go: a pull that fetched — the background one's, or a read's own —
+   * and a write that fetched or committed. Once per operation, however many
+   * fetches it made, and never from under the lock, so whoever is told can
+   * queue an operation of their own. Called synchronously; it must return at
+   * once, and a throw is reported rather than passed on.
+   *
+   * "May have": a fetch that brought nothing is still a fetch. What moved is
+   * for the listener to read, against whatever it last saw.
+   */
+  onChange?: (change: SyncChange) => void;
+}
+
+/** An operation that may have moved the clone's refs has finished (`onChange`). */
+export interface SyncChange {
+  /** `pull` for a fetch on its own — background or a read's — and `write` for a mutation. */
+  cause: "pull" | "write";
+  /** When it finished, ISO 8601 with second precision. */
+  at: string;
+}
+
+/** Whether an operation fetched or committed: what `onChange` is told about. */
+interface Moved {
+  moved: boolean;
 }
 
 /** What a mutation's write did, and whether the commit reached the remote. */
@@ -335,14 +360,17 @@ export class RepoSync {
 
   /** Run a read, having brought the clone up to date first. */
   read<T>(body: () => T): Promise<T> {
-    return this.lock.run(async () => {
-      // While the background pull keeps up, the clone is already as fresh as
-      // a read may ask for, and fetching again would only make it wait.
-      if (this.lastRefresh !== "ok") {
-        await this.pull(this.served(), { force: false, keptLocalCommit: false });
-      }
-      return body();
-    });
+    const op: Moved = { moved: false };
+    return this.lock
+      .run(async () => {
+        // While the background pull keeps up, the clone is already as fresh as
+        // a read may ask for, and fetching again would only make it wait.
+        if (this.lastRefresh !== "ok") {
+          await this.pull(this.served(), { force: false, keptLocalCommit: false }, op);
+        }
+        return body();
+      })
+      .finally(() => this.changed("pull", op));
   }
 
   /**
@@ -411,16 +439,30 @@ export class RepoSync {
    * merge that has not begun is skipped — including one still queued for the
    * clone behind a mutation, which may finish long after the stop was asked
    * for. A pull ended that way says nothing: it failed at nobody's request.
+   *
+   * A fetch that landed is told to `onChange` even when the merge after it
+   * conflicted: the remote-tracking branches moved all the same.
    */
   async refresh(signal?: AbortSignal): Promise<void> {
     const remote = this.opts.remote;
     if (remote === null) return;
+    const op: Moved = { moved: false };
+    try {
+      await this.pullInBackground(remote, op, signal);
+    } finally {
+      if (!signal?.aborted) this.changed("pull", op);
+    }
+  }
+
+  /** {@link refresh}'s pull, telling `op` once its fetch has landed. */
+  private async pullInBackground(remote: string, op: Moved, signal?: AbortSignal): Promise<void> {
     // What the clone is then as fresh as: the remote as it stood when asked.
     const asked = this.now();
     try {
       await this.net.run(() =>
         this.git.fetchRemote(this.opts.repoRoot, remote, this.network(signal)),
       );
+      op.moved = true;
       this.opts.afterSync?.();
       await this.lock.run(() => this.merge(this.served(), remote, signal));
       if (signal?.aborted) return;
@@ -484,38 +526,48 @@ export class RepoSync {
    * serve is one it must never create or write over.
    */
   writeOn<T, S extends WriteRoot>(op: WriteOn<T, S>): Promise<WriteResult<T>> {
-    return this.lock.run(async () => {
-      await this.pull(this.served(), { force: true, keptLocalCommit: false });
-      const site = op.open();
-      const outcome: WriteOutcome = { failed: true, pushed: false };
-      try {
-        const remote = this.opts.remote;
-        // The remote's tip the site was merged with: what its push is leased on.
-        let merged: string | null = null;
-        if (site.root !== this.opts.repoRoot && remote !== null) {
-          merged = await this.mergeReporting(site, remote, false);
-        }
-        this.opts.onWrite?.();
-        let result: T;
-        try {
-          result = op.body(site);
-        } catch (error) {
-          this.opts.onWrite?.();
-          throw error;
-        }
-        if (op.committed(result)) {
-          try {
-            outcome.pushed = await this.pushWithRetry(site, merged);
-          } finally {
-            this.opts.afterSync?.();
-          }
-        }
-        outcome.failed = false;
-        return { result, pushed: outcome.pushed };
-      } finally {
-        op.close(site, outcome);
+    const moved: Moved = { moved: false };
+    return this.lock
+      .run(() => this.writeLocked(op, moved))
+      .finally(() => this.changed("write", moved));
+  }
+
+  /** {@link writeOn}'s transaction, under the lock, telling `moved` what it fetched or committed. */
+  private async writeLocked<T, S extends WriteRoot>(
+    op: WriteOn<T, S>,
+    moved: Moved,
+  ): Promise<WriteResult<T>> {
+    await this.pull(this.served(), { force: true, keptLocalCommit: false }, moved);
+    const site = op.open();
+    const outcome: WriteOutcome = { failed: true, pushed: false };
+    try {
+      const remote = this.opts.remote;
+      // The remote's tip the site was merged with: what its push is leased on.
+      let merged: string | null = null;
+      if (site.root !== this.opts.repoRoot && remote !== null) {
+        merged = await this.mergeReporting(site, remote, false);
       }
-    });
+      this.opts.onWrite?.();
+      let result: T;
+      try {
+        result = op.body(site);
+      } catch (error) {
+        this.opts.onWrite?.();
+        throw error;
+      }
+      if (op.committed(result)) {
+        moved.moved = true;
+        try {
+          outcome.pushed = await this.pushWithRetry(site, merged);
+        } finally {
+          this.opts.afterSync?.();
+        }
+      }
+      outcome.failed = false;
+      return { result, pushed: outcome.pushed };
+    } finally {
+      op.close(site, outcome);
+    }
   }
 
   /**
@@ -533,6 +585,27 @@ export class RepoSync {
   /** Wait for in-flight work to finish, so shutdown never cuts one in half. */
   drain(): Promise<void> {
     return this.lock.drain();
+  }
+
+  /**
+   * Tell `onChange` that an operation which fetched or committed has finished.
+   *
+   * Called once the lock has let go — from a continuation of the operation's
+   * promise, which runs in its caller's context rather than the lock's — so
+   * whoever is told is not mistaken for code holding the clone.
+   */
+  private changed(cause: SyncChange["cause"], op: Moved): void {
+    if (!op.moved) return;
+    try {
+      this.opts.onChange?.({
+        cause,
+        at: new Date(this.now()).toISOString().replace(/\.\d+Z$/, "Z"),
+      });
+    } catch (error) {
+      this.report(
+        `nav-server: a sync listener failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   /** The clone itself, as a site: its own branch, pushed to the same name. */
@@ -572,6 +645,7 @@ export class RepoSync {
   private async pull(
     site: WriteRoot,
     opts: { force: boolean; keptLocalCommit: boolean },
+    moved?: Moved,
   ): Promise<string | null> {
     const remote = this.opts.remote;
     if (remote === null) return null;
@@ -583,6 +657,7 @@ export class RepoSync {
     } catch (error) {
       throw this.stopped(error, opts.keptLocalCommit);
     }
+    if (moved) moved.moved = true;
     this.lastFetch = this.now();
     this.opts.afterSync?.();
     return this.mergeReporting(site, remote, opts.keptLocalCommit);
