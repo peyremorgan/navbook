@@ -43,6 +43,7 @@ import {
   listEntities,
   listPrsAcrossRefs,
   locatePr,
+  locatePrToWrite,
   materializePrIfAbsent,
   mintIds,
   openIssue,
@@ -640,7 +641,7 @@ describe("ops: opening a pull request", () => {
 
   it("refuses a named source that is not a local branch", () => {
     inPrWorkspace((ws) => {
-      for (const source of ["nowhere", "origin/feature", "HEAD~1"]) {
+      for (const source of ["nowhere", "origin/feature"]) {
         assert.throws(
           () => preparePrOpen(ws, { source, target: "main" }),
           (error: unknown) =>
@@ -650,6 +651,46 @@ describe("ops: opening a pull request", () => {
           source,
         );
       }
+    });
+  });
+
+  it("refuses a source or target that is a revision or an option, not a branch name", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "main"], { cwd: dir });
+      // Each of these resolves, or would be obeyed: `feature~1` and
+      // `feature@{1}` are commits, and `--octopus` an option to merge-base.
+      for (const [source, target] of [
+        ["feature~1", "main"],
+        ["feature@{1}", "main"],
+        ["feature^1", "main"],
+        ["HEAD~1", "main"],
+        ["feature", "--octopus"],
+        ["feature", "main~1"],
+      ] as const) {
+        assert.throws(
+          () => preparePrOpen(ws, { source, target }),
+          (error: unknown) =>
+            error instanceof WorkspaceError &&
+            error.code === "invalid-input" &&
+            /is not a branch name git accepts/.test(error.message),
+          `${source} -> ${target}`,
+        );
+      }
+    });
+  });
+
+  it("reads the source from another revision when told to, recording its name", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "main"], { cwd: dir });
+      git(["branch", "-q", "copy-of-feature", "feature"], { cwd: dir });
+      git(["branch", "-q", "-D", "feature"], { cwd: dir });
+      const draft = preparePrOpen(ws, {
+        source: "feature",
+        sourceRev: "refs/heads/copy-of-feature",
+        target: "main",
+      });
+      assert.equal(draft.source, "feature");
+      assert.equal(draft.head, resolveSha(dir, "copy-of-feature"));
     });
   });
 
@@ -1145,6 +1186,30 @@ describe("ops: updating and merging a pull request", () => {
         () => locatePr(ws, "zzzz9999"),
         (error: unknown) => error instanceof WorkspaceError && error.code === "not-found",
       );
+    });
+  });
+
+  it("locates a pull request on its own branch, not on one that merged it in", () => {
+    inPrWorkspace((ws, dir) => {
+      // As a clone sees it: only remote-tracking copies, and `alpha` — which
+      // sorts first — has merged `feature` and so carries its directory too.
+      git(["checkout", "-q", "-b", "alpha", "main"], { cwd: dir });
+      git(["merge", "-q", "--no-ff", "-m", "take feature", "feature"], { cwd: dir });
+      git(["checkout", "-q", "main"], { cwd: dir });
+      for (const branch of ["alpha", "feature"]) {
+        git(["update-ref", `refs/remotes/origin/${branch}`, branch], { cwd: dir });
+        git(["branch", "-q", "-D", branch], { cwd: dir });
+      }
+
+      const located = locatePr(ws, "ppp1");
+      assert.equal(located.sourceRef, "origin/feature");
+      assert.deepEqual(located.refs.toSorted(), [
+        "refs/remotes/origin/alpha",
+        "refs/remotes/origin/feature",
+      ]);
+      const elsewhere = locatePrToWrite(ws, "ppp1").elsewhere;
+      assert.equal(elsewhere?.branch, "feature");
+      assert.deepEqual(elsewhere?.refs.toSorted(), located.refs.toSorted());
     });
   });
 

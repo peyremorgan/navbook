@@ -75,6 +75,7 @@ import {
   isMergeInProgress,
   isReplayInProgress,
   isTreeClean,
+  isValidBranchName,
   resolveSha,
   updateBranch,
   worktreeHolding,
@@ -132,9 +133,17 @@ export interface PrOpenOptions {
    *
    * Named, it need not be checked out at all, which is how a pull request is
    * opened on a branch the caller is not standing on — its tip is read from
-   * the branch, never from `HEAD`.
+   * the branch, never from `HEAD`. It has to be a branch name, not any
+   * revision: `feat~1` or `feat@{1}` would resolve, and record a pull request
+   * on a branch nobody has.
    */
   source?: string;
+  /**
+   * Where to read the source from, when that is not the local branch of its
+   * name: a caller writing on a copy of the branch under another name. The
+   * pull request still records {@link source} by name.
+   */
+  sourceRev?: string;
   target?: string;
   /**
    * Where to read the target from, when that is not the local branch of its
@@ -159,17 +168,23 @@ export function preparePrOpen(ws: WsCtx, opts: PrOpenOptions = {}): PrOpenDraft 
   if (!source) {
     wsFail("precondition", "HEAD is detached; check out the branch the pull request rides on");
   }
+  requireBranchName(ws, source);
 
   const target = opts.target ?? defaultBranch(ws.repoRoot);
   if (!target) wsFail("precondition", "could not determine a target branch; pass --target");
+  // Named on a command line, it reaches `git merge-base` as an argument, where
+  // `--octopus` would be obeyed rather than looked for.
+  requireBranchName(ws, target);
   if (target === source) {
     wsFail("precondition", `a pull request cannot target its own branch (${source})`);
   }
 
+  // A name that passed is a name and nothing more — no `~`, `^` or `@{` — so
+  // the ref it spells is the branch and cannot be read as some other commit.
   const head =
     opts.source === undefined
       ? resolveSha(ws.repoRoot, "HEAD")
-      : resolveSha(ws.repoRoot, `refs/heads/${source}`);
+      : resolveSha(ws.repoRoot, opts.sourceRev ?? `refs/heads/${source}`);
   if (!head) {
     wsFail(
       "precondition",
@@ -194,6 +209,13 @@ export function preparePrOpen(ws: WsCtx, opts: PrOpenOptions = {}): PrOpenDraft 
     title: opts.title ?? lastCommitSubject(ws, head) ?? source,
     revision: { head, base, date: created },
   };
+}
+
+/** Refuse, as bad input, a name git would not take for a branch. */
+function requireBranchName(ws: WsCtx, name: string): void {
+  if (!isValidBranchName(ws.repoRoot, name)) {
+    wsFail("invalid-input", `'${name}' is not a branch name git accepts`);
+  }
 }
 
 /** Open a pull request from a composed file. */
@@ -1427,6 +1449,12 @@ export interface LocatedPr {
   sourceRef: string;
   /** Whether {@link sourceRef} is a remote-tracking branch rather than a local one. */
   sourceRemote: boolean;
+  /**
+   * Every ref carrying it, by full name. A branch merged into another carries
+   * the pull request's directory along, so there can be several besides the
+   * one it was opened on.
+   */
+  refs: string[];
 }
 
 /**
@@ -1466,16 +1494,33 @@ export function locatePr(ws: WsCtx, ref: string): LocatedPr {
   return { entity: entry.entity, ...sourceOf(entry) };
 }
 
-/** The ref a pull request is merged from, out of those carrying it. */
+/**
+ * The ref a pull request is merged from, out of those carrying it.
+ *
+ * The one its `source:` names, the local branch before the remote's copy. A
+ * remote-tracking ref is `origin/feat` to `source: feat`, so it is compared
+ * without its remote — compared whole it never matches, and the answer would
+ * be whichever branch sorts first among those that merged this one in.
+ */
 function sourceOf(entry: FoundPr): Omit<LocatedPr, "entity"> {
+  const declared = stringField(entry.entity, "source");
   // `source:` is only SHOULD, so fall back to a local ref before a remote one:
   // a local branch is the copy the user can actually merge.
-  const declared = stringField(entry.entity, "source");
   const source =
-    entry.refs.find((candidate) => candidate.short === declared) ??
+    entry.refs.find((candidate) => !candidate.remote && candidate.short === declared) ??
+    entry.refs.find((candidate) => candidate.remote && branchOf(candidate.short) === declared) ??
     entry.refs.find((candidate) => !candidate.remote) ??
     (entry.refs[0] as Ref);
-  return { sourceRef: source.short, sourceRemote: source.remote };
+  return {
+    sourceRef: source.short,
+    sourceRemote: source.remote,
+    refs: entry.refs.map((ref) => ref.full),
+  };
+}
+
+/** A remote-tracking branch's short name without its remote: `feat` for `origin/feat`. */
+function branchOf(remoteShort: string): string {
+  return remoteShort.slice(remoteShort.indexOf("/") + 1);
 }
 
 export interface ReadablePr {
@@ -1505,6 +1550,8 @@ export interface PrElsewhere {
   /** The ref carrying it, in the spelling {@link locatePr} reports. */
   sourceRef: string;
   sourceRemote: boolean;
+  /** Every ref carrying it, by full name, as {@link LocatedPr.refs}. */
+  refs: string[];
   /**
    * The local branch to stand on: {@link sourceRef} without its remote prefix,
    * since a remote-tracking copy is `<remote>/<branch>` and `git switch
@@ -1548,8 +1595,8 @@ export function locatePrToWrite(ws: WsCtx, ref: string): PrWriteTarget {
   const here = prInTree(loadRepo(ws), ref);
   if (here) return { entity: here, elsewhere: null };
 
-  const { entity, sourceRef, sourceRemote } = locatePr(ws, ref);
-  const branch = sourceRemote ? sourceRef.slice(sourceRef.indexOf("/") + 1) : sourceRef;
+  const { entity, sourceRef, sourceRemote, refs } = locatePr(ws, ref);
+  const branch = sourceRemote ? branchOf(sourceRef) : sourceRef;
 
   // Standing on the branch that carries it, with the directory gone from the
   // tree, is a different fault with a different fix: nowhere else to go, and
@@ -1569,6 +1616,7 @@ export function locatePrToWrite(ws: WsCtx, ref: string): PrWriteTarget {
     elsewhere: {
       sourceRef,
       sourceRemote,
+      refs,
       branch,
       worktree,
       worktreeClean: worktree !== null && isTreeClean(worktree, { untracked: false }),
