@@ -533,6 +533,16 @@ export function decisionFor(core: Core, poll: PollRecord, input: CloseInput): An
   return decision;
 }
 
+/**
+ * When a poll is closed: now, or the latest vote's second when that is later —
+ * a vote stamped after its voter's last one may run ahead of the clock (§4),
+ * and closing must not make a vote it has just counted late (§3.2).
+ */
+function closeAt(poll: PollRecord, ws: WsCtx): Date {
+  const now = Math.floor(ws.now().getTime() / 1000) * 1000;
+  return new Date(Math.max(now, ...poll.votes.map((vote) => vote.date.getTime())));
+}
+
 /** Close a poll (§3.2), recording the decision. */
 export function closePoll(
   core: Core,
@@ -553,7 +563,7 @@ export function closePoll(
   const decision = decisionFor(core, poll, input);
   const text = readFileSync(core.absPath(ws, poll.filePath), "utf8");
   const content = closedPoll(text, {
-    at: core.nowIso(ws),
+    at: core.toIsoSeconds(closeAt(poll, ws)),
     by: core.currentAuthor(ws),
     decision,
     note: input.note ?? null,

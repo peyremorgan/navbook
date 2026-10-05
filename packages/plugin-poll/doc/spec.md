@@ -192,6 +192,9 @@ decision-note: |
   closer left a tie undecided.
 - `closed-by` MUST be present exactly when `closed` is. `decision` and
   `decision-note` MUST NOT be present without `closed`.
+- A tool closing a poll writes `closed` no earlier than the latest vote in the
+  poll's directory (§4 can stamp one ahead of the clock), so that no vote it
+  counted reads as late.
 
 **Reopening** removes all four keys. The poll is open again; the decision it
 had is in the history. A vote cast while it was closed — which no tool writes,

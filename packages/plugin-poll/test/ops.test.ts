@@ -386,6 +386,33 @@ describe("voting", () => {
     });
   });
 
+  it("closes a poll no earlier than its latest vote, so a quick revote is not late", () => {
+    inRepo((act, _dir, issueId) => {
+      const id = opened(act, issueId);
+      for (const picks of [["s3-compatible"], ["local-disk"], ["s3-compatible"]]) {
+        const ws = act(2, "bob@example.com");
+        castVote(
+          core,
+          ws,
+          pollOf(ws, id),
+          { answers: answers({ q1: { picks } }) },
+          { commit: true },
+        );
+      }
+      const ws = act(2);
+      closePoll(core, ws, pollOf(ws, id), {}, { commit: true });
+      const poll = pollOf(ws, id);
+      assert.equal(poll.closed, "2026-10-04T10:02:02Z");
+      assert.deepEqual(
+        poll.ballots.map((b) => b.state),
+        ["superseded", "superseded", "counted"],
+      );
+      assert.deepEqual(Object.fromEntries(poll.outcome ?? []), {
+        q1: { picks: ["s3-compatible"], other: null },
+      });
+    });
+  });
+
   it("mints IDs no poll or vote holds, those of archived issues included", () => {
     inRepo((act, dir, issueId) => {
       const archived = join(
