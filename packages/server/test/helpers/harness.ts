@@ -60,6 +60,12 @@ export interface HarnessOptions extends FixtureOptions {
   graphiql?: boolean;
   /** Extra environment for the server process, e.g. `NAVBOOK_PLUGIN_PATH`. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * A fixture made by the caller, to serve instead of a new one: two servers
+   * started one after the other on the same clone, as a restart is. The
+   * harness leaves it on disk when it stops; cleaning it up is the caller's.
+   */
+  fixture?: Fixture;
   /** An authorization policy, as its flags would be given; none admits everyone. */
   policy?: {
     requireClaims?: string[];
@@ -70,8 +76,12 @@ export interface HarnessOptions extends FixtureOptions {
 
 /** Start a server, or report why it would not start. */
 export async function startHarness(opts: HarnessOptions = {}): Promise<Harness> {
-  const fixture = makeFixture(opts);
+  const owned = opts.fixture === undefined;
+  const fixture = opts.fixture ?? makeFixture(opts);
   opts.prepare?.(fixture);
+  const cleanup = (): void => {
+    if (owned) fixture.cleanup();
+  };
   const issuer = await startStubIssuer(
     opts.issuerPath === undefined ? {} : { issuerPath: opts.issuerPath },
   );
@@ -125,7 +135,7 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<Harness> 
   } catch (error) {
     if (child.exitCode === null) child.kill("SIGKILL");
     await issuer.close();
-    fixture.cleanup();
+    cleanup();
     throw error;
   }
 
@@ -136,7 +146,7 @@ export async function startHarness(opts: HarnessOptions = {}): Promise<Harness> 
       await exited;
     }
     await issuer.close();
-    fixture.cleanup();
+    cleanup();
   };
 
   return {
@@ -206,4 +216,4 @@ export function ok<T>(response: GraphQLResponse<T>): T {
 
 // Re-exported so a plugin's suite has one import for the whole harness rather
 // than reaching into this package's test tree by path.
-export { type Fixture, originSubjects } from "./temprepo.ts";
+export { type Fixture, makeFixture, originSubjects } from "./temprepo.ts";
