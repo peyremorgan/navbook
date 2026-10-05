@@ -28,6 +28,10 @@ type SrvProbe {
   """
   issueTitles: [String!]!
   """
+  What running an operation from inside a read answers.
+  """
+  underLock: String!
+  """
   What running an operation the schema does not have answers.
   """
   invalid: [String!]!

@@ -198,6 +198,11 @@ export interface ServerPluginHost {
      * that branch is pushed. `body` runs synchronously under the lock, with a
      * workspace rooted at that site and the entity as read there, and must
      * commit what it writes: the push follows when `result.run` committed.
+     *
+     * It tells nobody. A built-in mutation reports through `commitInfo`, which
+     * is what emits the mutation event services listen for; a plugin's must
+     * call it too, with the `run` and `pushed` this resolves to, or its write
+     * is the one change a chat bridge never hears of.
      */
     writeEntity<T extends { run: RunPlanResult }>(
       ctx: GraphQLCtx,
@@ -210,15 +215,27 @@ export interface ServerPluginHost {
      *
      * The same resolvers, transactions, error codes and mutation event as a
      * request from a client, so a plugin acting for somebody — an assistant, a
-     * bridge — needs no copy of any of them. Available from a resolver or a
-     * service, once the schema is built; not during `activate`.
+     * bridge — needs no copy of any of them.
+     *
+     * Called from a resolver, with the context that resolver was handed: a
+     * context is built for each request, so there is none outside one, and a
+     * service has nothing to pass. Never from inside `sync.read`, `sync.write`,
+     * `sync.locked` or a `writeEntity` body — the operation's own resolvers
+     * take the repository lock, which is not re-entrant, so it would wait for
+     * itself and every request after it would wait too. That call is refused.
      */
     execute(
       ctx: GraphQLCtx,
       source: string,
       variables?: Record<string, unknown>,
     ): Promise<ExecutionResult>;
-    /** The schema this server serves, for checking a document in a service's `start`. */
+    /**
+     * The schema this server serves, once every plugin has activated.
+     *
+     * What a service can use: it cannot run an operation, having no request's
+     * context, but it can check in its `start` that the documents its
+     * resolvers will run are ones this schema answers.
+     */
     schema(): GraphQLSchema;
   };
 }

@@ -77,6 +77,16 @@ export function activate(host) {
         );
         return result.data.issues.map((issue) => issue.title).sort();
       },
+      // The deadlock `execute` refuses: an operation queued behind the read
+      // that is waiting for it.
+      underLock: async (_parent, _args, ctx) => {
+        try {
+          await ctx.sync.read(() => host.api.execute(ctx, "{ issues { title } }"));
+          return "ran";
+        } catch (error) {
+          return error.message;
+        }
+      },
       invalid: async (_parent, _args, ctx) => {
         const result = await host.api.execute(ctx, "query { nothingLikeThis }");
         return result.errors.map((error) => error.message);
@@ -96,7 +106,9 @@ export function activate(host) {
               return { run: added.run, branch: site.worktree === null ? null : site.branch };
             },
           );
-          return { subject: result.run.subject, pushed, branch: result.branch };
+          // The write itself tells nobody: reporting it is what emits the event.
+          const info = host.api.commitInfo(ctx, result.run, pushed);
+          return { subject: info.subject, pushed: info.pushed, branch: result.branch };
         }),
     },
   });

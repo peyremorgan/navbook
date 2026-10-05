@@ -72,12 +72,24 @@ export class PluginRuntime {
    * The same resolvers, transactions, error codes and mutation event as a
    * request from a client, because it *is* one, minus the HTTP. A document
    * that does not parse or validate answers with its errors, as Yoga would.
+   *
+   * Refused from under the clone's lock. The resolvers it runs take that lock
+   * themselves, and the lock is a queue rather than a re-entrant one: called
+   * from inside `sync.read`, the operation would wait for the read that is
+   * waiting for it, and every request after them would wait too. Refusing is
+   * the difference between a plugin's bug and a server that stops answering.
    */
   async execute(
     ctx: GraphQLCtx,
     source: string,
     variables?: Record<string, unknown>,
   ): Promise<ExecutionResult> {
+    if (ctx.sync.underLock) {
+      throw new Error(
+        "host.api.execute was called under the repository lock, where it would wait for itself; " +
+          "call it from a resolver, never from inside sync.read, sync.write, sync.locked or a writeEntity body",
+      );
+    }
     const schema = this.schema();
     let document = this.#documents.get(source);
     if (document === undefined) {

@@ -199,11 +199,37 @@ describe("what a plugin runs through the host", () => {
         "{ srvprobe { issueTitles } }",
       );
       assert.deepEqual(result.errors, [], JSON.stringify(result.errors));
-      // The fetch the built-in resolver makes brought the peer's issue in too.
+      // The pull `openIssue` made brought the peer's issue in, and the
+      // operation read the tree that left through the built-in `issues`.
       assert.deepEqual(result.data?.srvprobe.issueTitles, [
         "Filed at a terminal",
         "Filed over the API",
       ]);
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("refuses an operation from under the lock, which would wait for itself", async () => {
+    const log = logFile("under-lock");
+    const harness = await startHarness({ env: probeEnv(log.path) });
+    try {
+      const result = await harness.gql<{ srvprobe: { underLock: string } }>(
+        "{ srvprobe { underLock } }",
+      );
+      assert.deepEqual(result.errors, [], JSON.stringify(result.errors));
+      assert.match(result.data?.srvprobe.underLock ?? "", /under the repository lock/);
+      assert.match(result.data?.srvprobe.underLock ?? "", /never from inside sync\.read/);
+      // And the lock was let go: the server answers what comes after, reads
+      // and writes alike, and stops.
+      const opened = await harness.gql<{ openIssue: { issue: { id: string } } }>(
+        `mutation { openIssue(input: { title: "After", body: "Body." }) { issue { id } } }`,
+      );
+      assert.deepEqual(opened.errors, [], JSON.stringify(opened.errors));
+      const titles = await harness.gql<{ srvprobe: { issueTitles: string[] } }>(
+        "{ srvprobe { issueTitles } }",
+      );
+      assert.deepEqual(titles.data?.srvprobe.issueTitles, ["After"]);
     } finally {
       await harness.stop();
     }
@@ -243,6 +269,12 @@ describe("what a plugin runs through the host", () => {
         branch: "elsewhere",
       });
       assert.equal(originSubjects(origin, "elsewhere")[0], "docs(pr): comment on #pppp1111");
+      // Reported through `commitInfo`, so services heard of it like any other.
+      const seen = await harness.gql<{ srvprobe: { seen: string[] } }>("{ srvprobe { seen } }");
+      assert.ok(
+        seen.data?.srvprobe.seen.includes("docs(pr): comment on #pppp1111"),
+        JSON.stringify(seen.data),
+      );
 
       const opened = await harness.gql<{ openIssue: { issue: { id: string } } }>(
         `mutation { openIssue(input: { title: "Here", body: "Body." }) { issue { id } } }`,

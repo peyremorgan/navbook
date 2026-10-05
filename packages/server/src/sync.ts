@@ -314,6 +314,18 @@ export class RepoSync {
     return this.opts.remote;
   }
 
+  /**
+   * True in code running under the clone's lock — inside `read`, `write`,
+   * `writeOn`, `locked` or `exclusive`, or anything their bodies awaited.
+   *
+   * The lock is not re-entrant, so code that queues an operation of its own
+   * asks this first: from under the lock, that operation would wait for the
+   * very one holding it, and so would everything after it.
+   */
+  get underLock(): boolean {
+    return this.lock.held;
+  }
+
   /** Run a read, having brought the clone up to date first. */
   read<T>(body: () => T): Promise<T> {
     return this.lock.run(async () => {

@@ -56,10 +56,11 @@ Settings under a plugin's name in `navbook.json` are committed, shared by
 everyone who clones, and therefore never secret. A plugin that needs a
 credential reads it from the environment.
 
-The built-in verbs never touch the network. A plugin's own command may reach
-a service it is configured for — a model endpoint, an issue importer's API —
-and says so in its description and README; no plugin fetches from or pushes to
-the repository's remotes (spec 04 §4.4).
+The verbs that read or write the tree never touch the network; `nav plugin
+install` does, through npm, and prints the command before running it. A
+plugin's own command may reach a service it is configured for — a model
+endpoint, an issue importer's API — and says so in its description and README;
+no plugin fetches from or pushes to the repository's remotes (spec 04 §4.4).
 
 ## Available plugins
 
@@ -257,7 +258,10 @@ one uses the host's write site rather than the working tree:
 
 - on the server, `host.api.writeEntity(ctx, kind, ref, (at, entity, site) =>
   …)` runs the write in the clone for an issue, and on the pull request's
-  branch — in a temporary worktree, then pushed — for a pull request;
+  branch — in a temporary worktree, then pushed — for a pull request. It tells
+  nobody by itself: report the write with `host.api.commitInfo(ctx, result.run,
+  pushed)`, as every built-in mutation does, or the mutation event services
+  listen for is never emitted;
 - in the CLI, `host.ui.withPrWriteSite(ref, { assumeYes }, (at, entity) => …)`
   asks, as `nav pr comment` does, before writing in a worktree on the branch,
   and `host.ui.withBranchWriteSite(branch, …)` does the same for a branch
@@ -272,9 +276,18 @@ A server plugin acting for somebody — an assistant, a chat bridge — needs no
 copy of the built-in operations: `host.api.execute(ctx, document, variables)`
 runs a GraphQL operation against the schema the server serves, as that
 request's viewer, through the same resolvers, transactions and mutation event
-as a client's request. The schema exists once every plugin has activated, so
-it is available from a resolver or a service, and `host.api.schema()` lets a
-service check its documents when it starts.
+as a client's request. It is called from a resolver, with the context that
+resolver was handed: a context is built for each request, so a service has none
+to pass, and can only check the documents its resolvers will run against
+`host.api.schema()` when it starts — the schema exists once every plugin has
+activated, never during `activate`.
+
+Never call `execute` from inside `ctx.sync.read`, `ctx.sync.write`,
+`ctx.sync.locked` or a `writeEntity` body. The operation's own resolvers take
+the repository lock, which is a queue rather than a re-entrant lock, so it would
+wait for the operation holding it — and every request after it, and the server's
+shutdown, would wait too. The host refuses that call with an error naming this
+rule; run the operation before or after the locked section instead.
 
 ### The web half
 

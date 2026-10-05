@@ -1116,3 +1116,40 @@ describe("RepoSync.exclusive", () => {
     assert.deepEqual(calls, ["fetch origin", "push origin main -> ok"]);
   });
 });
+
+describe("RepoSync.underLock", () => {
+  it("is true in a body and in what it awaits, and false beside and after it", async () => {
+    const push = gate();
+    const { sync } = makeSync({ pushGate: push.closed });
+    const seen: Record<string, boolean> = {};
+    assert.equal(sync.underLock, false);
+    const read = sync.read(async () => {
+      seen.read = sync.underLock;
+      await settle();
+      seen.awaited = sync.underLock;
+    });
+    const locked = sync.locked(() => {
+      seen.locked = sync.underLock;
+    });
+    const write = sync.write(
+      () => {
+        seen.write = sync.underLock;
+      },
+      () => true,
+    );
+    await settle();
+    // The write is on the network, still holding the clone; nothing here is.
+    seen.beside = sync.underLock;
+    push.open();
+    await Promise.all([read, locked, write]);
+    seen.after = sync.underLock;
+    assert.deepEqual(seen, {
+      read: true,
+      awaited: true,
+      locked: true,
+      write: true,
+      beside: false,
+      after: false,
+    });
+  });
+});

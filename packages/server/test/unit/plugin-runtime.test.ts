@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { GraphQLObjectType, GraphQLSchema, GraphQLString } from "graphql";
 import type { GraphQLCtx } from "../../src/context.ts";
+import { Mutex } from "../../src/lock.ts";
 import type { PluginService } from "../../src/plugins/host.ts";
 import { PluginRuntime } from "../../src/plugins/runtime.ts";
 
@@ -105,7 +106,10 @@ describe("running an operation for a plugin", () => {
     return { schema, resolved: () => count };
   }
 
-  const ctx = { viewer: { email: "person@example.invalid" } } as unknown as GraphQLCtx;
+  const ctx = {
+    viewer: { email: "person@example.invalid" },
+    sync: { underLock: false },
+  } as unknown as GraphQLCtx;
 
   it("has no schema until the server built one", async () => {
     const { runtime } = runtimeWith();
@@ -125,6 +129,29 @@ describe("running an operation for a plugin", () => {
       g: "hello",
     });
     assert.equal(greeted.data?.who, "hello person@example.invalid");
+  });
+
+  it("refuses to run under the lock its resolvers would take, and leaves the lock free", async () => {
+    const { runtime } = runtimeWith();
+    const { schema, resolved } = whoSchema();
+    runtime.setSchema(schema);
+    const lock = new Mutex();
+    const locked = {
+      ...ctx,
+      sync: {
+        get underLock() {
+          return lock.held;
+        },
+      },
+    } as unknown as GraphQLCtx;
+    await assert.rejects(
+      lock.run(() => runtime.execute(locked, "{ who }")),
+      /under the repository lock.*never from inside sync\.read/,
+    );
+    assert.equal(resolved(), 0);
+    // Outside it, the same context runs, and the lock still turns.
+    assert.equal((await runtime.execute(locked, "{ who }")).data?.who, "hi person@example.invalid");
+    assert.equal(await lock.run(() => "next"), "next");
   });
 
   it("answers a document that does not parse or validate with its errors, running nothing", async () => {
