@@ -9,6 +9,9 @@ revisions:
   - head: 131891a2023a811221833cf1441a0c38628a540f
     base: 11b41b1019658234ecfe1dd553da3d52c7fc14d3
     date: 2026-10-05T02:27:40Z
+  - head: 0cd3b5ff847982c52bcc8eab012076836064d2bf
+    base: 11b41b1019658234ecfe1dd553da3d52c7fc14d3
+    date: 2026-10-05T03:07:25Z
 ---
 
 The second of three pull requests for #gel4fvdo: the API half of `@navbook/plugin-poll`. It is stacked on #p4jj02ne (the format, the core and `nav poll`), whose commits it carries until that one merges; review the commits from `feat(poll): polls over the API` on.
