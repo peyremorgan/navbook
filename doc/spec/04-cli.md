@@ -244,8 +244,9 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   on the current branch: mint an ID, create `prs/open/<id>-<slug>/pr.md` with
   `source` = the current branch, `target` (default: the default branch), and
   one revision entry pinning `head` = current `HEAD` SHA and `base` = `git
-  merge-base HEAD <target>`. `--source` names another local branch: the pull
-  request is then written on that branch, whose tip is the `head` pinned, in
+  merge-base HEAD <target>`. `--source` names another local branch, by its
+  name: a revision such as `feat/work~1` is no branch, and MUST be refused.
+  The pull request is then written on that branch, whose tip is the `head` pinned, in
   the clean worktree that has it checked out or in a temporary one, after
   asking — or without asking under `-y` — exactly as a write to a pull request
   held by another branch is.

@@ -268,6 +268,27 @@ describe("nav pr open --source", () => {
     }
   });
 
+  it("refuses a revision that is not a branch name, before checking anything out", () => {
+    const repo = withBranch();
+    try {
+      const tmp = join(repo.home, "tmp");
+      mkdirSync(tmp, { recursive: true });
+      // Each resolves to a commit under `refs/heads/`, and none is a branch: a
+      // worktree on it would be a detached HEAD, recorded as the source.
+      for (const revision of ["feat/work~1", "feat/work^", "feat/work@{0}"]) {
+        const refused = repo.nav(["pr", "open", "--source", revision, "-y", "-m", "Body."], {
+          TMPDIR: tmp,
+        });
+        assert.equal(refused.code, 1, revision);
+        assert.match(refused.stderr, /is not a branch name/, revision);
+      }
+      assert.equal(repo.git(["worktree", "list"]).stdout.trim().split("\n").length, 1);
+      assert.deepEqual(readdirSync(tmp), []);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("refuses a worktree with uncommitted changes", () => {
     const repo = withBranch();
     const tree = join(repo.dir, "..", "worktree-dirty-open");

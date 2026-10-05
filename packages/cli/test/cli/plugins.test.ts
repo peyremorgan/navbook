@@ -10,7 +10,15 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { npmInvocation } from "../../src/plugins/store.ts";
@@ -281,6 +289,32 @@ describe("a plugin writing to a pull request", () => {
       assert.match(result.stdout, /Committed docs\(pr\): comment on #prbe1111/);
       assert.match(repo.git(["log", "-1", "--format=%s", "feat/x"]).stdout, /comment on #prbe1111/);
       assert.equal(repo.git(["worktree", "list"]).stdout.trim().split("\n").length, 1);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("refuses a write that returns a promise, keeping the worktree with what it staged", () => {
+    const repo = withPr();
+    const tmp = join(repo.home, "tmp");
+    try {
+      mkdirSync(tmp, { recursive: true });
+      const result = repo.nav(["probe", "note", "prbe1111", "Noted.", "-y", "--async"], {
+        ...withProbe(repo),
+        TMPDIR: tmp,
+      });
+      assert.equal(result.code, 1, result.stderr);
+      assert.match(result.stderr, /must be synchronous, and this one returned a promise/);
+      // Handled as a write that threw: what it staged is kept, and named.
+      const [kept] = readdirSync(tmp);
+      assert.ok(kept, "the temporary worktree is gone");
+      assert.match(result.stderr, /the change is staged in .*a temporary worktree on 'feat\/x'/);
+      assert.match(
+        repo.git(["-C", join(tmp, kept), "diff", "--cached", "--name-only"]).stdout,
+        /comments\//,
+      );
+      assert.doesNotMatch(repo.git(["log", "-1", "--format=%s", "feat/x"]).stdout, /comment on/);
+      repo.git(["worktree", "remove", "--force", join(tmp, kept)]);
     } finally {
       repo.cleanup();
     }

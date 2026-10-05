@@ -265,7 +265,11 @@ one uses the host's write site rather than the working tree:
 - in the CLI, `host.ui.withPrWriteSite(ref, { assumeYes }, (at, entity) => …)`
   asks, as `nav pr comment` does, before writing in a worktree on the branch,
   and `host.ui.withBranchWriteSite(branch, …)` does the same for a branch
-  with no pull request on it yet.
+  with no pull request on it yet — a branch's name, not a revision such as
+  `main~1`. The callback is synchronous: a temporary worktree is released as
+  soon as it returns, so one that returns a promise fails the command, keeping
+  the worktree only if it staged something there. Do the asynchronous work —
+  asking a model, say — first, and write inside without awaiting.
 
 `host.api.writeTarget(ctx, "pr", ref)` is the stricter choice for data that
 must sit in the served tree: it returns the entity there, and refuses a pull

@@ -151,6 +151,11 @@ export interface CliPluginUi {
    * or in a temporary one — after asking, unless `assumeYes` answered already.
    * `write` gets the context to write in and the pull request as read there;
    * when the write cannot move, this fails naming the branch.
+   *
+   * `write` is synchronous. The site is held only while it runs — a temporary
+   * worktree is released, and Ctrl-C given back, as soon as it returns — so a
+   * callback returning a promise fails the command, as a write that threw
+   * does. Do anything asynchronous first, and write inside without awaiting.
    */
   withPrWriteSite<T>(
     prefix: string,
@@ -161,6 +166,9 @@ export interface CliPluginUi {
    * Write on a local branch that may not be the one checked out here, as
    * `nav pr open --source` does: here, in the clean worktree that has it, or in
    * a temporary one, asking first unless `assumeYes` answered already.
+   *
+   * `branch` is a branch's name, never a revision such as `main~1`; `write` is
+   * synchronous, as for {@link withPrWriteSite}.
    */
   withBranchWriteSite<T>(branch: string, opts: { assumeYes?: boolean }, write: (at: Ctx) => T): T;
 }

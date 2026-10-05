@@ -39,11 +39,20 @@ export function activate(host) {
   });
 
   // A write beside a pull request, wherever its branch is checked out.
+  // `--async` makes it the mistake the host refuses: an async callback, which
+  // stages the comment before its first await and returns a promise.
   host.command("probe note", ([id, text], opts) => {
-    const written = host.ui.withPrWriteSite(id, { assumeYes: opts.yes === true }, (at, entity) => {
+    const note = (at, entity, commit) => {
       const content = core.newCommentFile({ author: core.currentAuthor(at), body: text });
-      return core.applyComment(at, entity, { content }, { commit: true });
-    });
+      return core.applyComment(at, entity, { content }, { commit });
+    };
+    const written = host.ui.withPrWriteSite(
+      id,
+      { assumeYes: opts.yes === true },
+      opts.async
+        ? async (at, entity) => note(at, entity, false)
+        : (at, entity) => note(at, entity, true),
+    );
     ctx.stdout.write(`${host.ui.commitReport(written.run)}\n`);
   });
 

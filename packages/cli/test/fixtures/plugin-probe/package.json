@@ -91,6 +91,10 @@
                 {
                   "flags": "-y, --yes",
                   "description": "write in a worktree on its branch without asking"
+                },
+                {
+                  "flags": "--async",
+                  "description": "write from an async callback, which the host refuses"
                 }
               ]
             }

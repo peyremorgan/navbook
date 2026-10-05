@@ -28,11 +28,11 @@ import {
   findPrToWrite,
   gitRun,
   isTreeClean,
+  isValidBranchName,
   locatePrToWrite,
   type PrElsewhere,
   refusePrWrite,
   removeWorktree,
-  resolveSha,
   worktreeHolding,
 } from "@navbook/core";
 import type { Ctx } from "../context.ts";
@@ -204,6 +204,35 @@ function sheltered<T>(body: () => T): T {
 }
 
 /**
+ * `write`, refusing a result that is still on its way.
+ *
+ * A write site is held for exactly as long as `write` runs: a temporary
+ * worktree is released, and terminal signals given back, the moment it
+ * returns. A promise returned then would go on writing into a worktree already
+ * taken away — or into one kept, after the user was told what it holds — so
+ * it fails instead, as a write that threw does: a worktree holding what it
+ * staged before its first `await` is kept and named, a clean one goes. What
+ * the promise does later is nobody's to report, so its rejection is dropped
+ * rather than left to end the process with a less useful message.
+ */
+function synchronous<A extends unknown[], T>(write: (...args: A) => T): (...args: A) => T {
+  return (...args) => {
+    const result = write(...args);
+    if (typeof (result as { then?: unknown } | null)?.then === "function") {
+      (result as PromiseLike<unknown>).then(undefined, () => undefined);
+      fail(
+        "a write at a pull request's write site must be synchronous, and this one returned a promise",
+        [
+          "the site is released as soon as the write returns, so nothing it awaits would land there",
+          "do the asynchronous work first, then write inside the callback without awaiting",
+        ],
+      );
+    }
+    return result;
+  };
+}
+
+/**
  * Run `write` at `to`: in the clean worktree that has the branch, or in a
  * temporary one made for the purpose and taken away again afterwards.
  */
@@ -235,13 +264,16 @@ function writeAt<T>(ctx: Ctx, to: Destination, write: (at: Ctx) => T): T {
  * sees it. When the write cannot or may not move, this is core's refusal
  * naming where the pull request lives — declining the question included: the
  * answer was "not there", not "do it here".
+ *
+ * `write` is synchronous, wherever the site is: one returning a promise fails.
  */
 export function withPrWriteSite<T>(
   ctx: Ctx,
   prefix: string,
   opts: PrWriteOptions,
-  write: (at: Ctx, entity: EntityRecord) => T,
+  given: (at: Ctx, entity: EntityRecord) => T,
 ): T {
+  const write = synchronous(given);
   const { entity, elsewhere } = locatePrToWrite(ctx, prefix);
   if (elsewhere === null) return write(ctx, entity);
 
@@ -261,19 +293,33 @@ export function withPrWriteSite<T>(
  * out here — the write that opens a pull request on a branch the caller is not
  * standing on, which has no pull request yet to be found on it.
  *
- * Only a local branch: a remote-tracking one would have to become a local
- * branch first, which is more than opening a pull request should do. A
- * worktree that has the branch is used when it is clean, and refused when it
- * is not, or is registered and gone.
+ * Only a local branch, named as one: a remote-tracking one would have to
+ * become a local branch first, which is more than opening a pull request
+ * should do, and a revision such as `feat/work~1` names a commit, which no
+ * pull request can be written on — checked out, it is a detached HEAD, and the
+ * `source` recorded would be no branch at all. A worktree that has the branch
+ * is used when it is clean, and refused when it is not, or is registered and
+ * gone. `write` is synchronous, as for {@link withPrWriteSite}.
  */
 export function withBranchWriteSite<T>(
   ctx: Ctx,
   branch: string,
   opts: PrWriteOptions,
-  write: (at: Ctx) => T,
+  given: (at: Ctx) => T,
 ): T {
+  const write = synchronous(given);
+  if (!isValidBranchName(ctx.repoRoot, branch)) {
+    fail(`'${branch}' is not a branch name`, [
+      "a pull request is written on a branch, so name one — not a revision such as 'main~1' or 'main@{1}'",
+    ]);
+  }
   if (branch === currentBranch(ctx.repoRoot)) return write(ctx);
-  if (resolveSha(ctx.repoRoot, `refs/heads/${branch}`) === null) {
+  // `show-ref --verify` rather than `rev-parse`, which reads its argument as
+  // a revision and finds a commit for more than an exact ref.
+  if (
+    gitRun(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: ctx.repoRoot })
+      .code !== 0
+  ) {
     fail(`'${branch}' is not a local branch`, [
       `create it first, e.g. 'git switch -c ${branch}' or 'git branch ${branch} origin/${branch}'`,
     ]);
