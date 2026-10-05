@@ -105,11 +105,11 @@ jobs:
       # The generated bundle is what the suite serves, because it is what gets
       # deployed: a dev server has no SPA fallback to prove.
       #
-      # Both scripts name `@navbook/plugin-kb` and `@navbook/plugin-tests` in
-      # `NAVBOOK_WEB_PLUGINS`, since this repository uses both. That makes this
-      # job the acceptance test for the plugin system's web half: the bundle is
-      # built with two layers, and Playwright runs each plugin's own suite
-      # beside this package's because the same variable decided both.
+      # Both scripts name the three first-party plugins in `NAVBOOK_WEB_PLUGINS`.
+      # That makes this job the acceptance test for the plugin system's web
+      # half: the bundle is built with three layers, and Playwright runs each
+      # plugin's own suite beside this package's because the same variable
+      # decided both.
       - run: pnpm --filter @navbook/web build
       - run: pnpm --filter @navbook/web test:e2e
       - uses: actions/upload-artifact@v4
