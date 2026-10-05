@@ -9,6 +9,9 @@ revisions:
   - head: e417568dc50251cec9a0f147ce67e8d4dc95d27f
     base: 11b41b1019658234ecfe1dd553da3d52c7fc14d3
     date: 2026-10-05T02:13:52Z
+  - head: 73aea053f102fd86dfc89a7defdd00d3d07ce0ef
+    base: 11b41b1019658234ecfe1dd553da3d52c7fc14d3
+    date: 2026-10-05T03:07:24Z
 ---
 
 The first of three pull requests for #gel4fvdo: `@navbook/plugin-poll`, polls on issues. This one is the format, the core and the CLI; the server and the web follow, each stacked on the one before.
