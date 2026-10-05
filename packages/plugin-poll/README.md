@@ -150,6 +150,7 @@ has polls in it:
 |---|---|
 | Format | `poll/<id>-<slug>/poll.md` and its votes inside issue directories; checks X-poll-1 to X-poll-3 |
 | CLI | `nav poll {open,vote,show,list,edit,close,reopen}`, a "polls" section and `polls` JSON on `nav issue show`, the `poll:` and `poll-awaiting:` terms on `nav issue list` |
+| API | `Poll` and `Query.poll`, `polls` on `Issue`, five mutations (a ballot is the signed-in person's), `myState` and `myDraft` for the viewer, `polls` and `pollAwaiting` issue filters, and `ext.poll` on issue rows |
 | Commits | the `docs(poll): …` scope, with a `Refs:` trailer naming the issue |
 
 ## Without it installed

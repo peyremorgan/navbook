@@ -1,0 +1,301 @@
+# Polls on issues: the API half — `doc/spec.md`.
+#
+# Merged into the schema `nav-server` serves. Writes go through the same
+# transaction the built-in mutations use, and the same operations `nav poll`
+# runs: a poll opened in a browser and one opened at a terminal are the same
+# file, committed the same way. The person voting is the one the token names.
+
+extend type Query {
+  "A poll by ID or unambiguous prefix (four characters at least)."
+  poll(id: ID!): Poll!
+}
+
+extend type Mutation {
+  openPoll(input: OpenPollInput!): PollPayload!
+  "Change what a poll asks; a change to its questions revokes every ballot."
+  editPoll(input: EditPollInput!): PollPayload!
+  "Cast the viewer's ballot, replacing their last; no answers at all withdraws it."
+  votePoll(input: VotePollInput!): PollPayload!
+  closePoll(input: ClosePollInput!): PollPayload!
+  reopenPoll(input: ReopenPollInput!): PollPayload!
+}
+
+extend type Issue {
+  "Its polls, oldest first."
+  polls: [Poll!]!
+}
+
+extend input IssueFilter {
+  """
+  Poll states, lowercase as the CLI's `poll:` term takes them: open, closed,
+  or none for an issue with no poll. An issue matches any one of them.
+  """
+  polls: [String!]
+  """
+  Addresses, as the CLI's `poll-awaiting:` term takes them: an issue matches
+  when an open poll on it waits on any one of them — they filed, hold or
+  commented on it and have no ballot that counts, or the questions changed
+  under the one they cast.
+  """
+  pollAwaiting: [String!]
+}
+
+"Open, or closed — by somebody, or because its issue is (`doc/spec.md` §6.2)."
+enum PollStatus {
+  OPEN
+  CLOSED
+}
+
+"When a front end shows the tallies (`doc/spec.md` §6.4). The API always carries them."
+enum PollResults {
+  "Once the person looking has a ballot that counts, or the poll is closed."
+  HIDDEN
+  VISIBLE
+}
+
+"Where somebody stands on a poll: their ballot's state, or NONE."
+enum PollVoterState {
+  NONE
+  COUNTED
+  WITHDRAWN
+  "The questions changed since they voted: asked again."
+  REVOKED
+}
+
+"What became of a vote (`doc/spec.md` §6.1)."
+enum PollBallotState {
+  COUNTED
+  WITHDRAWN
+  REVOKED
+  "An earlier vote of somebody who voted again."
+  SUPERSEDED
+  "Cast after the poll was closed: not counted."
+  LATE
+  "A file with faults: not read at all."
+  INVALID
+}
+
+"""
+A poll on an issue (`doc/spec.md` §3): a preamble, and questions. What its
+votes add up to is derived, never stored.
+"""
+type Poll {
+  id: ID!
+  "The issue it is on."
+  issue: Issue!
+  "Path of its directory from the repository root."
+  path: String!
+  """
+  A token for the version of `poll.md` this was read from, as `Issue.baseSha`
+  is. Hand it back to edit, close or reopen: a change made against an older
+  version is refused with STALE_CONTENT.
+  """
+  baseSha: String!
+  title: String!
+  author: String!
+  created: String!
+  "Markdown before the questions; may be empty."
+  preamble: String!
+  results: PollResults!
+  "A day, YYYY-MM-DD: when an answer is wanted. Advisory."
+  deadline: String
+  questions: [PollQuestion!]!
+  """
+  The fingerprint of the questions (`doc/spec.md` §5). A ballot cast against
+  another one is revoked; `votePoll` takes the one its form was built from.
+  """
+  fingerprint: String!
+  status: PollStatus!
+  "True when it reads as closed only because its issue is."
+  closedByIssue: Boolean!
+  "When it was closed, or null."
+  closed: String
+  closedBy: String
+  """
+  What it came to: the decision recorded when it was closed, what its votes
+  came to when its issue closed it, and null while it is open. A question
+  missing from it is undecided.
+  """
+  outcome: [PollAnswer!]
+  "Why, in Markdown, as the closer put it."
+  decisionNote: String
+  "What closing it now would record unless the closer decided otherwise; ties are left out."
+  proposed: [PollAnswer!]!
+  "How many ballots count."
+  voters: Int!
+  "Each question's tally over the ballots that count."
+  tallies: [PollTally!]!
+  "Every vote, oldest first, and what became of it."
+  votes: [PollVote!]!
+  "Where the viewer stands."
+  myState: PollVoterState!
+  "The viewer's ballot — counting, revoked or withdrawn — or null when they have none."
+  myBallot: PollVote
+  """
+  Where the viewer's next ballot starts: their last answers, less whatever no
+  longer fits the questions, and their note.
+  """
+  myDraft: PollDraft!
+  "Faults in `poll.md`; nothing can be changed until they are fixed."
+  problems: [String!]!
+}
+
+type PollQuestion {
+  id: String!
+  text: String!
+  "Any number of answers, rather than exactly one."
+  multi: Boolean!
+  "Accepts an answer in the voter's own words."
+  other: Boolean!
+  options: [PollOption!]!
+}
+
+type PollOption {
+  id: String!
+  label: String!
+  "Markdown."
+  description: String
+}
+
+"One question's answer, in a ballot or a decision."
+type PollAnswer {
+  question: String!
+  picks: [String!]!
+  "The answer in other words, or null."
+  other: String
+}
+
+type PollVote {
+  id: ID!
+  path: String!
+  author: String!
+  "When it was cast."
+  cast: String!
+  state: PollBallotState!
+  answers: [PollAnswer!]!
+  "Markdown; may be empty."
+  note: String!
+  "What is wrong with it, for an INVALID one."
+  problems: [String!]!
+}
+
+type PollDraft {
+  answers: [PollAnswer!]!
+  note: String!
+}
+
+type PollTally {
+  question: String!
+  "How many counting ballots answer it."
+  answered: Int!
+  "A single-choice question with more than one leader."
+  tied: Boolean!
+  "The options with the most picks, when that is at least one."
+  leaders: [String!]!
+  options: [PollOptionCount!]!
+  "Every answer in other words, as written."
+  others: [PollWriteIn!]!
+}
+
+type PollOptionCount {
+  option: String!
+  count: Int!
+  "Who picked it, as their votes name them."
+  voters: [String!]!
+}
+
+type PollWriteIn {
+  text: String!
+  voter: String!
+}
+
+input PollOptionInput {
+  "A slug; made from the label when absent."
+  id: String
+  "One line."
+  label: String!
+  "Markdown."
+  description: String
+}
+
+input PollQuestionInput {
+  "A slug; q1, q2… by position when absent."
+  id: String
+  "One line."
+  text: String!
+  multi: Boolean
+  other: Boolean
+  options: [PollOptionInput!]!
+}
+
+input OpenPollInput {
+  "The issue's ID or an unambiguous prefix; it must be open."
+  issue: ID!
+  title: String!
+  preamble: String
+  results: PollResults
+  deadline: String
+  questions: [PollQuestionInput!]!
+}
+
+"""
+What to change on an open poll; a field left out is left as it is, and a
+null `results` or `deadline` removes it.
+"""
+input EditPollInput {
+  poll: ID!
+  title: String
+  preamble: String
+  results: PollResults
+  deadline: String
+  "Replaces every question; revokes every ballot unless they come out the same."
+  questions: [PollQuestionInput!]
+  baseSha: String!
+}
+
+input PollAnswerInput {
+  question: String!
+  picks: [String!]! = []
+  other: String
+}
+
+input VotePollInput {
+  poll: ID!
+  """
+  The poll's `fingerprint` when the form was built: a vote against questions
+  that have changed since is refused with STALE_CONTENT.
+  """
+  fingerprint: String!
+  "A question left out, or answered with nothing, is skipped. None at all withdraws."
+  answers: [PollAnswerInput!]!
+  "Why, in Markdown."
+  note: String
+}
+
+input ClosePollInput {
+  poll: ID!
+  """
+  What the closer decided. A question left out gets what the votes came to;
+  one given with no picks and no answer in other words is left undecided. A
+  tied question must be given.
+  """
+  decisions: [PollAnswerInput!]! = []
+  note: String
+  baseSha: String!
+}
+
+input ReopenPollInput {
+  poll: ID!
+  baseSha: String!
+}
+
+type PollPayload {
+  poll: Poll!
+  "The issue it is on, for a client to refresh what it shows of it."
+  issue: Issue!
+  "How many ballots an edit of the questions revoked; 0 for anything else."
+  revoked: Int!
+  "How many votes cast while it was closed count again after a reopen; 0 for anything else."
+  late: Int!
+  commit: CommitInfo!
+}

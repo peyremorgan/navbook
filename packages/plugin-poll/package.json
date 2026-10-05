@@ -26,6 +26,7 @@
   "exports": {
     "./core": "./src/core/index.ts",
     "./cli": "./src/cli/index.ts",
+    "./server": "./src/server/index.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -39,12 +40,17 @@
         "types": "./dist/cli/index.d.ts",
         "default": "./dist/cli/index.js"
       },
+      "./server": {
+        "types": "./dist/server/index.d.ts",
+        "default": "./dist/server/index.js"
+      },
       "./package.json": "./package.json"
     }
   },
   "files": [
     "dist",
-    "doc"
+    "doc",
+    "schema.graphql"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -58,7 +64,8 @@
   },
   "devDependencies": {
     "@navbook/cli": "workspace:*",
-    "@navbook/core": "workspace:*"
+    "@navbook/core": "workspace:*",
+    "@navbook/server": "workspace:*"
   },
   "navbook": {
     "short": "poll",
@@ -151,7 +158,7 @@
               "options": [
                 {
                   "flags": "--pick <answer>",
-                  "description": "QUESTION=OPTION[,OPTION…], by ID or by number from 1; replaces that question's picks",
+                  "description": "QUESTION=OPTION[,OPTION\u2026], by ID or by number from 1; replaces that question's picks",
                   "repeatable": true
                 },
                 {
@@ -263,7 +270,7 @@
               "options": [
                 {
                   "flags": "--decide <answer>",
-                  "description": "QUESTION=OPTION[,OPTION…] in place of what the votes came to; QUESTION= leaves it undecided",
+                  "description": "QUESTION=OPTION[,OPTION\u2026] in place of what the votes came to; QUESTION= leaves it undecided",
                   "repeatable": true
                 },
                 {
@@ -312,6 +319,9 @@
           "completions": true
         }
       ]
+    },
+    "server": {
+      "schema": "schema.graphql"
     }
   }
 }

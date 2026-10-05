@@ -122,6 +122,9 @@ importers:
       '@navbook/core':
         specifier: workspace:*
         version: link:../core
+      '@navbook/server':
+        specifier: workspace:*
+        version: link:../server
 
   packages/plugin-tests:
     devDependencies:
