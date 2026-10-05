@@ -161,7 +161,7 @@ describe("the deployment descriptor", () => {
       });
       assert.equal(
         defaulted.stdout,
-        "@navbook/plugin-kb @navbook/plugin-tests @navbook/plugin-chat @navbook/plugin-poll\n",
+        "@navbook/plugin-kb @navbook/plugin-tests @navbook/plugin-chat @navbook/plugin-poll @navbook/plugin-discord\n",
         `${name} defaults to the workspace plugins`,
       );
     }

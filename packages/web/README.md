@@ -162,14 +162,15 @@ compiled in, so they cannot be. Changing which plugins the client has is
 therefore `docker compose build`, not a restart, and `compose.yaml` passes
 `NAVBOOK_PLUGINS` through as a build argument for exactly that reason.
 
-This package's own scripts default `NAVBOOK_WEB_PLUGINS` to the four
+This package's own scripts default `NAVBOOK_WEB_PLUGINS` to the five
 first-party plugins, `@navbook/plugin-kb`, `@navbook/plugin-tests`,
-`@navbook/plugin-chat` and `@navbook/plugin-poll`, when it is unset. The
-knowledge base is there because this repository uses it: `.navbook/navbook.json`
-declares it, and `specs/` is where these documents live. The others are there so
-that every build and every end-to-end run proves their layers too: the fixture
-the e2e stack serves has plans in it, the assistant's suite starts a server with
-a model behind it, and the polls' suite opens polls on issues it files. A value that is set wins, even an empty one: that is
+`@navbook/plugin-chat`, `@navbook/plugin-poll` and `@navbook/plugin-discord`,
+when it is unset. The knowledge base is there because this repository uses it:
+`.navbook/navbook.json` declares it, and `specs/` is where these documents live.
+The others are there so that every build and every end-to-end run proves their
+layers too: the fixture the e2e stack serves has plans in it, the assistant's
+and the Discord bridge's suites each start a server with what they talk to
+behind it, and the polls' suite opens polls on issues it files. A value that is set wins, even an empty one: that is
 how the image builds exactly the plugins `NAVBOOK_PLUGINS` names, and how
 `NAVBOOK_WEB_PLUGINS= pnpm dev` shows a client without any. Nothing here needs
 any of them to build.

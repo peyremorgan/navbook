@@ -38,7 +38,7 @@ const SERVER_ENTRY = join(PACKAGE_ROOT, "..", "server", "src", "main.ts");
  * yourself goes on `NAVBOOK_PLUGIN_PATH` beside this one, since `process.env`
  * is spread whole into both children.
  */
-const OWN_PLUGINS = ["plugin-kb", "plugin-tests", "plugin-chat", "plugin-poll"]
+const OWN_PLUGINS = ["plugin-kb", "plugin-tests", "plugin-chat", "plugin-poll", "plugin-discord"]
   .map((name) => join(PACKAGE_ROOT, "..", name))
   .join(delimiter);
 

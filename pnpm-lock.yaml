@@ -295,6 +295,9 @@ importers:
       '@navbook/plugin-chat':
         specifier: workspace:*
         version: link:../plugin-chat
+      '@navbook/plugin-discord':
+        specifier: workspace:*
+        version: link:../plugin-discord
       '@navbook/plugin-kb':
         specifier: workspace:*
         version: link:../plugin-kb
