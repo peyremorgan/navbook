@@ -70,6 +70,7 @@ no plugin fetches from or pushes to the repository's remotes (spec 04 §4.4).
 | [`@navbook/plugin-tests`](../packages/plugin-tests/README.md) | Manual test plans under `tests/`, and the runs that record executing one: standalone, or inside a pull request's directory, with a `tested:` term to find what passed |
 | [`@navbook/plugin-chat`](../packages/plugin-chat/README.md) | An assistant: `nav chat` and a button in the web tracker, talking to an OpenAI-compatible model, reading the tracker and — once you approve — writing to it |
 | [`@navbook/plugin-poll`](../packages/plugin-poll/README.md) | Polls on issues: questions with options put to the people working on one, a ballot per person that a later one replaces, and the decision it came to — how a team, or an agent, asks for a decision |
+| [`@navbook/plugin-discord`](../packages/plugin-discord/README.md) | A Discord bridge: a thread per pull request and per issue a rule picks, told what happens and pinging who is asked, and commands that comment, review, assign and close as the person who typed them |
 
 `@navbook/plugin-kb` is also the worked example. It uses every seam a plugin
 has — a directory of its own, a frontmatter key, a query term, doctor checks, a

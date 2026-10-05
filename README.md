@@ -353,6 +353,14 @@ questions with options, a ballot per person that their next one replaces, and
 the decision each question came to once somebody closes it. It is how a team
 settles a design, and how an agent planning a change asks a person to choose.
 
+One more is a bridge to Discord.
+[`@navbook/plugin-discord`](packages/plugin-discord/README.md) runs inside the
+server and gives every pull request, and every issue a rule picks, a thread in
+a Discord channel. The thread is told what happens — comments, reviews,
+closes, merges — whether it happened in the web tracker or was pushed from a
+terminal, and pings whoever is assigned or asked to review. From Discord,
+people comment, review, assign and close, recorded as themselves.
+
 ## Documentation
 
 The [specification](doc/spec/README.md) is the normative definition of the file
@@ -396,6 +404,9 @@ is the assistant, the plugin that acts for somebody: it performs its writes
 through the host's own operations rather than its own copies of them.
 `packages/plugin-poll` ([`@navbook/plugin-poll`](packages/plugin-poll/README.md))
 keeps polls inside issue directories, and votes as files beside them.
+`packages/plugin-discord` ([`@navbook/plugin-discord`](packages/plugin-discord/README.md))
+is the Discord bridge, a service of the server: it hears of every change to the
+clone, whoever made it, and acts for people with no request in flight.
 Development needs no build step outside the web client: a library's entry point
 is its TypeScript source, and Node runs it directly.
 
