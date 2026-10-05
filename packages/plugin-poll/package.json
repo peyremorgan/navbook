@@ -25,6 +25,7 @@
   },
   "exports": {
     "./core": "./src/core/index.ts",
+    "./cli": "./src/cli/index.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -33,6 +34,10 @@
       "./core": {
         "types": "./dist/core/index.d.ts",
         "default": "./dist/core/index.js"
+      },
+      "./cli": {
+        "types": "./dist/cli/index.d.ts",
+        "default": "./dist/cli/index.js"
       },
       "./package.json": "./package.json"
     }
@@ -100,6 +105,212 @@
       ],
       "commitScopes": [
         "poll"
+      ]
+    },
+    "cli": {
+      "commands": [
+        {
+          "name": "poll",
+          "description": "ask the people on an issue to choose, and record what they decided",
+          "commands": [
+            {
+              "name": "open",
+              "description": "open a poll on an issue",
+              "arguments": [
+                {
+                  "name": "issue",
+                  "description": "the issue's ID, or an unambiguous prefix of it",
+                  "complete": "issue"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--from <file>",
+                  "description": "the poll, shaped like poll.md: YAML title and questions, then a Markdown preamble ('-' reads stdin); without it $EDITOR is opened on a template"
+                },
+                {
+                  "flags": "--title <text>",
+                  "description": "the poll's title, in place of the one the file or the template has"
+                },
+                {
+                  "flags": "--commit",
+                  "description": "wrap the change in a 'docs(poll):' commit"
+                }
+              ]
+            },
+            {
+              "name": "vote",
+              "description": "vote on a poll; your new ballot replaces your last",
+              "arguments": [
+                {
+                  "name": "poll",
+                  "description": "the poll's ID, or an unambiguous prefix of it",
+                  "complete": "open-poll"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--pick <answer>",
+                  "description": "QUESTION=OPTION[,OPTION…], by ID or by number from 1; replaces that question's picks",
+                  "repeatable": true
+                },
+                {
+                  "flags": "--other <answer>",
+                  "description": "QUESTION=TEXT: an answer in your own words, where the question accepts one",
+                  "repeatable": true
+                },
+                {
+                  "flags": "--clear <question>",
+                  "description": "leave a question unanswered",
+                  "repeatable": true
+                },
+                {
+                  "flags": "--fresh",
+                  "description": "start from an empty ballot rather than from your last one"
+                },
+                {
+                  "flags": "-m, --message <note>",
+                  "description": "why you voted as you did; replaces the note of your last ballot"
+                },
+                {
+                  "flags": "--withdraw",
+                  "description": "take your vote back: a ballot that answers nothing"
+                },
+                {
+                  "flags": "--interactive",
+                  "description": "ask about each question even without a terminal, reading answers from stdin"
+                },
+                {
+                  "flags": "--commit",
+                  "description": "wrap the change in a 'docs(poll):' commit"
+                }
+              ]
+            },
+            {
+              "name": "show",
+              "description": "render a poll: its questions, where you stand, and the results when they are shown",
+              "arguments": [
+                {
+                  "name": "poll",
+                  "description": "the poll's ID, or an unambiguous prefix of it",
+                  "complete": "poll"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--results",
+                  "description": "show the results even where the poll hides them until you vote"
+                },
+                {
+                  "flags": "--json",
+                  "description": "emit a single JSON object, results included"
+                }
+              ]
+            },
+            {
+              "name": "list",
+              "description": "list polls; by default the open ones waiting on you",
+              "options": [
+                {
+                  "flags": "--all",
+                  "description": "every poll, not only those waiting on you"
+                },
+                {
+                  "flags": "--state <state>",
+                  "description": "only polls that are open or closed"
+                },
+                {
+                  "flags": "--issue <id>",
+                  "description": "only the polls on this issue"
+                },
+                {
+                  "flags": "--json",
+                  "description": "one JSON object per poll, newline-delimited"
+                }
+              ]
+            },
+            {
+              "name": "edit",
+              "description": "change an open poll; a change to its questions revokes every vote",
+              "arguments": [
+                {
+                  "name": "poll",
+                  "description": "the poll's ID, or an unambiguous prefix of it",
+                  "complete": "open-poll"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--from <file>",
+                  "description": "the poll's new version, shaped like poll.md ('-' reads stdin); without it $EDITOR is opened on poll.md"
+                },
+                {
+                  "flags": "--commit",
+                  "description": "wrap the change in a 'docs(poll):' commit"
+                }
+              ]
+            },
+            {
+              "name": "close",
+              "description": "close a poll, recording what each question came to",
+              "arguments": [
+                {
+                  "name": "poll",
+                  "description": "the poll's ID, or an unambiguous prefix of it",
+                  "complete": "poll"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--decide <answer>",
+                  "description": "QUESTION=OPTION[,OPTION…] in place of what the votes came to; QUESTION= leaves it undecided",
+                  "repeatable": true
+                },
+                {
+                  "flags": "--decide-other <answer>",
+                  "description": "QUESTION=TEXT: decide on an answer given in other words",
+                  "repeatable": true
+                },
+                {
+                  "flags": "-m, --message <note>",
+                  "description": "why, in Markdown"
+                },
+                {
+                  "flags": "--commit",
+                  "description": "wrap the change in a 'docs(poll):' commit"
+                }
+              ]
+            },
+            {
+              "name": "reopen",
+              "description": "reopen a closed poll; its decision is cleared and voting resumes",
+              "arguments": [
+                {
+                  "name": "poll",
+                  "description": "the poll's ID, or an unambiguous prefix of it",
+                  "complete": "poll"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--commit",
+                  "description": "wrap the change in a 'docs(poll):' commit"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "contributions": [
+        {
+          "on": "issue show",
+          "showSection": true,
+          "jsonExtra": true
+        },
+        {
+          "on": "issue list",
+          "completions": true
+        }
       ]
     }
   }

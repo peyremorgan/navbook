@@ -198,6 +198,14 @@ export interface OpenPollResult {
   run: RunPlanResult;
 }
 
+/** Refuse to ask anything in what is not an open issue. */
+export function requireOpenIssue(core: Core, issue: EntityRecord): void {
+  if (issue.kind !== "issue") core.wsFail("wrong-kind", `#${issue.id} is not an issue`);
+  if (issue.status !== "open") {
+    core.wsFail("precondition", `#${issue.id} is closed; reopen it to ask anything in it`);
+  }
+}
+
 /** Open a poll on an issue (§3). */
 export function openPoll(
   core: Core,
@@ -206,10 +214,7 @@ export function openPoll(
   draft: PollDraft,
   opts: CommitOptions,
 ): OpenPollResult {
-  if (issue.kind !== "issue") core.wsFail("wrong-kind", `#${issue.id} is not an issue`);
-  if (issue.status !== "open") {
-    core.wsFail("precondition", `#${issue.id} is closed; reopen it to ask anything in it`);
-  }
+  requireOpenIssue(core, issue);
   const { created } = core.prepareOpen(ws);
   const content = newPollFile(draft, { author: core.currentAuthor(ws), created });
   requireValid(core, content);
