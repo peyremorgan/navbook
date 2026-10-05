@@ -46,11 +46,11 @@ export interface NetworkOptions {
 }
 
 /** What a network call hands the async runner, beyond its cwd. */
-function runOptions(opts: NetworkOptions): GitAsyncOptions {
+function runOptions({ timeoutMs, signal }: NetworkOptions): GitAsyncOptions {
   return {
     env: NON_INTERACTIVE,
-    ...opts,
-    ...(opts.signal === undefined ? {} : { processGroup: true }),
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(signal === undefined ? {} : { signal, processGroup: true }),
   };
 }
 
@@ -88,12 +88,37 @@ export async function fetchRemoteAsync(
 
 export type PushOutcome = "ok" | "rejected";
 
-const pushArgs = (remote: string, branch: string): string[] => [
-  "push",
-  "--quiet",
-  remote,
-  `${branch}:${branch}`,
-];
+/** Where a push lands, when that is not the remote's branch of the same name. */
+export interface PushTarget {
+  /** The remote's branch to update: `branch` itself when omitted. */
+  to?: string;
+  /**
+   * Update it only while the remote still has it at this commit — git's
+   * `--force-with-lease` — and refuse otherwise, as a rejection.
+   *
+   * What it buys is the refusal: a branch the remote no longer has, or has
+   * moved, is not written over or created again. The force it also grants is
+   * the caller's to make harmless, by pushing only a descendant of `expect`.
+   */
+  expect?: string;
+}
+
+/** What {@link pushBranchAsync} may be told. */
+export interface PushOptions extends NetworkOptions, PushTarget {}
+
+function pushArgs(remote: string, branch: string, { to, expect }: PushTarget = {}): string[] {
+  if (to === undefined && expect === undefined) {
+    return ["push", "--quiet", remote, `${branch}:${branch}`];
+  }
+  const dst = `refs/heads/${to ?? branch}`;
+  return [
+    "push",
+    "--quiet",
+    ...(expect === undefined ? [] : [`--force-with-lease=${dst}:${expect}`]),
+    remote,
+    `refs/heads/${branch}:${dst}`,
+  ];
+}
 
 /**
  * Push a branch to a remote.
@@ -120,9 +145,9 @@ export async function pushBranchAsync(
   cwd: string,
   remote: string,
   branch: string,
-  opts: NetworkOptions = {},
+  opts: PushOptions = {},
 ): Promise<PushOutcome> {
-  const args = pushArgs(remote, branch);
+  const args = pushArgs(remote, branch, opts);
   return pushOutcome(args, await gitRunAsync(args, { cwd, ...runOptions(opts) }));
 }
 
@@ -133,7 +158,8 @@ function pushOutcome(args: string[], result: GitResult): PushOutcome {
 }
 
 /**
- * Whether git refused a push because the remote has commits we do not.
+ * Whether git refused a push because the remote has commits we do not — or,
+ * under a lease, no longer has the commit it was expected to (`stale info`).
  *
  * Matched on stderr because git reports every push failure with exit code 1.
  * The phrasing has been stable for many major versions, and the failure mode of

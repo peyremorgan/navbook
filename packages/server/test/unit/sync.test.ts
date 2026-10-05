@@ -40,6 +40,8 @@ interface Scripted {
   fastForwardable?: boolean;
   /** No such branch on the remote yet. */
   noUpstream?: boolean;
+  /** The remote-tracking tip each merge reads, in turn; null for a branch gone. */
+  upstreams?: (string | null)[];
   /** What the fetch raises instead of returning, as a stopped one would. */
   fetchThrows?: Error;
   /** What the push raises instead of returning. */
@@ -64,6 +66,7 @@ function recorder(script: Scripted = {}): Recorder {
   const pushes = [...(script.pushes ?? ["ok"])];
   const merges = [...(script.merges ?? ["staged"])];
   const behind = [...(script.behind ?? [false])];
+  const upstreams = [...(script.upstreams ?? [script.noUpstream ? null : "a".repeat(40)])];
 
   const git: SyncGit = {
     fetchRemote: async (_cwd, remote, opts) => {
@@ -96,10 +99,13 @@ function recorder(script: Scripted = {}): Recorder {
         throw script.pushThrows;
       }
       const outcome = next(pushes);
-      calls.push(`push ${remote} ${branch} -> ${outcome}`);
+      // A push to another name says where, and what it was leased on.
+      const onto =
+        opts?.to === undefined ? "" : `:${opts.to} lease=${opts.expect?.slice(0, 7) ?? "none"}`;
+      calls.push(`push ${remote} ${branch}${onto} -> ${outcome}`);
       return outcome;
     },
-    resolveSha: async () => (script.noUpstream ? null : "a".repeat(40)),
+    resolveSha: async () => next(upstreams),
     isAlreadyMerged: async () => !next(behind),
     canFastForward: async () => script.fastForwardable === true,
     fastForward: async (cwd) => {
@@ -732,6 +738,73 @@ describe("RepoSync.writeOn", () => {
     const { pushed } = await sync.writeOn(siteOp(calls));
     assert.equal(pushed, false);
     assert.deepEqual(calls, ["open", `body ${SITE}`, `close ${SITE} failed=false pushed=false`]);
+  });
+
+  /** A site on the server's copy of a branch, pushed to the remote's branch of the original name. */
+  const onCopy = (calls: string[]) => {
+    const op = siteOp(calls);
+    return { ...op, open: () => ({ ...op.open(), upstream: "feat" }) };
+  };
+
+  it("pushes a copy to its own branch, leased on the remote's tip it merged", async () => {
+    const { sync, calls } = makeSync({
+      behind: [false, true],
+      fastForwardable: true,
+      upstreams: ["c".repeat(40), "d".repeat(40)],
+    });
+    const { pushed } = await sync.writeOn(onCopy(calls));
+    assert.equal(pushed, true);
+    assert.deepEqual(calls, [
+      "fetch origin",
+      "open",
+      `fast-forward ${SITE}`,
+      `body ${SITE}`,
+      "push origin feature:feat lease=ddddddd -> ok",
+      `close ${SITE} failed=false pushed=true`,
+    ]);
+  });
+
+  it("answers a lease that failed as a refusal: merges, and pushes on the new tip", async () => {
+    const { sync, calls } = makeSync({
+      pushes: ["rejected", "ok"],
+      behind: [false, false, true],
+      fastForwardable: true,
+      upstreams: ["c".repeat(40), "d".repeat(40), "e".repeat(40)],
+    });
+    const { pushed } = await sync.writeOn(onCopy(calls));
+    assert.equal(pushed, true);
+    assert.deepEqual(calls.slice(3), [
+      "push origin feature:feat lease=ddddddd -> rejected",
+      "fetch origin",
+      `fast-forward ${SITE}`,
+      "push origin feature:feat lease=eeeeeee -> ok",
+      `close ${SITE} failed=false pushed=true`,
+    ]);
+  });
+
+  it("never makes again a branch that went from the remote, and keeps the commit", async () => {
+    const { sync, calls } = makeSync({
+      pushes: ["rejected"],
+      upstreams: ["c".repeat(40), "d".repeat(40), null],
+    });
+    await assert.rejects(sync.writeOn(onCopy(calls)), (error: unknown) => {
+      const extensions = extensionsOf(error);
+      assert.equal(extensions.code, "PRECONDITION");
+      assert.equal(extensions.branch, "feat");
+      assert.equal(extensions.keptLocalCommit, true);
+      return true;
+    });
+    assert.deepEqual(calls.slice(3), [
+      "push origin feature:feat lease=ddddddd -> rejected",
+      "fetch origin",
+      `close ${SITE} failed=true pushed=false`,
+    ]);
+  });
+
+  it("does not push a copy whose branch was already gone when it was merged", async () => {
+    const { sync, calls } = makeSync({ upstreams: ["c".repeat(40), null] });
+    await assert.rejects(sync.writeOn(onCopy(calls)), /'feat' is no longer on 'origin'/);
+    assert.equal(calls.filter((call) => call.startsWith("push")).length, 0);
   });
 
   it("says a write is starting, and that git wrote, as a write in the clone does", async () => {

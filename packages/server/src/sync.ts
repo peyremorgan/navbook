@@ -47,7 +47,9 @@ import {
   type MergeOutcome,
   mergeNoCommitAsync,
   type NetworkOptions,
+  type PushOptions,
   type PushOutcome,
+  type PushTarget,
   pushBranchAsync,
   resolveShaAsync,
 } from "@navbook/core";
@@ -57,12 +59,7 @@ import { Mutex } from "./lock.ts";
 /** The git operations the engine needs, injectable so the matrix is testable. */
 export interface SyncGit {
   fetchRemote(cwd: string, remote: string, opts?: NetworkOptions): Promise<void>;
-  pushBranch(
-    cwd: string,
-    remote: string,
-    branch: string,
-    opts?: NetworkOptions,
-  ): Promise<PushOutcome>;
+  pushBranch(cwd: string, remote: string, branch: string, opts?: PushOptions): Promise<PushOutcome>;
   resolveSha(cwd: string, rev: string): Promise<string | null>;
   isAlreadyMerged(cwd: string, source: string): Promise<boolean>;
   canFastForward(cwd: string, source: string): Promise<boolean>;
@@ -132,6 +129,14 @@ export interface WriteResult<T> {
 /** Where a write happens: the clone itself, or a worktree of it on another branch. */
 export interface WriteRoot {
   root: string;
+  /**
+   * The remote's branch that {@link root}'s checked-out branch is a copy of,
+   * when the copy goes by another name; unset, it is the branch of the same
+   * name. Merged from before the write and pushed to after it — under a lease,
+   * so that a branch somebody deleted or moved since the fetch is refused
+   * rather than written over or made again.
+   */
+  upstream?: string;
 }
 
 /** How a write went, as the site it ran in is told when it is closed. */
@@ -204,6 +209,26 @@ export function mergeRefused(upstream: string): Error {
     details: [
       "no files conflicted, so the clone itself needs attention",
       "the server's log carries what git said",
+    ],
+  });
+}
+
+/**
+ * A branch the remote no longer has, found when pushing the copy of it a write
+ * committed on.
+ *
+ * Refused rather than pushed: pushing would create the branch again, and the
+ * server never creates one anybody would see (spec 06 §6.3). Whoever deleted
+ * it may have meant to.
+ */
+export function syncBranchGone(branch: string, remote: string): Error {
+  return apiError(`'${branch}' is no longer on '${remote}'`, "PRECONDITION", {
+    branch,
+    remote,
+    keptLocalCommit: true,
+    details: [
+      "the change was committed in the server's copy of the branch but not pushed",
+      "the server does not create a branch on the remote; push it again to write there",
     ],
   });
 }
@@ -295,7 +320,7 @@ export class RepoSync {
       // While the background pull keeps up, the clone is already as fresh as
       // a read may ask for, and fetching again would only make it wait.
       if (this.lastRefresh !== "ok") {
-        await this.pull(this.opts.repoRoot, { force: false, keptLocalCommit: false });
+        await this.pull(this.served(), { force: false, keptLocalCommit: false });
       }
       return body();
     });
@@ -378,7 +403,7 @@ export class RepoSync {
         this.git.fetchRemote(this.opts.repoRoot, remote, this.network(signal)),
       );
       this.opts.afterSync?.();
-      await this.lock.run(() => this.merge(this.opts.repoRoot, remote, signal));
+      await this.lock.run(() => this.merge(this.served(), remote, signal));
       if (signal?.aborted) return;
     } catch (error) {
       if (error instanceof GitStoppedError && signal?.aborted) return;
@@ -420,7 +445,7 @@ export class RepoSync {
    */
   write<T>(body: () => T, committed: (result: T) => boolean): Promise<WriteResult<T>> {
     return this.writeOn({
-      open: () => ({ root: this.opts.repoRoot }),
+      open: () => this.served(),
       body: () => body(),
       committed,
       close: () => undefined,
@@ -435,17 +460,21 @@ export class RepoSync {
    * merged with its branch's remote-tracking branch — fast-forward, merge, or
    * a conflict reported and aborted — and the push after the body is of that
    * branch. That is the served branch's whole transaction, moved: spec 06 §6.3
-   * gives no branch a privileged path.
+   * gives no branch a privileged path. One thing is added: a site's push is
+   * leased on the commit it merged, because a branch the server does not
+   * serve is one it must never create or write over.
    */
   writeOn<T, S extends WriteRoot>(op: WriteOn<T, S>): Promise<WriteResult<T>> {
     return this.lock.run(async () => {
-      await this.pull(this.opts.repoRoot, { force: true, keptLocalCommit: false });
+      await this.pull(this.served(), { force: true, keptLocalCommit: false });
       const site = op.open();
       const outcome: WriteOutcome = { failed: true, pushed: false };
       try {
         const remote = this.opts.remote;
+        // The remote's tip the site was merged with: what its push is leased on.
+        let merged: string | null = null;
         if (site.root !== this.opts.repoRoot && remote !== null) {
-          await this.mergeReporting(site.root, remote, false);
+          merged = await this.mergeReporting(site, remote, false);
         }
         this.opts.onWrite?.();
         let result: T;
@@ -457,7 +486,7 @@ export class RepoSync {
         }
         if (op.committed(result)) {
           try {
-            outcome.pushed = await this.pushWithRetry(site.root);
+            outcome.pushed = await this.pushWithRetry(site, merged);
           } finally {
             this.opts.afterSync?.();
           }
@@ -487,6 +516,11 @@ export class RepoSync {
     return this.lock.drain();
   }
 
+  /** The clone itself, as a site: its own branch, pushed to the same name. */
+  private served(): WriteRoot {
+    return { root: this.opts.repoRoot };
+  }
+
   /** What the calls that reach the network are told. */
   private network(signal?: AbortSignal): NetworkOptions {
     return {
@@ -512,14 +546,17 @@ export class RepoSync {
    * asking the network on every request would make the server's latency the
    * network's. A mutation always fetches: it is about to write, and writing on a
    * stale tree is how avoidable conflicts are made.
+   *
+   * Resolves to what {@link merge} does: the remote's tip now merged, or null
+   * — including when nothing was fetched.
    */
   private async pull(
-    root: string,
+    site: WriteRoot,
     opts: { force: boolean; keptLocalCommit: boolean },
-  ): Promise<void> {
+  ): Promise<string | null> {
     const remote = this.opts.remote;
-    if (remote === null) return;
-    if (!opts.force && this.now() - this.lastFetch < this.opts.pullIntervalMs) return;
+    if (remote === null) return null;
+    if (!opts.force && this.now() - this.lastFetch < this.opts.pullIntervalMs) return null;
 
     try {
       // One fetch serves every worktree: they share the clone's refs.
@@ -529,17 +566,17 @@ export class RepoSync {
     }
     this.lastFetch = this.now();
     this.opts.afterSync?.();
-    await this.mergeReporting(root, remote, opts.keptLocalCommit);
+    return this.mergeReporting(site, remote, opts.keptLocalCommit);
   }
 
   /** {@link merge}, with a conflict turned into the error a client is told. */
   private async mergeReporting(
-    root: string,
+    site: WriteRoot,
     remote: string,
     keptLocalCommit: boolean,
-  ): Promise<void> {
+  ): Promise<string | null> {
     try {
-      await this.merge(root, remote);
+      return await this.merge(site, remote);
     } catch (error) {
       if (error instanceof MergeConflict) throw syncConflict(error.paths, keptLocalCommit);
       throw error;
@@ -547,28 +584,39 @@ export class RepoSync {
   }
 
   /**
-   * Merge the remote-tracking branch into `root`'s HEAD. Throws {@link MergeConflict}.
+   * Merge the remote-tracking branch into the site's HEAD. Throws {@link MergeConflict}.
+   *
+   * Resolves to the remote's tip, which HEAD then contains, or null when the
+   * remote has no such branch. The tip is read once and merged by its SHA, so
+   * a fetch landing meanwhile — the background one does not wait for the
+   * clone — cannot make what was merged differ from what is reported.
    *
    * Does nothing once `signal` has aborted, however far it got with looking:
    * the questions it asks first change nothing, and the last moment to decide
    * against moving the branch is just before it moves.
    */
-  private async merge(root: string, remote: string, signal?: AbortSignal): Promise<void> {
-    if (signal?.aborted) return;
-    const branch = await this.git.currentBranch(root);
-    if (branch === null) return;
+  private async merge(
+    site: WriteRoot,
+    remote: string,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    if (signal?.aborted) return null;
+    const root = site.root;
+    const branch = site.upstream ?? (await this.git.currentBranch(root));
+    if (branch === null) return null;
     const upstream = `${remote}/${branch}`;
     // Nothing to merge: the remote has no such branch yet, or holds nothing new.
-    if ((await this.git.resolveSha(root, upstream)) === null) return;
-    if (await this.git.isAlreadyMerged(root, upstream)) return;
+    const tip = await this.git.resolveSha(root, `refs/remotes/${upstream}`);
+    if (tip === null) return null;
+    if (await this.git.isAlreadyMerged(root, tip)) return tip;
 
-    const fastForward = await this.git.canFastForward(root, upstream);
-    if (signal?.aborted) return;
+    const fastForward = await this.git.canFastForward(root, tip);
+    if (signal?.aborted) return null;
     if (fastForward) {
-      await this.git.fastForward(root, upstream);
-      return;
+      await this.git.fastForward(root, tip);
+      return tip;
     }
-    if ((await this.git.mergeNoCommit(root, upstream)) === "conflict") {
+    if ((await this.git.mergeNoCommit(root, tip)) === "conflict") {
       // "conflict" is every non-zero exit, not only a content conflict: git
       // also refuses outright over unrelated histories, a busy index, or a
       // working tree the merge would overwrite. Which it was decides what the
@@ -588,15 +636,42 @@ export class RepoSync {
       await this.git.abortMerge(root);
       throw error;
     }
+    return tip;
   }
 
   /** One push, with a stopped one reported as the commit it leaves behind. */
-  private async push(root: string, remote: string, branch: string): Promise<PushOutcome> {
+  private async push(
+    root: string,
+    remote: string,
+    branch: string,
+    target: PushTarget = {},
+  ): Promise<PushOutcome> {
     try {
-      return await this.net.run(() => this.git.pushBranch(root, remote, branch, this.network()));
+      return await this.net.run(() =>
+        this.git.pushBranch(root, remote, branch, { ...this.network(), ...target }),
+      );
     } catch (error) {
       throw this.stopped(error, true);
     }
+  }
+
+  /**
+   * Push a site's copy of its branch, leased on `merged`, the remote's tip it
+   * contains.
+   *
+   * With nothing to lease on, the branch has gone from the remote since the
+   * site was opened, and a push would make it again. A lease that fails —
+   * the branch moved, or went, since the fetch — comes back as a rejection,
+   * which {@link pushWithRetry} answers as it answers any other.
+   */
+  private async pushCopy(
+    site: WriteRoot & { upstream: string },
+    remote: string,
+    branch: string,
+    merged: string | null,
+  ): Promise<PushOutcome> {
+    if (merged === null) throw syncBranchGone(site.upstream, remote);
+    return this.push(site.root, remote, branch, { to: site.upstream, expect: merged });
   }
 
   /**
@@ -607,17 +682,26 @@ export class RepoSync {
    * spinning. The change is safe either way — it is in the clone's history, and
    * the error says so.
    */
-  private async pushWithRetry(root: string): Promise<boolean> {
+  private async pushWithRetry(site: WriteRoot, merged: string | null): Promise<boolean> {
     const remote = this.opts.remote;
     if (remote === null) return false;
-    const branch = await this.git.currentBranch(root);
+    const branch = await this.git.currentBranch(site.root);
     if (branch === null) return false;
 
-    if ((await this.push(root, remote, branch)) === "ok") return true;
-    // Rejected: somebody pushed first. Merge what they pushed and try again —
-    // and if that merge conflicts, the commit stays local, which the error says.
-    await this.pull(root, { force: true, keptLocalCommit: true });
-    if ((await this.push(root, remote, branch)) === "ok") return true;
+    const { upstream } = site;
+    if (upstream === undefined) {
+      if ((await this.push(site.root, remote, branch)) === "ok") return true;
+      // Rejected: somebody pushed first. Merge what they pushed and try again —
+      // and if that merge conflicts, the commit stays local, which the error says.
+      await this.pull(site, { force: true, keptLocalCommit: true });
+      if ((await this.push(site.root, remote, branch)) === "ok") return true;
+      throw syncPushRejected();
+    }
+
+    const copy = { ...site, upstream };
+    if ((await this.pushCopy(copy, remote, branch, merged)) === "ok") return true;
+    const again = await this.pull(site, { force: true, keptLocalCommit: true });
+    if ((await this.pushCopy(copy, remote, branch, again)) === "ok") return true;
     throw syncPushRejected();
   }
 }

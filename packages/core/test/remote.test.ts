@@ -187,6 +187,46 @@ describe("remotes, without blocking", () => {
     });
   });
 
+  it("pushes a copy under another name, and only while the remote has what it expects", async () => {
+    await inRemotesAsync(async ({ origin, clone, peer, commit }) => {
+      const sha = (dir: string, rev: string): string =>
+        git(["rev-parse", rev], { cwd: dir }).trim();
+      git(["push", "--quiet", "origin", "main:feat"], { cwd: clone });
+      const fetched = sha(clone, "main");
+      git(["branch", "--quiet", "copy", "main"], { cwd: clone });
+      git(["checkout", "--quiet", "copy"], { cwd: clone });
+      commit(clone, "on the copy");
+
+      // The remote's branch is where it was: the copy lands on it.
+      assert.equal(
+        await pushBranchAsync(clone, "origin", "copy", { to: "feat", expect: fetched }),
+        "ok",
+      );
+      assert.equal(sha(origin, "feat"), sha(clone, "copy"));
+
+      // Somebody moved it: refused, and theirs stays.
+      git(["fetch", "--quiet", "origin"], { cwd: peer });
+      git(["checkout", "--quiet", "-b", "feat", "origin/feat"], { cwd: peer });
+      commit(peer, "theirs");
+      git(["push", "--quiet", "origin", "feat"], { cwd: peer });
+      commit(clone, "again");
+      const stale = sha(clone, "copy~1");
+      assert.equal(
+        await pushBranchAsync(clone, "origin", "copy", { to: "feat", expect: stale }),
+        "rejected",
+      );
+      assert.equal(sha(origin, "feat"), sha(peer, "feat"));
+
+      // Somebody deleted it: refused, and not made again.
+      git(["push", "--quiet", "origin", "--delete", "feat"], { cwd: peer });
+      assert.equal(
+        await pushBranchAsync(clone, "origin", "copy", { to: "feat", expect: stale }),
+        "rejected",
+      );
+      assert.equal(git(["branch", "--list", "feat"], { cwd: origin }), "");
+    });
+  });
+
   it("stops a push the remote sits on, and can push again once it answers", async () => {
     await inRemotesAsync(async ({ origin, clone, commit }) => {
       const unstall = stallPushes(origin, 5);
