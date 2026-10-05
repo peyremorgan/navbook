@@ -25,30 +25,43 @@ A pull request's files live on the branch it proposes to merge (spec 03 §3.5), 
   - `close` is always called with the outcome.
   - `write` is now a thin wrapper over it.
 - **`write-site.ts`**:
-  - The site is a temporary worktree (`nav-server-wt-*` under the OS temp dir) on a local copy of `origin/<branch>`.
-  - The copy is deleted once it equals the remote, and kept (and logged) while it carries an unpushed commit, exactly as the served branch keeps a stopped push.
-  - A registration whose directory is gone is pruned.
-  - A worktree somebody else made is refused.
+  - The site is a temporary worktree (`nav-server-wt-*` under the OS temp dir) on the server's own copy of the branch, `nav-server/<branch>`, made from `origin/<branch>` and pushed to `<branch>`. The clone's own local branches are never written on, pushed or deleted: they are an operator's.
+  - The copy is deleted once the remote has everything on it, and kept (and logged) while it carries an unpushed commit, exactly as the served branch keeps a stopped push. It is deleted only after its worktree is gone.
+  - The push is leased on the remote tip the write merged, so a branch deleted meanwhile is refused (`PRECONDITION`) rather than created again.
+  - A registration whose directory is gone is pruned; one of the server's own temporary worktrees left behind is taken over; a worktree somebody else made is refused.
   - Leftovers from a killed server are swept at startup.
 - **`openPr(input: OpenPrInput!)`** opens a pull request on a branch already on the remote.
-  - A target known only as `origin/<target>` is read from there (core `preparePrOpen` gained `source` and `targetRev`).
+  - `source` and `target` must be names git takes for a branch (`INVALID_INPUT` otherwise: no `--octopus`, `HEAD~3`, `feat~1`), and the target must be a branch on the remote, read from `origin/<target>` rather than a local branch that may be stale (core `preparePrOpen` gained `source`, `sourceRev` and `targetRev`).
+  - The served branch and the default branch are refused as a source.
   - A branch with no `.navbook/` is refused plainly.
-- **`addComment` / `updatePr`** on a pull request held by another branch now write on that branch and report `refs: [<branch>]`.
+- **`addComment` / `updatePr`** on a pull request held by another branch now write on the branch its `source:` names, and report `refs: [<branch>]`. A branch that merged the source in carries the pull request's directory too, and is never written instead: when the source branch no longer carries it, the write is refused.
   - The remaining refusal is `PRECONDITION` with `extensions.branch`, which the web alert now reads; its copy no longer tells anyone to serve another branch.
 - **Docs**: spec 06 (now "most checkout-centric verbs are not exposed", plus a paragraph on writing on the branch), `.navbook/specs/server/api.md`, `.navbook/specs/pull-requests/lifecycle.md`, and the server README.
+
+## Self-review (2026-10-05)
+
+Rebased onto `dev`, which had gained plugin-tests and its `host.api.writeTarget`; that is kept, beside this branch's `writeEntity`. An adversarial review then found, and this branch now fixes:
+
+- **Writes on the wrong branch.** `sourceOf` compared `origin/<b>` with the PR's `source:` and never matched, so the alphabetically first branch carrying the PR's directory won — any branch that had merged the source. Writes now go to the `source:` branch only.
+- **Any target.** `openPr` passed `target` to `git merge-base` unchecked (`--octopus` was recorded), and read a stale local branch over the remote's.
+- **The operator's branches.** The site deleted a local branch it had not made, and would have pushed an operator's unpushed commits on it: hence the `nav-server/` copies.
+- **Who may push where.** Opening a PR from the default or served branch is refused.
+- **Clean-up.** A branch was deleted under a worktree that could not be removed, leaving every later write refused; the sweep logged removals that failed.
+- **A branch made again.** A plain push recreated a branch deleted after the fetch; the push is now leased.
+- **Codegen.** The web client's generated types had not been regenerated after the schema's doc changes.
+
+Not done: each off-branch write checks out the whole tree; a sparse, no-checkout worktree would be cheaper.
 
 ## Tests
 
 | Suite | Result |
 |---|---|
-| core | 896 passed |
-| server | 461 passed |
-| cli | 401 passed |
-| plugin-kb | 138 passed |
+| core | 953 passed |
+| server | 487 passed |
+| cli | 426 passed |
+| plugin-tests | 120 passed |
 | conformance | 128 passed |
-| deploy | 73 passed |
-| web vitest | 410 passed |
-| Playwright | 171 passed |
+| Playwright | 196 passed (on the combined stack with #kw6afa4a and #s86nic83) |
 
 - New `branches.test.ts` and `preparePrOpen` cases (explicit source, detached HEAD, not-a-branch, self-target, orphan, `targetRev`).
 - 11 `RepoSync.writeOn` unit cases (site merge, clone site, throw, open failure, no-op, conflict, retry into the site, kept commit, no remote, events).
@@ -60,6 +73,6 @@ Two timing tests failed once each under a load average of 25 and pass alone, on 
 
 ## Heads-up
 
-#z9yqtsbv exports `writeTarget` for plugins. It is gone here, and #kw6afa4a will expose `writeEntity` as `host.api.writeEntity` instead (see the comments on #yp56dc43).
+`host.api.writeTarget` stays as #z9yqtsbv made it, refusing a pull request the served checkout does not hold; #kw6afa4a adds `host.api.writeEntity` beside it for a plugin that wants to write there.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
