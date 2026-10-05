@@ -5,6 +5,7 @@ created: 2026-10-05T01:28:33Z
 labels: [enhancement, plugin]
 assignee: Claude <noreply@anthropic.com>
 feature: plugins
+resolution: fixed
 ---
 
 A new first-party plugin, `@navbook/plugin-poll` (short `poll`), that adds polls to issues: to gather consensus on design decisions, and so agents can ask a human for decisions while planning.
