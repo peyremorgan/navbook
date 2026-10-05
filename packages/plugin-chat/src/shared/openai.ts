@@ -19,7 +19,7 @@
  * - `tool_choice` refused outright (Ollama), which is why it is never sent.
  */
 
-import { parseSse } from "./sse.ts";
+import { parseSse, SseError } from "./sse.ts";
 import type { OpenAiTool, ToolCall } from "./tools.ts";
 
 /** A message as the chat-completions API takes it. */
@@ -63,7 +63,11 @@ export interface ChatClient {
 export interface ClientOptions {
   baseUrl: string;
   apiKey?: string;
-  /** How long to wait for the endpoint to start answering and keep answering. */
+  /**
+   * How long the endpoint may stay silent: before it starts answering, and
+   * between two pieces of the answer. A slow model that keeps streaming is
+   * never cut off; one that stops is.
+   */
   timeoutMs?: number;
   fetch?: typeof fetch;
 }
@@ -101,8 +105,13 @@ export function makeClient(opts: ClientOptions): ChatClient {
 
   return {
     async *stream(request) {
-      const timeout = AbortSignal.timeout(timeoutMs);
-      const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
+      const idle = new AbortController();
+      let timer = setTimeout(() => idle.abort(), timeoutMs);
+      const heard = (): void => {
+        clearTimeout(timer);
+        timer = setTimeout(() => idle.abort(), timeoutMs);
+      };
+      const signal = request.signal ? AbortSignal.any([request.signal, idle.signal]) : idle.signal;
       const body = {
         model: request.model,
         messages: request.messages,
@@ -111,57 +120,63 @@ export function makeClient(opts: ClientOptions): ChatClient {
         ...(request.tools && request.tools.length > 0 ? { tools: request.tools } : {}),
       };
 
-      let response: Response;
       try {
-        response = await doFetch(url, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            accept: "text/event-stream",
-            ...(opts.apiKey ? { authorization: `Bearer ${opts.apiKey}` } : {}),
-          },
-          body: JSON.stringify(body),
-          signal,
-        });
-      } catch (error) {
-        throw fetchFailure(error, signal, request.signal, opts.baseUrl, timeoutMs);
-      }
-      if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        throw httpFailure(response.status, text, url, opts.apiKey);
-      }
-      if (response.body === null)
-        throw new ChatApiError("protocol", `${url} answered with no body`);
-
-      const state = newAccumulator();
-      try {
-        for await (const data of parseSse(response.body)) {
-          if (data === "[DONE]") break;
-          let chunk: unknown;
-          try {
-            chunk = JSON.parse(data);
-          } catch {
-            throw new ChatApiError(
-              "protocol",
-              `${url} sent something that is not JSON: ${data.slice(0, 80)}`,
-            );
-          }
-          const failure = streamedError(chunk);
-          if (failure !== null)
-            throw new ChatApiError("server", `the model endpoint failed: ${failure}`);
-          const delta = accumulate(state, chunk);
-          if (delta !== "") yield { type: "text", delta };
+        let response: Response;
+        try {
+          response = await doFetch(url, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              accept: "text/event-stream",
+              ...(opts.apiKey ? { authorization: `Bearer ${opts.apiKey}` } : {}),
+            },
+            body: JSON.stringify(body),
+            signal,
+          });
+        } catch (error) {
+          throw fetchFailure(error, signal, request.signal, opts.baseUrl, timeoutMs);
         }
-      } catch (error) {
-        if (error instanceof ChatApiError) throw error;
-        throw fetchFailure(error, signal, request.signal, opts.baseUrl, timeoutMs);
+        if (!response.ok) {
+          const text = await response.text().catch(() => "");
+          throw httpFailure(response.status, text, url, opts.apiKey);
+        }
+        if (response.body === null)
+          throw new ChatApiError("protocol", `${url} answered with no body`);
+
+        const state = newAccumulator();
+        try {
+          for await (const data of parseSse(response.body, heard)) {
+            if (data === "[DONE]") break;
+            let chunk: unknown;
+            try {
+              chunk = JSON.parse(data);
+            } catch {
+              throw new ChatApiError(
+                "protocol",
+                `${url} sent something that is not JSON: ${data.slice(0, 80)}`,
+              );
+            }
+            const failure = streamedError(chunk);
+            if (failure !== null)
+              throw new ChatApiError("server", `the model endpoint failed: ${failure}`);
+            const delta = accumulate(state, chunk);
+            if (delta !== "") yield { type: "text", delta };
+          }
+        } catch (error) {
+          if (error instanceof ChatApiError) throw error;
+          if (error instanceof SseError)
+            throw new ChatApiError("protocol", `${url} ${error.message}`);
+          throw fetchFailure(error, signal, request.signal, opts.baseUrl, timeoutMs);
+        }
+        yield {
+          type: "finish",
+          reason: state.finish,
+          toolCalls: finishedCalls(state),
+          usage: state.usage,
+        };
+      } finally {
+        clearTimeout(timer);
       }
-      yield {
-        type: "finish",
-        reason: state.finish,
-        toolCalls: finishedCalls(state),
-        usage: state.usage,
-      };
     },
   };
 }
@@ -205,7 +220,21 @@ export function accumulate(state: Accumulator, chunk: unknown): string {
   for (const raw of calls) {
     if (typeof raw !== "object" || raw === null) continue;
     const call = raw as Record<string, unknown>;
-    const index = typeof call.index === "number" ? call.index : (state.last ?? state.calls.size);
+    // Without an index a delta continues the last call — unless it names a
+    // call of its own: some servers send parallel calls whole, unindexed.
+    const current = state.last === null ? undefined : state.calls.get(state.last);
+    const fresh =
+      typeof call.id === "string" &&
+      call.id !== "" &&
+      current !== undefined &&
+      current.id !== "" &&
+      current.id !== call.id;
+    const index =
+      typeof call.index === "number"
+        ? call.index
+        : state.last === null || fresh
+          ? state.calls.size
+          : state.last;
     let partial = state.calls.get(index);
     if (!partial) {
       partial = { id: "", name: "", arguments: "" };

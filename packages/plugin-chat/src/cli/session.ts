@@ -26,8 +26,12 @@ export interface Output {
 
 /** A line editor: what the REPL needs of `node:readline`. */
 export interface Terminal {
-  /** Ask for one line; null once the input has ended (Ctrl-D). */
-  ask(prompt: string): Promise<string | null>;
+  /**
+   * Ask for one line; null once the input has ended (Ctrl-D), or once
+   * `signal` aborts — the question is then withdrawn, not left to catch the
+   * next line typed.
+   */
+  ask(prompt: string, signal?: AbortSignal): Promise<string | null>;
   /** Called on Ctrl-C, with whether a line was being typed. */
   onInterrupt(handler: () => void): void;
   /** What is typed on the line being edited, so Ctrl-C can clear it first. */
@@ -135,10 +139,12 @@ export async function repl(deps: SessionDeps, opts: ReplOptions): Promise<void> 
       for await (const event of deps.runner.run(deps.messages, {
         execute: deps.executor,
         signal: controller.signal,
+        // Shown under -y too: -y skips the question, never the telling.
+        // Ctrl-C at the question stops the turn, which declines the write.
         approve: async (request) => {
-          if (opts.yes) return "approved";
           output.out(preview(output, request));
-          const answer = await terminal.ask("Apply? [y/N] ");
+          if (opts.yes) return "approved";
+          const answer = await terminal.ask("Apply? [y/N] ", controller.signal);
           return answer !== null && /^y(es)?$/i.test(answer.trim()) ? "approved" : "denied";
         },
       })) {
@@ -170,7 +176,7 @@ function textView(output: Output): (event: RunnerEvent) => string | null {
   return (event) => {
     switch (event.type) {
       case "text-delta":
-        output.out(event.delta);
+        output.out(printable(event.delta));
         if (event.delta !== "") midLine = !event.delta.endsWith("\n");
         return null;
       case "tool-call":
@@ -181,7 +187,7 @@ function textView(output: Output): (event: RunnerEvent) => string | null {
       case "tool-result": {
         endLine();
         const mark = event.result.ok ? output.dim("←") : output.red("✗");
-        output.err(`${mark} ${output.dim(`${event.name}: ${event.result.summary}`)}\n`);
+        output.err(`${mark} ${output.dim(`${event.name}: ${printable(event.result.summary)}`)}\n`);
         return null;
       }
       case "done":
@@ -232,17 +238,28 @@ function jsonView(output: Output): (event: RunnerEvent) => string | null {
 
 /** What a write will do, in full, for the person deciding. */
 export function preview(output: Output, request: ApprovalRequest): string {
-  const lines = [`\n${output.bold(request.summary)}`];
+  const lines = [`\n${output.bold(printable(request.summary))}`];
   for (const [key, value] of Object.entries(request.args)) {
     if (key === "body") continue;
     lines.push(
-      `  ${output.dim(`${key}:`)} ${Array.isArray(value) ? value.join(", ") : String(value)}`,
+      `  ${output.dim(`${key}:`)} ${printable(Array.isArray(value) ? value.join(", ") : String(value))}`,
     );
   }
   const body = request.args.body;
   if (typeof body === "string" && body.trim() !== "") {
     lines.push(`  ${output.dim("body:")}`);
-    for (const line of body.trimEnd().split("\n")) lines.push(`    ${line}`);
+    for (const line of printable(body.trimEnd()).split("\n")) lines.push(`    ${line}`);
   }
   return `${lines.join("\n")}\n`;
+}
+
+/**
+ * Text from the model, safe to write to a terminal. What it writes may repeat
+ * whatever it read, and an escape sequence in that could move the cursor or
+ * clear the screen — over the very preview a person is deciding on. Control
+ * characters other than a newline and a tab are shown as `�`.
+ */
+export function printable(text: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what is replaced
+  return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "\ufffd");
 }

@@ -146,9 +146,11 @@ export function useChatSession() {
       inflight?.abort();
     },
 
+    /** A new conversation, which starts asking again: "Allow all" was for the last one. */
     reset(): void {
       inflight?.abort();
       resetChat(state);
+      mode.value = "manual";
     },
   };
 }

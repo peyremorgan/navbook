@@ -155,6 +155,63 @@ describe("the runner", () => {
     assert.equal(result?.type === "tool-result" && result.decision, "approved");
   });
 
+  it("gives every call an id of its own, whatever the model sent", async () => {
+    // No id at all, the same id twice in one reply, and again in the next: a
+    // provider that numbers calls per response sends exactly this.
+    const { messages } = await run(
+      [
+        {
+          calls: [
+            { id: "", name: "list_issues", arguments: {} },
+            { id: "x", name: "list_prs", arguments: {} },
+            { id: "x", name: "list_prs", arguments: {} },
+          ],
+        },
+        { calls: [{ id: "x", name: "list_issues", arguments: {} }] },
+        { text: "Done." },
+      ],
+      "approved",
+    );
+    const ids = messages.flatMap((message) =>
+      message.role === "assistant" ? (message.tool_calls ?? []).map((call) => call.id) : [],
+    );
+    assert.equal(ids.length, 4);
+    assert.equal(new Set(ids).size, 4, ids.join(", "));
+    assert.ok(ids.every((id) => id !== ""));
+    assert.equal(ids[1], "x", "an id that is free is kept");
+    const answered = messages.flatMap((message) =>
+      message.role === "tool" ? [message.tool_call_id] : [],
+    );
+    assert.deepEqual(answered, ids, "each answer goes to its own call");
+  });
+
+  it("declines what it was asking about when the turn is stopped", async () => {
+    const { client } = scripted({
+      calls: [{ id: "w", name: "close_issue", arguments: { ref: "ab12" } }],
+    });
+    const executor = recording();
+    const controller = new AbortController();
+    const events: RunnerEvent[] = [];
+    const messages: ChatMessage[] = [
+      { role: "system", content: "S" },
+      { role: "user", content: "Q" },
+    ];
+    for await (const event of makeRunner(client, "m", TOOLS).run(messages, {
+      execute: executor,
+      signal: controller.signal,
+      // Ctrl-C while the question is open, then a "y" typed after it.
+      approve: () => {
+        controller.abort();
+        return "approved";
+      },
+    })) {
+      events.push(event);
+    }
+    assert.deepEqual(executor.calls, []);
+    const result = events.find((event) => event.type === "tool-result");
+    assert.equal(result?.type === "tool-result" && result.decision, "denied");
+  });
+
   it("does not run a declined write, and tells the model not to retry", async () => {
     const { executor, messages, events } = await run(
       [

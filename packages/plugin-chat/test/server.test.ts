@@ -324,6 +324,91 @@ describe("the chat subscription", () => {
     assert.equal(originSubjects(h.fixture.origin)[0], "docs(issue): comment on #peer0001");
   });
 
+  it("lets an approval answer only its own write, though the next reuses its id", async () => {
+    filedByPeer(h, "To approve once", "once0001");
+    // A provider that numbers calls per response sends the same id each round.
+    stub.enqueue({
+      toolCalls: [
+        { id: "dup", name: "comment", arguments: { kind: "issue", ref: "once0001", body: "One." } },
+      ],
+    });
+    const asked = await turn(h, { transcript: "[]", message: "comment, then close it" });
+    const waiting = asked.events.find((event) => event.type === "APPROVAL_REQUEST");
+    assert.equal(waiting?.callId, "dup");
+    // The model asks for another write, under the id the first one had.
+    stub.enqueue({
+      toolCalls: [{ id: "dup", name: "close_issue", arguments: { ref: "once0001" } }],
+    });
+    const approved = await turn(h, {
+      transcript: last(asked).transcript,
+      approvals: [{ callId: "dup", approved: true }],
+    });
+    assert.deepEqual(
+      kinds(approved).filter((kind) => kind !== "TEXT"),
+      ["TOOL_CALL", "TOOL_RESULT", "TOOL_CALL", "APPROVAL_REQUEST", "DONE"],
+    );
+    const second = approved.events.find((event) => event.type === "APPROVAL_REQUEST");
+    assert.notEqual(second?.callId, "dup", "the second call was given an id of its own");
+    assert.equal(last(approved).reason, "APPROVAL");
+    assert.equal(originSubjects(h.fixture.origin)[0], "docs(issue): comment on #once0001");
+
+    // The write that ran carried the transcript as it stood, with its answer in it.
+    const ran = approved.events.find((event) => event.type === "TOOL_RESULT");
+    const after = JSON.parse(ran?.transcript ?? "[]") as { role: string; tool_call_id?: string }[];
+    assert.equal(after.at(-1)?.role, "tool");
+    assert.equal(after.at(-1)?.tool_call_id, "dup");
+  });
+
+  it("decides a waiting write by its own buttons, whatever Allow all says", async () => {
+    filedByPeer(h, "Waiting under Allow all", "wait0001");
+    stub.enqueue({
+      toolCalls: [
+        { id: "c1", name: "close_issue", arguments: { ref: "wait0001" } },
+        { id: "c2", name: "comment", arguments: { kind: "issue", ref: "wait0001", body: "Ok." } },
+      ],
+    });
+    const asked = await turn(h, { transcript: "[]", message: "comment and close" });
+    stub.enqueue({ text: "Commented only." });
+    const decided = await turn(h, {
+      transcript: last(asked).transcript,
+      approvals: [
+        { callId: "c1", approved: false },
+        { callId: "c2", approved: true },
+      ],
+      autoApprove: true,
+    });
+    assert.deepEqual(
+      decided.events
+        .filter((event) => event.type === "TOOL_RESULT")
+        .map((event) => [event.callId, event.ok, event.summary]),
+      [
+        ["c1", false, "declined"],
+        ["c2", true, "commented on #wait0001"],
+      ],
+    );
+
+    // Switching to Allow all and then saying no is a no.
+    stub.enqueue({
+      toolCalls: [{ id: "c3", name: "close_issue", arguments: { ref: "wait0001" } }],
+    });
+    const again = await turn(h, { transcript: last(decided).transcript, message: "close it" });
+    stub.enqueue({ text: "Left open." });
+    const before = originSubjects(h.fixture.origin);
+    const no = await turn(h, {
+      transcript: last(again).transcript,
+      message: "no, don't",
+      autoApprove: true,
+    });
+    assert.equal(no.events.find((event) => event.type === "TOOL_RESULT")?.summary, "declined");
+    assert.deepEqual(originSubjects(h.fixture.origin), before);
+  });
+
+  it("refuses a message longer than anybody types", async () => {
+    const t = await turn(h, { transcript: "[]", message: "x".repeat(100_001) });
+    assert.equal(last(t).type, "ERROR");
+    assert.equal(last(t).code, "INVALID_INPUT");
+  });
+
   it("reports a write the server refuses, with its code, for the model to read", async () => {
     stub.enqueue(
       {

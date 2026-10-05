@@ -10,16 +10,18 @@
 
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { parsePluginPackage } from "@navbook/core";
 import { PLUGIN } from "./helpers/nav.ts";
 
-function sources(dir: string): string[] {
+function sources(dir: string, extensions = [".ts"]): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
     entry.isDirectory()
-      ? sources(join(dir, entry.name))
-      : entry.name.endsWith(".ts")
+      ? entry.name === "generated"
+        ? []
+        : sources(join(dir, entry.name), extensions)
+      : extensions.some((extension) => entry.name.endsWith(extension))
         ? [join(dir, entry.name)]
         : [],
   );
@@ -51,6 +53,27 @@ describe("the package", () => {
     assert.equal(pkg.dependencies, undefined, "no runtime dependencies at all");
     for (const shipped of ["dist", "doc", "schema.graphql", "web"])
       assert.ok(pkg.files.includes(shipped), shipped);
+  });
+
+  it("ships every file its web layer imports", () => {
+    // The layer is compiled from the published package, source and all, by
+    // whoever builds a client with it: an import reaching outside `web/` must
+    // land on a file the package ships.
+    const pkg = JSON.parse(readFileSync(join(PLUGIN, "package.json"), "utf8"));
+    let checked = 0;
+    for (const file of sources(join(PLUGIN, "web"), [".ts", ".vue"])) {
+      const text = readFileSync(file, "utf8");
+      for (const match of text.matchAll(/from\s+"(\.{1,2}\/[^"]+)"/g)) {
+        const target = relative(PLUGIN, resolve(dirname(file), match[1] ?? ""));
+        if (target.startsWith("web")) continue;
+        const shipped = pkg.files.some(
+          (entry: string) => target === entry || target === entry.replace(/\.ts$/, ""),
+        );
+        assert.ok(shipped, `${relative(PLUGIN, file)} imports ${target}, which is not shipped`);
+        checked += 1;
+      }
+    }
+    assert.ok(checked >= 1, "the scan found the import it guards");
   });
 
   it("imports the hosts and graphql for types only", () => {

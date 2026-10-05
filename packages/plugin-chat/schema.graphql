@@ -39,7 +39,7 @@ type Subscription {
 
 input ChatInput {
   """
-  The `transcript` the last DONE or ERROR carried, as it came; `"[]"` to start.
+  The last `transcript` the previous turn carried, as it came; `"[]"` to start.
   A string of JSON the client never needs to read: the host's `JSON` scalar is
   output-only.
   """
@@ -64,7 +64,10 @@ enum ChatEventType {
   TOOL_CALL
   "A write waits for the person: `callId`, `tool`, `arguments`, `summary`."
   APPROVAL_REQUEST
-  "A tool ran, or was declined: `callId`, `tool`, `ok`, `summary`, and `commit` and `record` for a write."
+  """
+  A tool ran, or was declined: `callId`, `tool`, `ok`, `summary`, and `commit`,
+  `record` and `transcript` for a write that ran.
+  """
   TOOL_RESULT
   "The turn is over: `reason`, and the `transcript` to send back next."
   DONE
@@ -96,7 +99,11 @@ type ChatEvent {
   "The record a write made or changed."
   record: ChatRecord
   reason: ChatDoneReason
-  "The whole conversation after this turn, system prompt excluded: opaque, to send back."
+  """
+  The whole conversation, system prompt excluded: opaque, to send back. On
+  DONE and ERROR, as the turn left it; on the TOOL_RESULT of a write that ran,
+  as it stood then — the one to send back if the turn ends without another.
+  """
   transcript: String
   message: String
   code: String

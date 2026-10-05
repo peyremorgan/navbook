@@ -12,6 +12,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { pathToFileURL } from "node:url";
 import { makeNavRepo, type TempRepo } from "@navbook/cli/test-helpers";
 import { nav, PLUGIN } from "./helpers/nav.ts";
 import { type StubLlm, startStubLlm } from "./helpers/stub-llm.ts";
@@ -493,7 +494,8 @@ describe("nav chat", () => {
     const repo = chatRepo();
     const log = join(repo.home, "imports.log");
     try {
-      const hook = join(PLUGIN, "test", "helpers", "import-log.mjs");
+      // A URL, not a path: `--import` reads a Windows path's drive as a scheme.
+      const hook = pathToFileURL(join(PLUGIN, "test", "helpers", "import-log.mjs")).href;
       const listed = await nav(repo, ["issue", "list"], {
         NODE_OPTIONS: `--import=${hook}`,
         CHAT_IMPORT_LOG: log,

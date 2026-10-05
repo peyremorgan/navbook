@@ -6,6 +6,11 @@
  * by everyone who clones, which makes them the place for the team's choice of
  * endpoint and model and never the place for a key: the key is read from the
  * environment only (doc/plugins.md, "Using them").
+ *
+ * Nor do the settings decide where that key goes. Anybody who can commit can
+ * change them, so a key is sent only to an endpoint the environment names, or
+ * to the default; an endpoint the settings alone name is used without one,
+ * and refused when a key is set, rather than handed somebody else's key.
  */
 
 export interface ChatConfig {
@@ -72,6 +77,16 @@ export function resolveChatConfig(sources: ConfigSources): ConfigReading {
   }
 
   const apiKey = env("API_KEY");
+  if (apiKey !== undefined && env("BASE_URL") === undefined && setting("baseUrl") !== undefined) {
+    return {
+      ok: false,
+      message: `navbook.json names ${endpointOf(baseUrl)} as the assistant's endpoint, and ${sources.prefix}API_KEY is only sent to one the environment names`,
+      details: [
+        `set ${sources.prefix}BASE_URL=${baseUrl} to send the key there,`,
+        `or unset ${sources.prefix}API_KEY if that endpoint needs none`,
+      ],
+    };
+  }
   return { ok: true, config: { baseUrl, model, ...(apiKey === undefined ? {} : { apiKey }) } };
 }
 

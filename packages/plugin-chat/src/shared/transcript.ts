@@ -38,6 +38,9 @@ export function parseTranscript(
   let characters = 0;
   const messages: ChatMessage[] = [];
   let calls = new Set<string>();
+  // Every call made so far: an id used twice would let an approval, or a tool
+  // message, answer a call it was not about.
+  const made = new Set<string>();
   for (const [index, item] of raw.entries()) {
     const message = parseMessage(item);
     if (message === null)
@@ -51,7 +54,17 @@ export function parseTranscript(
       }
       calls.delete(message.tool_call_id);
     } else if (message.role === "assistant") {
-      calls = new Set((message.tool_calls ?? []).map((call) => call.id));
+      calls = new Set();
+      for (const call of message.tool_calls ?? []) {
+        if (made.has(call.id)) {
+          return {
+            ok: false,
+            message: `message ${index + 1} makes a tool call under an id already used`,
+          };
+        }
+        made.add(call.id);
+        calls.add(call.id);
+      }
     } else {
       // A person speaking again closes whatever was left unanswered, which a
       // provider would refuse: only the last assistant message may be pending.

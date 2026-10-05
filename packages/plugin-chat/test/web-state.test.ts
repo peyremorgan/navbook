@@ -190,6 +190,26 @@ describe("the panel's state", () => {
     assert.equal(state.status, "ready");
   });
 
+  it("keeps the transcript a write that ran carries, so a stop after it loses nothing", () => {
+    const state = emptyChat();
+    state.transcript = "[1]";
+    startTurn(state, null);
+    applyEvent(state, call("w", "comment"));
+    applyEvent(state, {
+      type: "TOOL_RESULT",
+      callId: "w",
+      tool: "comment",
+      ok: true,
+      summary: "commented on #ab12",
+      commit: { committed: true, subject: "docs(issue): comment on #ab12", pushed: true },
+      transcript: "[1,2]",
+    });
+    applyEvent(state, text("Done, and now a long"));
+    interrupt(state, null);
+    assert.equal(state.transcript, "[1,2]", "the next turn starts after the write");
+    assert.equal(tools(state)[0]?.state, "done");
+  });
+
   it("forgets everything on reset", () => {
     const state = emptyChat();
     startTurn(state, "hi");

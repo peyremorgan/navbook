@@ -48,6 +48,7 @@
     "dist",
     "doc",
     "schema.graphql",
+    "src/shared/sse.ts",
     "web"
   ],
   "scripts": {

@@ -35,6 +35,9 @@ interface ChatInput {
 /** What the subscription yields: a `ChatEvent`, as the SDL spells it. */
 type ChatEvent = Record<string, unknown> & { type: string };
 
+/** The longest thing a person may say in one message: a pasted log, not a book. */
+export const MAX_MESSAGE = 100_000;
+
 export function activate(host: ServerPluginHost): void {
   const reading = resolveChatConfig({
     env: host.pluginConfig,
@@ -108,6 +111,14 @@ async function* turn(
     }
   }
   const message = input.message?.trim() ?? "";
+  if (message.length > MAX_MESSAGE) {
+    yield {
+      type: "ERROR",
+      code: "INVALID_INPUT",
+      message: `a message may be at most ${MAX_MESSAGE} characters`,
+    };
+    return;
+  }
   if (message === "" && pending.length === 0) {
     yield {
       type: "ERROR",
@@ -123,11 +134,19 @@ async function* turn(
   const request = (ctx as GraphQLCtx & { request?: Request }).request;
   request?.signal.addEventListener("abort", () => controller.abort(), { once: true });
 
+  // A write the transcript left waiting was shown to the person, and is
+  // decided by what they said about it: their Approve or Decline, else
+  // `undecided` — never by "Allow all", which covers only writes asked for
+  // from here on. Each decision answers its write once; a write the model asks
+  // for later in the turn waits for its own, whatever id it carries.
   const auto = input.autoApprove === true;
+  const waitingIds = new Set(pending.map((call) => call.id));
   const decide = (callId: string, undecided: Decision): Decision => {
-    if (auto) return "approved";
-    const approved = approvals.get(callId);
-    return approved === undefined ? undecided : approved ? "approved" : "denied";
+    if (waitingIds.delete(callId)) {
+      const approved = approvals.get(callId);
+      return approved === undefined ? undecided : approved ? "approved" : "denied";
+    }
+    return auto ? "approved" : undecided;
   };
 
   const messages: ChatMessage[] = [
@@ -150,7 +169,7 @@ async function* turn(
           ...opts,
           approve: ({ call }) => decide(call.id, "denied"),
         })) {
-          yield* chatEvent(event);
+          yield* chatEvent(event, history);
         }
       }
       messages.push({ role: "user", content: message });
@@ -179,7 +198,7 @@ async function* turn(
         yield { type: "DONE", reason: event.reason.toUpperCase(), transcript: history() };
         return;
       }
-      yield* chatEvent(event);
+      yield* chatEvent(event, history);
     }
   } catch (error) {
     // Nothing reaches Yoga as a thrown error: it would end the stream with a
@@ -192,8 +211,16 @@ async function* turn(
   }
 }
 
-/** A runner event as the subscription spells it; `done` and `error` are the turn's own. */
-function* chatEvent(event: RunnerEvent): Generator<ChatEvent> {
+/**
+ * A runner event as the subscription spells it; `done` and `error` are the
+ * turn's own.
+ *
+ * A write that ran carries the transcript as it stands: it is in git now, and
+ * a turn stopped or cut off before its last event must not leave the client
+ * with a transcript in which that write is still waiting — the next turn would
+ * tell the model it was declined, and the model might ask for it again.
+ */
+function* chatEvent(event: RunnerEvent, history: () => string): Generator<ChatEvent> {
   switch (event.type) {
     case "text-delta":
       yield { type: "TEXT", delta: event.delta };
@@ -226,6 +253,7 @@ function* chatEvent(event: RunnerEvent): Generator<ChatEvent> {
               },
             }
           : {}),
+        ...(event.decision === "approved" ? { transcript: history() } : {}),
       };
       return;
     default:

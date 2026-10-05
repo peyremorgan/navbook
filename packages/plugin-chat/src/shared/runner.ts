@@ -16,9 +16,13 @@
  *   call before the next assistant message — declined, invalid and failed calls
  *   included;
  * - an interrupted turn leaves nothing half-written: a request that failed or
- *   was stopped adds no assistant message.
+ *   was stopped adds no assistant message;
+ * - no two calls share an id. Providers that send none, or number them per
+ *   response, would otherwise make a tool message — and an approval, which
+ *   names the call it answers — fit a call it was never about.
  */
 
+import { randomUUID } from "node:crypto";
 import { ChatApiError, type ChatClient, type ChatMessage, type Usage } from "./openai.ts";
 import {
   checkCall,
@@ -138,6 +142,7 @@ export function makeRunner(client: ChatClient, model: string, tools: readonly To
           return;
         }
 
+        calls = distinctIds(calls, messages);
         messages.push({
           role: "assistant",
           content: text === "" && calls.length > 0 ? null : text,
@@ -219,7 +224,9 @@ async function* settle(
         args: checked.args,
         summary: describeCall(name, checked.args),
       };
-      const decision = await opts.approve(request);
+      // A turn stopped while the question was open declines what it asked.
+      const asked = opts.signal?.aborted ? "denied" : await opts.approve(request);
+      const decision = opts.signal?.aborted ? "denied" : asked;
       if (decision === "defer") {
         deferred = true;
         yield { type: "approval-request", request };
@@ -280,6 +287,20 @@ function answer(messages: ChatMessage[], call: ToolCall, result: ToolResult): vo
     });
   }
   messages.push({ role: "tool", tool_call_id: call.id, content });
+}
+
+/** `calls`, each with an id no call in `messages`, nor another of `calls`, already has. */
+function distinctIds(calls: ToolCall[], messages: readonly ChatMessage[]): ToolCall[] {
+  const taken = new Set(
+    messages.flatMap((message) =>
+      message.role === "assistant" ? (message.tool_calls ?? []).map((call) => call.id) : [],
+    ),
+  );
+  return calls.map((call) => {
+    const id = call.id === "" || taken.has(call.id) ? `call_${randomUUID()}` : call.id;
+    taken.add(id);
+    return id === call.id ? call : { ...call, id };
+  });
 }
 
 /**

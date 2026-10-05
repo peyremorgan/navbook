@@ -157,6 +157,9 @@ export function applyEvent(state: ChatState, event: ChatEventWire): ToolPart | n
       part.state = declined ? "declined" : event.ok ? "done" : "failed";
       part.summary = event.summary ?? "";
       if (event.commit) part.commit = event.commit;
+      // A write that ran is in the transcript from here on, even if the turn
+      // is stopped before it ends.
+      if (typeof event.transcript === "string") state.transcript = event.transcript;
       if (event.record)
         part.record = { kind: event.record.kind === "PR" ? "pr" : "issue", id: event.record.id };
       return part.commit?.committed ? part : null;
@@ -185,7 +188,8 @@ export function interrupt(state: ChatState, why: string | null): void {
   closeText(state);
   stopRunning(state);
   // Whatever the interrupted turn asked for, it asked in a transcript the
-  // server never finished: the next turn starts from the last one it did.
+  // server never finished: the next turn starts from the last one it sent —
+  // its previous turn's, or the one after the last write that ran.
   for (const part of toolParts(state)) if (part.state === "awaiting") part.state = "declined";
   state.decisions = {};
   state.status = why === null ? "ready" : "error";

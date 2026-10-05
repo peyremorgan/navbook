@@ -416,7 +416,7 @@ export function checkArguments(schema: JsonSchema, raw: unknown): string | null 
   }
   const args = raw as Record<string, unknown>;
   for (const key of Object.keys(args)) {
-    if (!(key in schema.properties)) return `'${key}' is not an argument it takes`;
+    if (!Object.hasOwn(schema.properties, key)) return `'${key}' is not an argument it takes`;
   }
   for (const key of schema.required) {
     if (args[key] === undefined || args[key] === null) return `'${key}' is required`;

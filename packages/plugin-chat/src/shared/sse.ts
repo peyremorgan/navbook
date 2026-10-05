@@ -18,8 +18,15 @@ export interface SseEvent {
  * Events are separated by a blank line, a payload may span several `data:`
  * lines, `\r\n` and `\r` end a line as `\n` does, and a line starting with
  * `:` is a comment — a keep-alive, usually.
+ *
+ * `onChunk` is told each time bytes arrive, keep-alives included, so a caller
+ * can tell a silent stream from a slow one. A line longer than
+ * `MAX_LINE` is refused rather than buffered without end.
  */
-export async function* parseSseEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<SseEvent> {
+export async function* parseSseEvents(
+  body: ReadableStream<Uint8Array>,
+  onChunk?: () => void,
+): AsyncGenerator<SseEvent> {
   const decoder = new TextDecoder("utf-8");
   let buffer = "";
   let data: string[] = [];
@@ -44,6 +51,7 @@ export async function* parseSseEvents(body: ReadableStream<Uint8Array>): AsyncGe
   try {
     for (;;) {
       const { done, value } = await reader.read();
+      if (!done) onChunk?.();
       buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
       let end = lineEnd(buffer, done);
       while (end !== null) {
@@ -58,6 +66,8 @@ export async function* parseSseEvents(body: ReadableStream<Uint8Array>): AsyncGe
         end = lineEnd(buffer, done);
       }
       if (done) break;
+      if (buffer.length > MAX_LINE)
+        throw new SseError(`sent a line longer than ${MAX_LINE} characters`);
     }
     // A stream that ends without its final blank line still said something.
     if (buffer !== "") take(buffer);
@@ -69,9 +79,23 @@ export async function* parseSseEvents(body: ReadableStream<Uint8Array>): AsyncGe
   }
 }
 
+/** A stream that is not one this parser will read, rather than a failure to read it. */
+export class SseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SseError";
+  }
+}
+
+/** The longest line a stream may send: far more than any chunk a model streams. */
+export const MAX_LINE = 4_000_000;
+
 /** Just the payloads, for a stream whose events are all of one kind. */
-export async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
-  for await (const event of parseSseEvents(body)) yield event.data;
+export async function* parseSse(
+  body: ReadableStream<Uint8Array>,
+  onChunk?: () => void,
+): AsyncGenerator<string> {
+  for await (const event of parseSseEvents(body, onChunk)) yield event.data;
 }
 
 function lineEnd(buffer: string, done: boolean): { at: number; length: number } | null {

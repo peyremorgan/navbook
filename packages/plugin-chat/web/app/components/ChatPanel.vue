@@ -7,6 +7,12 @@
   one line. A write waiting for the person is a card instead, with what it
   will write and the two buttons that decide it; nothing is written until one
   is pressed, unless the Edits selector under the prompt says "Allow all".
+
+  Two things are shown more plainly than Markdown would show them. The body a
+  card asks about is its source, exactly as it would be written: rendered, a
+  link's target or a comment would not be seen. And a reply's images are links
+  instead: a model led on by something it read could otherwise have the
+  browser fetch a URL carrying what it read.
 -->
 <script setup lang="ts">
 import type { ToolPart } from "../utils/chat-state";
@@ -75,6 +81,11 @@ function fields(part: ToolPart): [string, string][] {
     ]);
 }
 
+/** A reply's Markdown with its images as links: nothing is fetched just by being shown. */
+function replyMarkdown(text: string): string {
+  return text.replaceAll("![", "\\![").replace(/<img\b/gi, "&lt;img");
+}
+
 function bodyOf(part: ToolPart): string {
   const body = (part.input as Record<string, unknown> | null)?.body;
   return typeof body === "string" ? body : "";
@@ -115,7 +126,10 @@ function recordLink(part: ToolPart): string | null {
           <div class="space-y-2" :data-testid="`chat-${message.role}`">
             <template v-for="(part, index) in message.parts" :key="`${message.id}-${index}`">
               <template v-if="part.type === 'text'">
-                <MarkdownBody v-if="message.role === 'assistant'" :source="part.text || ' '" />
+                <MarkdownBody
+                  v-if="message.role === 'assistant'"
+                  :source="replyMarkdown(part.text) || ' '"
+                />
                 <p v-else class="whitespace-pre-wrap">{{ part.text }}</p>
               </template>
               <div
@@ -130,9 +144,11 @@ function recordLink(part: ToolPart): string | null {
                     <dd class="break-words">{{ value }}</dd>
                   </template>
                 </dl>
-                <div v-if="bodyOf(part)" class="rounded border border-default bg-default p-2">
-                  <MarkdownBody :source="bodyOf(part)" />
-                </div>
+                <pre
+                  v-if="bodyOf(part)"
+                  class="rounded border border-default bg-default p-2 font-sans whitespace-pre-wrap break-words"
+                  data-testid="chat-card-body"
+                >{{ bodyOf(part) }}</pre>
                 <p
                   v-if="decisionOf(part) !== null"
                   class="text-muted"
@@ -143,6 +159,7 @@ function recordLink(part: ToolPart): string | null {
                 <div v-else class="flex gap-2">
                   <UButton
                     label="Approve"
+                    :aria-label="`Approve: ${part.summary}`"
                     icon="i-lucide-check"
                     size="sm"
                     :disabled="session.busy.value"
@@ -151,6 +168,7 @@ function recordLink(part: ToolPart): string | null {
                   />
                   <UButton
                     label="Decline"
+                    :aria-label="`Decline: ${part.summary}`"
                     icon="i-lucide-x"
                     size="sm"
                     color="neutral"

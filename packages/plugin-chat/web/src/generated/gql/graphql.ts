@@ -30,7 +30,10 @@ export type ChatEventType =
   | 'TEXT'
   /** The model called a tool: `callId`, `tool`, `arguments`. */
   | 'TOOL_CALL'
-  /** A tool ran, or was declined: `callId`, `tool`, `ok`, `summary`, and `commit` and `record` for a write. */
+  /**
+   * A tool ran, or was declined: `callId`, `tool`, `ok`, `summary`, and `commit`,
+   * `record` and `transcript` for a write that ran.
+   */
   | 'TOOL_RESULT';
 
 export type ChatInput = {
@@ -41,7 +44,7 @@ export type ChatInput = {
   /** What the person just said. Omitted when this turn only answers approvals. */
   message?: string | null | undefined;
   /**
-   * The `transcript` the last DONE or ERROR carried, as it came; `"[]"` to start.
+   * The last `transcript` the previous turn carried, as it came; `"[]"` to start.
    * A string of JSON the client never needs to read: the host's `JSON` scalar is
    * output-only.
    */

@@ -45,18 +45,18 @@ export function systemPrompt(context: SessionContext, fixed = staticPrompt()): s
   const lines = [
     "## This session",
     "",
-    `- You are talking to ${context.viewer}. "me", "my" and "I" mean them.`,
+    `- You are talking to ${inline(context.viewer)}. "me", "my" and "I" mean them.`,
     `- Today is ${context.today}.`,
     `- The conversation happens in ${context.surface}.`,
   ];
-  if (context.branch) lines.push(`- The checked-out branch is \`${context.branch}\`.`);
+  if (context.branch) lines.push(`- The checked-out branch is \`${inline(context.branch)}\`.`);
   const list = (label: string, values: readonly string[] | undefined): void => {
     if (!values || values.length === 0) return;
     const sorted = [...new Set(values)].sort((a, b) => a.localeCompare(b));
     const shown = sorted.slice(0, SESSION_LIST_LIMIT);
     const more = sorted.length - shown.length;
     lines.push(
-      `- ${label}: ${shown.map((value) => `\`${value}\``).join(", ")}${more > 0 ? `, and ${more} more` : ""}.`,
+      `- ${label}: ${shown.map((value) => `\`${inline(value)}\``).join(", ")}${more > 0 ? `, and ${more} more` : ""}.`,
     );
   };
   list("Labels in use", context.labels);
@@ -64,9 +64,19 @@ export function systemPrompt(context: SessionContext, fixed = staticPrompt()): s
   list("People who appear in the tracker", context.people);
   if (context.queryKeys && context.queryKeys.length > 0) {
     lines.push("- This repository's plugins add these query terms:");
-    for (const help of context.queryKeys) lines.push(`  - \`${help.trim()}\``);
+    for (const help of context.queryKeys) lines.push(`  - \`${inline(help)}\``);
   }
   return `${fixed.trimEnd()}\n\n${lines.join("\n")}\n`;
+}
+
+/**
+ * A value from the tree, made safe to quote in the system prompt: anybody who
+ * can commit writes labels and names, and one holding a newline or a backtick
+ * could otherwise close its quote and go on as instructions.
+ */
+function inline(value: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what is removed
+  return value.replace(/[\u0000-\u001f\u007f`]+/g, " ").trim();
 }
 
 /**

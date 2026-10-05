@@ -15,7 +15,7 @@ import {
   newAccumulator,
   type StreamEvent,
 } from "../src/shared/openai.ts";
-import { parseSse, parseSseEvents } from "../src/shared/sse.ts";
+import { MAX_LINE, parseSse, parseSseEvents } from "../src/shared/sse.ts";
 import { type StubLlm, startStubLlm } from "./helpers/stub-llm.ts";
 
 /** A body delivered in the chunks given, split wherever the test likes. */
@@ -117,6 +117,30 @@ describe("accumulate", () => {
     );
     accumulate(state, delta({ tool_calls: [{ function: { arguments: ":1}" } }] }));
     assert.deepEqual(finishedCalls(state), [{ id: "a", name: "show", arguments: '{"a":1}' }]);
+  });
+
+  it("starts a new call when an unindexed delta names a call of its own", () => {
+    // Parallel calls sent whole, with ids and no index, as some gateways do.
+    const state = newAccumulator();
+    accumulate(
+      state,
+      delta({
+        tool_calls: [
+          { id: "a", function: { name: "show", arguments: '{"kind":"issue","ref":"aaaa"}' } },
+          { id: "b", function: { name: "list_issues", arguments: "{}" } },
+        ],
+      }),
+    );
+    accumulate(
+      state,
+      delta({ tool_calls: [{ id: "c", function: { name: "show", arguments: "{" } }] }),
+    );
+    accumulate(state, delta({ tool_calls: [{ function: { arguments: "}" } }] }));
+    assert.deepEqual(finishedCalls(state), [
+      { id: "a", name: "show", arguments: '{"kind":"issue","ref":"aaaa"}' },
+      { id: "b", name: "list_issues", arguments: "{}" },
+      { id: "c", name: "show", arguments: "{}" },
+    ]);
   });
 
   it("keeps a name that continuation deltas repeat whole or send empty", () => {
@@ -326,6 +350,56 @@ describe("the client", () => {
         makeClient({ baseUrl: stub.url, timeoutMs: 200 }).stream({ model: "m", messages: [] }),
       ),
       (error) => error instanceof ChatApiError && error.kind === "timeout",
+    );
+  });
+
+  it("waits as long as the answer keeps coming: the timeout is for silence", async () => {
+    // Five pieces 100 ms apart: half a second in all, against a 250 ms timeout.
+    const encoder = new TextEncoder();
+    const slow = (async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          async start(controller) {
+            for (const piece of ["a", "b", "c", "d", "e"]) {
+              await new Promise((resolve) => setTimeout(resolve, 100));
+              const chunk = { choices: [{ index: 0, delta: { content: piece } }] };
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+            }
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      )) as typeof fetch;
+    const events = await collect(
+      makeClient({ baseUrl: "http://slow.invalid/v1", timeoutMs: 250, fetch: slow }).stream({
+        model: "m",
+        messages: [],
+      }),
+    );
+    assert.equal(
+      events.map((event) => (event.type === "text" ? event.delta : "")).join(""),
+      "abcde",
+    );
+  });
+
+  it("refuses a line that never ends rather than holding all of it", async () => {
+    const endless = (async () =>
+      new Response(body(`data: ${"x".repeat(MAX_LINE + 10)}`), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })) as typeof fetch;
+    await assert.rejects(
+      collect(
+        makeClient({ baseUrl: "http://endless.invalid/v1", fetch: endless }).stream({
+          model: "m",
+          messages: [],
+        }),
+      ),
+      (error) =>
+        error instanceof ChatApiError &&
+        error.kind === "protocol" &&
+        /longer than/.test(error.message),
     );
   });
 

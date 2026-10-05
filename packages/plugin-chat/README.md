@@ -70,6 +70,12 @@ The endpoint defaults to `https://api.openai.com/v1`. A local server needs no
 key. With no model configured anywhere, `nav chat` says how to set one, and
 the web tracker shows no assistant at all.
 
+Anybody who can commit can change `navbook.json`, so it never decides where a
+key goes either: a key is sent only to the default endpoint or to one the
+environment names. With a key set and an endpoint named only in
+`navbook.json`, the assistant refuses to start, and says to name that endpoint
+in the environment too (or to drop the key, if it needs none).
+
 Small local models vary a great deal in how well they call tools. A model
 tuned for it — Qwen3 8B or larger, for instance — works; one that is not tends
 to describe the call in prose instead of making it.
@@ -86,14 +92,16 @@ nav chat --json -m <text>     one JSON event per line, for scripts
 
 - **In a conversation**, type your question and press Enter. The reply streams
   as it is written. Each tool the assistant uses is one dim line on stderr, and
-  a change is shown in full with `Apply? [y/N]`.
+  a change is shown in full with `Apply? [y/N]` — under `-y` too, without the
+  question. Ctrl-C at the question declines the change and stops the reply.
   - `/reset` forgets the conversation.
   - `/quit`, `/exit` or Ctrl-D leave.
   - Ctrl-C stops a reply, and leaves on an empty line.
   - Nothing is kept once you leave.
 - **Piped input is part of the question**, never an answer to one:
   `git log -5 | nav chat -m "file an issue for whatever broke here"`. Since
-  nobody can be asked, changes are declined unless `-y` is given.
+  nobody can be asked, changes are declined unless `-y` is given — as they
+  are when stdout is redirected, where the question would not be seen.
 - **Every change it makes is committed**, as `--commit` would, because you
   approved that exact change. A pull request held by another branch is written
   there, in its clean worktree or a temporary one, as `nav pr comment -y` does.
@@ -112,7 +120,8 @@ appears as a card saying what it will write, with **Approve** and **Decline**.
 Saying something else instead declines it.
 
 The **Edits** selector under the prompt switches to **Allow all**, which makes
-changes without asking for the rest of the conversation. After each change,
+the changes proposed from then on without asking, until a new conversation. A
+card already waiting is still decided by its own buttons. After each change,
 the lists on the page refresh and a notice names the commit, or says it could
 not be pushed.
 
@@ -133,6 +142,12 @@ and only the endpoint configured above. What they send is:
 
 Choose an endpoint you would show the tracker to. The key is sent to that
 endpoint and nowhere else, and is never logged or shown.
+
+What the tools read was written by whoever wrote the tracker, and the model
+reads it. The assistant is told to treat it as data, never as instructions,
+but a model can be talked round: a pull request's description could ask it to
+approve that pull request. That is what the approval is for, so think twice
+before **Allow all** or `-y` in a tracker that strangers write to.
 
 ## Development
 

@@ -89,14 +89,16 @@ async function chat(host: CliPluginHost, opts: ChatOptions): Promise<void> {
 
   // Piped input is part of the question, never answers to one: a pipeline
   // cannot be asked whether to apply a change, so without -y none is applied.
-  const piped = process.stdin.isTTY === true ? "" : await readAll(process.stdin);
+  const piped = process.stdin.isTTY === true ? "" : await readAll(process.stdin, ctx);
   const text = [opts.message ?? "", piped]
     .map((part) => part.trim())
     .filter(Boolean)
     .join("\n\n");
   if (text === "") ui.fail("nothing to ask: pass the question with -m, or pipe it in");
 
-  const canAsk = !opts.json && process.stdin.isTTY === true;
+  // Both ends, as the host's own questions need: with stdout redirected the
+  // question would go to the file, and the run would wait on an answer to it.
+  const canAsk = !opts.json && ui.isInteractive();
   let warned = false;
   const approve = (request: Parameters<typeof preview>[1]): Decision => {
     if (opts.yes) return "approved";
@@ -160,18 +162,26 @@ function readlineTerminal(): Terminal {
     closed = true;
   });
   return {
-    ask: (prompt) =>
-      closed
+    ask: (prompt, signal) =>
+      closed || signal?.aborted
         ? Promise.resolve(null)
         : new Promise((resolve) => {
             // A question pending when the input ends (Ctrl-D) resolves as null
             // rather than hanging: `close` is the only answer it will get.
-            const onClose = (): void => resolve(null);
-            rl.once("close", onClose);
-            rl.question(prompt, (answer) => {
+            // Aborted, readline withdraws the question itself.
+            const settle = (answer: string | null): void => {
               rl.off("close", onClose);
+              signal?.removeEventListener("abort", onAbort);
               resolve(answer);
-            });
+            };
+            const onClose = (): void => settle(null);
+            const onAbort = (): void => {
+              process.stdout.write("\n");
+              settle(null);
+            };
+            rl.once("close", onClose);
+            signal?.addEventListener("abort", onAbort, { once: true });
+            rl.question(prompt, signal ? { signal } : {}, (answer) => settle(answer));
           }),
     // With a SIGINT listener, readline hands Ctrl-C to us instead of ending.
     onInterrupt: (handler) => void rl.on("SIGINT", handler),
@@ -186,9 +196,23 @@ function readlineTerminal(): Terminal {
   };
 }
 
-async function readAll(stream: NodeJS.ReadableStream): Promise<string> {
+/**
+ * Everything on stdin. A stdin that is not a terminal but never ends — a
+ * terminal that only looks like a pipe, as mintty's does, or a caller that
+ * leaves it open — would otherwise wait in silence, so after a moment with
+ * nothing read, the person at the terminal is told what it is waiting for.
+ */
+async function readAll(stream: NodeJS.ReadableStream, ctx: CliPluginHost["ctx"]): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of stream)
-    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+  const hint = setTimeout(() => {
+    if (chunks.length === 0 && ctx.stderr.isTTY === true)
+      ctx.stderr.write(ctx.colors.dim("reading the question from stdin; end it with Ctrl-D\n"));
+  }, 1000);
+  try {
+    for await (const chunk of stream)
+      chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+  } finally {
+    clearTimeout(hint);
+  }
   return Buffer.concat(chunks).toString("utf8");
 }
