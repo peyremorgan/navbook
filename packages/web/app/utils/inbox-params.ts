@@ -16,10 +16,9 @@ import { joinTerms, queryValues, type RouteQuery, splitTerms } from "~/utils/fil
 import {
   INBOX_GROUPINGS,
   INBOX_KIND_CHOICES,
-  INBOX_VIEWS,
   type InboxKindChoice,
   type InboxSelection,
-  type InboxView,
+  inboxViews,
 } from "~/utils/inbox";
 import { isSortOrder, type SortOrder } from "~/utils/sort";
 
@@ -83,7 +82,7 @@ export function queryToInboxParams(query: RouteQuery): InboxParams {
   const view = firstWord(query.view);
   const kind = firstWord(query.kind);
   return {
-    view: INBOX_VIEWS.includes(view as InboxView) ? (view as InboxView) : "everything",
+    view: view !== null && inboxViews().includes(view) ? view : "everything",
     kind: INBOX_KIND_CHOICES.includes(kind as InboxKindChoice) ? (kind as InboxKindChoice) : "any",
     // A registered group's value is somebody's word, not one of ours, so it is
     // carried through as written and left to the group to compare.

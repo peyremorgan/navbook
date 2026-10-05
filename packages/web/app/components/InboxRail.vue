@@ -19,6 +19,7 @@
 -->
 <script setup lang="ts">
 import type {
+  BuiltinView,
   InboxKindChoice,
   InboxSelection,
   InboxView,
@@ -31,12 +32,19 @@ const emit = defineEmits<{ select: [Partial<InboxSelection>] }>();
 
 const slots = useNavbookSlots();
 
-const VIEW_LOOK: Record<InboxView, { label: string; icon: string }> = {
+const VIEW_LOOK: Record<BuiltinView, { label: string; icon: string }> = {
   everything: { label: "Everything", icon: "i-lucide-inbox" },
   assigned: { label: "Assigned to me", icon: "i-lucide-user" },
   authored: { label: "Authored by me", icon: "i-lucide-pen-line" },
   reviews: { label: "Review requested", icon: "i-lucide-eye" },
 };
+
+/** How a view looks: a built-in's, or the source's that registered it. */
+function viewLook(view: InboxView): { label: string; icon: string } {
+  const source = slots.inboxSources().find((entry) => entry.reason === view);
+  if (source !== undefined) return { label: source.label, icon: source.icon };
+  return VIEW_LOOK[view as BuiltinView] ?? { label: view, icon: "i-lucide-inbox" };
+}
 
 const KIND_LOOK: Record<InboxKindChoice, { label: string; icon: string }> = {
   any: { label: "Anything", icon: "i-lucide-list" },
@@ -88,7 +96,7 @@ const groups = computed<Group[]>(() => [
     heading: "Show",
     choices: props.counts.views.map((entry) => ({
       testid: `inbox-view-${entry.value}`,
-      ...VIEW_LOOK[entry.value],
+      ...viewLook(entry.value),
       count: entry.count,
       active: props.selection.view === entry.value,
       patch: { view: entry.value },

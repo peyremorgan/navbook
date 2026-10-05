@@ -21,7 +21,7 @@ import {
   toIssueFilter,
   toPrFilter,
 } from "~/utils/filter-params";
-import { INBOX_GROUPINGS } from "~/utils/inbox";
+import { INBOX_GROUPINGS, INBOX_SOURCES } from "~/utils/inbox";
 import {
   buildEntityPatch,
   describeEntityEdit,
@@ -87,6 +87,57 @@ describe("panels", () => {
     });
     assert.equal(slots.panels("issue").length, 2);
     assert.equal(slots.panels("pr").length, 1);
+  });
+});
+
+describe("timeline items", () => {
+  it("are returned for the noun they named, in `order`", () => {
+    const slots = useNavbookSlots();
+    const read = (key: string) => () => [{ key, at: "2026-10-04T10:00:00Z" }];
+    slots.register({
+      timelineItems: [
+        { noun: "issue", items: read("late"), component: Stub, order: 200 },
+        { noun: "issue", items: read("early"), component: Stub, order: 10 },
+      ],
+    });
+    assert.deepEqual(
+      slots.timelineItems("issue").map((slot) => slot.items({})[0]?.key),
+      ["early", "late"],
+    );
+  });
+});
+
+describe("inbox sources", () => {
+  const source = (reason: string) => ({
+    reason,
+    label: "Polls awaiting your vote",
+    badge: "Poll",
+    icon: "i-lucide-vote",
+    filter: (email: string) => ({ pollAwaiting: [email] }),
+  });
+
+  it("are returned, and add their reason as a view the rail offers", () => {
+    useNavbookSlots().register({ inboxSources: [source("polls")] });
+    assert.deepEqual(
+      useNavbookSlots()
+        .inboxSources()
+        .map((entry) => entry.reason),
+      ["polls"],
+    );
+    assert.deepEqual(INBOX_SOURCES, ["polls"]);
+  });
+
+  it("are refused a reason that is taken, by a built-in view or reason or another source", () => {
+    const slots = useNavbookSlots();
+    slots.register({
+      inboxSources: [source("reviews"), source("author"), source("everything"), source("polls")],
+    });
+    slots.register({ inboxSources: [source("polls")] });
+    assert.deepEqual(
+      slots.inboxSources().map((entry) => entry.reason),
+      ["polls"],
+    );
+    assert.deepEqual(INBOX_SOURCES, ["polls"]);
   });
 });
 
@@ -345,10 +396,15 @@ describe("resetting", () => {
       inboxGroups: [{ key: "x", label: "X", icon: "i", values: () => [], matches: () => false }],
       cache: { typePolicies: { X: { keyFields: ["id"] } } },
       overlays: [{ component: Stub }],
+      timelineItems: [{ noun: "issue", items: () => [], component: Stub }],
+      inboxSources: [{ reason: "x", label: "X", badge: "X", icon: "i", filter: () => ({}) }],
     });
     resetNavbookSlots();
     assert.deepEqual(slots.navLinks(), []);
     assert.deepEqual(slots.overlays(), []);
+    assert.deepEqual(slots.timelineItems("issue"), []);
+    assert.deepEqual(slots.inboxSources(), []);
+    assert.deepEqual(INBOX_SOURCES, []);
     assert.deepEqual(slots.entityFields(), []);
     assert.deepEqual(slots.inboxGroups(), []);
     assert.deepEqual(slots.typePolicies(), {});

@@ -13,9 +13,10 @@
  */
 
 import { useQuery } from "@vue/apollo-composable";
-import { INBOX_QUERY, VIEWER_QUERY } from "~/graphql/queries";
-import { type InboxItem, inboxVariables, mergeInbox } from "~/utils/inbox";
+import { INBOX_QUERY, INBOX_SOURCE_QUERY, VIEWER_QUERY } from "~/graphql/queries";
+import { type InboxItem, inboxSourceFilter, inboxVariables, mergeInbox } from "~/utils/inbox";
 import type { InboxParams } from "~/utils/inbox-params";
+import type { IssueFilter } from "~~/src/generated/gql/graphql";
 
 export interface InboxHandle {
   /** The address the inbox is about; null until the server has said. */
@@ -43,6 +44,23 @@ export function useInbox(scope: ComputedRef<Pick<InboxParams, "finished" | "text
     () => ({ fetchPolicy: "cache-and-network" as const, enabled: email.value !== null }),
   );
 
+  // One question per reason a plugin layer added. The slots are filled before
+  // the first render and never change, so this is a fixed number of queries.
+  const sources = useNavbookSlots()
+    .inboxSources()
+    .map((source) => {
+      const asked = useQuery(
+        INBOX_SOURCE_QUERY,
+        () => ({
+          // The plugin's fields are the server's `IssueFilter`, not this
+          // client's copy of it; see INBOX_SOURCE_QUERY.
+          filter: inboxSourceFilter(source.filter(email.value ?? ""), scope.value) as IssueFilter,
+        }),
+        () => ({ fetchPolicy: "cache-and-network" as const, enabled: email.value !== null }),
+      );
+      return { reason: source.reason, ...asked };
+    });
+
   const items = computed(() => {
     const answers = result.value;
     if (answers === undefined) return [];
@@ -50,6 +68,10 @@ export function useInbox(scope: ComputedRef<Pick<InboxParams, "finished" | "text
       issues: [
         { reason: "assigned", entities: answers.assignedIssues },
         { reason: "assigned", entities: answers.finishedAssignedIssues ?? [] },
+        ...sources.map((source) => ({
+          reason: source.reason,
+          entities: source.result.value?.issues ?? [],
+        })),
       ],
       prs: [
         { reason: "assigned", entities: answers.assignedPrs },
@@ -66,13 +88,23 @@ export function useInbox(scope: ComputedRef<Pick<InboxParams, "finished" | "text
     items,
     // Waiting for the address is waiting: the query has not been asked yet, so
     // Apollo reports nothing in flight and only this knows better.
-    loading: computed(() => (email.value === null && viewerError.value === null) || loading.value),
+    loading: computed(
+      () =>
+        (email.value === null && viewerError.value === null) ||
+        loading.value ||
+        sources.some((source) => source.loading.value),
+    ),
+    // A plugin's source failing takes its own rows out, and nothing else: the
+    // inbox a person relies on must not go blank because a layer's API half
+    // is missing or broken — a client built with a layer can meet a server
+    // without its plugin.
     error: computed(() => viewerError.value ?? error.value),
     refetch: () => {
       // The address first. When it is what failed, the inbox query was never
       // asked at all, and asking a disabled query again would do nothing.
       void refetchViewer();
       void refetch();
+      for (const source of sources) void source.refetch();
     },
   };
 }

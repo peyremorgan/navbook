@@ -21,7 +21,13 @@
 
 import type { Component } from "vue";
 import { registerFilterParam, resetFilterParams } from "~/utils/filter-params";
-import { type InboxItem, registerInboxGrouping, resetInboxGroupings } from "~/utils/inbox";
+import {
+  type InboxItem,
+  registerInboxGrouping,
+  registerInboxSource,
+  resetInboxGroupings,
+  resetInboxSources,
+} from "~/utils/inbox";
 import { registerPatchField, resetPatchFields } from "~/utils/patch";
 
 /** A tab in the header, beside Issues and Pull requests. */
@@ -58,6 +64,27 @@ export interface NavLinkSlot {
  */
 export interface PanelSlot {
   noun: "issue" | "pr";
+  component: Component;
+  order?: number;
+}
+
+/**
+ * Something that happened on an entity, placed in its discussion.
+ *
+ * `items` reads what there is to place off the entity's `ext` — which the
+ * detail page already has, so placing costs no request — as a key and the
+ * time it happened. The key is also an anchor in the page, so it should be
+ * one nothing else there has: a Navbook ID is, being unique in the repository; `interleave` puts each among the top-level comments by
+ * that time. Each is drawn with `component`, given its `itemKey` and the
+ * entity's `entityId`, and fetches what it shows itself. The page wraps it in
+ * an element whose `id` is `timeline-<key>`, so a panel can link to it.
+ *
+ * Issues only, for now: the pull request page's conversation is a review's,
+ * with revisions in it, and nothing has asked to stand among those yet.
+ */
+export interface TimelineItemSlot {
+  noun: "issue";
+  items: (ext: Record<string, unknown>) => { key: string; at: string }[];
   component: Component;
   order?: number;
 }
@@ -136,6 +163,31 @@ export interface InboxGroupSlot {
 }
 
 /**
+ * A reason for an issue to be in somebody's inbox, beside the built-in three.
+ *
+ * The inbox asks the API for the open issues `filter` names — fields of
+ * `IssueFilter`, a plugin's own included — for the person signed in, and
+ * merges them in as rows carrying `reason`. That is the whole of what a
+ * plugin says: which question to ask. The host asks it with its own row
+ * fragment, so a row from a plugin is the row any other issue is.
+ *
+ * `reason` is also the rail's view showing only these rows, and the address
+ * that view is kept under, so it must not be one of the built-in views
+ * (`assigned`, `authored`, `reviews`, `everything`). `label` names the view;
+ * `badge` is what a row says about itself, as the built-in "Assigned" does.
+ *
+ * Open issues only, finished work or not: a reason a plugin adds is something
+ * still to do, and leaves the inbox by being done.
+ */
+export interface InboxSourceSlot {
+  reason: string;
+  label: string;
+  badge: string;
+  icon: string;
+  filter: (email: string) => Record<string, unknown>;
+}
+
+/**
  * Something drawn over every page, rather than in one: a floating button and
  * the panel it opens, say.
  *
@@ -170,11 +222,13 @@ export interface CacheSlot {
 export interface SlotRegistration {
   navLinks?: NavLinkSlot[];
   panels?: PanelSlot[];
+  timelineItems?: TimelineItemSlot[];
   entityFields?: EntityFieldSlot[];
   formFields?: FormFieldSlot[];
   filters?: FilterSlot[];
   rowBadges?: RowBadgeSlot[];
   inboxGroups?: InboxGroupSlot[];
+  inboxSources?: InboxSourceSlot[];
   overlays?: OverlaySlot[];
   cache?: CacheSlot;
   /**
@@ -190,11 +244,13 @@ export interface SlotRegistration {
 interface Slots {
   navLinks: NavLinkSlot[];
   panels: PanelSlot[];
+  timelineItems: TimelineItemSlot[];
   entityFields: EntityFieldSlot[];
   formFields: FormFieldSlot[];
   filters: FilterSlot[];
   rowBadges: RowBadgeSlot[];
   inboxGroups: InboxGroupSlot[];
+  inboxSources: InboxSourceSlot[];
   overlays: OverlaySlot[];
   cache: CacheSlot[];
   listings: string[];
@@ -203,11 +259,13 @@ interface Slots {
 const slots: Slots = {
   navLinks: [],
   panels: [],
+  timelineItems: [],
   entityFields: [],
   formFields: [],
   filters: [],
   rowBadges: [],
   inboxGroups: [],
+  inboxSources: [],
   overlays: [],
   cache: [],
   listings: [],
@@ -222,12 +280,15 @@ export function useNavbookSlots() {
   return {
     navLinks: () => byOrder(slots.navLinks),
     panels: (noun: "issue" | "pr") => byOrder(slots.panels.filter((slot) => slot.noun === noun)),
+    timelineItems: (noun: "issue") =>
+      byOrder(slots.timelineItems.filter((slot) => slot.noun === noun)),
     entityFields: () => [...slots.entityFields],
     formFields: (form: "issue-new") =>
       byOrder(slots.formFields.filter((slot) => slot.form === form)),
     filters: (noun: "issue" | "pr") => slots.filters.filter((slot) => slot.nouns.includes(noun)),
     rowBadges: () => byOrder(slots.rowBadges),
     inboxGroups: () => [...slots.inboxGroups],
+    inboxSources: () => [...slots.inboxSources],
     overlays: () => byOrder(slots.overlays),
     /** Every registered type policy, merged into one map for Apollo. */
     typePolicies: () =>
@@ -247,6 +308,7 @@ export function useNavbookSlots() {
     register(registration: SlotRegistration): void {
       for (const link of registration.navLinks ?? []) slots.navLinks.push(link);
       for (const panel of registration.panels ?? []) slots.panels.push(panel);
+      for (const item of registration.timelineItems ?? []) slots.timelineItems.push(item);
       for (const entityField of registration.entityFields ?? []) {
         slots.entityFields.push(entityField);
         // The pure patch builder keeps its own list, so it stays testable
@@ -265,6 +327,11 @@ export function useNavbookSlots() {
         slots.inboxGroups.push(group);
         registerInboxGrouping(group);
       }
+      for (const source of registration.inboxSources ?? []) {
+        // Refused when its reason is taken — a built-in view's, or an earlier
+        // source's — since two views of one name could not both be chosen.
+        if (registerInboxSource(source.reason)) slots.inboxSources.push(source);
+      }
       for (const overlay of registration.overlays ?? []) slots.overlays.push(overlay);
       if (registration.cache !== undefined) slots.cache.push(registration.cache);
       for (const listing of registration.listings ?? []) {
@@ -278,14 +345,17 @@ export function useNavbookSlots() {
 export function resetNavbookSlots(): void {
   resetFilterParams();
   resetInboxGroupings();
+  resetInboxSources();
   resetPatchFields();
   slots.navLinks.length = 0;
   slots.panels.length = 0;
+  slots.timelineItems.length = 0;
   slots.entityFields.length = 0;
   slots.formFields.length = 0;
   slots.filters.length = 0;
   slots.rowBadges.length = 0;
   slots.inboxGroups.length = 0;
+  slots.inboxSources.length = 0;
   slots.overlays.length = 0;
   slots.cache.length = 0;
   slots.listings.length = 0;

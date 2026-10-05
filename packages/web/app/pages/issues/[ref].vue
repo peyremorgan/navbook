@@ -31,6 +31,7 @@ import {
   parseRankInput,
 } from "~/utils/patch";
 import { countSubtasks } from "~/utils/subtasks";
+import { interleave } from "~/utils/timeline";
 import { entityTitle } from "~/utils/title";
 
 const route = useRoute();
@@ -83,6 +84,21 @@ const known = computed(() => {
 const slots = useNavbookSlots();
 const comments = computed(() => buildCommentTree(issue.value?.comments ?? []));
 const commentCount = computed(() => countComments(comments.value));
+/**
+ * The thread, with what plugin layers place in it: each item where its time
+ * falls among the top-level comments. Read off `ext`, which the page already
+ * has, so placing costs no request; each item fetches what it shows itself.
+ */
+const timeline = computed(() =>
+  interleave(
+    comments.value,
+    slots
+      .timelineItems("issue")
+      .flatMap((slot, index) =>
+        slot.items(issue.value?.ext ?? {}).map((item) => ({ ...item, source: { slot, index } })),
+      ),
+  ),
+);
 const subtaskCount = computed(() => countSubtasks(issue.value?.subtasks ?? []));
 
 /** The issue as the patch builder compares against. */
@@ -347,13 +363,28 @@ async function unlink(child: string): Promise<void> {
 
           <section class="space-y-3">
             <h2 class="font-semibold">Discussion</h2>
-            <div v-if="comments.length" class="space-y-3" data-testid="comment-thread">
-              <CommentCard
-                v-for="node in comments"
-                :key="node.comment.id"
-                :node="node"
-                @reply="(id: string) => (replyTo = id)"
-              />
+            <div v-if="timeline.length" class="space-y-3" data-testid="comment-thread">
+              <template
+                v-for="entry in timeline"
+                :key="
+                  entry.kind === 'comment'
+                    ? `comment-${entry.node.comment.id}`
+                    : `item-${entry.item.source.index}-${entry.item.key}`
+                "
+              >
+                <CommentCard
+                  v-if="entry.kind === 'comment'"
+                  :node="entry.node"
+                  @reply="(id: string) => (replyTo = id)"
+                />
+                <div v-else :id="`timeline-${entry.item.key}`" class="scroll-mt-20">
+                  <component
+                    :is="entry.item.source.slot.component"
+                    :item-key="entry.item.key"
+                    :entity-id="issue.id"
+                  />
+                </div>
+              </template>
             </div>
             <p v-else class="text-sm text-muted">No comments yet.</p>
 

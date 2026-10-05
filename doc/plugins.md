@@ -340,6 +340,21 @@ component }]` renders a component after the page in the default layout — a
 floating button and the panel it opens, say — and so never on the signed-out
 pages, which sit outside that layout.
 
+Two more put a plugin's things where the host's own are, rather than beside
+them (`@navbook/plugin-poll` uses both):
+
+- `timelineItems: [{ noun: "issue", items, component }]` places things in an
+  issue's discussion. `items(ext)` reads them off the issue's `Entity.ext` as
+  `{ key, at }` pairs, and the page puts each where its time falls among the
+  top-level comments — never between a reply and what it answers — drawing
+  `component` with `itemKey` and `entityId`, in an element whose `id` is
+  `timeline-<key>`.
+- `inboxSources: [{ reason, label, badge, icon, filter }]` adds a reason to be in
+  somebody's inbox. `filter(email)` returns `IssueFilter` fields — the plugin's
+  own included — and the inbox asks for the open issues they name with its own
+  row fragment, so a plugin's row is any other row. `reason` is also the rail's
+  view of only those rows, named `label`; each row wears `badge`.
+
 **`Entity.ext` is how a plugin draws on somebody else's row.** A plugin's SDL
 extends `Issue`, but nothing extends a *fragment* — and the host's list-row
 fragment is written in `@navbook/web`, which has never heard of your field. So

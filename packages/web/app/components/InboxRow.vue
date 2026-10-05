@@ -27,7 +27,7 @@
 <script setup lang="ts">
 import type { ReorderRow } from "~/composables/useInboxReorder";
 import { statusColor, statusLabel } from "~/utils/entities";
-import type { InboxItem, InboxReason } from "~/utils/inbox";
+import type { BuiltinReason, InboxItem, InboxReason } from "~/utils/inbox";
 import { displayPerson } from "~/utils/people";
 
 const props = defineProps<{
@@ -46,11 +46,18 @@ const emit = defineEmits<{
 }>();
 
 /** What each reason says on the row, in the words the rail uses for it. */
-const REASONS: Record<InboxReason, { label: string; icon: string }> = {
+const REASONS: Record<BuiltinReason, { label: string; icon: string }> = {
   assigned: { label: "Assigned", icon: "i-lucide-user" },
   author: { label: "Author", icon: "i-lucide-pen-line" },
   awaiting: { label: "Review requested", icon: "i-lucide-eye" },
 };
+
+/** What a reason says: a built-in's words, or the badge of the source that added it. */
+function reasonLook(reason: InboxReason): { label: string; icon: string } {
+  const source = slots.inboxSources().find((entry) => entry.reason === reason);
+  if (source !== undefined) return { label: source.badge, icon: source.icon };
+  return REASONS[reason as BuiltinReason] ?? { label: reason, icon: "i-lucide-inbox" };
+}
 
 /** Written out, because a class built from a value is one Tailwind never sees. */
 const STATUS_CLASS = {
@@ -152,11 +159,11 @@ const described = computed(() => {
           color="neutral"
           variant="subtle"
           size="sm"
-          :icon="REASONS[reason].icon"
+          :icon="reasonLook(reason).icon"
           :data-testid="`inbox-reason-${reason}`"
         >
           <!-- Narrow, the badge is its icon; the word is still read out. -->
-          <span class="sr-only sm:not-sr-only">{{ REASONS[reason].label }}</span>
+          <span class="sr-only sm:not-sr-only">{{ reasonLook(reason).label }}</span>
         </UBadge>
         <UAvatar
           :alt="displayPerson(entity.author).label"

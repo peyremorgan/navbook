@@ -10,15 +10,20 @@ import {
   INBOX_REASONS,
   type InboxItem,
   type InboxSelection,
+  inboxReasons,
+  inboxSourceFilter,
   inboxVariables,
   matchesSelection,
   mergeInbox,
   narrowInbox,
   railCounts,
   registerInboxGrouping,
+  registerInboxSource,
   resetInboxGroupings,
+  resetInboxSources,
   sortInbox,
 } from "../../app/utils/inbox";
+import { queryToInboxParams } from "../../app/utils/inbox-params";
 import type { IssueListItemFragment, PrListItemFragment } from "../../src/generated/gql/graphql";
 
 /**
@@ -503,5 +508,81 @@ describe("inboxVariables", () => {
     // Absent and empty mean the same to the server; one shape keeps Apollo
     // watching one query rather than two.
     assert.equal(inboxVariables("me@example.invalid", { finished: false, text: "   " }).text, null);
+  });
+});
+
+describe("a registered source", () => {
+  beforeEach(() => {
+    registerInboxSource("polls");
+  });
+  afterEach(() => resetInboxSources());
+
+  const merged = (): InboxItem[] =>
+    mergeInbox({
+      issues: [
+        { reason: "polls", entities: [issue("aaaa0001"), issue("aaaa0002")] },
+        { reason: "assigned", entities: [issue("aaaa0002"), issue("aaaa0003")] },
+      ],
+      prs: [],
+    });
+  const everything: InboxSelection = { view: "everything", kind: "any", ext: {} };
+
+  it("adds a reason worn after the built-in ones, however the answers arrived", () => {
+    assert.deepEqual(inboxReasons(), [...INBOX_REASONS, "polls"]);
+    assert.deepEqual(
+      merged().map((item) => [item.id, item.reasons]),
+      [
+        ["aaaa0001", ["polls"]],
+        ["aaaa0002", ["assigned", "polls"]],
+        ["aaaa0003", ["assigned"]],
+      ],
+    );
+  });
+
+  it("adds a view showing only its rows, counted like the rest", () => {
+    const polls: InboxSelection = { ...everything, view: "polls" };
+    assert.deepEqual(
+      narrowInbox(merged(), polls).map((item) => item.id),
+      ["aaaa0001", "aaaa0002"],
+    );
+    const views = railCounts(merged(), everything).views;
+    assert.deepEqual(
+      views.map((entry) => [entry.value, entry.count]),
+      [
+        ["everything", 3],
+        ["assigned", 2],
+        ["authored", 0],
+        ["reviews", 0],
+        ["polls", 2],
+      ],
+    );
+  });
+
+  it("asks for open issues by its own fields and the search box's words", () => {
+    assert.deepEqual(inboxSourceFilter({ pollAwaiting: ["a@example.com"] }, { text: "" }), {
+      pollAwaiting: ["a@example.com"],
+      status: ["OPEN"],
+      text: null,
+    });
+    // The status is the host's to set, whatever the source said.
+    assert.deepEqual(inboxSourceFilter({ status: ["CLOSED"], x: 1 }, { text: "disk  quota" }), {
+      x: 1,
+      status: ["OPEN"],
+      text: ["disk", "quota"],
+    });
+  });
+
+  it("is a view an address can name, and only while it is registered", () => {
+    assert.equal(queryToInboxParams({ view: "polls" }).view, "polls");
+    resetInboxSources();
+    assert.equal(queryToInboxParams({ view: "polls" }).view, "everything");
+  });
+
+  it("refuses a reason already taken", () => {
+    assert.equal(registerInboxSource("polls"), false);
+    assert.equal(registerInboxSource("reviews"), false);
+    assert.equal(registerInboxSource("awaiting"), false);
+    assert.equal(registerInboxSource(""), false);
+    assert.equal(registerInboxSource("chats"), true);
   });
 });

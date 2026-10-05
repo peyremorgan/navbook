@@ -27,16 +27,49 @@ import type {
 export type InboxKind = "issue" | "pr";
 
 /**
- * Why a row is here.
+ * Why a row is here, without plugins.
  *
  * `awaiting` is the review a person still owes: being listed as a reviewer is
  * the request, and answering the latest revision is what takes it off the list
  * (spec 02 §2.7). Nothing has to be marked read — the files say when it is done.
  */
-export type InboxReason = "assigned" | "author" | "awaiting";
+export type BuiltinReason = "assigned" | "author" | "awaiting";
+
+/** Why a row is here: a built-in reason, or one a plugin's source registered. */
+export type InboxReason = string;
 
 /** Fixed, so two rows carrying the same reasons wear them in the same order. */
-export const INBOX_REASONS: readonly InboxReason[] = ["assigned", "author", "awaiting"];
+export const INBOX_REASONS: readonly BuiltinReason[] = ["assigned", "author", "awaiting"];
+
+/**
+ * The reasons plugin layers' inbox sources registered, in registration order.
+ *
+ * Module state for the reason `INBOX_GROUPINGS` is: everything here stays a
+ * pure function over a list, testable without an app, and the slot registry
+ * pushes here. A source's reason is also the view that shows only its rows.
+ */
+export const INBOX_SOURCES: string[] = [];
+
+/**
+ * Register a source's reason. False, and nothing registered, when it is taken
+ * — by a built-in reason or view, or by an earlier source.
+ */
+export function registerInboxSource(reason: string): boolean {
+  const taken: string[] = [...INBOX_REASONS, ...INBOX_VIEWS, ...INBOX_SOURCES];
+  if (reason === "" || taken.includes(reason)) return false;
+  INBOX_SOURCES.push(reason);
+  return true;
+}
+
+/** Forget every registered source. For tests. */
+export function resetInboxSources(): void {
+  INBOX_SOURCES.length = 0;
+}
+
+/** Every reason, in the order a row wears them: the built-in ones, then the registered. */
+export function inboxReasons(): InboxReason[] {
+  return [...INBOX_REASONS, ...INBOX_SOURCES];
+}
 
 /** One row: an entity, and every answer it came back in. */
 export type InboxItem =
@@ -98,7 +131,8 @@ export function mergeInbox(answers: InboxAnswers): InboxItem[] {
     for (const reason of item.reasons) {
       if (!seen.reasons.includes(reason)) seen.reasons.push(reason);
     }
-    seen.reasons.sort((a, b) => INBOX_REASONS.indexOf(a) - INBOX_REASONS.indexOf(b));
+    const order = inboxReasons();
+    seen.reasons.sort((a, b) => order.indexOf(a) - order.indexOf(b));
   };
 
   for (const group of answers.issues) {
@@ -117,20 +151,38 @@ export function mergeInbox(answers: InboxAnswers): InboxItem[] {
 
 /* ------------------------------------------------------------------ narrow */
 
-/** The rail's first group: which reason, or all of them. */
-export type InboxView = "everything" | "assigned" | "authored" | "reviews";
+/** The rail's first group without plugins: which reason, or all of them. */
+export type BuiltinView = "everything" | "assigned" | "authored" | "reviews";
+/** A built-in view, or a registered source's: its reason. */
+export type InboxView = string;
 /** Its second: which kind, or both. */
 export type InboxKindChoice = "any" | InboxKind;
 
-export const INBOX_VIEWS: readonly InboxView[] = ["everything", "assigned", "authored", "reviews"];
+/** The built-in views, in the order the rail offers them. */
+export const INBOX_VIEWS: readonly BuiltinView[] = [
+  "everything",
+  "assigned",
+  "authored",
+  "reviews",
+];
 export const INBOX_KIND_CHOICES: readonly InboxKindChoice[] = ["any", "issue", "pr"];
 
-/** A view names a reason; "everything" names none and keeps every row. */
-const VIEW_REASON: Record<Exclude<InboxView, "everything">, InboxReason> = {
+/** Every view the rail offers: the built-in ones, then one per registered source. */
+export function inboxViews(): InboxView[] {
+  return [...INBOX_VIEWS, ...INBOX_SOURCES];
+}
+
+/** A built-in view names a reason; "everything" names none and keeps every row. */
+const VIEW_REASON: Record<Exclude<BuiltinView, "everything">, BuiltinReason> = {
   assigned: "assigned",
   authored: "author",
   reviews: "awaiting",
 };
+
+/** The reason a view shows: a built-in's, or a registered source's own. */
+function reasonOfView(view: Exclude<InboxView, "everything">): InboxReason {
+  return VIEW_REASON[view as keyof typeof VIEW_REASON] ?? view;
+}
 
 export interface InboxSelection {
   view: InboxView;
@@ -176,7 +228,7 @@ export function resetInboxGroupings(): void {
 }
 
 export function matchesSelection(item: InboxItem, selection: InboxSelection): boolean {
-  if (selection.view !== "everything" && !item.reasons.includes(VIEW_REASON[selection.view])) {
+  if (selection.view !== "everything" && !item.reasons.includes(reasonOfView(selection.view))) {
     return false;
   }
   if (selection.kind !== "any" && item.kind !== selection.kind) return false;
@@ -255,13 +307,27 @@ export function railCounts(items: readonly InboxItem[], selection: InboxSelectio
   }
 
   return {
-    views: INBOX_VIEWS.map((view) => ({ value: view, count: countWith({ view }) })),
+    views: inboxViews().map((view) => ({ value: view, count: countWith({ view }) })),
     kinds: INBOX_KIND_CHOICES.map((kind) => ({ value: kind, count: countWith({ kind }) })),
     ext,
   };
 }
 
 /* --------------------------------------------------------------- variables */
+
+/**
+ * What a registered source's query asks: its own fields, for open issues, and
+ * the search box's words as every inbox question takes them. The status is
+ * the host's to set, whatever the source returns, since a source's rows are
+ * work still to do.
+ */
+export function inboxSourceFilter(
+  fields: Record<string, unknown>,
+  scope: { text: string },
+): Record<string, unknown> {
+  const terms = splitTerms(scope.text);
+  return { ...fields, status: ["OPEN"], text: terms.length > 0 ? terms : null };
+}
 
 /** What the inbox query takes, for one person and one scope. */
 export function inboxVariables(

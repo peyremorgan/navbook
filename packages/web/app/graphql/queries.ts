@@ -143,6 +143,23 @@ export const INBOX_QUERY = graphql(`
   }
 `);
 
+/**
+ * One reason a plugin layer added to the inbox: the open issues its filter
+ * names, for one person (`InboxSourceSlot`).
+ *
+ * The filter arrives whole as a variable because its fields are the plugin's —
+ * `IssueFilter` as the server composes it has them, this client's copy of the
+ * schema does not — and the rows come back in the host's own fragment, so a
+ * plugin's row is drawn as any other.
+ */
+export const INBOX_SOURCE_QUERY = graphql(`
+  query InboxSource($filter: IssueFilter!) {
+    issues(filter: $filter) {
+      ...IssueListItem
+    }
+  }
+`);
+
 /*
  * The two tabs beside the conversation, each its own query so that the page
  * opens as fast as it did when it had only the one: neither is sent until its
