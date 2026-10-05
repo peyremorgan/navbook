@@ -31,8 +31,14 @@ import {
 } from "./model.ts";
 import { card, messageFor, type RenderContext, tagIds, tagNames, threadName } from "./render.ts";
 import { type CompiledRule, compileRules, openingFor, watchedFields } from "./rules.ts";
-import type { BridgeState, StateFile, ThreadRef } from "./state.ts";
-import { isGone, RENAME_SPACING_MS, Threads } from "./threads.ts";
+import { type BridgeState, type StateFile, type ThreadRef, TOLD_LIMIT } from "./state.ts";
+import { ChannelRefused, isGone, RENAME_SPACING_MS, Threads } from "./threads.ts";
+
+/** A message the thread has not been told yet, and the key it is remembered by. */
+interface Telling {
+  key: string;
+  message: MessageBody;
+}
 
 /** Every record as the tracker has it now, and what is needed to judge them. */
 export interface View {
@@ -50,8 +56,11 @@ export interface BridgeOptions {
   settings: Settings;
   rest: DiscordRest;
   state: StateFile;
-  /** How long after a run that could not finish to try again. */
-  retryMs?: number;
+  /**
+   * How long after a run that could not finish to try again, doubled each
+   * time it fails again, up to five minutes.
+   */
+  backoffMs?: number;
 }
 
 export class Bridge {
@@ -63,6 +72,8 @@ export class Bridge {
   private readonly core: Core;
   private readonly file: StateFile;
   private state: BridgeState;
+  /** The keys of every message told, as `state.told` lists them, for asking. */
+  private told = new Set<string>();
   /** The rules as last compiled, against the extensions and settings they were compiled with. */
   private compiled: { ext: CoreExtensions; settings: Settings; rules: CompiledRule[] } | null =
     null;
@@ -77,8 +88,9 @@ export class Bridge {
   private searched = false;
   /** Whether a run has finished since the bridge started. */
   private caughtUp = false;
-  private retry: NodeJS.Timeout | null = null;
-  private readonly retryMs: number;
+  private retry: { timer: NodeJS.Timeout; at: number } | null = null;
+  private readonly firstBackoffMs: number;
+  private backoffMs: number;
   /** What was last said about each recurring fault, so the log says it once. */
   private readonly said = new Map<string, string>();
 
@@ -88,8 +100,10 @@ export class Bridge {
     this.settings = opts.settings;
     this.file = opts.state;
     this.state = opts.state.load();
+    this.told = new Set(this.state.told);
     this.threads = new Threads(opts.rest);
-    this.retryMs = opts.retryMs ?? 60_000;
+    this.firstBackoffMs = opts.backoffMs ?? 5_000;
+    this.backoffMs = this.firstBackoffMs;
     this.useSettings(opts.settings);
   }
 
@@ -169,7 +183,7 @@ export class Bridge {
 
   async stop(): Promise<void> {
     this.stopped = true;
-    if (this.retry !== null) clearTimeout(this.retry);
+    if (this.retry !== null) clearTimeout(this.retry.timer);
     this.retry = null;
     await this.queue.catch(() => undefined);
     this.file.save(this.state);
@@ -237,8 +251,9 @@ export class Bridge {
   }
 
   private async runOnce(): Promise<void> {
+    let refs: string | null = null;
     try {
-      const refs = await this.refsDigest();
+      refs = await this.refsDigest();
       if (refs === this.lastRefs && !this.forced) return;
       this.forced = false;
       const view = await this.readView();
@@ -247,11 +262,15 @@ export class Bridge {
       await this.findThreads();
       const { failed, waiting } = await this.reconcile(view);
       this.file.save(this.state);
-      // A failure is tried again at the next sync as well as on the timer; a
-      // rename that waits for Discord's limit only on the timer.
-      this.lastRefs = failed ? null : refs;
+      // What was read is done with either way: a sync that moved nothing
+      // reads nothing again. What failed is tried again on the backoff, or
+      // sooner when the tracker moves; a rename waiting for Discord's limit,
+      // a minute on.
+      this.lastRefs = refs;
       this.clear("run");
-      if (failed || waiting) this.retryLater();
+      if (failed) this.retryAfterFailure();
+      else this.backoffMs = this.firstBackoffMs;
+      if (waiting) this.retryLater(60_000);
       if (!this.caughtUp) {
         this.caughtUp = true;
         this.host.report(
@@ -259,10 +278,16 @@ export class Bridge {
         );
       }
     } catch (error) {
-      this.lastRefs = null;
+      this.lastRefs = refs;
       this.say("run", `could not bring Discord up to date: ${messageOf(error)}`);
-      this.retryLater();
+      this.retryAfterFailure();
     }
+  }
+
+  /** Try again after the backoff, and wait twice as long the next time. */
+  private retryAfterFailure(): void {
+    this.retryLater(this.backoffMs);
+    this.backoffMs = Math.min(this.backoffMs * 2, 5 * 60_000);
   }
 
   /**
@@ -474,12 +499,16 @@ export class Bridge {
       this.file.save(this.state);
       // The card names who is asked for something; only a message notifies them.
       const told = before === undefined ? asked(this.core, record) : events;
-      await this.post(thread, ctx, record, after, told);
+      for (const each of this.untold(id, before, ctx, record, after, told)) {
+        await this.tell(thread, each);
+      }
       return;
     }
 
     if (record === undefined || after === undefined) {
-      await this.post(thread, ctx, null, before as Seen, events);
+      for (const each of this.untold(id, before, ctx, null, before as Seen, events)) {
+        await this.tell(thread, each);
+      }
       if (!thread.archived) await this.threads.patch(thread, { archived: true });
       return;
     }
@@ -487,23 +516,17 @@ export class Bridge {
     const body = card(ctx, record);
     const drawn = hashOf(body);
     const settled = record.status !== "open";
-    const fresh = events.filter(
-      (event) => !(event.type === "comment" && this.state.mirrored.includes(event.id)),
-    );
     // Seen for the first time, yet already with a thread: one made by a run
     // that stopped before it told the people the record asks for something.
-    const told = fresh.some((event) => event.type === "opened")
-      ? [...fresh, ...asked(this.core, record)]
-      : fresh;
-    const bodies = told.flatMap((event) => {
-      const message = messageFor(ctx, record, after, event, this.watched);
-      return message === null ? [] : [{ event, message }];
-    });
+    const told = events.some((event) => event.type === "opened")
+      ? [...events, ...asked(this.core, record)]
+      : events;
+    const messages = this.untold(id, before, ctx, record, after, told);
     // A forum post's card is inside the thread, and an archived thread's
     // messages cannot be edited: open it first, as posting would anyway.
     if (
       thread.archived &&
-      (bodies.length > 0 || !settled || (drawn !== thread.card && thread.forum))
+      (messages.length > 0 || !settled || (drawn !== thread.card && thread.forum))
     ) {
       await this.threads.patch(thread, { archived: false });
     }
@@ -511,10 +534,7 @@ export class Bridge {
       await this.threads.editCard(thread, body);
       thread.card = drawn;
     }
-    for (const { event, message } of bodies) {
-      await this.threads.post(thread, message);
-      if (event.type === "comment") this.state.mirrored.push(event.id);
-    }
+    for (const each of messages) await this.tell(thread, each);
 
     const change: { name?: string; applied_tags?: string[]; archived?: boolean } = {};
     const name = threadName(record);
@@ -526,32 +546,62 @@ export class Bridge {
       const tags = tagIds(tagNames(this.core, record), channel.available_tags ?? []);
       if (!sameSet(tags, thread.tags)) change.applied_tags = tags;
     }
-    if (settled && !thread.archived) change.archived = true;
+    // An archived thread is renamed or retagged only as it is opened again,
+    // in the same request; it is archived again after, if it should be.
+    if (Object.keys(change).length > 0 && thread.archived) change.archived = false;
     await this.threads.patch(thread, change);
+    if (settled && !thread.archived) await this.threads.patch(thread, { archived: true });
   }
 
-  /** Post a message per event, remembering the comments posted. */
-  private async post(
-    thread: ThreadRef,
+  /**
+   * The messages `events` make that the thread has not been told yet.
+   *
+   * Each is keyed by what it tells: a comment by its id, anything else by the
+   * record's state before and the event, so the same change tried again after
+   * a failure part of the way through is not posted twice — and the same
+   * change made again later, from another state, is.
+   */
+  private untold(
+    id: string,
+    before: Seen | undefined,
     ctx: RenderContext,
     record: EntityRecord | null,
     last: Seen,
     events: readonly EntityEvent[],
-  ): Promise<void> {
+  ): Telling[] {
+    const out: Telling[] = [];
     for (const event of events) {
-      if (event.type === "comment" && this.state.mirrored.includes(event.id)) continue;
+      const key =
+        event.type === "comment"
+          ? `comment:${event.id}`
+          : `${id}:${createHash("sha1")
+              .update(JSON.stringify([before ?? null, event]))
+              .digest("hex")
+              .slice(0, 20)}`;
+      if (this.told.has(key)) continue;
       const message = messageFor(ctx, record, last, event, this.watched);
-      if (message === null) continue;
-      await this.threads.post(thread, message);
-      if (event.type === "comment") this.state.mirrored.push(event.id);
+      if (message !== null) out.push({ key, message });
     }
+    return out;
+  }
+
+  /** Post one message, named by its key so Discord does not make it twice, and remember it. */
+  private async tell(thread: ThreadRef, { key, message }: Telling): Promise<void> {
+    await this.threads.post(thread, message, createHash("sha1").update(key).digest("hex"));
+    this.told.add(key);
+    this.state.told.push(key);
+    if (this.state.told.length > TOLD_LIMIT) this.told.delete(this.state.told.shift() as string);
   }
 
   /** Start a record's thread in `channel`, with its card drawn. */
   private async open(record: EntityRecord, channel: string, view: View): Promise<ThreadRef> {
     const body = card(this.renderContext(view), record);
-    const thread = await this.threads.open(channel, threadName(record), body, (available) =>
-      tagIds(tagNames(this.core, record), available ?? []),
+    const thread = await this.threads.open(
+      channel,
+      this.settings.guild,
+      threadName(record),
+      body,
+      (available) => tagIds(tagNames(this.core, record), available ?? []),
     );
     thread.card = hashOf(body);
     return thread;
@@ -601,14 +651,21 @@ export class Bridge {
     this.watched = watchedFields(settings);
   }
 
-  private retryLater(): void {
-    if (this.retry !== null || this.stopped) return;
-    this.retry = setTimeout(() => {
+  /** Run again, forced, in `ms` — or sooner, if a run is already due sooner. */
+  private retryLater(ms: number): void {
+    if (this.stopped) return;
+    const at = Date.now() + ms;
+    if (this.retry !== null) {
+      if (this.retry.at <= at) return;
+      clearTimeout(this.retry.timer);
+    }
+    const timer = setTimeout(() => {
       this.retry = null;
       this.forced = true;
       this.notify();
-    }, this.retryMs);
-    this.retry.unref();
+    }, ms);
+    timer.unref();
+    this.retry = { timer, at };
   }
 
   /** Report a recurring fault once, until it changes or is cleared. */
@@ -637,6 +694,7 @@ function asked(core: Core, record: EntityRecord): EntityEvent[] {
 
 /** Whether a failure is one Discord may get over: a limit, its own fault, or no answer at all. */
 function retryable(error: unknown): boolean {
+  if (error instanceof ChannelRefused) return false;
   if (!(error instanceof DiscordError)) return true;
   return error.status === 429 || error.status >= 500;
 }

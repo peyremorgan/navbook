@@ -31,6 +31,8 @@ export interface RenderContext {
 }
 
 const COLORS = { open: 0x2da44e, draft: 0x6e7781, closed: 0x6e7781, merged: 0x8250df };
+/** What Discord allows in one embed, title, description, fields and footer together. */
+export const EMBED_LIMIT = 6_000;
 const DESCRIPTION_LIMIT = 1_500;
 const QUOTE_LIMIT = 1_500;
 const FIELD_LIMIT = 1_024;
@@ -50,6 +52,45 @@ export function threadName(record: { id: string; title: string }): string {
 export function idOfThreadName(name: string | undefined): string | null {
   const match = /^#([a-z][a-z0-9]{7})(?:\s|$)/.exec(name ?? "");
   return match ? (match[1] as string) : null;
+}
+
+/** An embed's size as Discord counts it: every text in it, in characters. */
+export function embedSize(embed: Embed): number {
+  const length = (value: string | undefined): number => Array.from(value ?? "").length;
+  return (
+    length(embed.title) +
+    length(embed.description) +
+    length(embed.footer?.text) +
+    (embed.fields ?? []).reduce((sum, field) => sum + length(field.name) + length(field.value), 0)
+  );
+}
+
+/**
+ * Bring an embed within {@link EMBED_LIMIT}: the description gives way
+ * first, then the longest fields, a record with a hundred assignees and a
+ * long list of labels being still a record whose card must be drawn.
+ */
+function fit(embed: Embed): void {
+  let over = embedSize(embed) - EMBED_LIMIT;
+  if (over <= 0) return;
+  if (embed.description !== undefined) {
+    const length = Array.from(embed.description).length;
+    embed.description = excerpt(embed.description, Math.max(200, length - over - 1));
+    over = embedSize(embed) - EMBED_LIMIT;
+  }
+  while (over > 0) {
+    const longest = (embed.fields ?? []).reduce<EmbedField | null>(
+      (best, field) =>
+        best === null || Array.from(field.value).length > Array.from(best.value).length
+          ? field
+          : best,
+      null,
+    );
+    const length = longest === null ? 0 : Array.from(longest.value).length;
+    if (longest === null || length <= 64) break;
+    longest.value = cut(longest.value, Math.max(64, length - over));
+    over = embedSize(embed) - EMBED_LIMIT;
+  }
 }
 
 /** The status as a person reads it, including a draft and why an issue was closed. */
@@ -142,6 +183,7 @@ export function card(ctx: RenderContext, record: EntityRecord): MessageBody {
   if (link !== null) embed.url = link;
   const created = text(record.fm.created);
   if (!Number.isNaN(Date.parse(created))) embed.timestamp = new Date(created).toISOString();
+  fit(embed);
   return {
     embeds: [embed],
     components: [buttons(core, record)],

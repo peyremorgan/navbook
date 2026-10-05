@@ -115,9 +115,15 @@ export class DiscordRest {
   }
 
   private async send<T>(key: string, method: Method, route: string, body?: unknown): Promise<T> {
+    // An interaction's answer has three seconds to arrive, and Discord counts
+    // it against no limit of the bot's: it neither waits out a global limit
+    // the bot's own posting ran into, nor queues for a slot behind them.
+    const interaction = isInteractionRoute(route);
     for (let attempt = 0; ; attempt++) {
-      await this.waitUntil(Math.max(this.globalUntil, this.spent.get(key) ?? 0));
-      const response = await this.slot(() => this.call(method, route, body));
+      await this.waitUntil(Math.max(interaction ? 0 : this.globalUntil, this.spent.get(key) ?? 0));
+      const response = interaction
+        ? await this.call(method, route, body)
+        : await this.slot(() => this.call(method, route, body));
       this.note(key, response);
       if (response.status === 429) {
         const { ms, global } = await retryAfter(response);
@@ -166,15 +172,20 @@ export class DiscordRest {
 
   /** Run `body` once fewer than `concurrency` requests are in flight. */
   private async slot<T>(body: () => Promise<T>): Promise<T> {
+    // A freed slot is handed to the first waiter as it is freed, never put
+    // back for whoever asks next: otherwise a newcomer could take it between
+    // the release and the waiter waking, and both would run.
     if (this.inFlight >= this.concurrency) {
       await new Promise<void>((resolve) => this.waiting.push(resolve));
+    } else {
+      this.inFlight++;
     }
-    this.inFlight++;
     try {
       return await body();
     } finally {
-      this.inFlight--;
-      this.waiting.shift()?.();
+      const next = this.waiting.shift();
+      if (next === undefined) this.inFlight--;
+      else next();
     }
   }
 

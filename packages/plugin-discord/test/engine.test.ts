@@ -15,6 +15,8 @@ import {
   actionId,
   card,
   cut,
+  EMBED_LIMIT,
+  embedSize,
   excerpt,
   idOfThreadName,
   messages,
@@ -522,6 +524,27 @@ describe("what a thread shows", () => {
     assert.equal(watched[0]?.content, "🏷️ **priority**: low → high, now.");
   });
 
+  it("keeps a card within Discord's 6000 characters, however much the record carries", () => {
+    const many = Array.from({ length: 60 }, (_, index) => `person${index}@example.com`).join(", ");
+    const labels = Array.from({ length: 80 }, (_, index) => `label-number-${index}`).join(", ");
+    const record = pr({
+      source: `feature/${"b".repeat(240)}`,
+      title: "x".repeat(300),
+      body: "y".repeat(5_000),
+      fm:
+        `assignee: [${many}]\nreviewer: [${many}]\nlabels: [${labels}]\nmilestone: ${"m".repeat(1_200)}\n` +
+        `revisions:\n  - head: ${HEAD}\n    base: ${HEAD_2}\n    date: 2026-08-04T16:40:00Z\n`,
+    });
+    const embed = card(ctx(), record).embeds?.[0];
+    assert.ok(embed);
+    assert.ok((embed.fields ?? []).length >= 6);
+    assert.ok(embedSize(embed) <= EMBED_LIMIT, `${embedSize(embed)} characters`);
+    for (const field of embed.fields ?? []) assert.ok(Array.from(field.value).length <= 1_024);
+    // What fits is left alone.
+    const small = card(ctx(), issue()).embeds?.[0];
+    assert.equal(small?.description, "It aborts after 5 s.");
+  });
+
   it("keeps every message inside 2000 characters", () => {
     const record = issue({
       comments: { "2026-08-07T101433Z-cmt22222.md": comment("a@example.com", "y".repeat(5_000)) },
@@ -586,17 +609,28 @@ describe("link codes", () => {
   it("work once, for a while, and one at a time per account", () => {
     let now = 0;
     const codes = new LinkCodes({ ttlMs: 1_000, now: () => now });
-    const first = codes.mint(ALICE, "alice");
+    const first = codes.mint(ALICE, "Alice", "alice");
     assert.match(first, /^[A-HJ-NP-Z2-9]{8}$/);
-    assert.equal(codes.peek(first.toLowerCase())?.user, ALICE);
+    assert.deepEqual(codes.peek(first.toLowerCase()), {
+      user: ALICE,
+      username: "Alice",
+      handle: "alice",
+      expires: 1_000,
+    });
     assert.equal(codes.peek(`${first.slice(0, 4)}-${first.slice(4)}`)?.user, ALICE);
-    const second = codes.mint(ALICE, "alice");
+    const second = codes.mint(ALICE, "Alice", "alice");
     assert.equal(codes.peek(first), null, "a new code replaces the old");
-    codes.consume(second);
-    assert.equal(codes.peek(second), null, "a code works once");
-    const third = codes.mint(ALICE, "alice");
+    const taken = codes.take(second);
+    assert.equal(taken?.user, ALICE);
+    assert.equal(codes.take(second), null, "a code works once, even raced");
+    // A link that could not be written gives its code back, while it is live.
+    codes.restore(second, taken as NonNullable<typeof taken>);
+    assert.equal(codes.peek(second)?.user, ALICE);
+    const third = codes.mint(ALICE, "Alice", "alice");
     now = 1_000;
     assert.equal(codes.peek(third), null, "a code expires");
+    codes.restore(third, { user: ALICE, username: "Alice", handle: "alice", expires: 1_000 });
+    assert.equal(codes.peek(third), null, "an expired code is not given back");
   });
 });
 

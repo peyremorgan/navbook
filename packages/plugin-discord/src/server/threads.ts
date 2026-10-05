@@ -28,6 +28,13 @@ export function isGone(error: unknown): boolean {
   return error instanceof DiscordError && (error.code === 10003 || error.code === 10008);
 }
 
+/**
+ * A channel the bridge will not post in: it is in another guild than the
+ * settings name. The settings are committed, and a channel id is all it would
+ * take to send the tracker's records somewhere the deployment never chose.
+ */
+export class ChannelRefused extends Error {}
+
 /** The refusal to touch an archived thread's messages, which reopening it answers. */
 function isArchived(error: unknown): boolean {
   return error instanceof DiscordError && error.code === 50083;
@@ -52,14 +59,20 @@ export class Threads {
     return channel;
   }
 
-  /** Start a thread in `parent` with `card` as its first message. */
+  /** Start a thread in `parent`, which must be in `guild`, with `card` as its first message. */
   async open(
     parent: string,
+    guild: string,
     name: string,
     card: MessageBody,
     tags: (available: Channel["available_tags"]) => string[],
   ): Promise<ThreadRef> {
     const channel = await this.channel(parent);
+    if (channel.guild_id !== guild) {
+      throw new ChannelRefused(
+        `channel ${parent} is not in guild ${guild}; nothing is posted there`,
+      );
+    }
     this.writes++;
     if (channel.type === ChannelType.GuildForum) {
       const applied = tags(channel.available_tags);
@@ -75,18 +88,34 @@ export class Threads {
       throw new Error(`channel ${parent} is neither a forum nor a text channel`);
     }
     const message = await this.rest.post<Message>(`/channels/${parent}/messages`, card);
-    const thread = await this.rest.post<Channel>(
-      `/channels/${parent}/messages/${message.id}/threads`,
-      { name, auto_archive_duration: AUTO_ARCHIVE_MINUTES },
-    );
+    let thread: Channel;
+    try {
+      thread = await this.rest.post<Channel>(`/channels/${parent}/messages/${message.id}/threads`, {
+        name,
+        auto_archive_duration: AUTO_ARCHIVE_MINUTES,
+      });
+    } catch (error) {
+      // A card with no thread would be left in the channel, and another one
+      // posted beside it when this is tried again.
+      await this.rest.delete(`/channels/${parent}/messages/${message.id}`).catch(() => undefined);
+      throw error;
+    }
     return ref(thread.id, parent, false, name, []);
   }
 
-  post(thread: ThreadRef, body: MessageBody): Promise<Message> {
+  /**
+   * Post in a thread. `nonce` names the message: Discord makes no second
+   * message with the same one for a few minutes, so a post whose answer was
+   * lost after Discord made it is not made twice when it is tried again.
+   */
+  post(thread: ThreadRef, body: MessageBody, nonce?: string): Promise<Message> {
     // Posting brings an archived thread back, as Discord does on its own.
     thread.archived = false;
     this.writes++;
-    return this.rest.post<Message>(`/channels/${thread.thread}/messages`, body);
+    return this.rest.post<Message>(`/channels/${thread.thread}/messages`, {
+      ...body,
+      ...(nonce === undefined ? {} : { nonce: nonce.slice(0, 25), enforce_nonce: true }),
+    });
   }
 
   /**

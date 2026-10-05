@@ -14,15 +14,17 @@ import type { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-
  * Learn more about it here: https://the-guild.dev/graphql/codegen/plugins/presets/preset-client#reducing-bundle-size
  */
 type Documents = {
-    "\n  mutation LinkDiscord($code: String!) {\n    linkDiscord(code: $code) {\n      link {\n        userId\n        username\n      }\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n": typeof types.LinkDiscordDocument,
+    "\n  mutation LinkDiscord($code: String!) {\n    linkDiscord(code: $code) {\n      link {\n        userId\n        username\n        handle\n      }\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n": typeof types.LinkDiscordDocument,
     "\n  mutation UnlinkDiscord {\n    unlinkDiscord {\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n": typeof types.UnlinkDiscordDocument,
-    "\n  query DiscordLink {\n    discord {\n      guild\n    }\n    viewer {\n      email\n      discord {\n        userId\n        username\n      }\n    }\n  }\n": typeof types.DiscordLinkDocument,
+    "\n  query DiscordLink {\n    discord {\n      guild\n    }\n    viewer {\n      email\n      discord {\n        userId\n        username\n        handle\n      }\n    }\n  }\n": typeof types.DiscordLinkDocument,
+    "\n  query DiscordPending($code: String!) {\n    discord {\n      pending(code: $code) {\n        userId\n        username\n        handle\n      }\n    }\n  }\n": typeof types.DiscordPendingDocument,
     "\n  query DiscordThread($ref: ID!) {\n    discord {\n      thread(ref: $ref) {\n        id\n        url\n      }\n    }\n  }\n": typeof types.DiscordThreadDocument,
 };
 const documents: Documents = {
-    "\n  mutation LinkDiscord($code: String!) {\n    linkDiscord(code: $code) {\n      link {\n        userId\n        username\n      }\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n": types.LinkDiscordDocument,
+    "\n  mutation LinkDiscord($code: String!) {\n    linkDiscord(code: $code) {\n      link {\n        userId\n        username\n        handle\n      }\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n": types.LinkDiscordDocument,
     "\n  mutation UnlinkDiscord {\n    unlinkDiscord {\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n": types.UnlinkDiscordDocument,
-    "\n  query DiscordLink {\n    discord {\n      guild\n    }\n    viewer {\n      email\n      discord {\n        userId\n        username\n      }\n    }\n  }\n": types.DiscordLinkDocument,
+    "\n  query DiscordLink {\n    discord {\n      guild\n    }\n    viewer {\n      email\n      discord {\n        userId\n        username\n        handle\n      }\n    }\n  }\n": types.DiscordLinkDocument,
+    "\n  query DiscordPending($code: String!) {\n    discord {\n      pending(code: $code) {\n        userId\n        username\n        handle\n      }\n    }\n  }\n": types.DiscordPendingDocument,
     "\n  query DiscordThread($ref: ID!) {\n    discord {\n      thread(ref: $ref) {\n        id\n        url\n      }\n    }\n  }\n": types.DiscordThreadDocument,
 };
 
@@ -43,7 +45,7 @@ export function graphql(source: string): unknown;
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  mutation LinkDiscord($code: String!) {\n    linkDiscord(code: $code) {\n      link {\n        userId\n        username\n      }\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation LinkDiscord($code: String!) {\n    linkDiscord(code: $code) {\n      link {\n        userId\n        username\n      }\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n"];
+export function graphql(source: "\n  mutation LinkDiscord($code: String!) {\n    linkDiscord(code: $code) {\n      link {\n        userId\n        username\n        handle\n      }\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n"): (typeof documents)["\n  mutation LinkDiscord($code: String!) {\n    linkDiscord(code: $code) {\n      link {\n        userId\n        username\n        handle\n      }\n      commit {\n        committed\n        subject\n        pushed\n      }\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
@@ -51,7 +53,11 @@ export function graphql(source: "\n  mutation UnlinkDiscord {\n    unlinkDiscord
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  query DiscordLink {\n    discord {\n      guild\n    }\n    viewer {\n      email\n      discord {\n        userId\n        username\n      }\n    }\n  }\n"): (typeof documents)["\n  query DiscordLink {\n    discord {\n      guild\n    }\n    viewer {\n      email\n      discord {\n        userId\n        username\n      }\n    }\n  }\n"];
+export function graphql(source: "\n  query DiscordLink {\n    discord {\n      guild\n    }\n    viewer {\n      email\n      discord {\n        userId\n        username\n        handle\n      }\n    }\n  }\n"): (typeof documents)["\n  query DiscordLink {\n    discord {\n      guild\n    }\n    viewer {\n      email\n      discord {\n        userId\n        username\n        handle\n      }\n    }\n  }\n"];
+/**
+ * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
+ */
+export function graphql(source: "\n  query DiscordPending($code: String!) {\n    discord {\n      pending(code: $code) {\n        userId\n        username\n        handle\n      }\n    }\n  }\n"): (typeof documents)["\n  query DiscordPending($code: String!) {\n    discord {\n      pending(code: $code) {\n        userId\n        username\n        handle\n      }\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */

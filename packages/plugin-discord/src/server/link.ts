@@ -23,7 +23,10 @@ export const CODE_TTL_MS = 10 * 60_000;
 
 export interface PendingLink {
   user: string;
+  /** The name Discord shows for the account. */
   username: string;
+  /** The account's unique handle, which a look-alike display name cannot copy. */
+  handle: string;
   expires: number;
 }
 
@@ -38,7 +41,7 @@ export class LinkCodes {
   }
 
   /** A new code for `user`, replacing any they had: one live code each. */
-  mint(user: string, username: string): string {
+  mint(user: string, username: string, handle: string): string {
     for (const [code, pending] of this.codes) if (pending.user === user) this.codes.delete(code);
     this.sweep();
     let code = "";
@@ -47,11 +50,11 @@ export class LinkCodes {
         "",
       );
     } while (this.codes.has(code));
-    this.codes.set(code, { user, username, expires: this.now() + this.ttlMs });
+    this.codes.set(code, { user, username, handle, expires: this.now() + this.ttlMs });
     return code;
   }
 
-  /** The link a code stands for, if it is live; it stays live until {@link consume}. */
+  /** The link a code stands for, if it is live, leaving it live: for showing whose it is. */
   peek(code: string): PendingLink | null {
     const key = normalize(code);
     const pending = this.codes.get(key);
@@ -63,9 +66,21 @@ export class LinkCodes {
     return pending;
   }
 
-  /** Spend a code, once the link it stood for is written. */
-  consume(code: string): void {
-    this.codes.delete(normalize(code));
+  /**
+   * Spend a code: the link it stands for, if it was live, and the code gone
+   * at once — so two redemptions racing each other cannot both write.
+   */
+  take(code: string): PendingLink | null {
+    const pending = this.peek(code);
+    if (pending !== null) this.codes.delete(normalize(code));
+    return pending;
+  }
+
+  /** Put back a code whose link could not be written, so it can be tried again. */
+  restore(code: string, pending: PendingLink): void {
+    if (pending.expires > this.now() && !this.codes.has(normalize(code))) {
+      this.codes.set(normalize(code), pending);
+    }
   }
 
   private sweep(): void {

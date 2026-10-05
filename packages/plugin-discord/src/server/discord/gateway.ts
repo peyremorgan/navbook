@@ -35,6 +35,12 @@ export interface GatewayOptions {
   /** The first wait before reconnecting, doubled each time up to {@link maxBackoffMs}. */
   backoffMs?: number;
   maxBackoffMs?: number;
+  /**
+   * How long a close the bridge sent may go unanswered before the connection
+   * is given up on. A connection that died silently answers nothing, and the
+   * socket would otherwise wait for TCP to notice — a quarter of an hour.
+   */
+  closeTimeoutMs?: number;
 }
 
 /** Close codes after which connecting again would fail the same way. */
@@ -64,6 +70,8 @@ export class DiscordGateway {
   private readonly stopper = new AbortController();
   private loop: Promise<void> | null = null;
   private connected = false;
+  /** How each open connection's session is ended, by its socket. */
+  private readonly enders = new Map<WebSocket, (close: { code: number; reason: string }) => void>();
 
   constructor(opts: GatewayOptions) {
     this.opts = opts;
@@ -83,7 +91,7 @@ export class DiscordGateway {
     this.stopper.abort();
     this.stopHeartbeat();
     // 1000 ends the session: there is nothing to resume after a stop.
-    this.socket?.close(1000);
+    if (this.socket !== null) this.hangUp(this.socket, 1000);
     await this.loop;
   }
 
@@ -130,10 +138,21 @@ export class DiscordGateway {
       const socket = new WebSocket(`${url.replace(/\/+$/, "")}/?v=${API_VERSION}&encoding=json`);
       this.socket = socket;
       let opened = false;
+      const end = (close: { code: number; reason: string }): void => {
+        if (!this.enders.has(socket)) return;
+        this.enders.delete(socket);
+        this.stopHeartbeat();
+        this.connected = false;
+        if (this.socket === socket) this.socket = null;
+        resolve(close);
+      };
+      this.enders.set(socket, end);
       socket.addEventListener("open", () => {
         opened = true;
       });
       socket.addEventListener("message", (event) => {
+        // A connection given up on says nothing more the bridge acts on.
+        if (!this.enders.has(socket)) return;
         let payload: GatewayPayload;
         try {
           payload = JSON.parse(String(event.data)) as GatewayPayload;
@@ -143,14 +162,11 @@ export class DiscordGateway {
         this.receive(payload, socket, established);
       });
       socket.addEventListener("close", (event) => {
-        this.stopHeartbeat();
-        this.connected = false;
-        if (this.socket === socket) this.socket = null;
-        resolve({ code: event.code, reason: event.reason });
+        end({ code: event.code, reason: event.reason });
       });
       socket.addEventListener("error", () => {
         // A socket that never opened will not close either: say why it failed.
-        if (!opened) reject(new Error(`could not connect to ${url}`));
+        if (!opened && this.enders.delete(socket)) reject(new Error(`could not connect to ${url}`));
       });
     });
   }
@@ -171,12 +187,12 @@ export class DiscordGateway {
         this.send(socket, { op: GatewayOp.Heartbeat, d: this.sequence });
         return;
       case GatewayOp.Reconnect:
-        socket.close(RECONNECT_CLOSE);
+        this.hangUp(socket, RECONNECT_CLOSE);
         return;
       case GatewayOp.InvalidSession:
         // `d` says whether the session can still be resumed.
         if (payload.d !== true) this.forgetSession();
-        socket.close(RECONNECT_CLOSE);
+        this.hangUp(socket, RECONNECT_CLOSE);
         return;
       case GatewayOp.Dispatch: {
         const event = payload.t ?? "";
@@ -231,7 +247,7 @@ export class DiscordGateway {
     this.acknowledged = true;
     const beat = (): void => {
       if (!this.acknowledged) {
-        socket.close(RECONNECT_CLOSE);
+        this.hangUp(socket, RECONNECT_CLOSE);
         return;
       }
       this.acknowledged = false;
@@ -239,6 +255,26 @@ export class DiscordGateway {
       this.heartbeat = setTimeout(beat, interval);
     };
     this.heartbeat = setTimeout(beat, Math.floor(interval * Math.random()));
+  }
+
+  /**
+   * Close a connection, and give up on it if the close goes unanswered: its
+   * session ends either way, so a reconnect — or a stop — is not held up by
+   * a peer that is no longer there.
+   */
+  private hangUp(socket: WebSocket, code: number): void {
+    try {
+      socket.close(code);
+    } catch {
+      // Already closing: the timer below still ends it.
+    }
+    const end = this.enders.get(socket);
+    if (end === undefined) return;
+    const timer = setTimeout(
+      () => end({ code, reason: "the close went unanswered" }),
+      this.opts.closeTimeoutMs ?? 3_000,
+    );
+    timer.unref();
   }
 
   private stopHeartbeat(): void {

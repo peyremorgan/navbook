@@ -113,22 +113,22 @@ test("links the account that asked for a code, once, and unlinks it", async ({ p
   const code = await codeFor(ALICE);
   await signIn(page, stack, { name: "Alice Smith", email: "alice@example.com" });
   await page.goto(`${stack.appUrl}/discord/link?code=${code}`);
-  // Opening the page links nothing: it asks.
-  await expect(page.getByTestId("discord-link-confirm")).toBeVisible();
-  await expect(page.getByText("alice@example.com")).toBeVisible();
+  // Opening the page links nothing: it says whose account it is, and asks.
+  await expect(page.getByTestId("discord-pending-account")).toHaveText("Alice (@alice)");
+  await expect(page.getByTestId("discord-link-ask")).toContainText("alice@example.com");
   await page.getByTestId("discord-link-confirm").click();
   await expect(page.getByTestId("discord-linked")).toContainText(
-    "Linked Alice to alice@example.com",
+    "Linked Alice (@alice) to alice@example.com",
   );
 
-  // A code works once.
+  // A code works once: spent, it offers nothing to confirm.
   await page.goto(`${stack.appUrl}/discord/link?code=${code}`);
-  await page.getByTestId("discord-link-confirm").click();
-  await expect(page.getByTestId("discord-link-error")).toContainText("unknown or has expired");
+  await expect(page.getByTestId("discord-code-dead")).toBeVisible();
+  await expect(page.getByTestId("discord-link-confirm")).toHaveCount(0);
 
   // Without a code, the link there is, and the way to undo it.
   await page.goto(`${stack.appUrl}/discord/link`);
-  await expect(page.getByTestId("discord-current-link")).toContainText("Alice");
+  await expect(page.getByTestId("discord-current-link")).toContainText("Alice (@alice)");
   await page.getByTestId("discord-unlink").click();
   await expect(page.getByTestId("discord-no-link")).toBeVisible();
 });

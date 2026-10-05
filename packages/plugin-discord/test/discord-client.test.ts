@@ -130,6 +130,40 @@ describe("the REST client", () => {
     await assert.rejects(waiting, /stopping/);
   });
 
+  it("answers an interaction at once, whatever global limit the bot is under", async () => {
+    const client = rest();
+    stub.fail("GET", new RegExp(`^/channels/${TEXT}$`), 429, {
+      body: { message: "global", retry_after: 1, global: true },
+    });
+    const limited = client.get(`/channels/${TEXT}`);
+    await sleep(50);
+    const started = Date.now();
+    await client.post("/interactions/123456789012345678/tok/callback", { type: 5 });
+    assert.ok(Date.now() - started < 500, "an interaction's answer waited out the bot's limit");
+    await limited;
+  });
+
+  it("never has more requests in flight than it allows, across routes", async () => {
+    let inFlight = 0;
+    let most = 0;
+    const counting: typeof fetch = async () => {
+      inFlight++;
+      most = Math.max(most, inFlight);
+      await sleep(10 + Math.random() * 20);
+      inFlight--;
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const client = rest({ concurrency: 3, fetch: counting });
+    // A route each, so no route's own queue is what keeps them apart.
+    const routes = Array.from(
+      { length: 30 },
+      (_, index) => `/channels/3000000000000${String(index).padStart(5, "0")}`,
+    );
+    await Promise.all(routes.map((route) => client.get(route)));
+    await Promise.all(routes.map((route) => client.get(route)));
+    assert.equal(most, 3);
+  });
+
   it("groups routes as Discord buckets them: by method, route and major id", () => {
     assert.equal(
       routeKey("POST", "/channels/111111111111111111/messages"),
@@ -236,6 +270,35 @@ describe("the gateway client", () => {
       assert.ok(events.includes("RESUMED"));
     } finally {
       stub.silent = false;
+      stub.heartbeatMs = 45_000;
+      await client.stop();
+    }
+  });
+
+  it("gives up on a connection gone silent, close and all, and stops at once with one", async () => {
+    stub.heartbeatMs = 60;
+    const events: string[] = [];
+    const client = new DiscordGateway({
+      rest: rest(),
+      token: "t0ken",
+      intents: INTENT_GUILDS,
+      report: () => undefined,
+      onDispatch: (event) => events.push(event),
+      backoffMs: 20,
+      maxBackoffMs: 50,
+      closeTimeoutMs: 100,
+    });
+    client.start();
+    try {
+      await waitFor(() => client.ready);
+      const resumed = stub.resumes;
+      stub.deafen();
+      await waitFor(() => stub.resumes > resumed, 3_000);
+      stub.deafen();
+      const stopping = Date.now();
+      await client.stop();
+      assert.ok(Date.now() - stopping < 1_000, "a stop waited on a peer that would never answer");
+    } finally {
       stub.heartbeatMs = 45_000;
       await client.stop();
     }

@@ -18,6 +18,19 @@ export const DISCORD_LINK_QUERY = graphql(`
       discord {
         userId
         username
+        handle
+      }
+    }
+  }
+`);
+
+export const DISCORD_PENDING_QUERY = graphql(`
+  query DiscordPending($code: String!) {
+    discord {
+      pending(code: $code) {
+        userId
+        username
+        handle
       }
     }
   }

@@ -15,7 +15,14 @@ import {
   startHarness,
 } from "@navbook/server/test-helpers";
 import { eventually, markerWith, PLUGIN, SETTINGS, startBridged } from "./helpers/bridge.ts";
-import { FORUM, GUILD, type StubDiscord, startStubDiscord, TEXT } from "./helpers/stub-discord.ts";
+import {
+  ELSEWHERE,
+  FORUM,
+  GUILD,
+  type StubDiscord,
+  startStubDiscord,
+  TEXT,
+} from "./helpers/stub-discord.ts";
 import {
   closeIssue,
   comment,
@@ -649,13 +656,13 @@ describe("commands", () => {
       );
       assert.equal(again.errors[0]?.extensions?.code, "INVALID_INPUT");
       const viewer = ok(
-        await harness.gql<{ viewer: { discord: { userId: string } | null } }>(
+        await harness.gql<{ viewer: { discord: { userId: string }[] } }>(
           "{ viewer { discord { userId } } }",
           undefined,
           alice,
         ),
       );
-      assert.deepEqual(viewer.viewer.discord, { userId: ALICE });
+      assert.deepEqual(viewer.viewer.discord, [{ userId: ALICE }]);
 
       // The bridge reads the link from the commit, at its next run.
       let whoami = "";
@@ -971,7 +978,7 @@ describe("starting", () => {
           "{ discord { guild } viewer { discord { userId } } }",
         ),
       );
-      assert.deepEqual(read, { discord: null, viewer: { discord: null } });
+      assert.deepEqual(read, { discord: null, viewer: { discord: [] } });
       await openIssue(harness, "Anything");
       const ext = ok(
         await harness.gql<{ issues: { ext: { discord: unknown } }[] }>("{ issues { ext } }"),
@@ -1154,6 +1161,185 @@ describe("acting for somebody the server would not let in", () => {
         ),
       );
       assert.deepEqual(await commentsOf(harness, "issue", id), []);
+    } finally {
+      await bridged.stop();
+    }
+  });
+});
+
+describe("what the review found", () => {
+  it("posts nothing in a channel of another guild, whatever the settings say", async () => {
+    const bridged = await startBridged({ settings: { ...SETTINGS, prs: { channel: ELSEWHERE } } });
+    const { stub, harness } = bridged;
+    try {
+      const { peer } = harness.fixture;
+      peer.filePr("Leaky", "Secret plans.", "pr444444", "leaky");
+      assert.equal(peer.git(["push", "--quiet", "origin", "leaky"]).code, 0);
+      await eventually(
+        () =>
+          /channel 100000000000000005 is not in guild 100000000000000001/.test(harness.stderr()),
+        () => harness.stderr(),
+      );
+      assert.equal(stub.threadsOf(ELSEWHERE).length, 0);
+      assert.equal(
+        stub.requests.some(
+          (request) => request.method === "POST" && request.path.includes(ELSEWHERE),
+        ),
+        false,
+      );
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("leaves no card behind when a text channel's thread cannot be made from it", async () => {
+    const bridged = await startBridged();
+    const { stub, harness } = bridged;
+    try {
+      stub.fail("POST", new RegExp(`^/channels/${TEXT}/messages/\\d+/threads$`), 502);
+      const id = await openIssue(harness, "Second time lucky");
+      await eventually(
+        () => stub.threadsOf(TEXT).length === 1,
+        () => harness.stderr(),
+        20_000,
+      );
+      // The first card went with its failed thread; the second has one.
+      assert.equal((stub.messages.get(TEXT) ?? []).length, 1);
+      assert.equal(stub.card(threadOf(stub, TEXT, id))?.embeds[0]?.footer?.text, `navbook:${id}`);
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("tells each change once, when a run fails part of the way through", async () => {
+    const people = { [ALICE]: "alice@example.com" };
+    const bridged = await startBridged({ settings: { ...SETTINGS, people } });
+    const { stub, harness } = bridged;
+    try {
+      const id = await openIssue(harness, "Half told");
+      await eventually(
+        () => stub.threadsOf(TEXT).length === 1,
+        () => harness.stderr(),
+      );
+      const thread = threadOf(stub, TEXT, id);
+      // The retitle is told; the assignment after it is refused, then tried again.
+      stub.fail("POST", new RegExp(`^/channels/${thread}/messages$`), 502, { skip: 1 });
+      peerEdit(harness, recordPath(harness, id), (text) =>
+        text
+          .replace("title: Half told", "title: Fully told")
+          .replace("---\n\n", "assignee: alice@example.com\n---\n\n"),
+      );
+      await eventually(
+        () => said(stub, thread).length === 2,
+        () => harness.stderr(),
+        20_000,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      assert.deepEqual(said(stub, thread), [
+        "✏️ Retitled: “Half told” → “Fully told”.",
+        `👤 Assigned to <@${ALICE}>.`,
+      ]);
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("does not post twice a message whose answer was lost after Discord made it", async () => {
+    const bridged = await startBridged();
+    const { stub, harness } = bridged;
+    try {
+      const id = await openIssue(harness, "Lost answer");
+      await eventually(
+        () => stub.threadsOf(TEXT).length === 1,
+        () => harness.stderr(),
+      );
+      const thread = threadOf(stub, TEXT, id);
+      stub.fail("POST", new RegExp(`^/channels/${thread}/messages$`), 502, { apply: true });
+      await comment(harness, "ISSUE", id, "Made, then lost.");
+      await eventually(
+        () => /could not tell the thread of/.test(harness.stderr()),
+        () => harness.stderr(),
+      );
+      // Tried again on the backoff: Discord answers with the message it made.
+      await eventually(
+        () =>
+          stub.requests.filter(
+            (request) =>
+              request.method === "POST" && request.path === `/channels/${thread}/messages`,
+          ).length === 2,
+        () => harness.stderr(),
+        20_000,
+      );
+      assert.equal(said(stub, thread).length, 1);
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("names the account a code was asked for, and does not link one code twice", async () => {
+    const bridged = await startBridged();
+    const { stub, harness } = bridged;
+    try {
+      await bridged.connected();
+      const offered = await answer(stub, slash(stub, ALICE_USER, "link"));
+      const code = /code=([A-Z0-9]{8})/.exec(offered)?.[1] as string;
+      const asked = ok(
+        await harness.gql<{ discord: { pending: unknown } }>(
+          "query P($code: String!) { discord { pending(code: $code) { userId username handle } } }",
+          { code },
+        ),
+      );
+      assert.deepEqual(asked.discord.pending, {
+        userId: ALICE,
+        username: "Alice",
+        handle: "alice",
+      });
+
+      // Two redemptions at once: one links, the other is told the code is spent.
+      const alice = await harness.token({ name: "Alice Smith", email: "alice@example.com" });
+      const mallory = await harness.token({ name: "Mallory", email: "mallory@example.com" });
+      const link = "mutation L($code: String!) { linkDiscord(code: $code) { link { userId } } }";
+      const [one, two] = await Promise.all([
+        harness.gql(link, { code }, alice),
+        harness.gql(link, { code }, mallory),
+      ]);
+      const errors = [one, two].map((each) => each.errors[0]?.extensions?.code ?? null).sort();
+      assert.deepEqual(errors, ["INVALID_INPUT", null]);
+      assert.equal(
+        originSubjects(harness.fixture.origin).filter((subject) =>
+          subject.startsWith("docs(discord): link"),
+        ).length,
+        1,
+      );
+      const spent = ok(
+        await harness.gql<{ discord: { pending: unknown } }>(
+          "query P($code: String!) { discord { pending(code: $code) { userId } } }",
+          { code },
+        ),
+      );
+      assert.equal(spent.discord.pending, null);
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("lists every account linked to a person", async () => {
+    const settings = {
+      ...SETTINGS,
+      people: { [ALICE]: "alice@example.com", [BOB]: "Alice@Example.com" },
+    };
+    const bridged = await startBridged({ settings });
+    const { harness } = bridged;
+    try {
+      const alice = await harness.token({ name: "Alice Smith", email: "alice@example.com" });
+      const read = ok(
+        await harness.gql<{ viewer: { discord: { userId: string }[] } }>(
+          "{ viewer { discord { userId } } }",
+          undefined,
+          alice,
+        ),
+      );
+      assert.deepEqual(read.viewer.discord.map((link) => link.userId).sort(), [ALICE, BOB]);
     } finally {
       await bridged.stop();
     }

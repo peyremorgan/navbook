@@ -8,6 +8,7 @@ export const LINK_DISCORD = graphql(`
       link {
         userId
         username
+        handle
       }
       commit {
         committed

@@ -29,24 +29,28 @@ const API_URL = "NAV_SERVER_DISCORD_API_URL";
 export function activate(host: ServerPluginHost): void {
   const { core } = host;
   const codes = new LinkCodes();
-  const usernames = new Map<string, string>();
+  const usernames = new Map<string, { username: string; handle: string }>();
   const bridge = startBridge(host, codes, usernames);
+  /** A link as the schema spells it, with what Discord calls the account if the bridge knows. */
+  const linkFor = (user: string) => ({
+    userId: user,
+    username: usernames.get(user)?.username ?? null,
+    handle: usernames.get(user)?.handle ?? null,
+  });
 
   host.entityExt((entity) => ({ thread: bridge?.threadUrl(entity.id) ?? null }));
 
   const notRunning = (): Error =>
     host.api.apiError("this server runs no Discord bridge", "PRECONDITION");
 
-  /** The account linked to `email` in the served branch's settings, if any. */
-  const linkOf = async (ctx: GraphQLCtx, email: string) => {
+  /** Every account linked to `email` in the served branch's settings. */
+  const linksOf = async (ctx: GraphQLCtx, email: string) => {
     const settings = await ctx.sync.read(() =>
       core.readPluginDeclaration(ctx.ws).plugins.get(PLUGIN_NAME),
     );
-    for (const [user, linked] of peopleOf(settings, core).people) {
-      if (core.sameEmail(linked, email))
-        return { userId: user, username: usernames.get(user) ?? null };
-    }
-    return null;
+    return [...peopleOf(settings, core).people]
+      .filter(([, linked]) => core.sameEmail(linked, email))
+      .map(([user]) => linkFor(user));
   };
 
   host.resolvers({
@@ -62,30 +66,43 @@ export function activate(host: ServerPluginHost): void {
         const url = id === null ? null : bridge.threadUrl(id);
         return id === null || url === null ? null : { id: bridge.threadOf(id)?.thread, url };
       },
+      pending: (_parent: unknown, args: { code: string }) => {
+        const pending = codes.peek(args.code);
+        return pending === null
+          ? null
+          : { userId: pending.user, username: pending.username, handle: pending.handle };
+      },
     },
     Viewer: {
       discord: (viewer: Identity, _args: unknown, ctx: GraphQLCtx) =>
-        host.api.run(() => linkOf(ctx, viewer.email)),
+        host.api.run(() => linksOf(ctx, viewer.email)),
     },
     Mutation: {
       linkDiscord: (_parent: unknown, args: { code: string }, ctx: GraphQLCtx) =>
         host.api.run(async () => {
           if (bridge === null) throw notRunning();
-          const pending = codes.peek(args.code);
+          // Taken before the write, so two redemptions racing cannot both
+          // link; put back if the write fails, so it can be tried again.
+          const pending = codes.take(args.code);
           if (pending === null) {
             throw host.api.invalidInput(
               "this link code is unknown or has expired; run /nav link in Discord for a new one",
             );
           }
           const email = ctx.viewer.email;
-          const { run, pushed } = await writePeople(host, ctx, "link", email, (people) => {
-            people[pending.user] = email;
-          });
-          codes.consume(args.code);
-          usernames.set(pending.user, pending.username);
+          let written: Awaited<ReturnType<typeof writePeople>>;
+          try {
+            written = await writePeople(host, ctx, "link", email, (people) => {
+              people[pending.user] = email;
+            });
+          } catch (error) {
+            codes.restore(args.code, pending);
+            throw error;
+          }
+          usernames.set(pending.user, { username: pending.username, handle: pending.handle });
           return {
-            link: { userId: pending.user, username: pending.username },
-            commit: host.api.commitInfo(ctx, run, pushed),
+            link: linkFor(pending.user),
+            commit: host.api.commitInfo(ctx, written.run, written.pushed),
           };
         }),
       unlinkDiscord: (_parent: unknown, _args: unknown, ctx: GraphQLCtx) =>
@@ -106,7 +123,7 @@ export function activate(host: ServerPluginHost): void {
 function startBridge(
   host: ServerPluginHost,
   codes: LinkCodes,
-  usernames: Map<string, string>,
+  usernames: Map<string, { username: string; handle: string }>,
 ): Bridge | null {
   const token = host.pluginConfig[TOKEN];
   if (token === undefined) {
@@ -206,8 +223,8 @@ function startBridge(
     },
     async stop() {
       stopper.abort(new Error("the server is stopping"));
-      await gateway.stop();
-      await bridge.stop();
+      // Side by side: the bridge's state is saved whatever the gateway does.
+      await Promise.allSettled([gateway.stop(), bridge.stop()]);
     },
   });
   return bridge;

@@ -28,6 +28,8 @@ export const GUILD = "100000000000000001";
 export const FORUM = "100000000000000002";
 export const TEXT = "100000000000000003";
 export const APP = "100000000000000009";
+/** A forum in a guild the bridge does not serve. */
+export const ELSEWHERE = "100000000000000005";
 export const BOT = "100000000000000010";
 
 export interface StubMessage extends Message {
@@ -57,6 +59,10 @@ interface Fault {
   body: unknown;
   headers: Record<string, string>;
   times: number;
+  /** How many matching requests to let through before failing. */
+  skip: number;
+  /** Do what was asked, then answer with the fault: an answer lost after the work was done. */
+  apply: boolean;
 }
 
 export interface StubDiscord {
@@ -76,7 +82,13 @@ export interface StubDiscord {
     method: string,
     path: RegExp,
     status: number,
-    opts?: { body?: unknown; headers?: Record<string, string>; times?: number },
+    opts?: {
+      body?: unknown;
+      headers?: Record<string, string>;
+      times?: number;
+      skip?: number;
+      apply?: boolean;
+    },
   ): void;
   /** Threads under a channel, oldest first. */
   threadsOf(parent: string): Channel[];
@@ -96,6 +108,8 @@ export interface StubDiscord {
   heartbeatMs: number;
   /** Stop answering heartbeats, as a dead connection does. */
   silent: boolean;
+  /** Make the open connections ignore everything, a close included, as a peer that is gone does. */
+  deafen(): void;
   /** Whether a gateway connection has identified or resumed and is open now. */
   connected(): boolean;
   /** Wait until a gateway connection is up. */
@@ -127,6 +141,15 @@ export async function startStubDiscord(
     available_tags: opts.forumTags ?? [],
   });
   channels.set(TEXT, { id: TEXT, type: 0, guild_id: GUILD, name: "issues" });
+  channels.set(ELSEWHERE, {
+    id: ELSEWHERE,
+    type: 15,
+    guild_id: "100000000000000099",
+    name: "somebody else's",
+    available_tags: [],
+  });
+  /** Messages by nonce, as Discord keeps them for a few minutes to refuse a second. */
+  const nonces = new Map<string, StubMessage>();
 
   const stub: StubDiscord = {
     url: "",
@@ -150,6 +173,8 @@ export async function startStubDiscord(
         body: more.body ?? { message: "refused by the stub", code: 0 },
         headers: more.headers ?? {},
         times: more.times ?? 1,
+        skip: more.skip ?? 0,
+        apply: more.apply ?? false,
       });
     },
     threadsOf(parent) {
@@ -202,6 +227,9 @@ export async function startStubDiscord(
     },
     drop(code) {
       for (const socket of sockets) socket.close(code, "dropped by the stub");
+    },
+    deafen() {
+      for (const socket of sockets) socket.deaf = true;
     },
     connected() {
       return [...sockets].some((socket) => socket.ready);
@@ -264,6 +292,15 @@ export async function startStubDiscord(
             ...tag,
             id: tag.id ?? mint(),
           }));
+        }
+        // As Discord does: an archived thread is changed only by the request
+        // that opens it again.
+        if (
+          channel.thread_metadata?.archived &&
+          patch.archived !== false &&
+          (patch.name !== undefined || patch.applied_tags !== undefined)
+        ) {
+          return [400, { message: "Thread is archived", code: 50083 }];
         }
         if (typeof patch.name === "string") channel.name = patch.name;
         if (Array.isArray(patch.applied_tags)) channel.applied_tags = patch.applied_tags;
@@ -332,7 +369,25 @@ export async function startStubDiscord(
           // Posting in an archived thread brings it back, as Discord does.
           channel.thread_metadata.archived = false;
         }
-        return [200, post(channel.id, body as MessageBody)];
+        const request = body as MessageBody & { nonce?: string; enforce_nonce?: boolean };
+        if (request.enforce_nonce && request.nonce !== undefined) {
+          const made = nonces.get(`${channel.id}:${request.nonce}`);
+          if (made !== undefined) return [200, made];
+        }
+        const made = post(channel.id, request);
+        if (request.nonce !== undefined) nonces.set(`${channel.id}:${request.nonce}`, made);
+        return [200, made];
+      },
+    ],
+    [
+      "DELETE",
+      /^\/channels\/(\d+)\/messages\/(\d+)$/,
+      (m) => {
+        const list = messages.get(m[1] as string) ?? [];
+        const index = list.findIndex((message) => message.id === m[2]);
+        if (index === -1) return [404, { message: "Unknown Message", code: 10008 }];
+        list.splice(index, 1);
+        return [204, null];
       },
     ],
     [
@@ -429,18 +484,28 @@ export async function startStubDiscord(
       const method = request.method ?? "GET";
       requests.push({ method, path, body, auth: request.headers.authorization ?? null });
 
-      const fault = faults.find((each) => each.method === method && each.path.test(path));
-      if (fault) {
+      let fault = faults.find((each) => each.method === method && each.path.test(path));
+      if (fault !== undefined && fault.skip > 0) {
+        fault.skip--;
+        fault = undefined;
+      }
+      if (fault !== undefined) {
         fault.times--;
         if (fault.times <= 0) faults.splice(faults.indexOf(fault), 1);
-        response.writeHead(fault.status, { "content-type": "application/json", ...fault.headers });
-        response.end(JSON.stringify(fault.body));
-        return;
+        if (!fault.apply) {
+          response.writeHead(fault.status, {
+            "content-type": "application/json",
+            ...fault.headers,
+          });
+          response.end(JSON.stringify(fault.body));
+          return;
+        }
       }
       for (const [verb, pattern, handle] of routes) {
         const match = pattern.exec(path.split("?")[0] ?? path);
         if (verb !== method || match === null) continue;
-        const [status, answer] = handle(match, body);
+        const done = handle(match, body);
+        const [status, answer] = fault === undefined ? done : [fault.status, fault.body];
         if (status === 204) {
           response.writeHead(204);
           response.end();
@@ -488,6 +553,8 @@ export async function startStubDiscord(
 /** One gateway connection: frames in, frames out, and Discord's side of the protocol. */
 class GatewaySocket {
   ready = false;
+  /** Gone without saying so: nothing it is sent is answered. */
+  deaf = false;
   private buffer = Buffer.alloc(0);
   private readonly socket: Socket;
   private readonly stub: StubDiscord;
@@ -577,6 +644,7 @@ class GatewaySocket {
   }
 
   private handle(opcode: number, payload: Buffer): void {
+    if (this.deaf) return;
     if (opcode === 8) {
       this.ready = false;
       this.frame(8, payload.subarray(0, 2));

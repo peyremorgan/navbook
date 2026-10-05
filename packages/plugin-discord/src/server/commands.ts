@@ -175,8 +175,8 @@ export interface CommandsOptions {
   bridge: Bridge;
   rest: DiscordRest;
   codes: LinkCodes;
-  /** Display names Discord gave its users, for the link page. */
-  usernames: Map<string, string>;
+  /** What Discord calls each user the bridge has heard from, for the link page. */
+  usernames: Map<string, { username: string; handle: string }>;
 }
 
 export class Commands {
@@ -184,7 +184,7 @@ export class Commands {
   private readonly bridge: Bridge;
   private readonly rest: DiscordRest;
   private readonly codes: LinkCodes;
-  private readonly usernames: Map<string, string>;
+  private readonly usernames: Map<string, { username: string; handle: string }>;
   private readonly seen = new Set<string>();
 
   constructor(opts: CommandsOptions) {
@@ -211,7 +211,10 @@ export class Commands {
     if (this.seen.size > SEEN_LIMIT) this.seen.delete(this.seen.values().next().value as string);
     const user = interaction.member?.user ?? interaction.user;
     if (user === undefined) return;
-    this.usernames.set(user.id, user.global_name ?? user.username);
+    this.usernames.set(user.id, {
+      username: user.global_name ?? user.username,
+      handle: user.username,
+    });
     try {
       switch (interaction.type) {
         case InteractionType.Command:
@@ -373,7 +376,7 @@ export class Commands {
       );
       return;
     }
-    const code = this.codes.mint(user.id, user.global_name ?? user.username);
+    const code = this.codes.mint(user.id, user.global_name ?? user.username, user.username);
     await this.reply(
       interaction,
       `Open ${url}/discord/link?code=${code} within ten minutes, signed in as yourself, to link this Discord account to you. The link works once, and only you can see it.`,

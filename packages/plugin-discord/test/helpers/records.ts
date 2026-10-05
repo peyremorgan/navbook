@@ -14,6 +14,8 @@ export interface RecordOptions {
   fm?: string;
   title?: string;
   body?: string;
+  /** The branch a pull request rides on. */
+  source?: string;
   /** Comment files: `<stamp>-<id>.md` to their text. */
   comments?: Record<string, string>;
 }
@@ -35,7 +37,7 @@ export function pr(opts: RecordOptions = {}): EntityRecord {
   return parse(
     dir,
     "pr.md",
-    `---\ntitle: ${opts.title ?? "Fix the login"}\nauthor: Bob <bob@example.com>\ncreated: 2026-08-04T16:40:00Z\ntarget: main\nsource: fix-login\n${opts.fm ?? `revisions:\n  - head: ${HEAD}\n    base: ${BASE}\n    date: 2026-08-04T16:40:00Z\n`}---\n\n${opts.body ?? "Retries once."}\n`,
+    `---\ntitle: ${opts.title ?? "Fix the login"}\nauthor: Bob <bob@example.com>\ncreated: 2026-08-04T16:40:00Z\ntarget: main\nsource: ${opts.source ?? "fix-login"}\n${opts.fm ?? `revisions:\n  - head: ${HEAD}\n    base: ${BASE}\n    date: 2026-08-04T16:40:00Z\n`}---\n\n${opts.body ?? "Retries once."}\n`,
     opts.comments,
   );
 }

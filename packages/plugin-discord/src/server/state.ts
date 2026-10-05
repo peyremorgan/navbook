@@ -33,15 +33,18 @@ export interface BridgeState {
   /** Every record as last seen; null until the bridge first looked. */
   seen: Record<string, Seen> | null;
   threads: Record<string, ThreadRef>;
-  /** Comments already posted, so a run tried again does not post them twice. */
-  mirrored: string[];
+  /**
+   * The keys of the messages already posted, oldest first, so a run tried
+   * again after failing part of the way does not post them twice.
+   */
+  told: string[];
 }
 
-/** How many mirrored comment ids are kept: enough to cover any run tried again. */
-const MIRRORED_LIMIT = 5_000;
+/** How many keys are kept: enough to cover any run tried again. */
+export const TOLD_LIMIT = 5_000;
 
 export function emptyState(): BridgeState {
-  return { version: 1, seen: null, threads: {}, mirrored: [] };
+  return { version: 1, seen: null, threads: {}, told: [] };
 }
 
 export class StateFile {
@@ -70,7 +73,7 @@ export class StateFile {
         version: 1,
         seen: parsed.seen && typeof parsed.seen === "object" ? parsed.seen : null,
         threads: parsed.threads,
-        mirrored: Array.isArray(parsed.mirrored) ? parsed.mirrored : [],
+        told: Array.isArray(parsed.told) ? parsed.told : [],
       };
     } catch (error) {
       this.report(
@@ -83,9 +86,6 @@ export class StateFile {
 
   /** Write it whole, through a temporary file, so a crash leaves the old one or the new. */
   save(state: BridgeState): void {
-    if (state.mirrored.length > MIRRORED_LIMIT) {
-      state.mirrored.splice(0, state.mirrored.length - MIRRORED_LIMIT);
-    }
     mkdirSync(dirname(this.path), { recursive: true });
     const temporary = `${this.path}.${process.pid}.tmp`;
     writeFileSync(temporary, `${JSON.stringify(state)}\n`, "utf8");

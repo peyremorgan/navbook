@@ -11,6 +11,12 @@ type DiscordBridge {
   guild: String!
   "Where an issue or pull request is discussed in Discord, when it has a thread."
   thread(ref: ID!): DiscordThread
+  """
+  The Discord account a link code was asked for by, while it is live: what
+  the link page shows before anybody links it, so nobody links an account
+  they do not recognise.
+  """
+  pending(code: String!): DiscordLink
 }
 
 type DiscordThread {
@@ -20,14 +26,16 @@ type DiscordThread {
 }
 
 extend type Viewer {
-  "The Discord account linked to this person, when there is one."
-  discord: DiscordLink
+  "Every Discord account linked to this person."
+  discord: [DiscordLink!]!
 }
 
 type DiscordLink {
   userId: ID!
   "The account's display name, when the bridge has seen it since it started."
   username: String
+  "The account's handle, when the bridge has seen it since it started."
+  handle: String
 }
 
 extend type Mutation {

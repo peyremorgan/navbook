@@ -137,8 +137,11 @@ rest of the tracker. Ids are the strings Discord shows with Developer Mode on
 
 What somebody does from Discord is recorded as them, so the bridge has to
 know who they are. `/nav link` answers, privately, with a link to the web
-tracker carrying a one-time code; opened there by somebody signed in, it asks
-before linking that Discord account to them. The link is committed to
+tracker carrying a one-time code; opened there by somebody signed in, it names
+the Discord account that asked for it — display name and handle — and asks
+before linking it to them. Only link an account that is yours: a code somebody
+sent you is theirs, and linking it lets their account act as you. The page
+lists every account linked to you, and unlinks them. The link is committed to
 `people` in the settings, as `docs(discord): link <address>`.
 
 At a terminal, a maintainer can do the same for somebody, and see who is
@@ -164,7 +167,9 @@ names, which begin with the record's id.
 
 While the server is down nothing is lost: when it comes back, the bridge
 tells each thread what happened meanwhile, once. While Discord is down, the
-bridge tries again as the tracker moves, and at least every minute.
+bridge tries again when the tracker moves, and otherwise after a wait that
+grows from five seconds to five minutes; a message is never posted twice for
+one change.
 
 ## What is sent to Discord
 
