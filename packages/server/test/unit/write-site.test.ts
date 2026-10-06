@@ -92,7 +92,10 @@ describe("a write site on another branch", () => {
     try {
       assert.throws(() => openWriteSite(ctx, "no-room"), /ENOENT/);
     } finally {
-      process.env.TMPDIR = saved;
+      // Unset is not the same as `undefined`: assigned, that is the string
+      // "undefined", and every later `tmpdir()` in this process lands there.
+      if (saved === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = saved;
     }
     assert.equal(copy("no-room"), "");
     assert.deepEqual(worktrees(fixture.server.dir), [real(fixture.server.dir)]);
