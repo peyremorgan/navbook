@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { errorCode, type Harness, ok, originSubjects, startHarness } from "../helpers/harness.ts";
-import { worktrees } from "../helpers/temprepo.ts";
+import { real, worktrees } from "../helpers/temprepo.ts";
 
 const OPEN = `mutation O($input: OpenPrInput!) {
   openPr(input: $input) {
@@ -70,7 +70,7 @@ describe("opening a pull request", () => {
 
   /** The server clone is exactly as it was: nothing checked out, nothing kept. */
   function assertTidy(...branches: string[]): void {
-    assert.deepEqual(worktrees(h.fixture.server.dir), [h.fixture.server.dir]);
+    assert.deepEqual(worktrees(h.fixture.server.dir), [real(h.fixture.server.dir)]);
     for (const branch of branches) {
       assert.equal(h.fixture.server.git(["branch", "--list", branch]).stdout, "", branch);
     }
@@ -511,7 +511,7 @@ describe("opening a pull request on a branch the clone already has a copy of", (
     );
     assert.ok(subjects.includes("local work on diverged"));
     assert.ok(subjects.includes("peer work on diverged"));
-    assert.deepEqual(worktrees(h.fixture.server.dir), [h.fixture.server.dir]);
+    assert.deepEqual(worktrees(h.fixture.server.dir), [real(h.fixture.server.dir)]);
   });
 
   it("reports a copy that conflicts with the remote, keeps it, and leaves no worktree", async () => {
@@ -529,7 +529,7 @@ describe("opening a pull request on a branch the clone already has a copy of", (
     assert.equal(errorCode(response), "SYNC_CONFLICT");
     assert.equal(response.errors[0]?.extensions?.keptLocalCommit, false);
     assert.deepEqual(originSubjects(h.fixture.origin, "clash"), originBefore);
-    assert.deepEqual(worktrees(h.fixture.server.dir), [h.fixture.server.dir]);
+    assert.deepEqual(worktrees(h.fixture.server.dir), [real(h.fixture.server.dir)]);
     // The copy still carries the server's commit, for an operator to reconcile.
     assert.equal(
       h.fixture.server.git(["log", "-1", "--format=%s", copyOf("clash")]).stdout.trim(),
@@ -586,7 +586,7 @@ describe("opening a pull request on a branch the clone already has a copy of", (
       await h.gql(OPEN, { input: { source: "vanished", title: "Vanished", body: "x" } }),
     ).openPr;
     assert.equal(commit.pushed, true);
-    assert.deepEqual(worktrees(server.dir), [server.dir]);
+    assert.deepEqual(worktrees(server.dir), [real(server.dir)]);
   });
 });
 
@@ -619,7 +619,7 @@ describe("opening a pull request without a remote", () => {
       `docs(pr): open #${pr.id}`,
     );
     // The branch is the clone's own, so it stays; only the worktree goes.
-    assert.deepEqual(worktrees(h.fixture.server.dir), [h.fixture.server.dir]);
+    assert.deepEqual(worktrees(h.fixture.server.dir), [real(h.fixture.server.dir)]);
   });
 
   it("refuses a branch the clone does not have", async () => {
@@ -658,7 +658,7 @@ describe("temporary worktrees an earlier run left", () => {
       /removed a temporary worktree an earlier run left at .*nav-server-wt-feat-x-AbC123/,
     );
     assert.equal(existsSync(leftover), false);
-    assert.deepEqual(worktrees(h.fixture.server.dir), [h.fixture.server.dir, kept]);
+    assert.deepEqual(worktrees(h.fixture.server.dir), [real(h.fixture.server.dir), real(kept)]);
     // The branch it had checked out is left: it may carry something unpushed.
     assert.notEqual(h.fixture.server.git(["branch", "--list", "left"]).stdout, "");
   });

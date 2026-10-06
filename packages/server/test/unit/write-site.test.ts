@@ -16,7 +16,7 @@ import {
   sweepTemporaryWorktrees,
   type WriteSite,
 } from "../../src/write-site.ts";
-import { type Fixture, makeFixture, worktrees } from "../helpers/temprepo.ts";
+import { type Fixture, makeFixture, real, worktrees } from "../helpers/temprepo.ts";
 
 /** A git call that has to work, for arranging a fixture. */
 function must(result: { code: number; stderr: string }): void {
@@ -75,13 +75,13 @@ describe("a write site on another branch", () => {
     // The worktree still stands on the copy, so the copy stays.
     assert.match(reported.join("\n"), /could not remove the temporary worktree/);
     assert.notEqual(copy("wedged"), "");
-    assert.ok(worktrees(fixture.server.dir).includes(site.root));
+    assert.ok(worktrees(fixture.server.dir).includes(real(site.root)));
 
     // Whatever wedged it is cleared; the next write is not refused over it.
     unwedge();
     const again = openWriteSite(ctx, "wedged");
     closeWriteSite(ctx, again, ctx.report);
-    assert.deepEqual(worktrees(fixture.server.dir), [fixture.server.dir]);
+    assert.deepEqual(worktrees(fixture.server.dir), [real(fixture.server.dir)]);
     assert.equal(copy("wedged"), "");
   });
 
@@ -95,7 +95,7 @@ describe("a write site on another branch", () => {
       process.env.TMPDIR = saved;
     }
     assert.equal(copy("no-room"), "");
-    assert.deepEqual(worktrees(fixture.server.dir), [fixture.server.dir]);
+    assert.deepEqual(worktrees(fixture.server.dir), [real(fixture.server.dir)]);
   });
 
   it("refuses a name git would not take for a branch as bad input", () => {
@@ -115,11 +115,11 @@ describe("a write site on another branch", () => {
       sweepTemporaryWorktrees(fixture.server.dir, ctx.report);
       assert.match(reported.join("\n"), /could not remove the temporary worktree/);
       assert.doesNotMatch(reported.join("\n"), /removed a temporary worktree/);
-      assert.ok(worktrees(fixture.server.dir).includes(site.root));
+      assert.ok(worktrees(fixture.server.dir).includes(real(site.root)));
     } finally {
       unwedge();
       closeWriteSite(ctx, site, ctx.report);
     }
-    assert.deepEqual(worktrees(fixture.server.dir), [fixture.server.dir]);
+    assert.deepEqual(worktrees(fixture.server.dir), [real(fixture.server.dir)]);
   });
 });

@@ -11,9 +11,9 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   closeEntity,
@@ -252,7 +252,13 @@ export function makeFixture(opts: FixtureOptions = {}): Fixture {
   };
 }
 
-/** The paths of a repository's worktrees, its own first. */
+/**
+ * The paths of a repository's worktrees, its own first, as {@link real} spells them.
+ *
+ * git names a worktree by its resolved path, and on macOS the temporary
+ * directory is reached through a symlink (/var → /private/var), so compare
+ * what this returns with `real(path)` rather than with `path`.
+ */
 export function worktrees(dir: string): string[] {
   const result = spawnSync("git", ["worktree", "list", "--porcelain"], {
     cwd: dir,
@@ -261,7 +267,21 @@ export function worktrees(dir: string): string[] {
   return (result.stdout ?? "")
     .split("\n")
     .filter((line) => line.startsWith("worktree "))
-    .map((line) => line.slice("worktree ".length));
+    .map((line) => real(line.slice("worktree ".length)));
+}
+
+/**
+ * A path with its symlinks resolved — those of its nearest existing ancestor
+ * when it is gone, as a worktree git still lists after its directory was
+ * deleted is.
+ */
+export function real(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    const parent = dirname(path);
+    return parent === path ? path : join(real(parent), basename(path));
+  }
 }
 
 /** Commit subjects on a ref of the bare origin, newest first. */
