@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { errorCode, type Harness, ok, originSubjects, startHarness } from "../helpers/harness.ts";
-import { worktrees } from "../helpers/temprepo.ts";
+import { real, worktrees } from "../helpers/temprepo.ts";
 
 interface PrShape {
   id: string;
@@ -138,7 +138,7 @@ describe("pull requests", () => {
     assert.equal(originSubjects(h.fixture.origin, "fix-login")[0], "docs(pr): review #pr111111");
     // Nothing of it on the served branch, and nothing left behind in the clone.
     assert.equal(h.fixture.server.git(["rev-parse", "HEAD"]).stdout.trim(), servedBefore);
-    assert.deepEqual(worktrees(h.fixture.server.dir), [h.fixture.server.dir]);
+    assert.deepEqual(worktrees(h.fixture.server.dir), [real(h.fixture.server.dir)]);
     assert.equal(h.fixture.server.git(["branch", "--list", "fix-login"]).stdout, "");
 
     // And the scan reads it back from the branch it went to.
@@ -171,7 +171,7 @@ describe("pull requests", () => {
     assert.equal(data.updatePr.commit.pushed, true);
     assert.equal(originSubjects(h.fixture.origin, "fix-login")[0], data.updatePr.commit.subject);
     assert.match(data.updatePr.commit.subject, /^docs\(pr\): .*#pr111111$/);
-    assert.deepEqual(worktrees(h.fixture.server.dir), [h.fixture.server.dir]);
+    assert.deepEqual(worktrees(h.fixture.server.dir), [real(h.fixture.server.dir)]);
   });
 
   it("refuses a patch that names no field, before checking anything out", async () => {
