@@ -1,6 +1,6 @@
 {
   "name": "@navbook/plugin-kb",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "The Navbook knowledge base: features under specs/, the documents that describe them, and the feature: key that attaches work to one",
   "keywords": [
     "navbook-plugin",
@@ -64,7 +64,7 @@
     "codegen:check": "graphql-codegen --config codegen.ts && git diff --exit-code -- web/src/generated"
   },
   "peerDependencies": {
-    "@navbook/core": "^0.6.0",
+    "@navbook/core": "^0.6.1",
     "@apollo/client": "^3.14.1",
     "@vue/apollo-composable": "^4.2.2",
     "graphql": "^16.14.2",

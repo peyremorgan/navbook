@@ -331,8 +331,8 @@ names in `navbook.json` and each machine installs.
 ```console
 $ nav plugin install          # install what this repository declares
 $ nav plugin list
-@navbook/plugin-kb  0.6.0  declared
-@navbook/plugin-tests  0.6.0  declared
+@navbook/plugin-kb  0.6.1  declared
+@navbook/plugin-tests  0.6.1  declared
 ```
 
 A repository naming a plugin never causes anything to be fetched or run:
