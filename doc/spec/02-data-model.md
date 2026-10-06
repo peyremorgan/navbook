@@ -507,8 +507,8 @@ than merely finds.
 | `auto` | A fast-forward where the branches allow one, otherwise a merge commit |
 | `merge` | A merge commit, always, including where a fast-forward was possible |
 | `merge-ff` | A fast-forward, only; a merge that cannot fast-forward MUST NOT be performed |
-| `rebase` | The source's commits replayed onto `target`, then a fast-forward |
-| `rebase-no-ff` | The same replay, then a merge commit rather than the fast-forward |
+| `rebase` | The source's commits replayed onto `target`, flattened, then a fast-forward |
+| `rebase-no-ff` | The source's commits replayed onto `target` with its own merge commits recreated, then a merge commit rather than the fast-forward |
 | `squash` | One commit carrying the whole of the source's change |
 
 `auto` is what §2.8 describes with no policy declared, so a repository that

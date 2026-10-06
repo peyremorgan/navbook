@@ -160,7 +160,10 @@ export interface ReplayResult {
  * `git rebase --onto` rather than a range of cherry-picks, because a pull
  * request branch that merged its target back in is ordinary and a cherry-pick
  * refuses a merge commit, while a rebase flattens it — which is what somebody
- * asking for a linear history meant.
+ * asking for a linear history meant. `keepMerges` asks for the opposite: the
+ * replay recreates the source's own merge commits (`--rebase-merges`), because
+ * a method that lands with a merge commit is one that wants the shape of the
+ * history kept, the merges inside the branch included.
  *
  * What `source` is decides what moves. A branch name is rebased *in place*:
  * git leaves that branch pointing at the replayed commits, which is what
@@ -177,8 +180,10 @@ export function replayOnto(
   onto: string,
   upstream: string,
   source: string,
+  keepMerges = false,
 ): ReplayResult {
-  const result = gitRun(["rebase", "--quiet", "--onto", onto, upstream, source], {
+  const shape = keepMerges ? ["--rebase-merges"] : [];
+  const result = gitRun(["rebase", "--quiet", ...shape, "--onto", onto, upstream, source], {
     cwd,
     env: NO_EDITOR,
   });

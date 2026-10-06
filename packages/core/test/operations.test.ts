@@ -927,6 +927,56 @@ describe("ops: updating and merging a pull request", () => {
     });
   });
 
+  it("keeps the source's own merges when the replay lands as a merge commit", () => {
+    inPrWorkspace((ws, dir) => {
+      // A source that integrated a subtask by a merge commit, and a target
+      // that moved on meanwhile.
+      git(["checkout", "-q", "-b", "subtask", "feature"], { cwd: dir });
+      writeFileSync(join(dir, "subtask.txt"), "subtask\n");
+      git(["add", "-A"], { cwd: dir });
+      git(["commit", "-qm", "subtask"], { cwd: dir });
+      git(["checkout", "-q", "feature"], { cwd: dir });
+      writeFileSync(join(dir, "feature.txt"), "feature\n");
+      git(["add", "-A"], { cwd: dir });
+      git(["commit", "-qm", "feature again"], { cwd: dir });
+      git(["merge", "-q", "--no-ff", "-m", "merge the subtask", "subtask"], { cwd: dir });
+      git(["checkout", "-q", "main"], { cwd: dir });
+      writeFileSync(join(dir, "other.txt"), "unrelated\n");
+      git(["add", "-A"], { cwd: dir });
+      git(["commit", "-qm", "unrelated"], { cwd: dir });
+
+      const result = executePrMerge(ws, planPrMerge(ws, "ppp1", { method: "rebase-no-ff" }));
+      assert.match(result.mergeSha ?? "", /^[0-9a-f]{40}$/);
+      assert.equal(result.source.outcome, "rebased");
+      const merges = git(["log", "--merges", "--format=%s", "main"], { cwd: dir }).trim();
+      assert.match(merges, /^Merge #ppp11111: /, "the landing merge is on top");
+      assert.match(merges, /\nmerge the subtask$/, "the source's own merge was recreated");
+      assert.equal(readFileSync(join(dir, "subtask.txt"), "utf8"), "subtask\n");
+    });
+  });
+
+  it("flattens the source's own merges when the replay fast-forwards", () => {
+    inPrWorkspace((ws, dir) => {
+      git(["checkout", "-q", "-b", "subtask", "feature"], { cwd: dir });
+      writeFileSync(join(dir, "subtask.txt"), "subtask\n");
+      git(["add", "-A"], { cwd: dir });
+      git(["commit", "-qm", "subtask"], { cwd: dir });
+      git(["checkout", "-q", "feature"], { cwd: dir });
+      writeFileSync(join(dir, "feature.txt"), "feature\n");
+      git(["add", "-A"], { cwd: dir });
+      git(["commit", "-qm", "feature again"], { cwd: dir });
+      git(["merge", "-q", "--no-ff", "-m", "merge the subtask", "subtask"], { cwd: dir });
+      git(["checkout", "-q", "main"], { cwd: dir });
+      writeFileSync(join(dir, "other.txt"), "unrelated\n");
+      git(["add", "-A"], { cwd: dir });
+      git(["commit", "-qm", "unrelated"], { cwd: dir });
+
+      executePrMerge(ws, planPrMerge(ws, "ppp1", { method: "rebase" }));
+      assert.equal(git(["log", "--merges", "--oneline", "main"], { cwd: dir }).trim(), "");
+      assert.equal(readFileSync(join(dir, "subtask.txt"), "utf8"), "subtask\n");
+    });
+  });
+
   it("leaves the source where it is when a squash replaces its commits", () => {
     inPrWorkspace((ws, dir) => {
       git(["checkout", "-q", "main"], { cwd: dir });
