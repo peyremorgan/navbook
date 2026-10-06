@@ -10,6 +10,9 @@ revisions:
   - head: 3b9069e2502fa4ba81b2c06efdfcf22dac5f404a
     base: 84a2eddf331e3c65731c7caf362c1c4edd769534
     date: 2026-10-06T23:35:43Z
+merged:
+  date: 2026-10-06T23:38:46Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Unblocks the v0.6.0 release. `release.yml` failed at `pnpm test`, before any publish step, so nothing reached npm. The same failure took down CI's two Ubuntu test jobs and the built-server suite in "build + pack smoke test".
