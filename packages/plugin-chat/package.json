@@ -21,7 +21,7 @@
   "type": "module",
   "engines": {
     "node": ">=24",
-    "navbook": "^1.0.0"
+    "navbook": "^1.1.0"
   },
   "exports": {
     "./cli": "./src/cli/index.ts",
