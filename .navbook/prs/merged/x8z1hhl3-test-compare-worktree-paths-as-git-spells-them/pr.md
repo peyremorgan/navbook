@@ -9,6 +9,10 @@ revisions:
   - head: d6d6dfa5315318051611f2f268bee0eb28cd229e
     base: e928d0a477ac9e3d9407176e32e5377024a249fa
     date: 2026-10-06T22:47:05Z
+merged:
+  date: 2026-10-06T22:52:09Z
+  by: Claude <noreply@anthropic.com>
+  commit: 51292bf9b8f4c2d16fdf98ce00249a050d34cdb8
 ---
 
 The server and CLI suites now pass on macOS, apart from one maintenance test that depends on the git version (below).
