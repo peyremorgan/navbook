@@ -9,6 +9,9 @@ revisions:
   - head: 1519b9feb3c7156031dfc9d148c30b7c120f2c85
     base: 11b41b1019658234ecfe1dd553da3d52c7fc14d3
     date: 2026-10-06T10:37:32Z
+merged:
+  date: 2026-10-06T11:30:51Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 \`rebase-no-ff\` now keeps the merge commits inside the source branch instead of flattening them.
