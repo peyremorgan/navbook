@@ -1,6 +1,6 @@
 {
   "name": "@navbook/plugin-chat",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "An assistant for the tracker: ask about issues and pull requests in your own words, and have it file, comment, review, open and close them — after you approve each change",
   "keywords": [
     "navbook-plugin",
@@ -61,7 +61,7 @@
     "codegen:check": "graphql-codegen --config codegen.ts && git diff --exit-code -- web/src/generated"
   },
   "peerDependencies": {
-    "@navbook/core": "^0.5.0",
+    "@navbook/core": "^0.6.0",
     "@apollo/client": "^3.14.1",
     "@vue/apollo-composable": "^4.2.2",
     "graphql": "^16.14.2",
