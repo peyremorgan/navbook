@@ -10,6 +10,9 @@ revisions:
   - head: 010f4b443d93249595a2e2dcfb92c5a5cb12c8b5
     base: e928d0a477ac9e3d9407176e32e5377024a249fa
     date: 2026-10-06T22:41:16Z
+merged:
+  date: 2026-10-06T22:43:46Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 plugin-chat now declares `engines.navbook: ^1.1.0` instead of `^1.0.0`. Found in the 0.6.0 pre-release checklist.
