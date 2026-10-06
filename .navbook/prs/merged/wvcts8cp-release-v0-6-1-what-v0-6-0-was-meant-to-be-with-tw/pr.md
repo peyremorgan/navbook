@@ -10,6 +10,9 @@ revisions:
   - head: 9b41be4caa4a4e431c6bb92446ef63178fae1e15
     base: 84a2eddf331e3c65731c7caf362c1c4edd769534
     date: 2026-10-06T23:49:18Z
+merged:
+  date: 2026-10-06T23:49:22Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Releases v0.6.1. That is v0.6.0 (#n6vu3l42) and two test fixes. v0.6.0 was tagged and merged into `main` but never published: `release.yml` failed at `pnpm test`, before its first publish step, so npm has no 0.6.0 of any package.
