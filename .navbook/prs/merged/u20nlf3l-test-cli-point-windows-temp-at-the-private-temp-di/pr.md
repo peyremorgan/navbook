@@ -10,6 +10,9 @@ revisions:
   - head: 3ecb056b46936a9e8cc9b1126c90876cab541f33
     base: 5cab7cab1fca89c68e00abfa064d871f46568bba
     date: 2026-10-06T23:39:53Z
+merged:
+  date: 2026-10-06T23:39:59Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Fixes the one failure in CI's "test (node 24, windows-latest, Git Bash)" job on `main` at 84a2edd. This is the second and last fix before 0.6.1.
