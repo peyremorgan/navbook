@@ -8,6 +8,9 @@
  * into the clone's own config, which stays the deployment's to read.
  */
 
+import { existsSync } from "node:fs";
+import { gitMaybe, SPARSE_CHECKOUT_CONFIG } from "@navbook/core";
+
 /**
  * Add one entry after whatever the environment already carries.
  *
@@ -45,4 +48,30 @@ function gitCount(text: string): number | null {
  */
 export function disableAutoMaintenance(env: NodeJS.ProcessEnv): void {
   appendGitConfig(env, "maintenance.auto", "false");
+}
+
+/**
+ * Keep the worktrees the server makes for a write to their sparse-checkout
+ * patterns, through every merge it runs there (core `addSparseWorktree`).
+ *
+ * Git applies the patterns only in a worktree that has a patterns file of its
+ * own, so the clone itself stays whole — unless it has one already, left from
+ * a sparse checkout somebody once set up and turned off. These settings would
+ * then turn it back on, under the server, so it is left alone: the server's
+ * worktrees are still sparse when made, and a merge there writes out whatever
+ * it brings in. What to say about that is returned, or null.
+ */
+export function enableSparseWorktrees(env: NodeJS.ProcessEnv, repoRoot: string): string | null {
+  const own = gitMaybe(
+    ["rev-parse", "--path-format=absolute", "--git-path", "info/sparse-checkout"],
+    { cwd: repoRoot, env },
+  );
+  if (own !== null && existsSync(own)) {
+    return (
+      `nav-server: ${own} exists, so the clone keeps its own sparse-checkout settings; ` +
+      "a merge in a worktree made for a write checks out everything it brings in"
+    );
+  }
+  for (const [key, value] of SPARSE_CHECKOUT_CONFIG) appendGitConfig(env, key, value);
+  return null;
 }

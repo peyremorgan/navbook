@@ -1,0 +1,8 @@
+spec-version: 1
+description: D15 rejects a worktree policy whose sparse is not a boolean
+init: {from: tree, date: 2026-10-13T12:00:00Z}
+run: {command: [doctor, --json]}
+expect:
+  exit: 2
+  diagnostics:
+    - {check: D15, level: error, path: .navbook/navbook.json}

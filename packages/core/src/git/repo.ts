@@ -11,8 +11,8 @@
  * contributor, whereas the marker is committed with the tree it describes.
  */
 
-import { type Dirent, existsSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { type Dirent, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { NAV_MARKER } from "../core/tree.ts";
 import { git, gitAsync, gitMaybe, gitMaybeAsync, gitRun, splitLines, splitNul } from "./exec.ts";
 
@@ -333,6 +333,89 @@ export function worktreeHolding(cwd: string, branch: string): string | null {
 export function addWorktree(cwd: string, path: string, branch: string): void {
   // After `--`, so a branch named like an option is checked out, not obeyed.
   git(["worktree", "add", "--quiet", "--", path, branch], { cwd });
+}
+
+/**
+ * The configuration under which git keeps a worktree to its sparse-checkout
+ * patterns, as key/value pairs for `-c` or `GIT_CONFIG_COUNT`.
+ *
+ * Given to git per command rather than written anywhere: `git sparse-checkout
+ * set` would turn on `extensions.worktreeConfig` in the clone's shared config,
+ * which is somebody else's file. Git applies patterns only in a worktree that
+ * has a patterns file of its own, so the same settings leave every other
+ * checkout of the clone — the main one included — whole.
+ */
+export const SPARSE_CHECKOUT_CONFIG: readonly (readonly [string, string])[] = [
+  ["core.sparseCheckout", "true"],
+  ["core.sparseCheckoutCone", "true"],
+];
+
+/**
+ * Whether `dir` — a path relative to the repository root, in POSIX form — can
+ * be named in a cone-mode pattern as it is.
+ *
+ * Git reads `\`, `*`, `?` and `[` in a pattern as glob syntax, a line break
+ * ends one, and trailing blanks are dropped, so a directory named with any of
+ * them would match something else. The root itself is no cone at all. Such a
+ * directory is checked out in full instead: correct, just not cheaper.
+ */
+export function isConeDir(dir: string): boolean {
+  if (/[\\*?[\r\n]|\s$/.test(dir)) return false;
+  return dir.split("/").every((part) => part !== "" && part !== "." && part !== "..");
+}
+
+/**
+ * The cone-mode patterns that check out `dir` in full, the files directly in
+ * each directory above it, and the files at the root: what `git
+ * sparse-checkout set --cone <dir>` writes. For `a/b`, in order: `/*`,
+ * `!/*\/`, `/a/`, `!/a/*\/`, `/a/b/`.
+ */
+export function conePatterns(dir: string): string[] {
+  const parts = dir.split("/");
+  const patterns = ["/*", "!/*/"];
+  for (let depth = 1; depth < parts.length; depth++) {
+    const parent = parts.slice(0, depth).join("/");
+    patterns.push(`/${parent}/`, `!/${parent}/*/`);
+  }
+  patterns.push(`/${dir}/`);
+  return patterns;
+}
+
+/**
+ * Check `branch` out into a new worktree at `path` with only `dir` in it —
+ * plus the files at the root and directly in each directory above `dir`, which
+ * cone mode always brings.
+ *
+ * Everything else stays in the index, marked skip-worktree, so a commit made
+ * there keeps it; it is just never written to disk. The patterns live in the
+ * worktree's own git directory and go when it is removed. Git's own checkout
+ * is skipped, and with it any `post-checkout` hook. `dir` must pass
+ * {@link isConeDir}.
+ *
+ * A merge run there keeps to the cone only under {@link SPARSE_CHECKOUT_CONFIG};
+ * without it, what the merge brings in is written out in full.
+ */
+export function addSparseWorktree(cwd: string, path: string, branch: string, dir: string): void {
+  git(["worktree", "add", "--no-checkout", "--quiet", "--", path, branch], { cwd });
+  try {
+    const file = git(
+      ["rev-parse", "--path-format=absolute", "--git-path", "info/sparse-checkout"],
+      { cwd: path },
+    ).trim();
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `${conePatterns(dir).join("\n")}\n`);
+    // The index is still empty: reading HEAD into it with `-u` fills it, and
+    // the working tree with what the patterns let through.
+    const config = SPARSE_CHECKOUT_CONFIG.flatMap(([key, value]) => ["-c", `${key}=${value}`]);
+    git([...config, "read-tree", "-mu", "HEAD"], { cwd: path });
+  } catch (error) {
+    try {
+      removeWorktree(cwd, path, { force: true });
+    } catch {
+      // The error that brought us here is the one worth reporting.
+    }
+    throw error;
+  }
 }
 
 /**

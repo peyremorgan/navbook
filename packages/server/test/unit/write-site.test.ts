@@ -7,8 +7,10 @@
  */
 
 import assert from "node:assert/strict";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { makeWsCtx } from "@navbook/core";
 import type { GraphQLCtx } from "../../src/context.ts";
 import {
   closeWriteSite,
@@ -30,10 +32,10 @@ describe("a write site on another branch", () => {
 
   before(() => {
     fixture = makeFixture();
-    // As much of a request's context as the site reads: where the clone is,
-    // which remote it pushes to, and where to say what went wrong.
+    // As much of a request's context as the site reads: the clone and its
+    // marker, which remote it pushes to, and where to say what went wrong.
     ctx = {
-      ws: { repoRoot: fixture.server.dir },
+      ws: makeWsCtx({ cwd: fixture.server.dir, env: fixture.env }),
       sync: { remote: "origin" },
       report: (line: string) => reported.push(line),
     } as unknown as GraphQLCtx;
@@ -121,5 +123,91 @@ describe("a write site on another branch", () => {
       closeWriteSite(ctx, site, ctx.report);
     }
     assert.deepEqual(worktrees(fixture.server.dir), [fixture.server.dir]);
+  });
+
+  /** Set the served clone's marker for `body`, as an operator editing it would, then restore it. */
+  function withMarker(text: string, body: () => void): void {
+    const file = join(fixture.server.dir, ".navbook", "navbook.json");
+    const saved = readFileSync(file, "utf8");
+    writeFileSync(file, text);
+    try {
+      body();
+    } finally {
+      writeFileSync(file, saved);
+    }
+  }
+
+  it("checks out the Navbook directory and the files at the root, and nothing else", () => {
+    pushed("sparse");
+    const site = openWriteSite(ctx, "sparse");
+    const patterns = (dir: string): string =>
+      fixture.server
+        .git([
+          "-C",
+          dir,
+          "rev-parse",
+          "--path-format=absolute",
+          "--git-path",
+          "info/sparse-checkout",
+        ])
+        .stdout.trim();
+    const own = patterns(site.root);
+    try {
+      assert.ok(existsSync(join(site.root, ".navbook", "navbook.json")));
+      // The branch's own commit, a file at the root.
+      assert.ok(existsSync(join(site.root, "sparse.txt")));
+      assert.equal(existsSync(join(site.root, "src")), false);
+      assert.equal(fixture.server.git(["-C", site.root, "status", "--porcelain"]).stdout, "");
+      assert.ok(existsSync(own));
+      // Nothing of it in the clone's own config, or in its own git directory.
+      assert.doesNotMatch(
+        fixture.server.git(["config", "--list", "--local"]).stdout,
+        /sparse|worktreeconfig/i,
+      );
+      assert.equal(existsSync(patterns(fixture.server.dir)), false);
+    } finally {
+      closeWriteSite(ctx, site, ctx.report);
+    }
+    assert.equal(existsSync(own), false);
+    assert.deepEqual(worktrees(fixture.server.dir), [fixture.server.dir]);
+  });
+
+  it("checks out everything when the served clone's marker says so, without a restart", () => {
+    pushed("whole");
+    withMarker('{ "version": 1, "worktrees": { "sparse": false } }\n', () => {
+      const site = openWriteSite(ctx, "whole");
+      try {
+        assert.ok(existsSync(join(site.root, "src", "deep", "code.ts")));
+      } finally {
+        closeWriteSite(ctx, site, ctx.report);
+      }
+    });
+    const site = openWriteSite(ctx, "whole");
+    try {
+      assert.equal(existsSync(join(site.root, "src")), false);
+    } finally {
+      closeWriteSite(ctx, site, ctx.report);
+    }
+  });
+
+  it("logs a policy it cannot read once, and stays sparse", () => {
+    pushed("garbled");
+    reported.length = 0;
+    withMarker('{ "version": 1, "worktrees": { "sparse": "no" } }\n', () => {
+      for (let write = 0; write < 2; write++) {
+        const site = openWriteSite(ctx, "garbled");
+        try {
+          assert.equal(existsSync(join(site.root, "src")), false);
+        } finally {
+          closeWriteSite(ctx, site, ctx.report);
+        }
+      }
+    });
+    assert.deepEqual(
+      reported.filter((line) => line.includes("worktrees")),
+      [
+        "nav-server: warning: .navbook/navbook.json: 'worktrees.sparse' must be true or false; using the default",
+      ],
+    );
   });
 });

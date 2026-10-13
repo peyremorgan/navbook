@@ -690,6 +690,19 @@ describe("D15 the marker", () => {
     );
   });
 
+  it("passes a well-formed worktree policy", () => {
+    assert.deepEqual(codes(marker({ version: 1, worktrees: { sparse: false } })), []);
+  });
+
+  it("flags a worktree policy it cannot read", () => {
+    assert.deepEqual(codes(marker({ worktrees: false })), ["D15"]);
+    const diagnostics = validateTree(tree(marker({ worktrees: { sparse: "no" } })));
+    assert.deepEqual(
+      diagnostics.map((d) => [d.check, d.message]),
+      [["D15", "'worktrees.sparse' must be true or false"]],
+    );
+  });
+
   it("passes a well-formed plugin declaration", () => {
     assert.deepEqual(codes(marker({ version: 1, plugins: { "@navbook/plugin-kb": {} } })), []);
   });

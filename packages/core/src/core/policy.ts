@@ -277,3 +277,82 @@ const MERGE_METHOD_SUMMARIES: Record<MergeMethod, string> = {
   "rebase-no-ff": "rebase, then a merge commit",
   squash: "squash into a single commit",
 };
+
+/* --------------------------------------------------------- worktree policy */
+
+/**
+ * How a tool checks a branch out when it makes a worktree of its own for a
+ * write — spec 02 §2.10.
+ *
+ * Writing to a pull request whose branch nobody has checked out happens in a
+ * temporary worktree on that branch. Everything such a write reads or writes
+ * is under the Navbook directory, so by default only that directory is checked
+ * out there. The policy is about cost and nothing else: whichever way the
+ * branch is checked out, the write commits the same thing. A repository turns
+ * it off when something that runs in the worktree needs the rest of the tree —
+ * a hook, typically.
+ */
+export interface WorktreePolicy {
+  /** Whether a worktree made for a write checks out the Navbook directory alone. */
+  sparse: boolean;
+}
+
+export const DEFAULT_WORKTREE_POLICY: WorktreePolicy = { sparse: true };
+
+/** A marker read for its worktree policy: what it asks for, and what was wrong with it. */
+export interface WorktreePolicyReading {
+  /** What to check out by — the declared policy, with any unreadable key defaulted. */
+  policy: WorktreePolicy;
+  /** True when the marker carries a usable `worktrees` object. */
+  declared: boolean;
+  /** One message per fault, in key order; empty when there is nothing wrong. */
+  problems: string[];
+}
+
+/** The reading of a repository that declares nothing, which is most of them. */
+export const NO_WORKTREE_POLICY: WorktreePolicyReading = {
+  policy: DEFAULT_WORKTREE_POLICY,
+  declared: false,
+  problems: [],
+};
+
+/**
+ * Read the worktree policy out of a marker's text.
+ *
+ * The same fallbacks as {@link parseMergePolicy}, and the same refusal to
+ * throw: a mistyped policy reports a D15 fault and checks out the way a
+ * repository that declared nothing does.
+ */
+export function parseWorktreePolicy(markerText: string | undefined): WorktreePolicyReading {
+  if (markerText === undefined) return NO_WORKTREE_POLICY;
+
+  let marker: unknown;
+  try {
+    marker = JSON.parse(markerText);
+  } catch {
+    return { policy: DEFAULT_WORKTREE_POLICY, declared: false, problems: ["is not valid JSON"] };
+  }
+  if (!isPlainObject(marker)) {
+    return { policy: DEFAULT_WORKTREE_POLICY, declared: false, problems: ["is not a JSON object"] };
+  }
+
+  const worktrees = marker.worktrees;
+  if (worktrees === undefined) return NO_WORKTREE_POLICY;
+  if (!isPlainObject(worktrees)) {
+    return {
+      policy: DEFAULT_WORKTREE_POLICY,
+      declared: false,
+      problems: ["'worktrees' must be an object"],
+    };
+  }
+
+  const problems: string[] = [];
+  let { sparse } = DEFAULT_WORKTREE_POLICY;
+
+  if (worktrees.sparse !== undefined) {
+    if (typeof worktrees.sparse === "boolean") sparse = worktrees.sparse;
+    else problems.push("'worktrees.sparse' must be true or false");
+  }
+
+  return { policy: { sparse }, declared: true, problems };
+}

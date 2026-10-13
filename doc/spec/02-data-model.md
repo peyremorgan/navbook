@@ -423,9 +423,10 @@ ask, and one that does is still not asking.
 
 `navbook.json`, at the top of the root directory, is the **marker**: its
 presence is what identifies the directory that contains it as a Navbook root
-(§2.1). It MUST be a JSON object. This revision defines four keys, `version`,
+(§2.1). It MUST be a JSON object. This revision defines five keys, `version`,
 whose value MUST be an integer and is `1` for this revision, `review`, the review policy below,
-`merge`, the merge policy below it, and `plugins`, the declaration of §2.12;
+`merge`, the merge policy below it, `worktrees`, the worktree policy after
+that, and `plugins`, the declaration of §2.12;
 tools MUST ignore keys they do not recognize, and MUST NOT reject a marker for
 carrying them.
 
@@ -536,6 +537,39 @@ another method for a single merge ([04 §4.3](04-cli.md)). It is not subject to
 §2.7, because it says nothing about reviews: `merge-ff` refusing a merge that
 cannot fast-forward is a statement about the shape of two branches, which no
 review could change.
+
+### The worktree policy
+
+`worktrees`, when present, MUST be an object. It says how a tool checks a
+branch out when it makes a worktree of its own for a write: the temporary
+checkout a tool MAY use to write to a pull request whose source branch nobody
+has checked out ([03 §3.5](03-merge-and-branches.md)).
+
+```json
+{
+  "version": 1,
+  "worktrees": {
+    "sparse": false
+  }
+}
+```
+
+| Key | Req. | Type | Default | Meaning |
+|-----|------|------|---------|---------|
+| `sparse` | MAY | boolean | `true` | Whether such a worktree writes out only the root directory, with the files at the top of the repository and directly in each directory above it |
+
+Everything a write reads or writes is inside the root directory, so by
+default nothing else needs to be written to disk; a tool that makes such a
+worktree SHOULD keep it to that. `false` asks for the whole branch, for a
+repository whose hooks need it — a `post-checkout` hook, which a sparse
+checkout does not run, or a `pre-commit` hook that reads the code. A checkout
+of the branch that already exists is used as it is, whatever the policy says.
+
+**The policy is about cost alone.** Whichever way a branch is checked out, a
+write MUST commit the same tree: the paths a sparse checkout leaves out are
+kept, unchanged, in the commit it makes. Like the policies above, the one a
+tool follows is its own checkout's, and a malformed one is reported under D15
+and read as the default.
 
 `specs/`, at the top of the root directory, holds features (§2.11).
 

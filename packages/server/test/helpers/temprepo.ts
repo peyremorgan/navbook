@@ -231,6 +231,9 @@ export function makeFixture(opts: FixtureOptions = {}): Fixture {
   seed.write(`${navDir}/prs/open/.gitkeep`, "");
   seed.write(`${navDir}/prs/merged/.gitkeep`, "");
   seed.write(`${navDir}/prs/closed/.gitkeep`, "");
+  // Code beside the tracker, below the root: what a worktree made for a write
+  // leaves out (spec 02 §2.10), so a test can see that it did.
+  seed.write("src/deep/code.ts", "export {};\n");
   seed.commitAll("docs(navbook): initialise");
   if (!opts.noRemote) {
     const pushed = seed.git(["push", "--quiet", "origin", "main:main"]);

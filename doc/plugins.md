@@ -273,6 +273,12 @@ one uses the host's write site rather than the working tree:
   the worktree only if it staged something there. Do the asynchronous work —
   asking a model, say — first, and write inside without awaiting.
 
+A temporary worktree holds the Navbook directory and the files at the top of
+the repository, and nothing else, unless the marker turns that off
+(`"worktrees": { "sparse": false }`, spec 02 §2.10). Read and write inside the
+Navbook directory there; the rest of the branch is still in every commit made
+there, it is just not on disk.
+
 `host.api.writeTarget(ctx, "pr", ref)` is the stricter choice for data that
 must sit in the served tree: it returns the entity there, and refuses a pull
 request the served checkout does not hold with `PRECONDITION` and the branch

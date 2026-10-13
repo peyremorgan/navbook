@@ -12,12 +12,14 @@ import { describe, it } from "node:test";
 import {
   DEFAULT_MERGE_POLICY,
   DEFAULT_REVIEW_POLICY,
+  DEFAULT_WORKTREE_POLICY,
   describeMergeMethod,
   describeReviewPolicy,
   MERGE_METHODS,
   parseMarkerVersion,
   parseMergePolicy,
   parseReviewPolicy,
+  parseWorktreePolicy,
   rewritesSource,
 } from "../src/core/policy.ts";
 
@@ -276,6 +278,65 @@ describe("parseMergePolicy", () => {
     assert.equal(parseMergePolicy(half).policy.method, "rebase");
     assert.deepEqual(parseMergePolicy(half).problems, []);
     assert.equal(parseReviewPolicy(half).problems.length, 1);
+  });
+});
+
+describe("parseWorktreePolicy", () => {
+  it("declares nothing for a repository with no marker, or the one `nav init` writes", () => {
+    for (const text of [undefined, marker({ version: 1 })]) {
+      assert.deepEqual(parseWorktreePolicy(text), {
+        policy: DEFAULT_WORKTREE_POLICY,
+        declared: false,
+        problems: [],
+      });
+    }
+  });
+
+  it("checks out the Navbook directory alone unless told otherwise", () => {
+    assert.equal(DEFAULT_WORKTREE_POLICY.sparse, true);
+  });
+
+  it("reads either value", () => {
+    for (const sparse of [true, false]) {
+      const reading = parseWorktreePolicy(marker({ version: 1, worktrees: { sparse } }));
+      assert.deepEqual(reading, { policy: { sparse }, declared: true, problems: [] });
+    }
+  });
+
+  it("counts an empty policy as declared", () => {
+    const reading = parseWorktreePolicy(marker({ version: 1, worktrees: {} }));
+    assert.deepEqual(reading, { policy: DEFAULT_WORKTREE_POLICY, declared: true, problems: [] });
+  });
+
+  it("defaults a `sparse` that is not a boolean", () => {
+    for (const value of ["false", 0, null, [false]]) {
+      const reading = parseWorktreePolicy(marker({ version: 1, worktrees: { sparse: value } }));
+      assert.deepEqual(reading.policy, DEFAULT_WORKTREE_POLICY, `for ${JSON.stringify(value)}`);
+      assert.deepEqual(reading.problems, ["'worktrees.sparse' must be true or false"]);
+    }
+  });
+
+  it("refuses a `worktrees` that is not an object, and defaults", () => {
+    for (const value of [false, "full", [], null]) {
+      const reading = parseWorktreePolicy(marker({ version: 1, worktrees: value }));
+      assert.deepEqual(reading, {
+        policy: DEFAULT_WORKTREE_POLICY,
+        declared: false,
+        problems: ["'worktrees' must be an object"],
+      });
+    }
+  });
+
+  it("reports text that is not JSON in the words the other policies use", () => {
+    assert.deepEqual(parseWorktreePolicy("{ oops").problems, ["is not valid JSON"]);
+    assert.deepEqual(parseWorktreePolicy("[]").problems, ["is not a JSON object"]);
+  });
+
+  it("reads its own key and leaves the others alone", () => {
+    const text = marker({ version: 1, merge: { method: "nope" }, worktrees: { sparse: false } });
+    assert.deepEqual(parseWorktreePolicy(text).problems, []);
+    assert.equal(parseWorktreePolicy(text).policy.sparse, false);
+    assert.equal(parseMergePolicy(text).problems.length, 1);
   });
 });
 

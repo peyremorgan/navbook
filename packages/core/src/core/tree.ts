@@ -18,7 +18,9 @@ import {
   parseMarkerVersion,
   parseMergePolicy,
   parseReviewPolicy,
+  parseWorktreePolicy,
   type ReviewPolicyReading,
+  type WorktreePolicyReading,
 } from "./policy.ts";
 import { parseDirName } from "./slug.ts";
 
@@ -178,6 +180,8 @@ export interface Repo {
   reviewPolicy: ReviewPolicyReading;
   /** The merge policy the marker declares, and what was wrong with it (§2.10). */
   mergePolicy: MergePolicyReading;
+  /** The worktree policy the marker declares, and what was wrong with it (§2.10). */
+  worktreePolicy: WorktreePolicyReading;
   /** The plugins the marker declares, and what was wrong with it (§2.12). */
   plugins: PluginDeclarationReading;
   /** A marker `version` this tool cannot take at its word (§2.10, D15/D16). */
@@ -248,6 +252,7 @@ export function parseTree(
     reserved,
     reviewPolicy: parseReviewPolicy(markerText),
     mergePolicy: parseMergePolicy(markerText),
+    worktreePolicy: parseWorktreePolicy(markerText),
     plugins: parsePluginDeclaration(markerText),
     versionFault: parseMarkerVersion(markerText),
     ext,

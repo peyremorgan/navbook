@@ -533,7 +533,7 @@ Doctor checks (E = error → exit 2, W = warning → exit 0 with report):
 | D12 | The `parent` chain loops, an issue naming itself included | E |
 | D13 | The layout and schema of `specs/`: a feature directory name that is not a slug, a file directly in `specs/`, a feature directory with no `feature.md`, or a `feature.md` or document missing a required key ([2.11](02-data-model.md)) | E |
 | D14 | An entity's `feature` names a slug with no `specs/<slug>/` directory in this tree | W |
-| D15 | `navbook.json` is not a JSON object, or its `version`, `review`, `merge` or `plugins` is malformed ([2.10](02-data-model.md), [2.12](02-data-model.md)) | E |
+| D15 | `navbook.json` is not a JSON object, or its `version`, `review`, `merge`, `worktrees` or `plugins` is malformed ([2.10](02-data-model.md), [2.12](02-data-model.md)) | E |
 | D16 | `navbook.json` declares a `version` above the one this implementation reads: the tree was written by a newer one ([2.10](02-data-model.md)) | W |
 
 An extension ([02 §2.12](02-data-model.md)) MAY add checks over the data it

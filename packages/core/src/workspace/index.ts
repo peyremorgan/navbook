@@ -13,3 +13,4 @@ export * from "./history-checks.ts";
 export * from "./link-conflicts.ts";
 export * from "./resolve.ts";
 export * from "./workspace.ts";
+export * from "./worktree.ts";

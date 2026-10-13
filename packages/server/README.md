@@ -302,6 +302,17 @@ proposes to merge, so `prs(allRefs: true)` finds ones this checkout does not
 hold — and writing to one happens on that branch, in a temporary worktree the
 server makes and removes. The branch has to be on the remote already.
 
+That worktree holds only the Navbook directory and the files at the top of the
+tree: a write needs nothing else, and a large repository would otherwise be
+written out in full for one comment. The clone's hooks run there and see that
+much; a repository whose hooks need everything sets
+`"worktrees": { "sparse": false }` in its `navbook.json`. Nothing is written to
+the clone's config for it: the server passes `core.sparseCheckout` and
+`core.sparseCheckoutCone` through the environment, which leaves every checkout
+without patterns of its own whole. A clone that already has
+`.git/info/sparse-checkout` is left with its own settings, and the server says
+so at startup. Git 2.31 or newer is required.
+
 ## Development
 
 ```sh

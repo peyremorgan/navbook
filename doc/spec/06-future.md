@@ -130,6 +130,11 @@ a `pr.md` that is not there would be the stranded comment of
 [03 §3.3.1](03-merge-and-branches.md). So the server does what a person at a
 terminal does: it checks the branch out into a temporary worktree of its
 clone, writes there, commits, pushes that branch, and removes the worktree.
+Only the Navbook directory is written out there, with the files at the top of
+the tree, unless the marker's worktree policy says otherwise
+([02 §2.10](02-data-model.md)): a single comment should not cost a checkout of
+a large repository, and the merges the server runs there keep to the same
+directory. The clone's hooks run in that worktree and see that much.
 The same mechanism is what lets it *open* a pull request — the one
 checkout-centric verb it exposes, because opening one is writing the first
 file on a branch somebody already pushed. The branch is the one the pull

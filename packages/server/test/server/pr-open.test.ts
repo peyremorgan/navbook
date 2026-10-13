@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { errorCode, type Harness, ok, originSubjects, startHarness } from "../helpers/harness.ts";
@@ -661,5 +661,154 @@ describe("temporary worktrees an earlier run left", () => {
     assert.deepEqual(worktrees(h.fixture.server.dir), [h.fixture.server.dir, kept]);
     // The branch it had checked out is left: it may carry something unpushed.
     assert.notEqual(h.fixture.server.git(["branch", "--list", "left"]).stdout, "");
+  });
+});
+
+describe("a worktree made for a write", () => {
+  let h: Harness;
+  /** Where the clone's pre-commit hook says what it found in each worktree it ran in. */
+  let seen: string;
+
+  before(async () => {
+    h = await startHarness({
+      pullIntervalMs: 0,
+      prepare: (fixture) => {
+        seen = join(fixture.home, "pre-commit.log");
+        // Hooks run in the worktree a commit is made in, which is the one place
+        // a test can look into a write site before it is taken away again.
+        writeFileSync(
+          join(fixture.server.dir, ".git", "hooks", "pre-commit"),
+          `#!/bin/sh\nif [ -e src ]; then echo "src present"; else echo "src absent"; fi >> '${seen}'\n`,
+          { mode: 0o755 },
+        );
+      },
+    });
+  });
+
+  after(async () => {
+    await h.stop();
+  });
+
+  /** What the hook has seen since the last call, one line per commit. */
+  function hookSaw(): string[] {
+    if (!existsSync(seen)) return [];
+    const lines = readFileSync(seen, "utf8").trim().split("\n");
+    rmSync(seen);
+    return lines;
+  }
+
+  /** Every path on the remote's `branch`. */
+  const onOrigin = (branch: string): string[] =>
+    h.fixture.peer
+      .git(["--git-dir", h.fixture.origin, "ls-tree", "-r", "--name-only", branch])
+      .stdout.trim()
+      .split("\n");
+
+  /** Commit `files` on the peer's `branch` and push it. */
+  function peerCommit(branch: string, files: Record<string, string>, message: string): void {
+    const peer = h.fixture.peer;
+    must(peer.git(["checkout", "--quiet", branch]));
+    for (const [path, content] of Object.entries(files)) peer.write(path, content);
+    peer.commitAll(message);
+    must(peer.git(["push", "--quiet", "origin", `${branch}:${branch}`]));
+    must(peer.git(["checkout", "--quiet", "main"]));
+  }
+
+  it("checks out the tracker alone, and commits the rest of the branch as it was", async () => {
+    h.fixture.peer.branch("sparse/open");
+    must(h.fixture.peer.git(["push", "--quiet", "origin", "sparse/open:sparse/open"]));
+    hookSaw();
+
+    const { pr, commit } = ok<Opened>(
+      await h.gql(OPEN, { input: { source: "sparse/open", title: "Sparse", body: "x" } }),
+    ).openPr;
+    assert.equal(commit.pushed, true);
+    assert.deepEqual(hookSaw(), ["src absent"]);
+    const paths = onOrigin("sparse/open");
+    assert.ok(paths.includes("src/deep/code.ts"), paths.join("\n"));
+    assert.ok(paths.some((path) => path.startsWith(`.navbook/prs/open/${pr.id}-`)));
+  });
+
+  it("merges work outside the tracker without checking it out", async () => {
+    h.fixture.peer.branch("sparse/merge");
+    must(h.fixture.peer.git(["push", "--quiet", "origin", "sparse/merge:sparse/merge"]));
+    // The server's copy, one commit ahead of the remote, touching code...
+    must(h.fixture.server.git(["fetch", "--quiet", "origin"]));
+    must(
+      h.fixture.server.git(["branch", "--quiet", "nav-server/sparse/merge", "origin/sparse/merge"]),
+    );
+    const arrange = join(h.fixture.home, "arrange-sparse-merge");
+    must(h.fixture.server.git(["worktree", "add", "--quiet", arrange, "nav-server/sparse/merge"]));
+    writeFileSync(join(arrange, "src", "server.ts"), "export {};\n");
+    must(h.fixture.server.git(["-C", arrange, "add", "--all"]));
+    must(
+      h.fixture.server.git([
+        "-C",
+        arrange,
+        "commit",
+        "--quiet",
+        "--no-verify",
+        "-m",
+        "server code",
+      ]),
+    );
+    must(h.fixture.server.git(["worktree", "remove", "--force", arrange]));
+    // ...and somebody else's push meanwhile, touching code too.
+    peerCommit("sparse/merge", { "src/peer.ts": "export {};\n" }, "peer code");
+    hookSaw();
+
+    const { commit } = ok<Opened>(
+      await h.gql(OPEN, { input: { source: "sparse/merge", title: "Merged", body: "x" } }),
+    ).openPr;
+    assert.equal(commit.pushed, true);
+    // The merge commit, then the pull request's: neither wrote the code out.
+    assert.deepEqual(hookSaw(), ["src absent", "src absent"]);
+    const paths = onOrigin("sparse/merge");
+    for (const path of ["src/deep/code.ts", "src/server.ts", "src/peer.ts"]) {
+      assert.ok(paths.includes(path), path);
+    }
+    assert.deepEqual(worktrees(h.fixture.server.dir), [h.fixture.server.dir]);
+  });
+
+  it("reports a conflict outside the tracker, and leaves no worktree", async () => {
+    h.fixture.peer.branch("sparse/clash");
+    must(h.fixture.peer.git(["push", "--quiet", "origin", "sparse/clash:sparse/clash"]));
+    must(h.fixture.server.git(["fetch", "--quiet", "origin"]));
+    must(
+      h.fixture.server.git(["branch", "--quiet", "nav-server/sparse/clash", "origin/sparse/clash"]),
+    );
+    const arrange = join(h.fixture.home, "arrange-sparse-clash");
+    must(h.fixture.server.git(["worktree", "add", "--quiet", arrange, "nav-server/sparse/clash"]));
+    writeFileSync(join(arrange, "src", "deep", "code.ts"), "export const server = 1;\n");
+    must(
+      h.fixture.server.git(["-C", arrange, "commit", "--quiet", "--no-verify", "-am", "server"]),
+    );
+    must(h.fixture.server.git(["worktree", "remove", "--force", arrange]));
+    peerCommit("sparse/clash", { "src/deep/code.ts": "export const peer = 1;\n" }, "peer");
+
+    const response = await h.gql(OPEN, {
+      input: { source: "sparse/clash", title: "Clash", body: "x" },
+    });
+    assert.equal(errorCode(response), "SYNC_CONFLICT");
+    assert.deepEqual(worktrees(h.fixture.server.dir), [h.fixture.server.dir]);
+    assert.equal(h.fixture.server.git(["status", "--porcelain"]).stdout, "");
+  });
+
+  it("checks out everything when the served clone's marker says so", async () => {
+    h.fixture.peer.branch("sparse/off");
+    must(h.fixture.peer.git(["push", "--quiet", "origin", "sparse/off:sparse/off"]));
+    const marker = join(h.fixture.server.dir, ".navbook", "navbook.json");
+    const saved = readFileSync(marker, "utf8");
+    writeFileSync(marker, '{ "version": 1, "worktrees": { "sparse": false } }\n');
+    hookSaw();
+    try {
+      const { commit } = ok<Opened>(
+        await h.gql(OPEN, { input: { source: "sparse/off", title: "Whole", body: "x" } }),
+      ).openPr;
+      assert.equal(commit.pushed, true);
+    } finally {
+      writeFileSync(marker, saved);
+    }
+    assert.deepEqual(hookSaw(), ["src present"]);
   });
 });

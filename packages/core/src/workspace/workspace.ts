@@ -29,7 +29,9 @@ import {
   parseMarkerVersion,
   parseMergePolicy,
   parseReviewPolicy,
+  parseWorktreePolicy,
   type ReviewPolicyReading,
+  type WorktreePolicyReading,
 } from "../core/policy.ts";
 import { needsComments, type Query } from "../core/query.ts";
 import { parseDirName } from "../core/slug.ts";
@@ -219,6 +221,17 @@ export function readReviewPolicy(ws: WsCtx): ReviewPolicyReading {
  */
 export function readMergePolicy(ws: WsCtx): MergePolicyReading {
   return parseMergePolicy(readMarker(ws));
+}
+
+/**
+ * Read the worktree policy the marker declares (spec 02 §2.10).
+ *
+ * Read from the working tree like the policies above it: how a worktree made
+ * for a write is checked out is the business of the checkout that makes it,
+ * not of the branch it checks out.
+ */
+export function readWorktreePolicy(ws: WsCtx): WorktreePolicyReading {
+  return parseWorktreePolicy(readMarker(ws));
 }
 
 /**

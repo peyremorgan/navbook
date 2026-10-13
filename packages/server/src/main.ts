@@ -8,7 +8,7 @@
  */
 
 import { ConfigError, loadConfig, parseServerArgs, USAGE } from "./config.ts";
-import { disableAutoMaintenance } from "./git-env.ts";
+import { disableAutoMaintenance, enableSparseWorktrees } from "./git-env.ts";
 import { StartupError, startServer } from "./server.ts";
 
 async function main(argv: readonly string[]): Promise<number> {
@@ -21,6 +21,9 @@ async function main(argv: readonly string[]): Promise<number> {
   // For every git this process starts, from here on: the server runs git's
   // housekeeping itself, where a shutdown can wait for it (#cvb57nhm).
   disableAutoMaintenance(process.env);
+  // And keeps the worktrees it makes for a write to the Navbook directory.
+  const sparse = enableSparseWorktrees(process.env, config.repoPath);
+  if (sparse !== null) process.stderr.write(`${sparse}\n`);
   const handle = await startServer({
     config,
     report: (line) => process.stderr.write(`${line}\n`),

@@ -9,6 +9,13 @@
  * directory, and removes it afterwards; the branch is pushed like the served
  * one, by {@link RepoSync.writeOn}.
  *
+ * Only the Navbook directory is checked out there, with the files at the root
+ * of the tree (core `addWriteWorktree`): it is all a write reads or writes, and
+ * the rest of a large repository would be written out and deleted again for a
+ * single comment. The hooks the clone runs see that much and no more. A
+ * repository whose hooks need the whole tree says so in its marker,
+ * `"worktrees": { "sparse": false }` (spec 02 §2.10).
+ *
  * The branch must already be on the remote. The server never creates a branch
  * anybody would see, and it never writes on one of the clone's own local
  * branches either: those are an operator's, and one may carry commits nobody
@@ -29,7 +36,7 @@ import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import {
-  addWorktree,
+  addWriteWorktree,
   createBranch,
   currentBranch,
   deleteBranch,
@@ -38,6 +45,7 @@ import {
   isAncestor,
   isValidBranchName,
   makeWsCtx,
+  NAV_MARKER,
   removeWorktree,
   resolveSha,
   splitLines,
@@ -131,7 +139,7 @@ export function openWriteSite(ctx: GraphQLCtx, branch: string | null): WriteSite
     const safe = branch.replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 40);
     const dir = mkdtempSync(join(tmpdir(), `${TEMP_WORKTREE_PREFIX}${safe}-`));
     try {
-      addWorktree(root, dir, local);
+      addWriteWorktree(ctx.ws, dir, local, (problem) => reportPolicyFault(ctx, problem));
     } catch (error) {
       rmSync(dir, { recursive: true, force: true });
       throw error;
@@ -147,6 +155,24 @@ export function openWriteSite(ctx: GraphQLCtx, branch: string | null): WriteSite
     if (created !== null) dropBranch(root, local, created);
     throw error;
   }
+}
+
+/** The marker faults each server has logged already, so a write logs only the new ones. */
+const reportedFaults = new WeakMap<(line: string) => void, Set<string>>();
+
+/**
+ * Log a fault in the marker's worktree policy, once per server: it is read on
+ * every write, and `nav doctor` is where it is reported in full (D15).
+ */
+function reportPolicyFault(ctx: GraphQLCtx, problem: string): void {
+  let seen = reportedFaults.get(ctx.report);
+  if (seen === undefined) {
+    seen = new Set();
+    reportedFaults.set(ctx.report, seen);
+  }
+  if (seen.has(problem)) return;
+  seen.add(problem);
+  ctx.report(`nav-server: warning: ${ctx.ws.navDir}/${NAV_MARKER}: ${problem}; using the default`);
 }
 
 /**

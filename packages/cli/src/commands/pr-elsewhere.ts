@@ -22,7 +22,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  addWorktree,
+  addWriteWorktree,
   currentBranch,
   type EntityRecord,
   findPrToWrite,
@@ -30,6 +30,7 @@ import {
   isTreeClean,
   isValidBranchName,
   locatePrToWrite,
+  NAV_MARKER,
   type PrElsewhere,
   refusePrWrite,
   removeWorktree,
@@ -39,6 +40,7 @@ import type { Ctx } from "../context.ts";
 import { makeContext } from "../context.ts";
 import { fail } from "../errors.ts";
 import { askYesNo, isInteractive } from "../prompt.ts";
+import { warnMarkerProblems } from "./policy.ts";
 
 /**
  * Help for `-y`, which answers the question in advance. The same letter
@@ -123,6 +125,12 @@ function contextIn(ctx: Ctx, worktree: string): Ctx {
   });
 }
 
+/** A temporary worktree, and whether only the Navbook directory is checked out there. */
+interface TemporaryWorktree {
+  dir: string;
+  sparse: boolean;
+}
+
 /**
  * A new worktree on `branch` in a fresh temporary directory.
  *
@@ -130,14 +138,19 @@ function contextIn(ctx: Ctx, worktree: string): Ctx {
  * user made is ever in the way; under `os.tmpdir()`, so `TMPDIR` says where.
  * The branch only flavours the name, so it is cut short: a directory name has
  * a length limit and a branch name has none.
+ *
+ * Only the Navbook directory is checked out there unless the marker says
+ * otherwise (core `addWriteWorktree`): the write needs nothing else.
  */
-function checkOutTemporarily(ctx: Ctx, branch: string): string {
+function checkOutTemporarily(ctx: Ctx, branch: string): TemporaryWorktree {
   const safe = branch.replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 40);
   let dir: string | null = null;
   try {
     dir = mkdtempSync(join(tmpdir(), `nav-${safe}-`));
-    addWorktree(ctx.repoRoot, dir, branch);
-    return dir;
+    const { sparse } = addWriteWorktree(ctx, dir, branch, (problem) =>
+      warnMarkerProblems(ctx, [problem]),
+    );
+    return { dir, sparse };
   } catch (error) {
     if (dir !== null) rmSync(dir, { recursive: true, force: true });
     fail(`could not check '${branch}' out into a temporary worktree`, [
@@ -156,7 +169,8 @@ function checkOutTemporarily(ctx: Ctx, branch: string): string {
  * failed before writing anything leaves it clean, and it goes. Untracked files
  * do not count: nothing but this run has been in there.
  */
-function release(ctx: Ctx, dir: string, branch: string, failed: boolean): void {
+function release(ctx: Ctx, site: TemporaryWorktree, branch: string, failed: boolean): void {
+  const { dir } = site;
   if (isTreeClean(dir, { untracked: false })) {
     try {
       removeWorktree(ctx.repoRoot, dir, { force: true });
@@ -176,7 +190,11 @@ function release(ctx: Ctx, dir: string, branch: string, failed: boolean): void {
   }
   ctx.stderr.write(
     `${ctx.colors.yellow("note:")} the change is staged in ${dir}, a temporary worktree on '${branch}'\n` +
-      `commit it there, then remove it: 'git worktree remove ${dir}'\n`,
+      `commit it there, then remove it: 'git worktree remove ${dir}'\n` +
+      (site.sparse
+        ? `only ${ctx.navDir}/ and the top-level files are checked out there; a commit keeps the rest of the branch\n` +
+          `('"worktrees": { "sparse": false }' in ${ctx.navDir}/${NAV_MARKER} checks out everything)\n`
+        : ""),
   );
 }
 
@@ -245,14 +263,14 @@ function writeAt<T>(ctx: Ctx, to: Destination, write: (at: Ctx) => T): T {
 
   const { branch } = to;
   return sheltered(() => {
-    const dir = checkOutTemporarily(ctx, branch);
+    const site = checkOutTemporarily(ctx, branch);
     let failed = true;
     try {
-      const result = write(contextIn(ctx, dir));
+      const result = write(contextIn(ctx, site.dir));
       failed = false;
       return result;
     } finally {
-      release(ctx, dir, branch, failed);
+      release(ctx, site, branch, failed);
     }
   });
 }

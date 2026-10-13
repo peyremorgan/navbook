@@ -32,7 +32,8 @@ export function warnMergePolicyProblems(ctx: Ctx, reading: MergePolicyReading): 
   warnMarkerProblems(ctx, reading.problems);
 }
 
-function warnMarkerProblems(ctx: Ctx, problems: readonly string[]): void {
+/** Warn about faults in the marker, D15's in full, each read as the default. */
+export function warnMarkerProblems(ctx: Ctx, problems: readonly string[]): void {
   for (const problem of problems) {
     ctx.stderr.write(
       `${ctx.colors.yellow("warning:")} ${ctx.navDir}/${NAV_MARKER}: ${problem}; using the default\n`,

@@ -1379,6 +1379,93 @@ describe("a pull request that only another branch holds", () => {
     }
   });
 
+  /**
+   * Give `feat/auth` code below the root, and the clone a pre-commit hook that
+   * logs whether it can see it: hooks run in the worktree a commit is made in.
+   * Returns a reader for the log.
+   */
+  function codeAndHook(repo: TempRepo): () => string[] {
+    repo.git(["checkout", "--quiet", "feat/auth"]);
+    repo.write("src/deep/code.ts", "export {};\n");
+    repo.commitAll("feat: code below the root");
+    repo.git(["checkout", "--quiet", "main"]);
+    const log = join(repo.home, "pre-commit.log");
+    const hooks = repo.git(["rev-parse", "--git-path", "hooks"]).stdout.trim();
+    mkdirSync(join(repo.dir, hooks), { recursive: true });
+    writeFileSync(
+      join(repo.dir, hooks, "pre-commit"),
+      `#!/bin/sh\nif [ -e src ]; then echo present; else echo absent; fi >> '${log}'\n`,
+      { mode: 0o755 },
+    );
+    return () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
+  }
+
+  it("checks out only the tracker in a temporary worktree, and commits the rest as it was", () => {
+    const { repo } = withOpenPr();
+    try {
+      const saw = codeAndHook(repo);
+      const written = repo.nav(["pr", "comment", id0(repo), "-y", "--commit", "-m", "Read."], {
+        TMPDIR: privateTmp(repo),
+      });
+      assert.equal(written.code, 0, written.stderr);
+      assert.deepEqual(saw(), ["absent"]);
+      const paths = repo.git(["ls-tree", "-r", "--name-only", "feat/auth"]).stdout;
+      assert.match(paths, /^src\/deep\/code\.ts$/m);
+      assert.match(paths, /^auth\.txt$/m);
+      assert.match(paths, /^\.navbook\/prs\/open\/dk3mp2x9-refactor-auth\/comments\//m);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("says a kept temporary worktree holds only the tracker, and a commit there keeps the rest", () => {
+    const { repo } = withOpenPr();
+    try {
+      codeAndHook(repo);
+      const written = repo.nav(["pr", "comment", id0(repo), "-y", "-m", "Read."], {
+        TMPDIR: privateTmp(repo),
+      });
+      assert.equal(written.code, 0, written.stderr);
+      const kept = /the change is staged in (\S+),/.exec(written.stderr)?.[1];
+      assert.ok(kept, written.stderr);
+      assert.match(
+        written.stderr,
+        /only \.navbook\/ and the top-level files are checked out there/,
+      );
+      assert.match(written.stderr, /"worktrees": \{ "sparse": false \}/);
+      assert.equal(existsSync(join(kept, "src")), false);
+      // Finished by hand, as the note says, with plain git.
+      assert.equal(repo.git(["-C", kept, "commit", "--quiet", "-m", "comment"]).code, 0);
+      assert.match(
+        repo.git(["ls-tree", "-r", "--name-only", "feat/auth"]).stdout,
+        /^src\/deep\/code\.ts$/m,
+      );
+      repo.git(["worktree", "remove", "--force", kept]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("checks out everything in a temporary worktree when the marker says so", () => {
+    const { repo } = withOpenPr();
+    try {
+      const saw = codeAndHook(repo);
+      repo.write(".navbook/navbook.json", '{ "version": 1, "worktrees": { "sparse": false } }\n');
+      const written = repo.nav(["pr", "comment", id0(repo), "-y", "-m", "Read."], {
+        TMPDIR: privateTmp(repo),
+      });
+      assert.equal(written.code, 0, written.stderr);
+      const kept = /the change is staged in (\S+),/.exec(written.stderr)?.[1];
+      assert.ok(kept, written.stderr);
+      assert.doesNotMatch(written.stderr, /top-level files/);
+      assert.ok(existsSync(join(kept, "src", "deep", "code.ts")));
+      assert.deepEqual(saw(), []);
+      repo.git(["worktree", "remove", "--force", kept]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("keeps the temporary worktree when the commit is refused, so the review survives", () => {
     const { repo } = withOpenPr();
     try {

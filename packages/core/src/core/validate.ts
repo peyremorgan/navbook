@@ -713,6 +713,7 @@ function checkMarker(repo: Repo): Diagnostic[] {
     ...(version?.kind === "malformed" ? [version.message] : []),
     ...repo.reviewPolicy.problems,
     ...repo.mergePolicy.problems,
+    ...repo.worktreePolicy.problems,
     ...repo.plugins.problems,
   ]) {
     if (seen.has(problem)) continue;
