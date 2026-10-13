@@ -12,6 +12,9 @@ revisions:
   - head: 51e29edb1355b7cf7b942ccd43002ac278e82c69
     base: 51578e067f6288ced846d27d52586f704a3ba41a
     date: 2026-10-13T23:34:29Z
+merged:
+  date: 2026-10-13T23:34:38Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 The last of three pull requests for #gel4fvdo: polls in the web client. It is stacked on #nh75ce1c (the API), itself on #p4jj02ne (the format, the core and `nav poll`), and carries their commits until they merge; review the commits from `feat(web): two slots` on. It closes the issue.
