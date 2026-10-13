@@ -5,6 +5,7 @@ created: 2026-10-13T22:46:37Z
 labels: [enhancement, performance]
 assignee: Claude <noreply@anthropic.com>
 feature: [server, cli]
+resolution: fixed
 ---
 
 When Navbook writes to a pull request on a branch that is not checked out, it
