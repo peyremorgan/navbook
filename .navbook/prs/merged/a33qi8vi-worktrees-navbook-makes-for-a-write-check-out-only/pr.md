@@ -15,6 +15,9 @@ revisions:
   - head: db71108fb625c3c883c856011934e4124872de0b
     base: 64953e28a9bab4b1a079040506f30914aca7d697
     date: 2026-10-13T23:56:43Z
+merged:
+  date: 2026-10-13T23:58:09Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Closes #h45qu2fx.
