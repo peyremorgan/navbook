@@ -73,6 +73,7 @@ Not changed: `WorktreePolicyReading.declared` is unused for now. It is kept so t
 | server | 503 passed, 1 failed (see below) |
 | cli | 440 passed |
 | plugin-tests | 120 passed |
+| plugin-poll | 109 passed |
 | conformance | 130 passed |
 
 - Core: `worktree.test.ts` covers:
@@ -93,6 +94,8 @@ Not changed: `WorktreePolicyReading.declared` is unused for now. It is kept so t
   - `pr-open.test.ts` covers an open, a merge of out-of-cone work on both sides, and an out-of-cone conflict. A pre-commit hook records what each commit saw, so every check also covers the merge commit.
 - CLI: a committed `-y` write, a kept worktree finished with plain `git commit`, and the opt-out.
 - The new tests fail against the old code. Mutation checks were also run for the per-command merge settings, the prune, and the hooks directory.
+
+Rebased onto `dev` after the poll plugin stack (#z0qt8gpt) merged: the only shared files were `README.md` and `doc/plugins.md`, and the rebase was clean. The suites above ran on the rebased branch.
 
 The server failure is `maintenance.test.ts` "packs what it finds, in the foreground" (3003 loose objects left where 0 are expected). It fails the same way on `dev`, and appeared when this machine's git became 2.56.0. It is not touched here.
 
