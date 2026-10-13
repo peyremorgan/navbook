@@ -560,7 +560,9 @@ has checked out ([03 §3.5](03-merge-and-branches.md)).
 
 Everything a write reads or writes is inside the root directory, so by
 default nothing else needs to be written to disk; a tool that makes such a
-worktree SHOULD keep it to that. `false` asks for the whole branch, for a
+worktree SHOULD keep it to that, and to the hooks directory when git is
+configured to find one inside the tree (`core.hooksPath`), without which git
+would run no hook there at all. `false` asks for the whole branch, for a
 repository whose hooks need it — a `post-checkout` hook, which a sparse
 checkout does not run, or a `pre-commit` hook that reads the code. A checkout
 of the branch that already exists is used as it is, whatever the policy says.
