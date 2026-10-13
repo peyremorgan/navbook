@@ -146,6 +146,15 @@ export function ballotFaults(
   return faults;
 }
 
+/**
+ * Markdown as the server keeps a note or a preamble (`bodyText` in the core):
+ * without the blank lines before it or trailing whitespace, and with the
+ * first line's indentation kept. What a form compares with what it was given.
+ */
+export function bodyText(text: string): string {
+  return text.replace(/^\s*\n/, "").replace(/\s+$/, "");
+}
+
 /** Whether a draft answers the same as the ballot the person already cast. */
 export function sameBallot(
   questions: readonly Question[],
@@ -327,14 +336,17 @@ export function wouldRevoke(
         ]),
       ]),
     );
+  // Trimmed as the editor's own are, so a text a hand-written file surrounds
+  // with spaces is not a change nobody made — sending the questions then
+  // would trim them, and revoke every ballot over a title edit.
   const before = questions.map((question) => ({
     id: question.id,
-    text: question.text,
+    text: question.text.trim(),
     multi: question.multi,
     other: question.other,
     options: question.options.map((option) => ({
       id: option.id,
-      label: option.label,
+      label: option.label.trim(),
       description: option.description ?? null,
     })),
   }));

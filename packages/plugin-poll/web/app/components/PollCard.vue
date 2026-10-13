@@ -18,6 +18,7 @@ import type { PollCardFragment } from "../../src/generated/gql/graphql";
 import {
   type BallotDraft,
   ballotFaults,
+  bodyText,
   carryOver,
   describeAnswer,
   draftFrom,
@@ -44,11 +45,13 @@ const closing = ref(false);
  * now, carried onto the new questions where it still fits, so nothing the
  * person picked and has not sent is thrown away.
  */
+// Three sources rather than one getter returning an array: a fresh array is
+// never the last one, so a refetch that changed none of them would reset a
+// form the person has not sent yet.
 watch(
-  () => [props.poll.id, props.poll.myBallot?.id, props.poll.fingerprint] as const,
+  [() => props.poll.id, () => props.poll.myBallot?.id, () => props.poll.fingerprint],
   (now, before) => {
-    const onlyQuestions =
-      before !== undefined && now[0] === before[0] && now[1] === before[1] && now[2] !== before[2];
+    const onlyQuestions = now[0] === before[0] && now[1] === before[1] && now[2] !== before[2];
     if (onlyQuestions) {
       draft.value = carryOver(props.poll.questions, draft.value);
       return;
@@ -80,7 +83,7 @@ const hasBallot = computed(
 const unchanged = computed(
   () =>
     props.poll.myState === "COUNTED" &&
-    note.value.trim() === (props.poll.myBallot?.note ?? "") &&
+    bodyText(note.value) === (props.poll.myBallot?.note ?? "") &&
     sameBallot(props.poll.questions, draft.value, props.poll.myBallot?.answers),
 );
 const canVote = computed(

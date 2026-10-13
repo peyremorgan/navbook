@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   ballotFaults,
+  bodyText,
   carryOver,
   closeDefaults,
   decisionsToInput,
@@ -150,6 +151,12 @@ describe("a ballot being filled in", () => {
     assert.deepEqual(ballotFaults(QUESTIONS, { backend: { picks: [], other: "two\nlines" } }), {
       backend: "Write your answer on one line.",
     });
+  });
+
+  it("compares notes as the server keeps them, indentation of the first line included", () => {
+    assert.equal(bodyText("\n\n    code\n  \n"), "    code");
+    assert.equal(bodyText("Plain."), "Plain.");
+    assert.equal(bodyText("   \n  "), "");
   });
 
   it("knows a ballot that says what the last one did", () => {
@@ -295,6 +302,13 @@ describe("the editor", () => {
       description: "",
     });
     assert.equal(wouldRevoke(QUESTIONS, added), true);
+    // Spaces a hand-written file put around a text are not an edit.
+    const padded: Questions = QUESTIONS.map((question) => ({
+      ...question,
+      text: ` ${question.text} `,
+      options: question.options.map((option) => ({ ...option, label: `${option.label} ` })),
+    }));
+    assert.equal(wouldRevoke(padded, questionsToDraft(padded)), false);
     const flipped = questionsToDraft(QUESTIONS);
     (flipped[0] as (typeof flipped)[number]).multi = true;
     assert.equal(wouldRevoke(QUESTIONS, flipped), true);

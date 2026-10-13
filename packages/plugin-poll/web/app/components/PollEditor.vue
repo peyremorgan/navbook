@@ -13,6 +13,7 @@
 <script setup lang="ts">
 import type { PollCardFragment } from "../../src/generated/gql/graphql";
 import {
+  bodyText,
   draftToQuestions,
   emptyOption,
   emptyQuestion,
@@ -73,7 +74,7 @@ const unchanged = computed(
   () =>
     props.poll != null &&
     title.value.trim() === props.poll.title &&
-    preamble.value.trim() === props.poll.preamble &&
+    bodyText(preamble.value) === props.poll.preamble &&
     visible.value === (props.poll.results === "VISIBLE") &&
     deadline.value.trim() === (props.poll.deadline ?? "") &&
     !wouldRevoke(props.poll.questions, questions.value),

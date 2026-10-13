@@ -8,6 +8,7 @@
 -->
 <script setup lang="ts">
 import { useQuery } from "@vue/apollo-composable";
+import { describeApiError } from "~/utils/errors";
 import { POLL_QUERY } from "../graphql/queries";
 
 const props = defineProps<{ itemKey: string; entityId: string }>();
@@ -16,10 +17,20 @@ const { result, error, loading, refetch } = useQuery(POLL_QUERY, () => ({ id: pr
   fetchPolicy: "cache-and-network",
 });
 const poll = computed(() => result.value?.poll ?? null);
+/**
+ * Gone, rather than unreadable: the issue's `ext` named a poll the tree no
+ * longer has — removed by hand, moved by a sync. Asking again cannot help.
+ */
+const gone = computed(
+  () => error.value != null && describeApiError(error.value).code === "NOT_FOUND",
+);
 </script>
 
 <template>
   <PollCard v-if="poll" :poll="poll" @reload="refetch()" />
+  <UCard v-else-if="gone || (!error && !loading)" :data-testid="`poll-card-${props.itemKey}`">
+    <p class="text-sm text-muted">Poll {{ props.itemKey }} is not in this tree any more.</p>
+  </UCard>
   <UCard v-else-if="error" :data-testid="`poll-card-${props.itemKey}`">
     <UAlert
       color="error"
@@ -30,8 +41,5 @@ const poll = computed(() => result.value?.poll ?? null);
       :actions="[{ label: 'Retry', onClick: () => void refetch() }]"
     />
   </UCard>
-  <USkeleton v-else-if="loading" class="h-32 w-full" />
-  <UCard v-else :data-testid="`poll-card-${props.itemKey}`">
-    <p class="text-sm text-muted">Poll {{ props.itemKey }} is not in this tree any more.</p>
-  </UCard>
+  <USkeleton v-else class="h-32 w-full" />
 </template>

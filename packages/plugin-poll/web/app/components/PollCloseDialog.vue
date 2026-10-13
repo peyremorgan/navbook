@@ -19,20 +19,44 @@ const mutations = usePollMutations();
 const decisions = ref<Record<string, Decision>>({});
 /** The tied questions, until the closer has said something about each. */
 const pending = ref<string[]>([]);
+/**
+ * The questions the closer has decided themselves. Only these are sent: the
+ * rest are left to the server, which takes them from the tallies as they are
+ * when it closes — and refuses a tie, which the closer must break — rather
+ * than from what this dialog happened to show (`doc/spec.md` §6.3).
+ */
+const touched = ref(new Set<string>());
 const note = ref("");
 const stale = ref<string | null>(null);
+
+/** What the votes come to now, for every question the closer has not decided. */
+function follow(): void {
+  const start = closeDefaults(props.poll);
+  for (const question of props.poll.questions) {
+    if (!touched.value.has(question.id))
+      decisions.value[question.id] = start.decisions[question.id] ?? null;
+  }
+  pending.value = start.mustChoose.filter((id) => !touched.value.has(id));
+}
 
 watch(
   open,
   (value) => {
     if (!value) return;
-    const start = closeDefaults(props.poll);
-    decisions.value = start.decisions;
-    pending.value = start.mustChoose;
+    touched.value = new Set();
+    decisions.value = {};
+    follow();
     note.value = "";
     stale.value = null;
   },
   { immediate: true },
+);
+// Votes keep arriving while the dialog is open; what it proposes follows them.
+watch(
+  () => props.poll,
+  () => {
+    if (open.value) follow();
+  },
 );
 
 /** "Undecided", then every option, as one choice for a single-choice question. */
@@ -57,6 +81,7 @@ function chosen(id: string): string | undefined {
 }
 
 function decided(id: string): void {
+  touched.value.add(id);
   pending.value = pending.value.filter((entry) => entry !== id);
 }
 
@@ -85,10 +110,18 @@ async function confirm(): Promise<void> {
     const payload = await mutations.closePoll({
       poll: props.poll.id,
       baseSha: props.poll.baseSha,
-      decisions: decisionsToInput(props.poll.questions, decisions.value),
+      decisions: decisionsToInput(
+        props.poll.questions.filter((question) => touched.value.has(question.id)),
+        decisions.value,
+      ),
       note: note.value.trim() === "" ? null : note.value,
     });
-    if (!payload) return;
+    if (!payload) {
+      // Refused — a tie that formed since this opened, say — and the toast
+      // has said why: read the poll again, so the dialog shows it.
+      emit("reload");
+      return;
+    }
     open.value = false;
     emit("closed");
   } catch (error) {
