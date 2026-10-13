@@ -113,7 +113,9 @@ export function pollJson(
     ),
   );
   const mine = me === null ? undefined : ballotOf(poll.ballots, me);
-  const readingOf = (vote: VoteRecord) => poll.ballots.find((reading) => reading.vote === vote);
+  // Each vote's reading once, not a search per vote.
+  const readings = new Map(poll.ballots.map((reading) => [reading.vote, reading]));
+  const readingOf = (vote: VoteRecord) => readings.get(vote);
   return {
     id: poll.id,
     issue: poll.issue.id,

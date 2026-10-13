@@ -333,9 +333,11 @@ export function involved(issue: EntityRecord, person: string): boolean {
  * True when a poll is waiting on `person`: it is open, and they have no ballot
  * that counts — either they have a hand in the issue and have not voted, or
  * the questions changed under the ballot they cast. A withdrawal is an answer.
+ * A poll whose file has faults waits on nobody: no vote on it can be cast
+ * until somebody fixes it by hand, so nobody can answer it by voting.
  */
 export function awaits(issue: EntityRecord, poll: PollRecord, person: string): boolean {
-  if (poll.status !== "open") return false;
+  if (poll.status !== "open" || poll.problems.length > 0) return false;
   const state = stateOf(poll, person);
   return state === "revoked" || (state === "none" && involved(issue, person));
 }

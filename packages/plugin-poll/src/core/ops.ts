@@ -8,7 +8,8 @@
  * gathered, never what is written.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, sep } from "node:path";
 import type * as NavbookCore from "@navbook/core";
 import type { EntityRecord, ParsedFile, Plan, Repo, RunPlanResult, WsCtx } from "@navbook/core";
 import { ballotOf, sameAnswer, voterKey } from "./ballot.ts";
@@ -236,15 +237,19 @@ export function openPoll(
 
 /* ----------------------------------------------------------------- edit */
 
+/** Refuse a change to a poll whose file has faults: what it says cannot be read whole. */
+function requireSound(core: Core, poll: PollRecord, doing: string): void {
+  if (poll.problems.length === 0) return;
+  core.wsFail(
+    "precondition",
+    `poll ${poll.id} has faults; fix ${POLL_FILE} by hand before you ${doing}`,
+    poll.problems.map((problem) => problem.message),
+  );
+}
+
 /** Refuse a change to a poll that is closed, or whose file has faults. */
 export function requireOpenPoll(core: Core, poll: PollRecord, doing: string): void {
-  if (poll.problems.length > 0) {
-    core.wsFail(
-      "precondition",
-      `poll ${poll.id} has faults; fix ${POLL_FILE} by hand before you ${doing}`,
-      poll.problems.map((problem) => problem.message),
-    );
-  }
+  requireSound(core, poll, doing);
   if (poll.closedByIssue) {
     core.wsFail(
       "precondition",
@@ -378,14 +383,38 @@ function writtenAnswers(questions: readonly PollQuestion[], given: Answers): Ans
 }
 
 /**
- * IDs nothing in the tree holds yet: every name `scanAllIds` reads, and every
- * poll's and vote's — which, in an archived issue, sit deeper than it looks.
+ * The IDs the tree already holds, read from names alone as `scanAllIds` reads
+ * them — which sees every poll and every live poll's votes, and stops one
+ * level above an archived issue's votes
+ * (`archive/<year>/issues/<status>/<issue>/poll/<poll>/`). Those are added
+ * here, so a new ID is never one an archived vote has.
  */
 export function takenIds(core: Core, ws: WsCtx): Set<string> {
   const taken = core.scanAllIds(ws.navRoot);
-  for (const poll of allPolls(loadTree(core, ws))) {
-    taken.add(poll.id);
-    for (const vote of poll.votes) taken.add(vote.id);
+  const below = (dir: string): string[] => {
+    try {
+      return readdirSync(dir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => join(dir, entry.name));
+    } catch {
+      return [];
+    }
+  };
+  const steps: ((dir: string) => string[])[] = [
+    below,
+    (dir) => below(dir).filter((path) => path.endsWith(`${sep}issues`)),
+    below,
+    below,
+    (dir) => below(dir).filter((path) => path.endsWith(`${sep}${POLL_DIR}`)),
+    below,
+  ];
+  let dirs = [join(ws.navRoot, "archive")];
+  for (const step of steps) dirs = dirs.flatMap(step);
+  for (const dir of dirs) {
+    for (const name of readdirSync(dir)) {
+      const vote = core.parseCommentFileName(name);
+      if (vote !== null) taken.add(vote.id);
+    }
   }
   return taken;
 }
@@ -551,13 +580,7 @@ export function closePoll(
   input: CloseInput,
   opts: EditOptions,
 ): CloseResult {
-  if (poll.problems.length > 0) {
-    core.wsFail(
-      "precondition",
-      `poll ${poll.id} has faults; fix ${POLL_FILE} by hand before you close it`,
-      poll.problems.map((problem) => problem.message),
-    );
-  }
+  requireSound(core, poll, "close it");
   if (poll.closed !== null) core.wsFail("precondition", `poll ${poll.id} is already closed`);
   assertUnchanged(core, poll.blobSha, `poll ${poll.id}`, opts.baseSha);
   const decision = decisionFor(core, poll, input);

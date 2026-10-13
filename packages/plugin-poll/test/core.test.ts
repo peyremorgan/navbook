@@ -798,6 +798,12 @@ describe("query terms", () => {
       [`${POLL_DIR}/poll.md`]: poll({ closed: "2026-10-05T10:00:00Z" }),
     };
     assert.deepEqual(match(closed, "poll-awaiting:ivy@example.com"), []);
+    const faulty = { ...entries, [`${POLL_DIR}/poll.md`]: poll({ raw: "results: secret" }) };
+    assert.deepEqual(
+      match(faulty, "poll-awaiting:ivy@example.com"),
+      [],
+      "nobody can answer a poll whose file has faults",
+    );
   });
 });
 
