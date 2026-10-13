@@ -304,14 +304,13 @@ server makes and removes. The branch has to be on the remote already.
 
 That worktree holds only the Navbook directory and the files at the top of the
 tree: a write needs nothing else, and a large repository would otherwise be
-written out in full for one comment. The clone's hooks run there and see that
-much; a repository whose hooks need everything sets
-`"worktrees": { "sparse": false }` in its `navbook.json`. Nothing is written to
-the clone's config for it: the server passes `core.sparseCheckout` and
-`core.sparseCheckoutCone` through the environment, which leaves every checkout
-without patterns of its own whole. A clone that already has
-`.git/info/sparse-checkout` is left with its own settings, and the server says
-so at startup. Git 2.31 or newer is required.
+written out in full for one comment. A merge the server runs there keeps to
+the same directories. The clone's hooks run there and see that much — a
+`core.hooksPath` inside the tree is checked out too — and a repository whose
+hooks need everything sets `"worktrees": { "sparse": false }` in its
+`navbook.json`. Nothing is written to the clone's config for it: the patterns
+live in the worktree's own git directory, and the settings that apply them are
+given to each git command run there.
 
 ## Development
 

@@ -16,7 +16,7 @@ import {
   addSparseWorktree,
   conePatterns,
   isConeDir,
-  SPARSE_CHECKOUT_CONFIG,
+  SPARSE_CHECKOUT_ARGS,
 } from "../src/git/repo.ts";
 import { makeWsCtx } from "../src/workspace/ctx.ts";
 import { addWriteWorktree } from "../src/workspace/worktree.ts";
@@ -54,13 +54,35 @@ function tracked(dir: string, rev: string): string[] {
 
 describe("conePatterns", () => {
   it("names the directory, and keeps the files above it", () => {
-    assert.deepEqual(conePatterns(".navbook"), ["/*", "!/*/", "/.navbook/"]);
-    assert.deepEqual(conePatterns(".github/navbook"), [
+    assert.deepEqual(conePatterns([".navbook"]), ["/*", "!/*/", "/.navbook/"]);
+    assert.deepEqual(conePatterns([".github/navbook"]), [
       "/*",
       "!/*/",
       "/.github/",
       "!/.github/*/",
       "/.github/navbook/",
+    ]);
+  });
+});
+
+describe("conePatterns, for several directories", () => {
+  it("shares the parents they have in common, and drops one inside another", () => {
+    assert.deepEqual(conePatterns([".github/navbook", ".github/hooks", ".github/navbook/x"]), [
+      "/*",
+      "!/*/",
+      "/.github/",
+      "!/.github/*/",
+      "/.github/hooks/",
+      "/.github/navbook/",
+    ]);
+  });
+
+  it("names no parent that is itself checked out in full", () => {
+    assert.deepEqual(conePatterns([".navbook", ".husky/_", ".husky"]), [
+      "/*",
+      "!/*/",
+      "/.husky/",
+      "/.navbook/",
     ]);
   });
 });
@@ -83,7 +105,7 @@ describe("addSparseWorktree", () => {
   it("writes out the Navbook directory and the files at the root, and nothing else", () => {
     inRepo(".navbook", (dir, scratch) => {
       const at = join(scratch, "wt");
-      addSparseWorktree(dir, at, "feat", ".navbook");
+      addSparseWorktree(dir, at, "feat", [".navbook"]);
       assert.ok(existsSync(join(at, ".navbook", "navbook.json")));
       assert.ok(existsSync(join(at, "README.md")));
       assert.equal(existsSync(join(at, "src")), false);
@@ -101,7 +123,7 @@ describe("addSparseWorktree", () => {
       git(["branch", "-f", "feat"], { cwd: dir });
 
       const at = join(scratch, "wt");
-      addSparseWorktree(dir, at, "feat", ".github/navbook");
+      addSparseWorktree(dir, at, "feat", [".github/navbook"]);
       assert.ok(existsSync(join(at, ".github", "navbook", "navbook.json")));
       assert.ok(existsSync(join(at, ".github", "CODEOWNERS")));
       assert.equal(existsSync(join(at, ".github", "workflows")), false);
@@ -112,7 +134,7 @@ describe("addSparseWorktree", () => {
   it("commits what was written, and keeps every path it never wrote out", () => {
     inRepo(".navbook", (dir, scratch) => {
       const at = join(scratch, "wt");
-      addSparseWorktree(dir, at, "feat", ".navbook");
+      addSparseWorktree(dir, at, "feat", [".navbook"]);
       writeFileSync(join(at, ".navbook", "prs", "open", "note.md"), "note\n");
       git(["add", "--", ".navbook/prs/open/note.md"], { cwd: at });
       // As a person would commit there by hand: with none of the settings.
@@ -136,9 +158,10 @@ describe("addSparseWorktree", () => {
       git(["checkout", "--quiet", "main"], { cwd: dir });
 
       const at = join(scratch, "wt");
-      addSparseWorktree(dir, at, "feat", ".navbook");
-      const config = SPARSE_CHECKOUT_CONFIG.flatMap(([key, value]) => ["-c", `${key}=${value}`]);
-      git([...config, "merge", "--quiet", "--no-ff", "--no-edit", "upstream"], { cwd: at });
+      addSparseWorktree(dir, at, "feat", [".navbook"]);
+      git([...SPARSE_CHECKOUT_ARGS, "merge", "--quiet", "--no-ff", "--no-edit", "upstream"], {
+        cwd: at,
+      });
       assert.equal(existsSync(join(at, "src")), false);
       assert.ok(tracked(dir, "feat").includes("src/new.ts"));
     });
@@ -147,7 +170,7 @@ describe("addSparseWorktree", () => {
   it("leaves the clone's own config alone", () => {
     inRepo(".navbook", (dir, scratch) => {
       const before = git(["config", "--list", "--local"], { cwd: dir });
-      addSparseWorktree(dir, join(scratch, "wt"), "feat", ".navbook");
+      addSparseWorktree(dir, join(scratch, "wt"), "feat", [".navbook"]);
       assert.equal(git(["config", "--list", "--local"], { cwd: dir }), before);
     });
   });
@@ -155,7 +178,7 @@ describe("addSparseWorktree", () => {
   it("takes the patterns away with the worktree", () => {
     inRepo(".navbook", (dir, scratch) => {
       const at = join(scratch, "wt");
-      addSparseWorktree(dir, at, "feat", ".navbook");
+      addSparseWorktree(dir, at, "feat", [".navbook"]);
       const file = git(
         ["rev-parse", "--path-format=absolute", "--git-path", "info/sparse-checkout"],
         { cwd: at },
@@ -186,7 +209,7 @@ describe("addSparseWorktree", () => {
       process.env.PATH = `${bin}:${path}`;
       const at = join(scratch, "wt");
       try {
-        assert.throws(() => addSparseWorktree(dir, at, "feat", ".navbook"), /refused/);
+        assert.throws(() => addSparseWorktree(dir, at, "feat", [".navbook"]), /refused/);
       } finally {
         process.env.PATH = path;
       }
@@ -197,9 +220,75 @@ describe("addSparseWorktree", () => {
       assert.equal(listed.length, 1);
     });
   });
+  it("unregisters the worktree even when git will not remove it", { skip: NO_GIT_SHIM }, () => {
+    inRepo(".navbook", (dir, scratch) => {
+      const bin = join(scratch, "bin");
+      mkdirSync(bin);
+      writeFileSync(
+        join(bin, "git"),
+        [
+          "#!/bin/sh",
+          'for a in "$@"; do case "$a" in read-tree|remove) echo refused >&2; exit 1;; esac; done',
+          `PATH="$\{PATH#*:}" exec git "$@"`,
+          "",
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+      const path = process.env.PATH;
+      process.env.PATH = `${bin}:${path}`;
+      const at = join(scratch, "wt");
+      try {
+        assert.throws(() => addSparseWorktree(dir, at, "feat", [".navbook"]), /refused/);
+      } finally {
+        process.env.PATH = path;
+      }
+      assert.equal(existsSync(at), false);
+      // Nothing holds the branch: it can be checked out again at once.
+      git(["worktree", "add", "--quiet", join(scratch, "again"), "feat"], { cwd: dir });
+    });
+  });
 });
 
 describe("addWriteWorktree", () => {
+  it("checks out a hooks directory inside the tree, so the hooks still run", () => {
+    inRepo(".navbook", (dir, scratch) => {
+      // As husky arranges it: hooks in the tree, found by a relative path.
+      mkdirSync(join(dir, ".githooks"));
+      const log = join(scratch, "hook.log");
+      writeFileSync(join(dir, ".githooks", "pre-commit"), `#!/bin/sh\necho ran >> '${log}'\n`, {
+        mode: 0o755,
+      });
+      git(["add", "-A"], { cwd: dir });
+      git(["commit", "--quiet", "--no-verify", "-m", "hooks"], { cwd: dir });
+      git(["branch", "-f", "feat"], { cwd: dir });
+      git(["config", "core.hooksPath", ".githooks/"], { cwd: dir });
+
+      const at = join(scratch, "wt");
+      assert.deepEqual(addWriteWorktree(makeWsCtx({ cwd: dir }), at, "feat"), { sparse: true });
+      assert.ok(existsSync(join(at, ".githooks", "pre-commit")));
+      assert.equal(existsSync(join(at, "src")), false);
+      writeFileSync(join(at, ".navbook", "note.md"), "note\n");
+      git(["add", "--", ".navbook/note.md"], { cwd: at });
+      git(["commit", "--quiet", "-m", "note"], { cwd: at });
+      assert.ok(existsSync(log), "the pre-commit hook ran");
+    });
+  });
+
+  it("checks out nothing more for a hooks directory outside the tree", () => {
+    inRepo(".navbook", (dir, scratch) => {
+      git(["config", "core.hooksPath", join(scratch, "hooks")], { cwd: dir });
+      const at = join(scratch, "wt");
+      assert.deepEqual(addWriteWorktree(makeWsCtx({ cwd: dir }), at, "feat"), { sparse: true });
+      assert.deepEqual(
+        git(["ls-files", "-t"], { cwd: at })
+          .trim()
+          .split("\n")
+          .filter((line) => line.startsWith("S ")),
+        ["S src/deep/code.ts"],
+      );
+    });
+  });
+
   it("is sparse by default", () => {
     inRepo(".navbook", (dir, scratch) => {
       const at = join(scratch, "wt");

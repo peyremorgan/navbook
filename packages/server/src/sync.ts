@@ -52,6 +52,7 @@ import {
   type PushTarget,
   pushBranchAsync,
   resolveShaAsync,
+  type WorktreeOptions,
 } from "@navbook/core";
 import { apiError } from "./errors.ts";
 import { Mutex } from "./lock.ts";
@@ -63,10 +64,10 @@ export interface SyncGit {
   resolveSha(cwd: string, rev: string): Promise<string | null>;
   isAlreadyMerged(cwd: string, source: string): Promise<boolean>;
   canFastForward(cwd: string, source: string): Promise<boolean>;
-  fastForward(cwd: string, source: string): Promise<void>;
-  mergeNoCommit(cwd: string, source: string): Promise<MergeOutcome>;
+  fastForward(cwd: string, source: string, opts?: WorktreeOptions): Promise<void>;
+  mergeNoCommit(cwd: string, source: string, opts?: WorktreeOptions): Promise<MergeOutcome>;
   commitMerge(cwd: string, message: string): Promise<string>;
-  abortMerge(cwd: string): Promise<void>;
+  abortMerge(cwd: string, opts?: WorktreeOptions): Promise<void>;
   conflictedPaths(cwd: string): Promise<string[]>;
   currentBranch(cwd: string): Promise<string | null>;
 }
@@ -137,6 +138,12 @@ export interface WriteRoot {
    * rather than written over or made again.
    */
   upstream?: string;
+  /**
+   * True when {@link root} is a sparse checkout (core `addWriteWorktree`): a
+   * merge there is kept to its patterns rather than writing out everything
+   * it brings in.
+   */
+  sparse?: boolean;
 }
 
 /** How a write went, as the site it ran in is told when it is closed. */
@@ -624,11 +631,12 @@ export class RepoSync {
 
     const fastForward = await this.git.canFastForward(root, tip);
     if (signal?.aborted) return null;
+    const worktree = { sparse: site.sparse === true };
     if (fastForward) {
-      await this.git.fastForward(root, tip);
+      await this.git.fastForward(root, tip, worktree);
       return tip;
     }
-    if ((await this.git.mergeNoCommit(root, tip)) === "conflict") {
+    if ((await this.git.mergeNoCommit(root, tip, worktree)) === "conflict") {
       // "conflict" is every non-zero exit, not only a content conflict: git
       // also refuses outright over unrelated histories, a busy index, or a
       // working tree the merge would overwrite. Which it was decides what the
@@ -636,7 +644,7 @@ export class RepoSync {
       const paths = await this.git.conflictedPaths(root);
       // Abort before reporting: leaving a half-merged tree behind would fail
       // every later operation for a reason unrelated to what it asked for.
-      await this.git.abortMerge(root);
+      await this.git.abortMerge(root, worktree);
       if (paths.length === 0) throw mergeRefused(upstream);
       throw new MergeConflict(paths);
     }
@@ -645,7 +653,7 @@ export class RepoSync {
     } catch (error) {
       // The merge is staged but uncommitted, which is the one state this
       // module must never leave behind — every later request would fail in it.
-      await this.git.abortMerge(root);
+      await this.git.abortMerge(root, worktree);
       throw error;
     }
     return tip;

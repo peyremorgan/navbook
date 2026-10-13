@@ -192,7 +192,7 @@ function release(ctx: Ctx, site: TemporaryWorktree, branch: string, failed: bool
     `${ctx.colors.yellow("note:")} the change is staged in ${dir}, a temporary worktree on '${branch}'\n` +
       `commit it there, then remove it: 'git worktree remove ${dir}'\n` +
       (site.sparse
-        ? `only ${ctx.navDir}/ and the top-level files are checked out there; a commit keeps the rest of the branch\n` +
+        ? `only ${ctx.navDir}/ is checked out there, with the files in the directories above it; a commit keeps the rest of the branch\n` +
           `('"worktrees": { "sparse": false }' in ${ctx.navDir}/${NAV_MARKER} checks out everything)\n`
         : ""),
   );

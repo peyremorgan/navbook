@@ -1430,7 +1430,7 @@ describe("a pull request that only another branch holds", () => {
       assert.ok(kept, written.stderr);
       assert.match(
         written.stderr,
-        /only \.navbook\/ and the top-level files are checked out there/,
+        /only \.navbook\/ is checked out there, with the files in the directories above it/,
       );
       assert.match(written.stderr, /"worktrees": \{ "sparse": false \}/);
       assert.equal(existsSync(join(kept, "src")), false);
@@ -1457,7 +1457,7 @@ describe("a pull request that only another branch holds", () => {
       assert.equal(written.code, 0, written.stderr);
       const kept = /the change is staged in (\S+),/.exec(written.stderr)?.[1];
       assert.ok(kept, written.stderr);
-      assert.doesNotMatch(written.stderr, /top-level files/);
+      assert.doesNotMatch(written.stderr, /is checked out there/);
       assert.ok(existsSync(join(kept, "src", "deep", "code.ts")));
       assert.deepEqual(saw(), []);
       repo.git(["worktree", "remove", "--force", kept]);

@@ -138,17 +138,22 @@ export function openWriteSite(ctx: GraphQLCtx, branch: string | null): WriteSite
     // has a length limit and a branch name has none.
     const safe = branch.replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 40);
     const dir = mkdtempSync(join(tmpdir(), `${TEMP_WORKTREE_PREFIX}${safe}-`));
+    const problems: string[] = [];
+    let sparse: boolean;
     try {
-      addWriteWorktree(ctx.ws, dir, local, (problem) => reportPolicyFault(ctx, problem));
+      ({ sparse } = addWriteWorktree(ctx.ws, dir, local, (problem) => problems.push(problem)));
     } catch (error) {
       rmSync(dir, { recursive: true, force: true });
       throw error;
+    } finally {
+      reportPolicyFaults(ctx, problems);
     }
     return {
       root: dir,
       branch,
       local,
       worktree: dir,
+      sparse,
       ...(remote === null ? {} : { upstream: branch }),
     };
   } catch (error) {
@@ -157,22 +162,24 @@ export function openWriteSite(ctx: GraphQLCtx, branch: string | null): WriteSite
   }
 }
 
-/** The marker faults each server has logged already, so a write logs only the new ones. */
-const reportedFaults = new WeakMap<(line: string) => void, Set<string>>();
+/** The faults each server last logged in the worktree policy, one per line. */
+const loggedFaults = new WeakMap<(line: string) => void, string>();
 
 /**
- * Log a fault in the marker's worktree policy, once per server: it is read on
- * every write, and `nav doctor` is where it is reported in full (D15).
+ * Log the faults in the marker's worktree policy when they differ from the
+ * ones last logged: the policy is read on every write, and `nav doctor` is
+ * where it is reported in full (D15). A marker fixed and broken again is
+ * logged again.
  */
-function reportPolicyFault(ctx: GraphQLCtx, problem: string): void {
-  let seen = reportedFaults.get(ctx.report);
-  if (seen === undefined) {
-    seen = new Set();
-    reportedFaults.set(ctx.report, seen);
+function reportPolicyFaults(ctx: GraphQLCtx, problems: readonly string[]): void {
+  const key = problems.join("\n");
+  if ((loggedFaults.get(ctx.report) ?? "") === key) return;
+  loggedFaults.set(ctx.report, key);
+  for (const problem of problems) {
+    ctx.report(
+      `nav-server: warning: ${ctx.ws.navDir}/${NAV_MARKER}: ${problem}; using the default`,
+    );
   }
-  if (seen.has(problem)) return;
-  seen.add(problem);
-  ctx.report(`nav-server: warning: ${ctx.ws.navDir}/${NAV_MARKER}: ${problem}; using the default`);
 }
 
 /**

@@ -100,10 +100,7 @@ function checkRepo(
  * expects git not to start its own: `main.ts` sets `maintenance.auto=false`
  * for every git the process runs, before calling this. A process that embeds
  * the server does the same (`disableAutoMaintenance`), or gets both — and a
- * detached run of git's may be cut off when the process ends. `main.ts` also
- * sets the sparse-checkout configuration (`enableSparseWorktrees`); without
- * it a worktree made for a write is still sparse, but a merge run there writes
- * out everything it brings in.
+ * detached run of git's may be cut off when the process ends.
  */
 export async function startServer(opts: StartOptions): Promise<ServerHandle> {
   const { config } = opts;

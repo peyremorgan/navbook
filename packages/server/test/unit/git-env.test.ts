@@ -8,15 +8,8 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, it } from "node:test";
-import {
-  appendGitConfig,
-  disableAutoMaintenance,
-  enableSparseWorktrees,
-} from "../../src/git-env.ts";
+import { appendGitConfig, disableAutoMaintenance } from "../../src/git-env.ts";
 
 /** What git reads for `key` with only `env`'s configuration: no files at all. */
 function gitSees(env: NodeJS.ProcessEnv, key: string): string | null {
@@ -107,41 +100,5 @@ describe("appendGitConfig", () => {
       }
       assert.equal(gitSees(keyed, "user.name"), null, `git accepted '${count}'`);
     }
-  });
-});
-
-describe("enableSparseWorktrees", () => {
-  /** An empty repository, for `use`, then gone. */
-  function inRepo(use: (dir: string) => void): void {
-    const dir = mkdtempSync(join(tmpdir(), "navbook-git-env-"));
-    try {
-      spawnSync("git", ["init", "--quiet", dir]);
-      use(dir);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }
-
-  it("turns sparse checkouts on for every git the environment reaches", () => {
-    inRepo((dir) => {
-      const env: NodeJS.ProcessEnv = {};
-      assert.equal(enableSparseWorktrees(env, dir), null);
-      assert.equal(gitSees(env, "core.sparseCheckout"), "true");
-      assert.equal(gitSees(env, "core.sparseCheckoutCone"), "true");
-    });
-  });
-
-  it("leaves a clone with patterns of its own alone, and says so", () => {
-    inRepo((dir) => {
-      // Left from a sparse checkout somebody set up and then turned off.
-      mkdirSync(join(dir, ".git", "info"), { recursive: true });
-      writeFileSync(join(dir, ".git", "info", "sparse-checkout"), "/*\n");
-      const env: NodeJS.ProcessEnv = {};
-      assert.match(
-        enableSparseWorktrees(env, dir) ?? "",
-        /sparse-checkout exists, so the clone keeps its own sparse-checkout settings/,
-      );
-      assert.deepEqual(env, {});
-    });
   });
 });

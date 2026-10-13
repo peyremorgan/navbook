@@ -15,6 +15,7 @@
 
 import { git, gitAsync, gitRun, gitRunAsync } from "./exec.ts";
 import { isAncestor, isAncestorAsync } from "./history.ts";
+import { SPARSE_CHECKOUT_ARGS } from "./repo.ts";
 
 export type MergeOutcome = "up-to-date" | "fast-forward" | "staged" | "conflict";
 
@@ -65,9 +66,26 @@ export function fastForward(cwd: string, source: string): void {
   git(fastForwardArgs(source), { cwd });
 }
 
+/**
+ * How a merge treats the worktree it runs in. `sparse` keeps it to its
+ * sparse-checkout patterns ({@link SPARSE_CHECKOUT_ARGS}): without it, a
+ * merge in a sparse worktree writes out everything it brings in.
+ */
+export interface WorktreeOptions {
+  sparse?: boolean;
+}
+
+function inWorktree(args: string[], opts: WorktreeOptions): string[] {
+  return opts.sparse ? [...SPARSE_CHECKOUT_ARGS, ...args] : args;
+}
+
 /** {@link fastForward} without blocking. */
-export async function fastForwardAsync(cwd: string, source: string): Promise<void> {
-  await gitAsync(fastForwardArgs(source), { cwd });
+export async function fastForwardAsync(
+  cwd: string,
+  source: string,
+  opts: WorktreeOptions = {},
+): Promise<void> {
+  await gitAsync(inWorktree(fastForwardArgs(source), opts), { cwd });
 }
 
 /**
@@ -79,8 +97,12 @@ export function mergeNoCommit(cwd: string, source: string): MergeOutcome {
 }
 
 /** {@link mergeNoCommit} without blocking. */
-export async function mergeNoCommitAsync(cwd: string, source: string): Promise<MergeOutcome> {
-  return mergeOutcome((await gitRunAsync(mergeArgs(source), { cwd })).code);
+export async function mergeNoCommitAsync(
+  cwd: string,
+  source: string,
+  opts: WorktreeOptions = {},
+): Promise<MergeOutcome> {
+  return mergeOutcome((await gitRunAsync(inWorktree(mergeArgs(source), opts), { cwd })).code);
 }
 
 function mergeOutcome(code: number): MergeOutcome {
@@ -105,8 +127,8 @@ export function abortMerge(cwd: string): void {
 }
 
 /** {@link abortMerge} without blocking. */
-export async function abortMergeAsync(cwd: string): Promise<void> {
-  await gitRunAsync(ABORT, { cwd });
+export async function abortMergeAsync(cwd: string, opts: WorktreeOptions = {}): Promise<void> {
+  await gitRunAsync(inWorktree([...ABORT], opts), { cwd });
 }
 
 /** Paths git could not merge automatically. */
