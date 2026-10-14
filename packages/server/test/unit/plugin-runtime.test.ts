@@ -152,6 +152,32 @@ describe("plugin services", () => {
     assert.equal(reported.filter((line) => /had not stopped/.test(line)).length, 3);
   });
 
+  it("give each service what is left of the deadline, not what the one before it left", async () => {
+    const log: string[] = [];
+    const stuck: PluginService = {
+      name: "stuck",
+      start: async () => undefined,
+      stop: () => new Promise<void>(() => undefined),
+    };
+    // Some I/O to finish, well within the deadline when it is given the chance.
+    const quick: PluginService = {
+      name: "quick-io",
+      start: async () => undefined,
+      stop: () => settle().then(() => void log.push("stop quick-io")),
+    };
+    // Stopped in reverse, so the stuck one is told first.
+    const { runtime, reported } = runtimeTimed({ stopTimeoutMs: 200 }, quick, stuck);
+    await runtime.start();
+    await runtime.stop();
+    assert.deepEqual(log, ["stop quick-io"]);
+    assert.deepEqual(
+      reported.filter((line) => /had not stopped/.test(line)),
+      [
+        "plugin service 'stuck' had not stopped when the 200 ms shutdown allows ran out; going on without it",
+      ],
+    );
+  });
+
   it("wait for a service that stops within the deadline, however slowly", async () => {
     const log: string[] = [];
     const slow: PluginService = {
@@ -237,6 +263,50 @@ describe("telling plugins the clone may have moved", () => {
     runtime.emitSync(pulled);
     await settle();
     assert.deepEqual(told, ["pull"], "told after the services stopped");
+  });
+
+  it("tells nothing it had queued once stopping has begun", async () => {
+    const log: string[] = [];
+    const { runtime } = runtimeWith(service("svc", log));
+    await runtime.start();
+    runtime.onSync(() => void log.push("told"));
+    // Emitted while running, its turn not yet come when the stop is asked for.
+    runtime.emitSync(pulled);
+    await runtime.stop();
+    await settle();
+    assert.deepEqual(log, ["start svc", "stop svc"]);
+  });
+
+  it("lets a listener already running finish before its service is stopped", async () => {
+    const log: string[] = [];
+    const { runtime } = runtimeWith(service("svc", log));
+    await runtime.start();
+    runtime.onSync(async () => {
+      log.push("listening");
+      await settle();
+      log.push("listened");
+    });
+    runtime.emitSync(pulled);
+    await new Promise((resolve) => setImmediate(resolve));
+    await runtime.stop();
+    assert.deepEqual(log, ["start svc", "listening", "listened", "stop svc"]);
+  });
+
+  it("stops the services all the same when a listener does not finish", async () => {
+    const log: string[] = [];
+    const { runtime, reported } = runtimeTimed({ stopTimeoutMs: 100 }, service("svc", log));
+    await runtime.start();
+    runtime.onSync(() => new Promise<void>(() => undefined));
+    runtime.emitSync(pulled);
+    await new Promise((resolve) => setImmediate(resolve));
+    const started = Date.now();
+    await runtime.stop();
+    assert.ok(Date.now() - started < 1_000, `took ${Date.now() - started} ms`);
+    assert.deepEqual(log, ["start svc", "stop svc"]);
+    assert.deepEqual(reported, [
+      "started plugin service 'svc'",
+      "plugin sync listeners were still running when half the 100 ms shutdown allows ran out; stopping their services all the same",
+    ]);
   });
 
   it("tells a listener nothing about what an operation it started did", async () => {

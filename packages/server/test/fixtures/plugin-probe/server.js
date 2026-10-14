@@ -10,6 +10,8 @@
  * `SRVPROBE_ACT_AS` (`Name <address>`, or an address) has the service open an
  * issue as that person when it starts. `SRVPROBE_SYNC_READ` has it read the
  * issue titles, as the server itself, whenever it is told of a sync.
+ * `SRVPROBE_LATE_READ` has it hold the clone as it stops, and ask for a read
+ * once the clone is closed, as a service shutdown went on without would.
  */
 
 import { appendFileSync } from "node:fs";
@@ -66,6 +68,7 @@ export function activate(host) {
     },
     async stop() {
       log("service:stop");
+      if (process.env.SRVPROBE_LATE_READ) lateRead(host);
     },
   });
 
@@ -134,6 +137,43 @@ export function activate(host) {
         }),
     },
   });
+}
+
+/**
+ * Hold the clone as the service stops, and ask for a read once it is closed.
+ *
+ * The hold is queued while the service is still stopping, so shutdown waits
+ * for it before the process may exit, and it is let go only once the read
+ * has its answer: what the read is told is in the log before the exit, on
+ * however loaded a machine. A server that never closes the clone is asked all
+ * the same after a few seconds, and a read it then queues behind the hold
+ * does not keep it held — the test fails, rather than hanging.
+ */
+function lateRead(host) {
+  let letGo = () => undefined;
+  void host.sync.locked(
+    () =>
+      new Promise((resolve) => {
+        letGo = resolve;
+      }),
+  );
+  const giveUp = Date.now() + 5_000;
+  const ask = () => {
+    if (!host.sync.closed && Date.now() < giveUp) {
+      setImmediate(ask);
+      return;
+    }
+    const answered = host.sync
+      .read(() => undefined)
+      .then(
+        () => log("late read ran"),
+        (error) => log(`late read refused ${error.extensions?.code ?? "?"}`),
+      );
+    void Promise.race([answered, new Promise((resolve) => setTimeout(resolve, 100))]).then(() =>
+      letGo(),
+    );
+  };
+  setImmediate(ask);
 }
 
 /** Open an issue as `who` from the service, and log what came of it. */

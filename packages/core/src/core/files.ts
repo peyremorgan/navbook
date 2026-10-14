@@ -788,7 +788,10 @@ function normalizeLine(line: string): string | number {
 
 /** Trim trailing whitespace and guarantee exactly one closing newline. */
 export function normalizeBody(body: string): string {
-  const trimmed = body.replace(/\s+$/, "");
+  // `trimEnd` rather than `/\s+$/`: the same characters, but a regular
+  // expression anchored at the end retries from every space, which made a
+  // long run of them inside a body quadratic.
+  const trimmed = body.trimEnd();
   return trimmed === "" ? "" : `${trimmed}\n`;
 }
 

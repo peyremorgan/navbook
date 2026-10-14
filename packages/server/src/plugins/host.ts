@@ -86,9 +86,11 @@ export type SyncEvent = SyncChange;
  * Something that runs for as long as the server does.
  *
  * `stop` is awaited during shutdown, before the clone is released, so a
- * service that holds a socket or a poll loop can close it — within ten seconds
- * for all the services together, after which shutdown goes on without the ones
- * still running and says so. A service that
+ * service that holds a socket or a poll loop can close it. Every service is
+ * told at once, after its sync listeners still running have finished, and ten
+ * seconds are given for all of that together, after which shutdown goes on
+ * without the ones still running, says so, and has the clone refuse what they
+ * ask of it from then on (`UNAVAILABLE`). A service that
  * throws while starting stops the server: it was configured, so it was wanted,
  * and a bridge that silently did not connect is worse than one that refused
  * to come up.

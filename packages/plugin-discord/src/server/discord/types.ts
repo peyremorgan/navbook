@@ -34,6 +34,8 @@ export interface Channel {
   available_tags?: ForumTag[];
   applied_tags?: string[];
   thread_metadata?: { archived: boolean; locked?: boolean; archive_timestamp?: string };
+  /** A thread's: the user who made it. */
+  owner_id?: string;
 }
 
 export interface User {

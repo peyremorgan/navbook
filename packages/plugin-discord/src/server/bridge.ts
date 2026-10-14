@@ -12,13 +12,15 @@
  * been told. A record whose telling failed in a way Discord may recover from
  * is told again on the next run, from the same starting point; a refusal that
  * would only be repeated (a permission the bot lacks) is reported and passed.
+ * A refusal of the bot's token is neither: it is about every record alike, so
+ * the run stops there and is tried again on the backoff, passing nothing.
  */
 
 import { createHash } from "node:crypto";
 import type { CoreExtensions, EntityRecord, ReviewPolicy } from "@navbook/core";
 import type { ServerPluginHost } from "@navbook/server/plugin";
 import type { Settings } from "../core/settings.ts";
-import { PLUGIN_NAME, parseSettings, peopleOf } from "../core/settings.ts";
+import { PLUGIN_NAME, peopleOf, serverSettings } from "../core/settings.ts";
 import { DiscordError, type DiscordRest } from "./discord/rest.ts";
 import { type Channel, ChannelType, type MessageBody } from "./discord/types.ts";
 import {
@@ -32,7 +34,7 @@ import {
 import { card, messageFor, type RenderContext, tagIds, tagNames, threadName } from "./render.ts";
 import { type CompiledRule, channelFor, compileRules, openingFor, watchedFields } from "./rules.ts";
 import { type BridgeState, type StateFile, type ThreadRef, TOLD_LIMIT } from "./state.ts";
-import { ChannelRefused, isGone, RENAME_SPACING_MS, Threads } from "./threads.ts";
+import { ChannelRefused, isGone, isUnauthorized, RENAME_SPACING_MS, Threads } from "./threads.ts";
 
 /** The least time between two saves of the state in one run. */
 const SAVE_SPACING_MS = 1_000;
@@ -278,6 +280,7 @@ export class Bridge {
       // a minute on.
       this.lastRefs = refs;
       this.clear("run");
+      if (!failed) this.clear("token");
       if (failed) this.retryAfterFailure();
       else this.backoffMs = this.firstBackoffMs;
       if (waiting) this.retryLater(60_000);
@@ -440,6 +443,15 @@ export class Bridge {
       try {
         await this.deliver(id, before, record, after, events, view);
       } catch (error) {
+        if (isUnauthorized(error)) {
+          // The token was revoked or reset: no record is to blame, and none
+          // is passed over. Once a new token is in, what was missed is told.
+          this.say(
+            "token",
+            `Discord refused the bot's token; nothing is told until it is accepted again: ${messageOf(error)}`,
+          );
+          return { failed: true, waiting: false };
+        }
         // Only a thread the bridge had can be gone; a 404 for a channel it
         // was making one in is a setting to fix, and said so below.
         if (thread !== undefined && isGone(error)) {
@@ -463,6 +475,12 @@ export class Bridge {
       this.clear(`record ${id}`);
       if (after === undefined) delete seen[id];
       else seen[id] = after;
+      // Told: what is told next starts a new round, so the same change made
+      // again — closed, reopened, closed — is a new message, not one told.
+      if (events.length > 0) {
+        if (after === undefined) delete this.state.rounds[id];
+        else this.state.rounds[id] = (this.state.rounds[id] ?? 0) + 1;
+      }
       // Saved soon after Discord was told something, so a restart does not
       // tell it again — at most once a second, since the whole state is
       // written each time; the run's end saves the rest.
@@ -577,9 +595,10 @@ export class Bridge {
    * The messages `events` make that the thread has not been told yet.
    *
    * Each is keyed by what it tells: a comment by its id, anything else by the
-   * record's state before and the event, so the same change tried again after
-   * a failure part of the way through is not posted twice — and the same
-   * change made again later, from another state, is.
+   * record's round — how many times its changes were told, left out until
+   * there is one so a state file from before rounds still matches — its
+   * state before and the event, so the same change tried again after a failure part of the
+   * way through is not posted twice, and the same change made again later is.
    */
   private untold(
     id: string,
@@ -590,12 +609,19 @@ export class Bridge {
     events: readonly EntityEvent[],
   ): Telling[] {
     const out: Telling[] = [];
+    // A record not yet told anything in a round is keyed as before rounds
+    // were kept, so a state file from then still knows what it told.
+    const round = this.state.rounds[id];
     for (const event of events) {
       const key =
         event.type === "comment"
           ? `comment:${event.id}`
           : `${id}:${createHash("sha1")
-              .update(JSON.stringify([before ?? null, event]))
+              .update(
+                JSON.stringify(
+                  round === undefined ? [before ?? null, event] : [round, before ?? null, event],
+                ),
+              )
               .digest("hex")
               .slice(0, 20)}`;
       if (this.told.has(key)) continue;
@@ -670,7 +696,7 @@ export class Bridge {
    * bridge cannot move to, since its commands are registered there.
    */
   private reloadSettings(raw: unknown): void {
-    const reading = parseSettings(raw ?? {}, this.core);
+    const reading = serverSettings(raw ?? {}, this.core);
     if (!reading.ok) {
       this.settings = { ...this.settings, people: peopleOf(raw, this.core).people };
       this.say(
@@ -680,6 +706,11 @@ export class Bridge {
       return;
     }
     this.clear("settings");
+    if (reading.dropped.length > 0) {
+      this.say("people", `links in navbook.json ignored: ${reading.dropped.join("; ")}`);
+    } else {
+      this.clear("people");
+    }
     if (reading.settings.guild !== this.settings.guild) {
       this.say("guild", "the settings name another guild; restart the server to serve it");
       reading.settings.guild = this.settings.guild;

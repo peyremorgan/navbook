@@ -6,7 +6,14 @@
  * Anything that writes runs as the person the Discord account is linked to,
  * through the API's own operations (`host.api.execute`): the same checks,
  * the same commit, the same events as if they had used the web tracker. An
- * account linked to nobody is told how to link, and nothing is written.
+ * account linked to nobody is told how to link, and nothing is written or
+ * shown: a record's card, or the ids and titles `id` completes, are what the
+ * person could read in the tracker, and only a link says who that is.
+ *
+ * A link stands in for a sign-in, and answers only what an address can: a
+ * server that also admits people by a token's claims, or by its verified
+ * address, cannot ask Discord either. Such a server's accounts act for
+ * nobody unless the operator says the links will do (`untrusted` is null).
  *
  * Discord wants an answer within three seconds. A write pulls and pushes, so
  * every write is answered "thinking…" at once and the answer edited in when
@@ -177,6 +184,8 @@ export interface CommandsOptions {
   codes: LinkCodes;
   /** What Discord calls each user the bridge has heard from, for the link page. */
   usernames: Map<string, { username: string; handle: string }>;
+  /** Why no linked account may act here, or null when they may. */
+  untrusted?: string | null;
 }
 
 export class Commands {
@@ -185,6 +194,7 @@ export class Commands {
   private readonly rest: DiscordRest;
   private readonly codes: LinkCodes;
   private readonly usernames: Map<string, { username: string; handle: string }>;
+  private readonly untrusted: string | null;
   private readonly seen = new Set<string>();
 
   constructor(opts: CommandsOptions) {
@@ -193,6 +203,7 @@ export class Commands {
     this.rest = opts.rest;
     this.codes = opts.codes;
     this.usernames = opts.usernames;
+    this.untrusted = opts.untrusted ?? null;
   }
 
   /** Register the commands in the guild, replacing whatever was there. */
@@ -221,7 +232,7 @@ export class Commands {
           await this.command(interaction, user);
           return;
         case InteractionType.Autocomplete:
-          await this.autocomplete(interaction);
+          await this.autocomplete(interaction, user);
           return;
         case InteractionType.Component:
           await this.component(interaction, user);
@@ -242,12 +253,20 @@ export class Commands {
   private async command(interaction: Interaction, user: User): Promise<void> {
     const data = interaction.data ?? {};
     if (data.type === CommandType.Message && data.name === COMMENT_ON) {
+      const actor = this.actor(user);
+      if ("refused" in actor) return this.reply(interaction, actor.refused);
       await this.commentOnMessage(interaction);
       return;
     }
     if (data.name !== "nav") return;
     const sub = data.options?.[0];
     if (sub === undefined) return;
+    // Asked first, before the record is: an id refused or completed tells
+    // whoever reads the refusal that a record is there, and what it is.
+    if (!["link", "unlink", "whoami"].includes(sub.name)) {
+      const actor = this.actor(user);
+      if ("refused" in actor) return this.reply(interaction, actor.refused);
+    }
     const option = (name: string): string | undefined => {
       const value = sub.options?.find((each) => each.name === name)?.value;
       return typeof value === "string" ? value : undefined;
@@ -265,7 +284,9 @@ export class Commands {
           interaction,
           email === undefined
             ? "Your Discord account is not linked to anybody in the tracker. `/nav link` links it."
-            : `Your Discord account acts as ${email}.`,
+            : this.untrusted === null
+              ? `Your Discord account acts as ${email}.`
+              : `Your Discord account is linked to ${email}. ${this.untrusted}`,
         );
         return;
       }
@@ -346,7 +367,6 @@ export class Commands {
       case "thread": {
         const target = this.target(interaction, option("id"));
         if ("refused" in target) return this.reply(interaction, target.refused);
-        if (this.personOf(user.id) === null) return this.reply(interaction, NOT_LINKED);
         await this.defer(interaction);
         const opened = await this.bridge
           .openOnRequest(target.record.id)
@@ -389,7 +409,8 @@ export class Commands {
       await this.reply(interaction, "Your Discord account is not linked to anybody.");
       return;
     }
-    await this.write(interaction, user, async (ctx) => {
+    // Unlinking only takes away: allowed whether or not the links are trusted.
+    await this.act(interaction, user, person, async (ctx) => {
       await writePeople(this.host, ctx, "unlink", person.email, (people) => {
         delete people[user.id];
       });
@@ -430,7 +451,12 @@ export class Commands {
     );
   }
 
-  private async autocomplete(interaction: Interaction): Promise<void> {
+  /** The records an `id` being typed may be, for somebody who may read them. */
+  private async autocomplete(interaction: Interaction, user: User): Promise<void> {
+    if ("refused" in this.actor(user)) {
+      await this.respond(interaction, InteractionResponseType.AutocompleteResult, { choices: [] });
+      return;
+    }
     const focused = interaction.data?.options?.[0]?.options?.find((option) => option.focused);
     const typed =
       typeof focused?.value === "string"
@@ -478,9 +504,9 @@ export class Commands {
       case "close":
         return this.modal(interaction, closeModal(record));
       case "assign-me": {
-        const person = this.personOf(user.id);
-        if (person === null) return this.reply(interaction, NOT_LINKED);
-        return this.write(interaction, user, (ctx) => this.assign(ctx, record, person.email));
+        const actor = this.actor(user);
+        if ("refused" in actor) return this.reply(interaction, actor.refused);
+        return this.write(interaction, user, (ctx) => this.assign(ctx, record, actor.person.email));
       }
       case "reopen":
         return this.write(interaction, user, (ctx) => this.reopen(ctx, record));
@@ -539,11 +565,21 @@ export class Commands {
     user: User,
     run: (ctx: GraphQLCtx) => Promise<string>,
   ): Promise<void> {
-    const person = this.personOf(user.id);
-    if (person === null) {
-      await this.reply(interaction, NOT_LINKED);
+    const actor = this.actor(user);
+    if ("refused" in actor) {
+      await this.reply(interaction, actor.refused);
       return;
     }
+    await this.act(interaction, user, actor.person, run);
+  }
+
+  /** {@link write}, for a person already judged. */
+  private async act(
+    interaction: Interaction,
+    user: User,
+    person: Identity,
+    run: (ctx: GraphQLCtx) => Promise<string>,
+  ): Promise<void> {
     await this.defer(interaction);
     let answer: string;
     try {
@@ -665,6 +701,14 @@ export class Commands {
     const first = result.errors?.[0];
     if (first !== undefined) throw new Error(first.message);
     return (result.data ?? {}) as Record<string, unknown>;
+  }
+
+  /** The person a Discord user acts as here, or what they are told instead. */
+  private actor(user: User): { person: Identity } | { refused: string } {
+    const person = this.personOf(user.id);
+    if (person === null) return { refused: NOT_LINKED };
+    if (this.untrusted !== null) return { refused: this.untrusted };
+    return { person };
   }
 
   /** The person a Discord account acts as, with the name the tree knows them by. */

@@ -61,6 +61,7 @@ describe("the package", () => {
       [
         ["NAV_SERVER_DISCORD_TOKEN", false],
         ["NAV_SERVER_DISCORD_GUILD", false],
+        ["NAV_SERVER_DISCORD_TRUST_LINKS", false],
         ["NAV_SERVER_DISCORD_API_URL", false],
       ],
     );

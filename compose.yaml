@@ -64,6 +64,7 @@ services:
       # The Discord bridge, when `@navbook/plugin-discord` is among the plugins.
       NAV_SERVER_DISCORD_TOKEN: ${NAVBOOK_DISCORD_TOKEN:-}
       NAV_SERVER_DISCORD_GUILD: ${NAVBOOK_DISCORD_GUILD:-}
+      NAV_SERVER_DISCORD_TRUST_LINKS: ${NAVBOOK_DISCORD_TRUST_LINKS:-}
       # What the entrypoint needs to make the clone in the first place.
       NAVBOOK_REPO_URL: ${NAVBOOK_REPO_URL:?set NAVBOOK_REPO_URL in .env}
       NAVBOOK_BRANCH: ${NAVBOOK_BRANCH:-}

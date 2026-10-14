@@ -31,7 +31,7 @@ import {
   parseRankInput,
 } from "~/utils/patch";
 import { countSubtasks } from "~/utils/subtasks";
-import { interleave } from "~/utils/timeline";
+import { gatherTimelineItems, interleave } from "~/utils/timeline";
 import { entityTitle } from "~/utils/title";
 
 const route = useRoute();
@@ -92,11 +92,10 @@ const commentCount = computed(() => countComments(comments.value));
 const timeline = computed(() =>
   interleave(
     comments.value,
-    slots
-      .timelineItems("issue")
-      .flatMap((slot, index) =>
-        slot.items(issue.value?.ext ?? {}).map((item) => ({ ...item, source: { slot, index } })),
-      ),
+    gatherTimelineItems(slots.timelineItems("issue"), issue.value?.ext ?? {}, (slot, index) => ({
+      slot,
+      index,
+    })),
   ),
 );
 const subtaskCount = computed(() => countSubtasks(issue.value?.subtasks ?? []));

@@ -34,7 +34,8 @@ interface ExtReader {
 const DOCUMENT_CACHE_LIMIT = 256;
 
 /**
- * How long shutdown waits for one service to stop before going on without it.
+ * How long shutdown waits for the services to stop before going on without
+ * the ones still running.
  *
  * Well inside the time a container is given to stop (`compose.yaml` gives
  * 75 s), which also has to cover a push in flight and the clone's release.
@@ -63,6 +64,8 @@ export class PluginRuntime {
   #accepting = false;
   /** Set while a sync listener runs, in everything it starts. */
   readonly #inListener = new AsyncLocalStorage<true>();
+  /** The sync listeners running now, which stopping waits for before their services go. */
+  readonly #telling = new Set<Promise<void>>();
   /** The services running now, in the order they started. */
   #started: PluginService[] = [];
   #report: (line: string) => void;
@@ -287,9 +290,10 @@ export class PluginRuntime {
    * Two things are not told:
    *
    * - What happens while services are not running: before they have all
-   *   started, and from the moment they are told to stop. A listener is part
-   *   of its plugin's service, and one told after it stopped could queue work
-   *   on a clone the server has already released.
+   *   started, and from the moment they are told to stop — including what
+   *   was emitted before then, to a listener whose turn had not yet come. A
+   *   listener is part of its plugin's service, and one told after it stopped
+   *   could queue work on a clone the server has already released.
    * - What an operation a sync listener started did. A listener that reads
    *   fetches when nothing else does (`--pull-interval-ms 0`), and telling it
    *   of its own fetch would have it read, and fetch, for ever. Whatever that
@@ -299,7 +303,9 @@ export class PluginRuntime {
     if (!this.#accepting || this.#inListener.getStore() === true) return;
     for (const listener of this.#syncListeners) {
       setImmediate(() => {
-        void this.#inListener
+        // Asked again: stopping may have begun since this turn was queued.
+        if (!this.#accepting) return;
+        const told: Promise<void> = this.#inListener
           .run(true, async () => listener(event))
           .catch((error: unknown) => {
             this.#report(
@@ -307,7 +313,9 @@ export class PluginRuntime {
                 error instanceof Error ? error.message : String(error)
               }`,
             );
-          });
+          })
+          .finally(() => this.#telling.delete(told));
+        this.#telling.add(told);
       });
     }
   }
@@ -334,50 +342,87 @@ export class PluginRuntime {
   }
 
   /**
-   * Stop every running service, in reverse order, and report rather than throw.
+   * Stop every running service, and report rather than throw.
    *
-   * Shutdown has to finish. A service whose `stop` rejects must not leave the
-   * ones after it running, nor stop the clone being released, so each is
-   * awaited on its own and a failure is news rather than an exception. Only
-   * what started is stopped, and only once.
+   * The sync listeners still running go first: they are their services'
+   * work, and one that carried on after its service stopped would be talking
+   * to a socket already closed. They are given half of {@link
+   * SERVICE_STOP_TIMEOUT_MS} at most, so that one stuck on a slow remote
+   * leaves its service the rest to stop in.
+   *
+   * Then every service is told to stop, in reverse order, and all of them are
+   * waited for together. Shutdown has to finish: a service whose `stop`
+   * rejects must not leave the others running, nor stop the clone being
+   * released, so a failure is news rather than an exception. Only what started
+   * is stopped, and only once.
    *
    * Nor may one that never returns hold the rest up: a socket that will not
    * close is a service's bug, and the clone it would keep from being released
    * is everybody's. All of them together are given {@link
    * SERVICE_STOP_TIMEOUT_MS}, however many there are, so that a container's
-   * time to stop is not spent here; one still running then is left to the
-   * process exit, and the log says so. Each is still told to stop.
+   * time to stop is not spent here — and each has all of what is left, since
+   * none waits for another; one still running then is left to the process
+   * exit, and the log says so.
    */
   async stop(): Promise<void> {
     this.#accepting = false;
     const running = this.#started.reverse();
     this.#started = [];
-    const deadline = Date.now() + this.#stopTimeoutMs;
-    for (const service of running) {
-      let timer: NodeJS.Timeout | undefined;
-      const abandoned = new Promise<"abandoned">((resolve) => {
-        timer = setTimeout(() => resolve("abandoned"), Math.max(0, deadline - Date.now()));
-      });
-      try {
-        const stopped = Promise.resolve()
-          .then(() => service.stop())
-          .then(() => "stopped" as const);
-        if ((await Promise.race([stopped, abandoned])) === "abandoned") {
-          this.#report(
-            `plugin service '${service.name}' had not stopped when the ${this.#stopTimeoutMs} ms shutdown allows ran out; going on without it`,
-          );
-          // Whatever it does later is still news, not an unhandled rejection.
-          stopped.catch(() => undefined);
-        }
-      } catch (error) {
+    const began = Date.now();
+    await this.#listenersDone(began + this.#stopTimeoutMs / 2);
+    let timer: NodeJS.Timeout | undefined;
+    const abandoned = new Promise<"abandoned">((resolve) => {
+      timer = setTimeout(
+        () => resolve("abandoned"),
+        Math.max(0, began + this.#stopTimeoutMs - Date.now()),
+      );
+    });
+    try {
+      await Promise.all(running.map((service) => this.#stopOne(service, abandoned)));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Wait for the sync listeners running now, until `until` at the latest. */
+  async #listenersDone(until: number): Promise<void> {
+    if (this.#telling.size === 0) return;
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<"late">((resolve) => {
+      timer = setTimeout(() => resolve("late"), Math.max(0, until - Date.now()));
+    });
+    // Each has its failure reported already, so none of these rejects.
+    const done = Promise.all([...this.#telling]).then(() => "done" as const);
+    try {
+      if ((await Promise.race([done, late])) === "late") {
         this.#report(
-          `plugin service '${service.name}' did not stop cleanly: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          `plugin sync listeners were still running when half the ${this.#stopTimeoutMs} ms shutdown allows ran out; stopping their services all the same`,
         );
-      } finally {
-        clearTimeout(timer);
       }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Tell one service to stop, and wait for it until `abandoned` says not to. */
+  async #stopOne(service: PluginService, abandoned: Promise<"abandoned">): Promise<void> {
+    try {
+      const stopped = Promise.resolve()
+        .then(() => service.stop())
+        .then(() => "stopped" as const);
+      if ((await Promise.race([stopped, abandoned])) === "abandoned") {
+        this.#report(
+          `plugin service '${service.name}' had not stopped when the ${this.#stopTimeoutMs} ms shutdown allows ran out; going on without it`,
+        );
+        // Whatever it does later is still news, not an unhandled rejection.
+        stopped.catch(() => undefined);
+      }
+    } catch (error) {
+      this.#report(
+        `plugin service '${service.name}' did not stop cleanly: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 }

@@ -4,13 +4,14 @@
  * The rules worth proving are the ones a reader would notice broken: an item
  * lands where its time falls among the top-level comments, never between a
  * reply and what it answers; a comment made in the same second as an item
- * comes first; and nothing is lost when a time does not parse.
+ * comes first; and nothing is lost when a time does not parse. And of the
+ * gathering, that one plugin's broken slot costs only its own items.
  */
 
 import assert from "node:assert/strict";
-import { describe, it } from "vitest";
+import { afterEach, describe, it, vi } from "vitest";
 import { buildCommentTree } from "~/utils/comments";
-import { interleave, type TimelineEntry } from "~/utils/timeline";
+import { gatherTimelineItems, interleave, type TimelineEntry } from "~/utils/timeline";
 import type { CommentFieldsFragment } from "~~/src/generated/gql/graphql";
 
 function comment(
@@ -87,5 +88,61 @@ describe("interleave", () => {
       "c:c3",
       "i:odd",
     ]);
+  });
+});
+
+describe("gatherTimelineItems", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A slot that places what `items` returns, named for the source it tags. */
+  const slot = (name: string, items: (ext: Record<string, unknown>) => unknown) => ({
+    name,
+    items,
+  });
+  const gather = (slots: ReturnType<typeof slot>[], ext: Record<string, unknown> = {}) =>
+    gatherTimelineItems(slots, ext, (each, index) => `${each.name}#${index}`).map(
+      (entry) => `${entry.source}:${entry.key}@${entry.at}`,
+    );
+
+  it("tags each slot's items with their slot, in slot order, reading the entity's ext", () => {
+    const polls = slot("polls", (ext) =>
+      ((ext.poll as string[] | undefined) ?? []).map((key) => ({
+        key,
+        at: "2026-10-04T10:00:00Z",
+      })),
+    );
+    const notes = slot("notes", () => [{ key: "n", at: "2026-10-04T09:00:00Z" }]);
+    assert.deepEqual(gather([polls, notes], { poll: ["p1", "p2"] }), [
+      "polls#0:p1@2026-10-04T10:00:00Z",
+      "polls#0:p2@2026-10-04T10:00:00Z",
+      "notes#1:n@2026-10-04T09:00:00Z",
+    ]);
+  });
+
+  it("leaves out a slot that throws, and says so once however often it is asked", () => {
+    const said = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const broken = slot("broken", () => {
+      throw new Error("no ext for me");
+    });
+    const fine = slot("fine", () => [{ key: "f", at: "2026-10-04T09:00:00Z" }]);
+    assert.deepEqual(gather([broken, fine]), ["fine#1:f@2026-10-04T09:00:00Z"]);
+    assert.deepEqual(gather([broken, fine]), ["fine#1:f@2026-10-04T09:00:00Z"]);
+    assert.equal(said.mock.calls.length, 1);
+  });
+
+  it("places only what is a key and a time, from a slot that returns anything else", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const sloppy = slot("sloppy", () => [
+      { key: "ok", at: "2026-10-04T09:00:00Z" },
+      { key: "dated", at: 1_728_000_000 },
+      { key: 7, at: "2026-10-04T09:00:00Z" },
+      null,
+      "text",
+    ]);
+    const odd = slot("odd", () => ({ key: "not-a-list", at: "2026-10-04T09:00:00Z" }));
+    const nothing = slot("nothing", () => undefined);
+    assert.deepEqual(gather([sloppy, odd, nothing]), ["sloppy#0:ok@2026-10-04T09:00:00Z"]);
   });
 });

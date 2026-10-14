@@ -4,7 +4,8 @@
  */
 
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
@@ -16,6 +17,7 @@ import {
 } from "@navbook/server/test-helpers";
 import { eventually, markerWith, PLUGIN, SETTINGS, startBridged } from "./helpers/bridge.ts";
 import {
+  BOT,
   ELSEWHERE,
   FORUM,
   GUILD,
@@ -1540,6 +1542,432 @@ describe("what the review found", () => {
       assert.deepEqual(read.viewer.discord.map((link) => link.userId).sort(), [ALICE, BOB]);
     } finally {
       await bridged.stop();
+    }
+  });
+});
+
+describe("what the release review found", () => {
+  const CAROL_USER = { id: "333333333333333333", username: "carol", global_name: "Carol" };
+  const LINK = `mutation L($code: String!) {
+    linkDiscord(code: $code) { link { userId } commit { committed } } }`;
+
+  it("acts for nobody from Discord where the server admits people by a claim, unless told to", async () => {
+    const settings = { ...SETTINGS, people: { [ALICE]: "alice@example.com" } };
+    const fixture = makeFixture({ marker: markerWith(settings) });
+    const stub = await startStubDiscord();
+    const policy = { requireClaims: ["groups=navbook"] };
+    try {
+      const guarded = await startBridged({ stub, settings, harness: { fixture, policy } });
+      let id = "";
+      try {
+        await guarded.connected();
+        const { harness } = guarded;
+        assert.match(
+          harness.stderr(),
+          /linked Discord accounts act for nobody: this server admits people by --require-claim, .*NAV_SERVER_DISCORD_TRUST_LINKS=true/,
+        );
+        const member = await harness.token({
+          name: "M",
+          email: "m@example.com",
+          claims: { groups: ["navbook"] },
+        });
+        id = await openIssue(harness, "Guarded", {}, member);
+        await eventually(
+          () => stub.threadsOf(TEXT).length === 1,
+          () => harness.stderr(),
+        );
+        // Alice may have left the group: nothing tells the bridge, so it acts for her in nothing.
+        assert.match(await answer(stub, slash(stub, ALICE_USER, "close", { id })), /sign-in/);
+        assert.match(await answer(stub, slash(stub, ALICE_USER, "show", { id })), /sign-in/);
+        assert.match(await answer(stub, slash(stub, ALICE_USER, "whoami")), /linked to alice@/);
+        assert.equal(
+          originSubjects(fixture.origin).some((subject) =>
+            subject.startsWith("docs(issue): close"),
+          ),
+          false,
+        );
+      } finally {
+        await guarded.harness.stop();
+      }
+
+      const trusting = await startBridged({
+        stub,
+        settings,
+        harness: { fixture, policy },
+        env: { NAV_SERVER_DISCORD_TRUST_LINKS: "true" },
+      });
+      try {
+        await trusting.connected();
+        assert.match(
+          trusting.harness.stderr(),
+          /linked Discord accounts act without --require-claim, .*as NAV_SERVER_DISCORD_TRUST_LINKS allows/,
+        );
+        assert.equal(
+          await answer(stub, slash(stub, ALICE_USER, "close", { id })),
+          `Closed #${id}.`,
+        );
+      } finally {
+        await trusting.harness.stop();
+      }
+    } finally {
+      fixture.cleanup();
+      await stub.close();
+    }
+  });
+
+  it("links no address the settings cannot hold, and starts with a link that does not read", async () => {
+    const bridged = await startBridged();
+    const { stub, harness } = bridged;
+    try {
+      await bridged.connected();
+      const offered = await answer(stub, slash(stub, ALICE_USER, "link"));
+      const code = /code=([A-Z0-9]{8})/.exec(offered)?.[1] as string;
+      const root = await harness.token({ name: "Root", email: "root@localhost" });
+      const refused = await harness.gql(LINK, { code }, root);
+      assert.equal(refused.errors[0]?.extensions?.code, "INVALID_INPUT");
+      assert.match(refused.errors[0]?.message ?? "", /"root@localhost" is not an address/);
+      assert.equal(
+        originSubjects(harness.fixture.origin).some((subject) =>
+          subject.startsWith("docs(discord): link"),
+        ),
+        false,
+      );
+      // The code is not spent on a refusal.
+      const alice = await harness.token({ name: "Alice", email: "alice@example.com" });
+      ok(await harness.gql(LINK, { code }, alice));
+    } finally {
+      await bridged.stop();
+    }
+
+    const broken = await startBridged({
+      settings: { ...SETTINGS, people: { [ALICE]: "root@localhost", [BOB]: "bob@example.com" } },
+    });
+    try {
+      await broken.connected();
+      assert.match(
+        broken.harness.stderr(),
+        /links in navbook\.json ignored: people\.111111111111111111: "root@localhost" is not an email address/,
+      );
+      assert.match(
+        await answer(broken.stub, slash(broken.stub, ALICE_USER, "whoami")),
+        /not linked/,
+      );
+      assert.equal(
+        await answer(broken.stub, slash(broken.stub, BOB_USER, "whoami")),
+        "Your Discord account acts as bob@example.com.",
+      );
+    } finally {
+      await broken.stop();
+    }
+  });
+
+  it("finds again only threads the bot made, in the guild it serves", async () => {
+    const stub = await startStubDiscord();
+    const settings = {
+      ...SETTINGS,
+      issues: [
+        { channel: TEXT, on: ["open"] },
+        { channel: ELSEWHERE, on: ["open"] },
+      ],
+    };
+    const fixture = makeFixture({ marker: markerWith(settings) });
+    try {
+      fixture.peer.fileIssue("Secret plans", "Do not leak.", "sec11111");
+      fixture.peer.fileIssue("Other plans", "Nor this.", "sec22222");
+      assert.equal(fixture.peer.git(["push", "--quiet", "origin", "main"]).code, 0);
+      // Named as the bridge names them; one in another guild's channel, one
+      // in the served channel but made by somebody else.
+      const foreign = "500000000000000001";
+      stub.channels.set(foreign, {
+        id: foreign,
+        type: 11,
+        guild_id: "100000000000000099",
+        parent_id: ELSEWHERE,
+        owner_id: BOT,
+        name: "#sec11111 bait",
+        thread_metadata: {
+          archived: true,
+          locked: false,
+          archive_timestamp: "2026-01-01T00:00:00Z",
+        },
+      });
+      const squatted = "500000000000000002";
+      stub.channels.set(squatted, {
+        id: squatted,
+        type: 11,
+        guild_id: GUILD,
+        parent_id: TEXT,
+        owner_id: "444444444444444444",
+        name: "#sec22222 bait",
+        thread_metadata: { archived: false, locked: false },
+      });
+      const bridged = await startBridged({
+        stub,
+        settings,
+        harness: { fixture },
+        env: { NAV_SERVER_DISCORD_GUILD: GUILD },
+      });
+      try {
+        const { harness } = bridged;
+        assert.doesNotMatch(harness.stderr(), /found \d+ threads/);
+        await comment(harness, "ISSUE", "sec11111", "Launch codes: 0000.");
+        await comment(harness, "ISSUE", "sec22222", "The vault's combination.");
+        // A thread the bridge makes now is one made after it told those two.
+        const id = await openIssue(harness, "After the comments");
+        await eventually(
+          () => stub.threadsOf(TEXT).some((each) => each.name?.startsWith(`#${id} `)),
+          () => harness.stderr(),
+        );
+        assert.deepEqual(said(stub, foreign), []);
+        assert.deepEqual(said(stub, squatted), []);
+      } finally {
+        await bridged.stop();
+      }
+    } finally {
+      fixture.cleanup();
+      await stub.close();
+    }
+  });
+
+  it("shows records, and completes their ids, only to a linked account", async () => {
+    const settings = {
+      ...SETTINGS,
+      issues: [{ channel: TEXT, on: ["assign"] }],
+      people: { [ALICE]: "alice@example.com" },
+    };
+    const bridged = await startBridged({ settings });
+    const { stub, harness } = bridged;
+    const complete = (user: typeof ALICE_USER) =>
+      stub.interact({
+        type: 4,
+        member: { user },
+        data: {
+          type: 1,
+          name: "nav",
+          options: [
+            { type: 1, name: "show", options: [{ type: 3, name: "id", value: "", focused: true }] },
+          ],
+        },
+      });
+    try {
+      await bridged.connected();
+      const id = await openIssue(harness, "Embargoed", { body: "Secret exploit details." });
+      // Alice, linked, is offered it once the bridge's view holds it.
+      let offered = "";
+      for (let tries = 0; tries < 50 && !offered.includes("Embargoed"); tries++) {
+        if (tries > 0) await new Promise((resolve) => setTimeout(resolve, 100));
+        const [choices] = await stub.answers(complete(ALICE_USER).id);
+        offered = JSON.stringify(choices?.data);
+      }
+      assert.match(offered, /Embargoed/);
+      const [carols] = await stub.answers(complete(CAROL_USER).id);
+      assert.deepEqual(carols?.data, { choices: [] });
+      assert.match(await answer(stub, slash(stub, CAROL_USER, "show", { id })), /not linked/);
+      assert.equal(
+        stub.responses.some((response) => JSON.stringify(response.data).includes("Secret exploit")),
+        false,
+      );
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("tells a change made again: closed, reopened, closed", async () => {
+    const bridged = await startBridged();
+    const { stub, harness } = bridged;
+    try {
+      const id = await openIssue(harness, "Flappy");
+      await eventually(
+        () => stub.threadsOf(TEXT).length === 1,
+        () => harness.stderr(),
+      );
+      const thread = threadOf(stub, TEXT, id);
+      await closeIssue(harness, id, "fixed");
+      await eventually(
+        () => said(stub, thread).length === 1,
+        () => harness.stderr(),
+      );
+      await reopenIssue(harness, id);
+      await eventually(
+        () => said(stub, thread).length === 2,
+        () => harness.stderr(),
+      );
+      await closeIssue(harness, id, "fixed");
+      await eventually(
+        () => said(stub, thread).length === 3,
+        () => harness.stderr(),
+      );
+      assert.deepEqual(said(stub, thread), [
+        "🔒 Closed as fixed.",
+        "🔓 Reopened.",
+        "🔒 Closed as fixed.",
+      ]);
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("passes nothing over while Discord refuses the bot's token", async () => {
+    const bridged = await startBridged();
+    const { stub, harness } = bridged;
+    try {
+      const id = await openIssue(harness, "Token reset");
+      await eventually(
+        () => stub.threadsOf(TEXT).length === 1,
+        () => harness.stderr(),
+      );
+      const thread = threadOf(stub, TEXT, id);
+      stub.fail("POST", new RegExp(`^/channels/${thread}/messages$`), 401, {
+        body: { message: "401: Unauthorized", code: 0 },
+      });
+      await comment(harness, "ISSUE", id, "Said while the token was refused.");
+      await eventually(
+        () => /Discord refused the bot's token/.test(harness.stderr()),
+        () => harness.stderr(),
+      );
+      // Told on the backoff, once the token is accepted again.
+      await eventually(
+        () => said(stub, thread).length === 1,
+        () => harness.stderr(),
+        20_000,
+      );
+      assert.match(said(stub, thread)[0] ?? "", /Said while the token was refused/);
+      assert.doesNotMatch(harness.stderr(), /passed over/);
+    } finally {
+      await bridged.stop();
+    }
+  });
+});
+
+describe("what the second review found", () => {
+  const CAROL_USER = { id: "333333333333333333", username: "carol", global_name: "Carol" };
+
+  it("tells an account it may not act nothing of records, and lets it unlink itself", async () => {
+    const settings = { ...SETTINGS, people: { [ALICE]: "alice@example.com" } };
+    const bridged = await startBridged({
+      settings,
+      harness: { policy: { requireClaims: ["groups=navbook"] } },
+    });
+    const { stub, harness } = bridged;
+    try {
+      await bridged.connected();
+      const member = await harness.token({
+        name: "M",
+        email: "m@example.com",
+        claims: { groups: ["navbook"] },
+      });
+      const id = await openIssue(harness, "Guarded", {}, member);
+      // Neither says what the record is, nor whether an id names one.
+      const review = { verdict: "approve", body: "Fine.", id };
+      assert.match(await answer(stub, slash(stub, CAROL_USER, "review", review)), /not linked/);
+      assert.match(await answer(stub, slash(stub, ALICE_USER, "review", review)), /sign-in/);
+      const nothing = { body: "Hello?", id: "zzzz" };
+      assert.match(await answer(stub, slash(stub, CAROL_USER, "comment", nothing)), /not linked/);
+      assert.match(
+        await answer(stub, slash(stub, ALICE_USER, "thread", { id: "zzzz" })),
+        /sign-in/,
+      );
+
+      assert.equal(
+        await answer(stub, slash(stub, ALICE_USER, "unlink")),
+        "Unlinked: your Discord account no longer acts as alice@example.com.",
+      );
+      assert.ok(
+        originSubjects(harness.fixture.origin).includes("docs(discord): unlink alice@example.com"),
+      );
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("does not take a thread somebody else named for a post whose answer was lost", async () => {
+    const bridged = await startBridged();
+    const { stub, harness } = bridged;
+    try {
+      // Refused without being made, so the post the bridge asked for is not there.
+      stub.fail("POST", new RegExp(`^/channels/${FORUM}/threads$`), 502);
+      const { peer } = harness.fixture;
+      peer.filePr("Squatted", "Lost answer.", "pr666666", "squatted");
+      assert.equal(peer.git(["push", "--quiet", "origin", "squatted"]).code, 0);
+      await eventually(
+        () => /could not tell the thread of #pr666666/.test(harness.stderr()),
+        () => harness.stderr(),
+      );
+      const squatter = "500000000000000003";
+      stub.channels.set(squatter, {
+        id: squatter,
+        type: 11,
+        guild_id: GUILD,
+        parent_id: FORUM,
+        owner_id: "444444444444444444",
+        name: "#pr666666 squatter",
+        thread_metadata: { archived: false, locked: false },
+      });
+      const deadline = Date.now() + 20_000;
+      let thread = await bridgedThread(harness, "pr666666");
+      while (thread === null) {
+        if (Date.now() > deadline) assert.fail(`never threaded:\n${harness.stderr()}`);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        thread = await bridgedThread(harness, "pr666666");
+      }
+      assert.notEqual(thread, squatter);
+      assert.equal(stub.channels.get(thread)?.owner_id, BOT);
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("knows what a state file from before rounds told", async () => {
+    const stub = await startStubDiscord();
+    const fixture = makeFixture({ marker: markerWith(SETTINGS) });
+    const path = join(fixture.server.dir, ".git", "navbook", "discord.json");
+    const state = () => JSON.parse(readFileSync(path, "utf8"));
+    try {
+      const first = await startBridged({ stub, harness: { fixture } });
+      let id = "";
+      let thread = "";
+      let before: unknown;
+      try {
+        id = await openIssue(first.harness, "Upgraded");
+        await eventually(
+          () => stub.threadsOf(TEXT).length === 1,
+          () => first.harness.stderr(),
+        );
+        thread = threadOf(stub, TEXT, id);
+        await eventually(() => state().seen?.[id] !== undefined && state().rounds?.[id] === 1);
+        before = state().seen[id];
+        await closeIssue(first.harness, id, "fixed");
+        await eventually(
+          () => said(stub, thread).length === 1,
+          () => first.harness.stderr(),
+        );
+      } finally {
+        await first.harness.stop();
+      }
+
+      // As an older bridge would have left it, stopped after telling the
+      // close and before noting it seen: no rounds, and the key of its day.
+      const old = state();
+      const event = { type: "status", from: "open", to: "closed", resolution: "fixed" };
+      const key = createHash("sha1")
+        .update(JSON.stringify([before, event]))
+        .digest("hex")
+        .slice(0, 20);
+      old.seen[id] = before;
+      delete old.rounds;
+      old.told.push(`${id}:${key}`);
+      writeFileSync(path, `${JSON.stringify(old)}\n`);
+
+      const second = await startBridged({ stub, harness: { fixture } });
+      try {
+        // Its first run is done once it says what it follows.
+        assert.deepEqual(said(stub, thread), ["🔒 Closed as fixed."]);
+      } finally {
+        await second.harness.stop();
+      }
+    } finally {
+      fixture.cleanup();
+      await stub.close();
     }
   });
 });

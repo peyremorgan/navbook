@@ -18,13 +18,15 @@
   buttons, and each carries an icon that says which group it belongs to.
 -->
 <script setup lang="ts">
-import type {
-  BuiltinView,
-  InboxKindChoice,
-  InboxSelection,
-  InboxView,
-  RailCounts,
-  RailEntry,
+import {
+  type BuiltinView,
+  chosenIn,
+  type InboxKindChoice,
+  type InboxSelection,
+  type InboxView,
+  ownEntry,
+  type RailCounts,
+  type RailEntry,
 } from "~/utils/inbox";
 
 const props = defineProps<{ counts: RailCounts; selection: InboxSelection }>();
@@ -43,7 +45,7 @@ const VIEW_LOOK: Record<BuiltinView, { label: string; icon: string }> = {
 function viewLook(view: InboxView): { label: string; icon: string } {
   const source = slots.inboxSources().find((entry) => entry.reason === view);
   if (source !== undefined) return { label: source.label, icon: source.icon };
-  return VIEW_LOOK[view as BuiltinView] ?? { label: view, icon: "i-lucide-inbox" };
+  return ownEntry(VIEW_LOOK, view) ?? { label: view, icon: "i-lucide-inbox" };
 }
 
 const KIND_LOOK: Record<InboxKindChoice, { label: string; icon: string }> = {
@@ -77,7 +79,7 @@ function groupChoice(
   group: { key: string; label: string; icon: string },
   entry: RailEntry<string | null>,
 ): Choice {
-  const chosen = props.selection.ext[group.key] ?? null;
+  const chosen = chosenIn(props.selection.ext, group.key);
   return {
     testid: `inbox-${group.key}-${entry.value ?? "any"}`,
     label: entry.value ?? `Any ${group.label.toLowerCase()}`,
@@ -115,7 +117,7 @@ const groups = computed<Group[]>(() => [
   // One group per registered grouping, and only where there is something to
   // choose between: a group holding nothing but "Any" narrows nothing.
   ...slots.inboxGroups().flatMap((group) => {
-    const entries = props.counts.ext[group.key] ?? [];
+    const entries = ownEntry(props.counts.ext, group.key) ?? [];
     if (entries.length <= 1) return [];
     return [
       {

@@ -162,6 +162,21 @@ describe("a plugin's service", () => {
     assert.ok(log.lines().includes("service:stop"), log.lines().join(", "));
   });
 
+  it("can no longer use the clone once it has been stopped", async () => {
+    const log = logFile("late");
+    const harness = await startHarness({ env: probeEnv(log.path, { SRVPROBE_LATE_READ: "1" }) });
+    await harness.stop();
+    const said = `${log.lines().join(", ")}\n${harness.stderr()}`;
+    assert.ok(log.lines().includes("service:stop"), said);
+    // Refused, rather than left running while the process exits under it.
+    assert.deepEqual(
+      log.lines().filter((line) => line.startsWith("late read")),
+      ["late read refused UNAVAILABLE"],
+      said,
+    );
+    log.clear();
+  });
+
   it("is given the configuration its manifest declared", async () => {
     const log = logFile("config");
     const harness = await startHarness({ env: probeEnv(log.path) });

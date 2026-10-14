@@ -61,6 +61,25 @@ export function share(count: number, answered: number): number {
   return answered === 0 ? 0 : Math.round((count / answered) * 100);
 }
 
+/* ----------------------------------------------------------- by question */
+
+/**
+ * An empty record keyed by question ID, with no prototype: `constructor` is a
+ * question ID like any other (`doc/spec.md` §3.1), and must not read as
+ * `Object`'s.
+ */
+export function byQuestion<T>(): Record<string, T> {
+  return Object.create(null) as Record<string, T>;
+}
+
+/** What a record keyed by question ID holds for `id` itself — never what it inherits. */
+export function own<T>(record: Readonly<Record<string, T>>, id: string): T | undefined {
+  return Object.hasOwn(record, id) ? record[id] : undefined;
+}
+
+/** A line break as the format means it (`doc/spec.md` §3.1). */
+const LINE_BREAK = /[\n\r\u0085\u2028\u2029]/;
+
 /* --------------------------------------------------------------- ballot */
 
 /** One question's answer as a form holds it: the picks, and the write-in as typed. */
@@ -69,7 +88,7 @@ export interface AnswerDraft {
   other: string;
 }
 
-/** A ballot being filled in, by question ID. */
+/** A ballot being filled in, by question ID; made by {@link byQuestion}. */
 export type BallotDraft = Record<string, AnswerDraft>;
 
 /** A form for these questions, filled in from `answers` where they still fit. */
@@ -77,15 +96,15 @@ export function draftFrom(
   questions: readonly Question[],
   answers: readonly AnswerLike[] = [],
 ): BallotDraft {
-  const draft: BallotDraft = {};
+  const draft = byQuestion<AnswerDraft>();
+  const given = new Map(answers.map((answer) => [answer.question, answer]));
   for (const question of questions) {
-    const given = answers.find((answer) => answer.question === question.id);
-    const picks = (given?.picks ?? []).filter((pick) =>
-      question.options.some((option) => option.id === pick),
-    );
+    const was = given.get(question.id);
+    const options = new Set(question.options.map((option) => option.id));
+    const picks = (was?.picks ?? []).filter((pick) => options.has(pick));
     draft[question.id] = {
       picks: question.multi ? picks : picks.slice(0, 1),
-      other: question.other ? (given?.other ?? "") : "",
+      other: question.other ? (was?.other ?? "") : "",
     };
   }
   return draft;
@@ -113,7 +132,7 @@ export function draftToInput(
 ): PollAnswerInput[] {
   const out: PollAnswerInput[] = [];
   for (const question of questions) {
-    const answer = draft[question.id];
+    const answer = own(draft, question.id);
     if (answer === undefined) continue;
     const other = question.other ? answer.other.trim() : "";
     if (answer.picks.length === 0 && other === "") continue;
@@ -134,12 +153,12 @@ export function ballotFaults(
   questions: readonly Question[],
   draft: BallotDraft,
 ): Record<string, string> {
-  const faults: Record<string, string> = {};
+  const faults = byQuestion<string>();
   for (const question of questions) {
-    const answer = draft[question.id];
+    const answer = own(draft, question.id);
     if (answer === undefined) continue;
     const other = answer.other.trim();
-    if (/[\r\n]/.test(answer.other)) faults[question.id] = "Write your answer on one line.";
+    if (LINE_BREAK.test(answer.other)) faults[question.id] = "Write your answer on one line.";
     else if (!question.multi && answer.picks.length + (other === "" ? 0 : 1) > 1)
       faults[question.id] = "One answer: an option, or one in your own words.";
   }
@@ -152,7 +171,8 @@ export function ballotFaults(
  * first line's indentation kept. What a form compares with what it was given.
  */
 export function bodyText(text: string): string {
-  return text.replace(/^\s*\n/, "").replace(/\s+$/, "");
+  // `trimEnd`, not `/\s+$/`, which retries from every space of a long run.
+  return text.replace(/^\s*\n/, "").trimEnd();
 }
 
 /** Whether a draft answers the same as the ballot the person already cast. */
@@ -162,25 +182,24 @@ export function sameBallot(
   ballot: readonly AnswerLike[] | null | undefined,
 ): boolean {
   const sent = draftToInput(questions, draft);
-  const cast = ballot ?? [];
-  if (sent.length !== cast.length) return false;
+  const cast = new Map((ballot ?? []).map((entry) => [entry.question, entry]));
+  if (sent.length !== (ballot ?? []).length) return false;
   return sent.every((answer) => {
-    const was = cast.find((entry) => entry.question === answer.question);
-    const picks = answer.picks ?? [];
+    const was = cast.get(answer.question);
+    const picks = new Set(answer.picks ?? []);
     return (
       was !== undefined &&
       (was.other ?? null) === (answer.other ?? null) &&
-      was.picks.length === picks.length &&
-      was.picks.every((pick) => picks.includes(pick))
+      was.picks.length === picks.size &&
+      was.picks.every((pick) => picks.has(pick))
     );
   });
 }
 
 /** An answer in words: the options' labels, and the write-in quoted. */
 export function describeAnswer(question: Question | undefined, answer: AnswerLike): string {
-  const labels = answer.picks.map(
-    (pick) => question?.options.find((option) => option.id === pick)?.label ?? pick,
-  );
+  const label = new Map(question?.options.map((option) => [option.id, option.label]));
+  const labels = answer.picks.map((pick) => label.get(pick) ?? pick);
   if (answer.other) labels.push(`“${answer.other}”`);
   return labels.join(", ");
 }
@@ -193,21 +212,27 @@ export type Decision = AnswerDraft | null;
 /**
  * Where the close dialog starts: what the votes came to, question by question,
  * and nothing for a tie — which only the closer can break, so it must be
- * chosen before closing.
+ * chosen before closing. Both as closing would read the ballots
+ * (`proposed`, `closingTies`), not as the tallies shown beside it do: closing
+ * makes a vote stamped far ahead of the clock late, and may break or make a
+ * tie by it.
  */
-export function closeDefaults(poll: Pick<PollCardFragment, "questions" | "proposed" | "tallies">): {
+export function closeDefaults(
+  poll: Pick<PollCardFragment, "questions" | "proposed" | "closingTies">,
+): {
   decisions: Record<string, Decision>;
   mustChoose: string[];
 } {
-  const decisions: Record<string, Decision> = {};
+  const decisions = byQuestion<Decision>();
   const mustChoose: string[] = [];
+  const proposals = new Map(poll.proposed.map((answer) => [answer.question, answer]));
+  const ties = new Set(poll.closingTies);
   for (const question of poll.questions) {
-    const proposed = poll.proposed.find((answer) => answer.question === question.id);
+    const proposed = proposals.get(question.id);
     decisions[question.id] = proposed
       ? { picks: [...proposed.picks], other: proposed.other ?? "" }
       : null;
-    if (poll.tallies.find((tally) => tally.question === question.id)?.tied)
-      mustChoose.push(question.id);
+    if (ties.has(question.id)) mustChoose.push(question.id);
   }
   return { decisions, mustChoose };
 }
@@ -218,7 +243,7 @@ export function decisionsToInput(
   decisions: Record<string, Decision>,
 ): PollAnswerInput[] {
   return questions.map((question) => {
-    const decision = decisions[question.id] ?? null;
+    const decision = own(decisions, question.id) ?? null;
     const other = decision?.other.trim() ?? "";
     return {
       question: question.id,
@@ -332,7 +357,7 @@ export function wouldRevoke(
         question.options.map((option) => [
           option.id ?? null,
           option.label,
-          (option.description ?? "").replace(/\s+$/, "") || null,
+          (option.description ?? "").trimEnd() || null,
         ]),
       ]),
     );

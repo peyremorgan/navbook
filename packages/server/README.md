@@ -215,10 +215,12 @@ mutation {
 Failures carry a machine-readable `extensions.code`: every
 `WorkspaceErrorCode` from the core library (`NOT_FOUND`, `AMBIGUOUS`,
 `PRECONDITION`, …), plus `UNAUTHENTICATED`, `FORBIDDEN`, `SYNC_CONFLICT`,
-`SYNC_FAILED`, `SYNC_PUSH_REJECTED`, `REPARENT_REQUIRED`, `STALE_CONTENT`, and
-`GIT_ERROR`. A `GIT_ERROR` says only that a git command failed; what git
+`SYNC_FAILED`, `SYNC_PUSH_REJECTED`, `REPARENT_REQUIRED`, `STALE_CONTENT`,
+`GIT_ERROR`, and `UNAVAILABLE`. A `GIT_ERROR` says only that a git command failed; what git
 actually said goes to the server's log, because its stderr can carry the
-remote's URL, server-side paths, and hook output.
+remote's URL, server-side paths, and hook output. Only a plugin's service
+meets `UNAVAILABLE`: it is what the clone answers once shutdown has begun
+releasing it, to a service that was still running past its time to stop.
 
 Some mutations have a shape worth knowing:
 
@@ -270,6 +272,12 @@ Every package the served clone declares in `navbook.json` must be installed
 beside `nav-server`, or the server refuses to start and says which — a browser
 user would otherwise meet an absence with nothing to explain it.
 `NAVBOOK_PLUGIN_PATH` loads one that is being developed without declaring it.
+Installed by hand rather than by the image, a plugin goes in with
+`npm install --legacy-peer-deps @navbook/server @navbook/plugin-<name>`: a first-party
+plugin's web half declares Vue and Apollo as optional peers, and npm's resolver
+otherwise refuses them over a Vue 2 one of those peers pulls in. The flag also
+stops npm checking the plugin's `@navbook/core` range, so check it yourself
+(`npm ls @navbook/core`), as the image does.
 A plugin's own settings come from `NAV_SERVER_<SHORT>_*` variables, and a
 required one that is missing is refused at startup like the server's own.
 

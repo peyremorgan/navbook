@@ -183,6 +183,10 @@
           "description": "the one Discord server the bridge may serve; settings naming another are refused"
         },
         {
+          "env": "NAV_SERVER_DISCORD_TRUST_LINKS",
+          "description": "true: linked accounts act although the server requires claims or a verified address, which Discord cannot show"
+        },
+        {
           "env": "NAV_SERVER_DISCORD_API_URL",
           "description": "Discord's API, when it is not https://discord.com/api/v10"
         }

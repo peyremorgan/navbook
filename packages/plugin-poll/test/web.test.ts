@@ -16,6 +16,7 @@ import {
   draftFrom,
   draftToInput,
   draftToQuestions,
+  own,
   questionsFault,
   questionsToDraft,
   readPollExt,
@@ -27,6 +28,9 @@ import {
 import type { PollCardFragment } from "../web/src/generated/gql/graphql.ts";
 
 type Questions = PollCardFragment["questions"];
+
+/** A record keyed by question ID, which has no prototype, as a plain object to compare. */
+const plain = <T>(record: Record<string, T>): Record<string, T> => ({ ...record });
 
 const QUESTIONS: Questions = [
   {
@@ -102,11 +106,11 @@ describe("a ballot being filled in", () => {
       { question: "limits", picks: ["size", "count"], other: "ignored" },
       { question: "removed", picks: ["x"] },
     ]);
-    assert.deepEqual(draft, {
+    assert.deepEqual(plain(draft), {
       backend: { picks: ["s3"], other: "MinIO" },
       limits: { picks: ["size", "count"], other: "" },
     });
-    assert.deepEqual(draftFrom(QUESTIONS), {
+    assert.deepEqual(plain(draftFrom(QUESTIONS)), {
       backend: { picks: [], other: "" },
       limits: { picks: [], other: "" },
     });
@@ -121,10 +125,12 @@ describe("a ballot being filled in", () => {
       },
     ];
     assert.deepEqual(
-      carryOver(changed, {
-        backend: { picks: [], other: "MinIO" },
-        limits: { picks: ["size", "count"], other: "" },
-      }),
+      plain(
+        carryOver(changed, {
+          backend: { picks: [], other: "MinIO" },
+          limits: { picks: ["size", "count"], other: "" },
+        }),
+      ),
       { backend: { picks: [], other: "" }, limits: { picks: ["count"], other: "" } },
     );
   });
@@ -142,15 +148,22 @@ describe("a ballot being filled in", () => {
 
   it("says what the API would refuse, beside the question", () => {
     assert.deepEqual(
-      ballotFaults(QUESTIONS, {
-        backend: { picks: ["s3"], other: "also this" },
-        limits: { picks: ["size", "count"], other: "" },
-      }),
+      plain(
+        ballotFaults(QUESTIONS, {
+          backend: { picks: ["s3"], other: "also this" },
+          limits: { picks: ["size", "count"], other: "" },
+        }),
+      ),
       { backend: "One answer: an option, or one in your own words." },
     );
-    assert.deepEqual(ballotFaults(QUESTIONS, { backend: { picks: [], other: "two\nlines" } }), {
-      backend: "Write your answer on one line.",
-    });
+    // A line break is any of the format's, not only the ASCII two (`doc/spec.md` §3.1).
+    for (const lineBreak of ["\n", "\r", "\u0085", "\u2028", "\u2029"]) {
+      assert.deepEqual(
+        plain(ballotFaults(QUESTIONS, { backend: { picks: [], other: `two${lineBreak}lines` } })),
+        { backend: "Write your answer on one line." },
+        JSON.stringify(lineBreak),
+      );
+    }
   });
 
   it("compares notes as the server keeps them, indentation of the first line included", () => {
@@ -185,31 +198,59 @@ describe("a ballot being filled in", () => {
   });
 });
 
+describe("a question whose ID an object already has", () => {
+  // `constructor` is a slug, so a question ID (`doc/spec.md` §3.1); on a plain
+  // object it reads as `Object`, which a form then showed as its fault.
+  const asked: Questions = [
+    {
+      id: "constructor",
+      text: "Who builds it?",
+      multi: false,
+      other: false,
+      options: [
+        { id: "us", label: "Us", description: null },
+        { id: "them", label: "Them", description: null },
+      ],
+    },
+  ];
+
+  it("has no fault, no answer and no decision until one is given", () => {
+    const draft = draftFrom(asked);
+    assert.equal(own(ballotFaults(asked, draft), "constructor"), undefined);
+    assert.equal(ballotFaults(asked, draft).constructor, undefined);
+    assert.deepEqual(draftToInput(asked, {}), []);
+    assert.deepEqual(draftToInput(asked, draft), []);
+    assert.deepEqual(decisionsToInput(asked, {}), [
+      { question: "constructor", picks: [], other: null },
+    ]);
+    const { decisions } = closeDefaults({ questions: asked, proposed: [], closingTies: [] });
+    assert.deepEqual(plain(decisions), { constructor: null });
+    assert.equal(own({}, "constructor"), undefined);
+  });
+
+  it("is answered like any other", () => {
+    const draft = draftFrom(asked, [{ question: "constructor", picks: ["us"] }]);
+    assert.deepEqual(own(draft, "constructor"), { picks: ["us"], other: "" });
+    assert.deepEqual(draftToInput(asked, draft), [
+      { question: "constructor", picks: ["us"], other: null },
+    ]);
+    assert.equal(sameBallot(asked, draft, [{ question: "constructor", picks: ["us"] }]), true);
+  });
+});
+
 describe("closing", () => {
-  it("starts from what the votes came to, and leaves a tie to the closer", () => {
+  it("starts from what closing would come to, and leaves its ties to the closer", () => {
+    // As closing would read the ballots, which may not be as the tallies shown
+    // read them: a vote stamped far ahead of the clock is late once closed.
     const { decisions, mustChoose } = closeDefaults({
       questions: QUESTIONS,
       proposed: [{ question: "limits", picks: ["size"], other: null }],
-      tallies: [
-        {
-          question: "backend",
-          answered: 2,
-          tied: true,
-          leaders: ["s3", "disk"],
-          options: [],
-          others: [],
-        },
-        {
-          question: "limits",
-          answered: 1,
-          tied: false,
-          leaders: ["size"],
-          options: [],
-          others: [],
-        },
-      ],
+      closingTies: ["backend"],
     });
-    assert.deepEqual(decisions, { backend: null, limits: { picks: ["size"], other: "" } });
+    assert.deepEqual(plain(decisions), {
+      backend: null,
+      limits: { picks: ["size"], other: "" },
+    });
     assert.deepEqual(mustChoose, ["backend"]);
   });
 

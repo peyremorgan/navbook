@@ -301,6 +301,22 @@ export function syncTimedOut(error: GitTimeoutError, keptLocalCommit: boolean): 
   );
 }
 
+/**
+ * An operation asked for once the server has begun shutting down.
+ *
+ * Nothing a client sends can arrive this late — the port has closed — so it
+ * is a plugin's service that shutdown went on without. Refused, because the
+ * process exits once the clone is released, and an operation running then
+ * would be cut off halfway: a commit without its push, or git's `index.lock`
+ * left behind for the next start to trip over.
+ */
+export function syncClosed(): Error {
+  return apiError(
+    "the server is shutting down and takes no more operations on its clone",
+    "UNAVAILABLE",
+  );
+}
+
 /** The background pull's state while it runs. */
 interface Background {
   timer: NodeJS.Timeout | null;
@@ -329,6 +345,8 @@ export class RepoSync {
   private background: Background | null = null;
   /** How the background pull's latest attempt went; null before its first. */
   private lastRefresh: "ok" | "failed" | null = null;
+  /** Set by {@link close}: every operation asked for from then on is refused. */
+  private shut = false;
 
   constructor(opts: SyncOptions) {
     this.opts = opts;
@@ -362,16 +380,14 @@ export class RepoSync {
   /** Run a read, having brought the clone up to date first. */
   read<T>(body: () => T): Promise<T> {
     const op: Moved = { moved: false };
-    return this.lock
-      .run(async () => {
-        // While the background pull keeps up, the clone is already as fresh as
-        // a read may ask for, and fetching again would only make it wait.
-        if (this.lastRefresh !== "ok") {
-          await this.pull(this.served(), { force: false, keptLocalCommit: false }, op);
-        }
-        return body();
-      })
-      .finally(() => this.changed("pull", op));
+    return this.enter(async () => {
+      // While the background pull keeps up, the clone is already as fresh as
+      // a read may ask for, and fetching again would only make it wait.
+      if (this.lastRefresh !== "ok") {
+        await this.pull(this.served(), { force: false, keptLocalCommit: false }, op);
+      }
+      return body();
+    }).finally(() => this.changed("pull", op));
   }
 
   /**
@@ -495,7 +511,7 @@ export class RepoSync {
    * because the answer must describe the same tree the parent already saw.
    */
   locked<T>(body: () => T): Promise<T> {
-    return this.lock.run(body);
+    return this.enter(body);
   }
 
   /**
@@ -528,9 +544,9 @@ export class RepoSync {
    */
   writeOn<T, S extends WriteRoot>(op: WriteOn<T, S>): Promise<WriteResult<T>> {
     const moved: Moved = { moved: false };
-    return this.lock
-      .run(() => this.writeLocked(op, moved))
-      .finally(() => this.changed("write", moved));
+    return this.enter(() => this.writeLocked(op, moved)).finally(() =>
+      this.changed("write", moved),
+    );
   }
 
   /** {@link writeOn}'s transaction, under the lock, telling `moved` what it fetched or committed. */
@@ -580,12 +596,40 @@ export class RepoSync {
    * is only safe when none is writing the same kind of file.
    */
   exclusive<T>(body: () => Promise<T> | T): Promise<T> {
-    return this.lock.run(() => this.net.run(body));
+    return this.enter(() => this.net.run(body));
+  }
+
+  /**
+   * Take no more operations: from now on each is refused with {@link
+   * syncClosed}, and those already queued still run.
+   *
+   * For shutdown, before {@link drain}. The drain waits for what was queued
+   * when it was asked; an operation queued after it — by a plugin's service
+   * that shutdown went on without — would otherwise still be running when the
+   * process exits. The background pull is {@link stop}'s, not this.
+   */
+  close(): void {
+    this.shut = true;
+  }
+
+  /**
+   * True once {@link close} has been called: shutdown has begun releasing the
+   * clone, and every operation asked for is refused. For a service that would
+   * rather not ask.
+   */
+  get closed(): boolean {
+    return this.shut;
   }
 
   /** Wait for in-flight work to finish, so shutdown never cuts one in half. */
   drain(): Promise<void> {
     return this.lock.drain();
+  }
+
+  /** Queue `body` on the clone, unless {@link close} said to take no more. */
+  private enter<T>(body: () => Promise<T> | T): Promise<T> {
+    if (this.shut) return Promise.reject(syncClosed());
+    return this.lock.run(body);
   }
 
   /**

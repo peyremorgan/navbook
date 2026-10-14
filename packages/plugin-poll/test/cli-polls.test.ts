@@ -310,7 +310,9 @@ describe("nav poll edit, close and reopen", () => {
       ).code,
       0,
     );
-    const tied = repo.nav(["poll", "close", poll]);
+    // After both votes: at the fixture's pinned instant they would be hours
+    // ahead of the clock, and a close would make them late rather than tied.
+    const tied = repo.nav(["poll", "close", poll], { NAV_NOW: "2026-08-01T12:10:00Z" });
     assert.equal(tied.code, 1);
     assert.match(tied.stderr, /has a tie only you can break/);
     assert.match(tied.stderr, /'backend' is tied between s3, disk/);
@@ -362,7 +364,9 @@ describe("nav poll edit, close and reopen", () => {
   });
 
   it("leaves a clean doctor behind", () => {
-    const doctor = repo.nav(["doctor"]);
+    // Run when the suite's last act was, not at the fixture's pinned instant
+    // before any of it: a vote stamped hours after the clock is X-poll-2's.
+    const doctor = repo.nav(["doctor"], { NAV_NOW: "2026-08-01T13:00:00Z" });
     assert.equal(doctor.code, 0, doctor.stdout + doctor.stderr);
     assert.doesNotMatch(doctor.stdout, /X-poll/);
   });

@@ -10,7 +10,13 @@
 
 import type { DiscordRest } from "./discord/rest.ts";
 import { DiscordError } from "./discord/rest.ts";
-import { type Channel, ChannelType, type Message, type MessageBody } from "./discord/types.ts";
+import {
+  type Channel,
+  ChannelType,
+  type Message,
+  type MessageBody,
+  type User,
+} from "./discord/types.ts";
 import { idOfThreadName } from "./render.ts";
 import type { ThreadRef } from "./state.ts";
 
@@ -44,6 +50,11 @@ function refused(error: unknown): boolean {
   return error instanceof DiscordError && error.status < 500 && error.status !== 429;
 }
 
+/** A refusal of the bot's token itself: revoked or reset, and nothing works until it is replaced. */
+export function isUnauthorized(error: unknown): boolean {
+  return error instanceof DiscordError && error.status === 401;
+}
+
 function isUnknownMessage(error: unknown): boolean {
   return error instanceof DiscordError && error.code === 10008;
 }
@@ -56,6 +67,8 @@ function isArchived(error: unknown): boolean {
 export class Threads {
   private readonly rest: DiscordRest;
   private readonly channels = new Map<string, { channel: Channel; at: number }>();
+  /** The bot's own user id, once asked: whose threads are the bridge's. */
+  private me: string | null = null;
   /** How many changes were sent to Discord: a run that sent none has nothing new to save. */
   writes = 0;
 
@@ -70,6 +83,16 @@ export class Threads {
     const channel = await this.rest.get<Channel>(`/channels/${id}`);
     this.channels.set(id, { channel, at: Date.now() });
     return channel;
+  }
+
+  /**
+   * The bot's own user id. A thread is the bridge's only if the bot made it:
+   * a name is anybody's to give, and a thread named `#<id> …` by somebody
+   * else is not one to post a record's comments in.
+   */
+  private async self(): Promise<string> {
+    this.me ??= (await this.rest.get<User>("/users/@me")).id;
+    return this.me;
   }
 
   /**
@@ -130,14 +153,16 @@ export class Threads {
 
   /**
    * The thread a request to {@link open} made for record `id` in `parent`
-   * when its answer was lost, if it made one: the active thread there whose
-   * name begins with the id. Null when there is none.
+   * when its answer was lost, if it made one: the active thread there that
+   * the bot made and whose name begins with the id. Null when there is none.
    */
   async made(guild: string, parent: string, id: string): Promise<ThreadRef | null> {
     const forum = (await this.channel(parent)).type === ChannelType.GuildForum;
+    const self = await this.self();
     const active = await this.rest.get<{ threads: Channel[] }>(`/guilds/${guild}/threads/active`);
     const thread = active.threads.find(
-      (each) => each.parent_id === parent && idOfThreadName(each.name) === id,
+      (each) =>
+        each.parent_id === parent && each.owner_id === self && idOfThreadName(each.name) === id,
     );
     return thread === undefined
       ? null
@@ -199,29 +224,34 @@ export class Threads {
   }
 
   /**
-   * Every thread in `parents` the bridge named, by the record it is about —
+   * Every thread in `parents` the bridge made, by the record it is about —
    * active ones from the guild's list, archived ones page by page — for when
-   * the bridge's state was lost and its threads must be found again.
+   * the bridge's state was lost and its threads must be found again. Only
+   * channels in `guild` are looked in, and only threads the bot made are
+   * taken, whatever their names say.
    */
   async find(guild: string, named: readonly string[]): Promise<Map<string, ThreadRef>> {
     const found = new Map<string, ThreadRef>();
     const forums = new Set<string>();
-    // A channel that cannot be read holds no thread the bridge can use; what
-    // is wrong with it is said when the bridge connects (`checkChannels`).
+    const self = await this.self();
+    // A channel that cannot be read, or is in another guild, holds no thread
+    // the bridge can use; what is wrong with it is said when the bridge
+    // connects (`checkChannels`).
     const parents: string[] = [];
     for (const parent of named) {
       try {
-        if ((await this.channel(parent)).type === ChannelType.GuildForum) forums.add(parent);
+        const channel = await this.channel(parent);
+        if (channel.guild_id !== guild) continue;
+        if (channel.type === ChannelType.GuildForum) forums.add(parent);
         parents.push(parent);
       } catch (error) {
-        if (!(error instanceof DiscordError) || error.status >= 500 || error.status === 429) {
-          throw error;
-        }
+        if (!refused(error) || isUnauthorized(error)) throw error;
       }
     }
     const take = (thread: Channel): void => {
       const id = idOfThreadName(thread.name);
       if (id === null || thread.parent_id == null || !parents.includes(thread.parent_id)) return;
+      if (thread.owner_id !== self) return;
       if (found.has(id)) return;
       const held = ref(
         thread.id,

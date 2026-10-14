@@ -27,7 +27,7 @@
 <script setup lang="ts">
 import type { ReorderRow } from "~/composables/useInboxReorder";
 import { statusColor, statusLabel } from "~/utils/entities";
-import type { BuiltinReason, InboxItem, InboxReason } from "~/utils/inbox";
+import { type BuiltinReason, type InboxItem, type InboxReason, ownEntry } from "~/utils/inbox";
 import { displayPerson } from "~/utils/people";
 
 const props = defineProps<{
@@ -56,7 +56,7 @@ const REASONS: Record<BuiltinReason, { label: string; icon: string }> = {
 function reasonLook(reason: InboxReason): { label: string; icon: string } {
   const source = slots.inboxSources().find((entry) => entry.reason === reason);
   if (source !== undefined) return { label: source.badge, icon: source.icon };
-  return REASONS[reason as BuiltinReason] ?? { label: reason, icon: "i-lucide-inbox" };
+  return ownEntry(REASONS, reason) ?? { label: reason, icon: "i-lucide-inbox" };
 }
 
 /** Written out, because a class built from a value is one Tailwind never sees. */

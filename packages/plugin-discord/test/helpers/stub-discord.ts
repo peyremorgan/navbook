@@ -276,6 +276,7 @@ export async function startStubDiscord(
 
   const routes: [string, RegExp, (match: RegExpExecArray, body: unknown) => [number, unknown]][] = [
     ["GET", /^\/gateway\/bot$/, () => [200, { url: stub.url.replace(/^http/, "ws") }]],
+    ["GET", /^\/users\/@me$/, () => [200, { id: BOT, username: "navbook", bot: true }]],
     [
       "GET",
       /^\/channels\/(\d+)$/,
@@ -335,6 +336,7 @@ export async function startStubDiscord(
           type: 11,
           guild_id: GUILD,
           parent_id: parent.id,
+          owner_id: BOT,
           name: request.name,
           applied_tags: request.applied_tags ?? [],
           thread_metadata: { archived: false, locked: false },
@@ -362,6 +364,7 @@ export async function startStubDiscord(
           type: 11,
           guild_id: GUILD,
           parent_id: parent.id,
+          owner_id: BOT,
           name: (body as { name: string }).name,
           thread_metadata: { archived: false, locked: false },
         };

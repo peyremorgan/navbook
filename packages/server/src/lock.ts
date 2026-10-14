@@ -49,8 +49,16 @@ export class Mutex {
     return result;
   }
 
-  /** Resolves when the queue is empty, so shutdown never cuts an operation in half. */
+  /**
+   * Resolves when the queue is empty, so shutdown never cuts an operation in
+   * half — including one queued while the drain was waiting, which the tail
+   * it began with does not cover.
+   */
   async drain(): Promise<void> {
-    await this.tail;
+    let tail: Promise<unknown>;
+    do {
+      tail = this.tail;
+      await tail;
+    } while (tail !== this.tail);
   }
 }
