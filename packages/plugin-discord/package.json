@@ -1,6 +1,6 @@
 {
   "name": "@navbook/plugin-discord",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "A Discord bridge for the tracker: a thread per pull request and per issue you choose, updates and mentions in it, and commands that comment, review, assign and close as the person who typed them",
   "keywords": [
     "navbook-plugin",
@@ -66,7 +66,7 @@
     "codegen:check": "graphql-codegen --config codegen.ts && git diff --exit-code -- web/src/generated"
   },
   "peerDependencies": {
-    "@navbook/core": "^0.6.1",
+    "@navbook/core": "^0.7.0",
     "@apollo/client": "^3.14.1",
     "@vue/apollo-composable": "^4.2.2",
     "graphql": "^16.14.2",
