@@ -5,6 +5,7 @@ created: 2026-10-14T00:02:42Z
 assignee: Claude <noreply@anthropic.com>
 labels: [bug]
 feature: server
+resolution: fixed
 ---
 
 `packages/server/test/unit/maintenance.test.ts` ("Maintenance against git" → "packs what it finds, in the foreground, whatever git would otherwise do") fails on git 2.56.0. It fails alone and in full runs, on `dev` as of `b73bde6c`:
