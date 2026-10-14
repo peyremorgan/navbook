@@ -212,22 +212,27 @@ export type Decision = AnswerDraft | null;
 /**
  * Where the close dialog starts: what the votes came to, question by question,
  * and nothing for a tie — which only the closer can break, so it must be
- * chosen before closing.
+ * chosen before closing. Both as closing would read the ballots
+ * (`proposed`, `closingTies`), not as the tallies shown beside it do: closing
+ * makes a vote stamped far ahead of the clock late, and may break or make a
+ * tie by it.
  */
-export function closeDefaults(poll: Pick<PollCardFragment, "questions" | "proposed" | "tallies">): {
+export function closeDefaults(
+  poll: Pick<PollCardFragment, "questions" | "proposed" | "closingTies">,
+): {
   decisions: Record<string, Decision>;
   mustChoose: string[];
 } {
   const decisions = byQuestion<Decision>();
   const mustChoose: string[] = [];
   const proposals = new Map(poll.proposed.map((answer) => [answer.question, answer]));
-  const tallies = new Map(poll.tallies.map((tally) => [tally.question, tally]));
+  const ties = new Set(poll.closingTies);
   for (const question of poll.questions) {
     const proposed = proposals.get(question.id);
     decisions[question.id] = proposed
       ? { picks: [...proposed.picks], other: proposed.other ?? "" }
       : null;
-    if (tallies.get(question.id)?.tied) mustChoose.push(question.id);
+    if (ties.has(question.id)) mustChoose.push(question.id);
   }
   return { decisions, mustChoose };
 }

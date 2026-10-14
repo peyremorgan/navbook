@@ -209,7 +209,11 @@ decision-note: |
   ballot it withdrew. It does not wait for a vote stamped more than five
   minutes ahead of its own clock: only a wrong clock or a hand edit writes one
   (X-poll-2, §8), and waiting for it would close the poll in 2099 because one
-  file says so. That vote is then late, like any vote cast after the close.
+  file says so. That vote is then late, like any vote cast after the close —
+  and so is every later vote of its voter, which §4 stamps after it.
+- What such a tool proposes (§6.3), and the ties it leaves to the closer, are
+  those of the ballots the close reads: the poll's as they would be read with
+  `closed` set to the instant it writes, without the votes that makes late.
 
 **Reopening** removes all four keys. The poll is open again; the decision it
 had is in the history. A vote cast while it was closed — which no tool writes,
@@ -256,9 +260,10 @@ A vote is never edited. Voting again writes a new file; the old one stays, and
 is what the history of somebody's opinion is made of. A file name records the
 second, so a tool writing a vote stamps it at least a second after the same
 voter's latest valid vote in that poll, whatever its clock says: one person's
-votes then sort in the order they were cast. A vote stamped more than five
-minutes ahead of the tool's clock is the exception, and is not one it stamps
-after (§3.2).
+votes then sort in the order they were cast. That holds however far ahead of
+the clock their latest vote is — stamped before it, a new vote would sort
+before it and change nothing. Closing does not wait for a vote stamped that
+far ahead (§3.2), which X-poll-2 points out (§8) so it can be renamed.
 
 ### 4.1 Answers
 

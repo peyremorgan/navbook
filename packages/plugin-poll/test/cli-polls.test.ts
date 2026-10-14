@@ -310,7 +310,9 @@ describe("nav poll edit, close and reopen", () => {
       ).code,
       0,
     );
-    const tied = repo.nav(["poll", "close", poll]);
+    // After both votes: at the fixture's pinned instant they would be hours
+    // ahead of the clock, and a close would make them late rather than tied.
+    const tied = repo.nav(["poll", "close", poll], { NAV_NOW: "2026-08-01T12:10:00Z" });
     assert.equal(tied.code, 1);
     assert.match(tied.stderr, /has a tie only you can break/);
     assert.match(tied.stderr, /'backend' is tied between s3, disk/);

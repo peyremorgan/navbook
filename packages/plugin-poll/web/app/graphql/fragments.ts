@@ -63,6 +63,7 @@ export const POLL_CARD = graphql(`
       picks
       other
     }
+    closingTies
     tallies {
       question
       answered

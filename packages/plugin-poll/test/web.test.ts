@@ -223,7 +223,7 @@ describe("a question whose ID an object already has", () => {
     assert.deepEqual(decisionsToInput(asked, {}), [
       { question: "constructor", picks: [], other: null },
     ]);
-    const { decisions } = closeDefaults({ questions: asked, proposed: [], tallies: [] });
+    const { decisions } = closeDefaults({ questions: asked, proposed: [], closingTies: [] });
     assert.deepEqual(plain(decisions), { constructor: null });
     assert.equal(own({}, "constructor"), undefined);
   });
@@ -239,28 +239,13 @@ describe("a question whose ID an object already has", () => {
 });
 
 describe("closing", () => {
-  it("starts from what the votes came to, and leaves a tie to the closer", () => {
+  it("starts from what closing would come to, and leaves its ties to the closer", () => {
+    // As closing would read the ballots, which may not be as the tallies shown
+    // read them: a vote stamped far ahead of the clock is late once closed.
     const { decisions, mustChoose } = closeDefaults({
       questions: QUESTIONS,
       proposed: [{ question: "limits", picks: ["size"], other: null }],
-      tallies: [
-        {
-          question: "backend",
-          answered: 2,
-          tied: true,
-          leaders: ["s3", "disk"],
-          options: [],
-          others: [],
-        },
-        {
-          question: "limits",
-          answered: 1,
-          tied: false,
-          leaders: ["size"],
-          options: [],
-          others: [],
-        },
-      ],
+      closingTies: ["backend"],
     });
     assert.deepEqual(plain(decisions), {
       backend: null,

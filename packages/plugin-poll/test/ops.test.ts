@@ -15,6 +15,8 @@ import { type Answer, newVoteFile, type PollDraft } from "../src/core/files.ts";
 import {
   castVote,
   closePoll,
+  closingOf,
+  closingTies,
   editPoll,
   findPoll,
   loadTree,
@@ -424,7 +426,59 @@ describe("voting", () => {
     });
   });
 
-  it("neither stamps after nor closes at a vote stamped far ahead of the clock", () => {
+  it("stamps a voter's new vote after their last, however far ahead of the clock that one is", () => {
+    inRepo((act, dir, issueId) => {
+      const id = opened(act, issueId);
+      // Bob's laptop runs ten minutes fast: at 10:02 it stamped his vote 10:12.
+      const poll = pollOf(act(2), id);
+      writeFileSync(
+        join(dir, ".navbook", poll.dirPath, "2026-10-04T101200Z-bbbb2222.md"),
+        newVoteFile({
+          author: "bob@example.com",
+          fingerprint: poll.fingerprint,
+          answers: answers({ q1: { picks: ["s3-compatible"] } }),
+          note: "",
+        }),
+      );
+      git(dir, "add", ".navbook");
+      git(dir, "commit", "-qm", "docs: a vote from a fast clock");
+
+      // At 10:03 he changes his mind through a tool with a true clock: the new
+      // vote must sort after the old one, or it would change nothing.
+      const bob = act(3, "bob@example.com");
+      const recast = castVote(
+        core,
+        bob,
+        pollOf(bob, id),
+        { answers: answers({ q1: { picks: ["local-disk"] } }) },
+        { commit: true },
+      );
+      assert.match(recast.path, /2026-10-04T101201Z-/);
+      const states = (p: PollRecord) => p.ballots.map((b) => `${b.vote.cast} ${b.state}`);
+      assert.deepEqual(states(pollOf(bob, id)), [
+        "2026-10-04T10:12:00Z superseded",
+        "2026-10-04T10:12:01Z counted",
+      ]);
+      assert.deepEqual(Object.fromEntries(pollOf(bob, id).proposed), {
+        q1: { picks: ["local-disk"], other: null },
+      });
+
+      // Closed once both stamps have passed, his last word is what counts.
+      const ws = act(20);
+      closePoll(core, ws, pollOf(ws, id), {}, { commit: true });
+      const closed = pollOf(ws, id);
+      assert.equal(closed.closed, "2026-10-04T10:20:00Z");
+      assert.deepEqual(states(closed), [
+        "2026-10-04T10:12:00Z superseded",
+        "2026-10-04T10:12:01Z counted",
+      ]);
+      assert.deepEqual(Object.fromEntries(closed.outcome ?? []), {
+        q1: { picks: ["local-disk"], other: null },
+      });
+    });
+  });
+
+  it("closes no later than a fast clock explains, and proposes what the ballots it reads come to", () => {
     inRepo((act, dir, issueId) => {
       const id = opened(act, issueId);
       const bob = act(2, "bob@example.com");
@@ -435,48 +489,52 @@ describe("voting", () => {
         { answers: answers({ q1: { picks: ["s3-compatible"] } }) },
         { commit: true },
       );
-      // By hand: a vote of Bob's from 2099; one of Dan's four minutes ahead of
-      // the clock, which a fast clock explains; and one of Eve's, which has
-      // faults and counts for nothing.
+      // By hand: a vote of Frank's from 2099, which ties q1 while the poll is
+      // open; one of Dan's four minutes ahead of the clock, which a fast clock
+      // explains; and one of Eve's, which has faults and counts for nothing.
       const poll = pollOf(bob, id);
-      const ballot = (author: string, picks: string[]) =>
+      const ballot = (author: string, entries: Record<string, Partial<Answer>>) =>
         newVoteFile({
           author,
           fingerprint: poll.fingerprint,
-          answers: answers({ q1: { picks } }),
+          answers: answers(entries),
           note: "",
         });
       const files: Record<string, string> = {
-        "2099-01-01T000000Z-zzzz9999.md": ballot("bob@example.com", ["s3-compatible"]),
-        "2026-10-04T100700Z-dddd4444.md": ballot("dan@example.com", ["local-disk"]),
-        "2026-10-04T100730Z-eeee5555.md": ballot("eve@example.com", ["nope"]),
+        "2099-01-01T000000Z-ffff6666.md": ballot("frank@example.com", {
+          q1: { picks: ["local-disk"] },
+        }),
+        "2026-10-04T100700Z-dddd4444.md": ballot("dan@example.com", {
+          limits: { picks: ["size"] },
+        }),
+        "2026-10-04T100730Z-eeee5555.md": ballot("eve@example.com", { q1: { picks: ["nope"] } }),
       };
       for (const [name, content] of Object.entries(files))
         writeFileSync(join(dir, ".navbook", poll.dirPath, name), content);
       git(dir, "add", ".navbook");
       git(dir, "commit", "-qm", "docs: votes by hand");
 
-      const again = act(3, "bob@example.com");
-      const recast = castVote(
-        core,
-        again,
-        pollOf(again, id),
-        { answers: answers({ q1: { picks: ["local-disk"] } }) },
-        { commit: true },
-      );
-      assert.match(recast.path, /2026-10-04T100300Z-/);
-
       const ws = act(3);
-      closePoll(core, ws, pollOf(ws, id), { decide: new Map([["q1", null]]) }, { commit: true });
+      const open = pollOf(ws, id);
+      assert.equal(open.tallies[0]?.tied, true, "tied while Frank's vote counts");
+      const closing = closingOf(open, ws);
+      assert.equal(closing.at.toISOString(), "2026-10-04T10:07:00.000Z");
+      assert.deepEqual(closingTies(closing), []);
+      assert.deepEqual(Object.fromEntries(closing.proposed), {
+        q1: { picks: ["s3-compatible"], other: null },
+        limits: { picks: ["size"], other: null },
+      });
+
+      const { decision } = closePoll(core, ws, open, {}, { commit: true });
+      assert.deepEqual(Object.fromEntries(decision), Object.fromEntries(closing.proposed));
       const closed = pollOf(ws, id);
       assert.equal(closed.closed, "2026-10-04T10:07:00Z");
       assert.deepEqual(
         closed.ballots.map((b) => `${b.vote.author} ${b.vote.cast} ${b.state}`),
         [
-          "bob@example.com 2026-10-04T10:02:00Z superseded",
-          "bob@example.com 2026-10-04T10:03:00Z counted",
+          "bob@example.com 2026-10-04T10:02:00Z counted",
           "dan@example.com 2026-10-04T10:07:00Z counted",
-          "bob@example.com 2099-01-01T00:00:00Z late",
+          "frank@example.com 2099-01-01T00:00:00Z late",
         ],
       );
     });
@@ -543,6 +601,43 @@ describe("limits (§4.2)", () => {
     results: null,
     deadline: null,
     questions,
+  });
+
+  it("counts a draft's questions and options before reading one of them", () => {
+    inRepo((act, _dir, issueId) => {
+      // Options that count how often they are read: filling in IDs, or
+      // writing the file to check it, would read every one.
+      let reads = 0;
+      const wide = new Proxy(options(20000), {
+        get(target, key, receiver) {
+          if (typeof key === "string" && /^\d+$/.test(key)) reads++;
+          return Reflect.get(target, key, receiver);
+        },
+      });
+      const ws = act(1);
+      assert.match(
+        refusal(() =>
+          openPoll(core, ws, issueOf(ws, issueId), draft([{ text: "Wide?", options: wide }]), {}),
+        ),
+        /the number of options must be at most 100, got 20000/,
+      );
+      assert.equal(reads, 0, "refused unread");
+      const id = opened(act, issueId);
+      const edit = act(2);
+      assert.match(
+        refusal(() =>
+          editPoll(
+            core,
+            edit,
+            pollOf(edit, id),
+            { questions: [{ text: "Wide?", options: wide }] },
+            {},
+          ),
+        ),
+        /the number of options must be at most 100, got 20000/,
+      );
+      assert.equal(reads, 0, "refused unread");
+    });
   });
 
   it("refuses to open or edit a poll over them, before making anything of it", () => {
