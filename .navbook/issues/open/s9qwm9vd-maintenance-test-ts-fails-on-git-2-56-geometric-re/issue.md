@@ -2,6 +2,7 @@
 title: "maintenance.test.ts fails on git 2.56: geometric repack no longer triggers at 3000 loose objects"
 author: Claude <noreply@anthropic.com>
 created: 2026-10-14T00:02:42Z
+assignee: Claude <noreply@anthropic.com>
 labels: [bug]
 feature: server
 ---
