@@ -366,8 +366,8 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   | `auto` | a fast-forward where the branches allow one, else a merge commit | inside the merge commit, or the follow-up where it fast-forwarded |
   | `merge` | a merge commit, always | inside the merge commit |
   | `merge-ff` | a fast-forward, only | the follow-up commit |
-  | `rebase` | the source replayed onto the target, then a fast-forward | the follow-up commit |
-  | `rebase-no-ff` | the same replay, then a merge commit | inside the merge commit |
+  | `rebase` | the source replayed onto the target, flattened, then a fast-forward | the follow-up commit |
+  | `rebase-no-ff` | the source replayed onto the target with its merges kept, then a merge commit | inside the merge commit |
   | `squash` | the whole of the source's change as one commit | inside the squash commit |
 
   The `merged:` block is always written in a commit of its own, because the SHA
@@ -381,6 +381,14 @@ The eight shared verbs, plus `update`, `request`, `review`, and `merge`:
   refuses to merge, and what it refuses is a shape of history rather than a
   review state, which is why it is not the gate [02 §2.7](02-data-model.md)
   forbids.
+
+  The two replays differ in what they do with a merge commit inside the
+  source. `rebase` asks for a linear history, so it flattens one into the
+  commits it brought in. `rebase-no-ff` asks for a merge commit at the end,
+  which is asking for the shape of the history to be kept, so it MUST recreate
+  the source's own merge commits on the replayed line (`git rebase
+  --rebase-merges`): a branch that integrated subtasks by merge commits lands
+  with those merges intact, the one it lands with on top.
 
   A replay that conflicts stops exactly as a merge that conflicts does, and is
   finished the same way (`--continue`, below). A replay a tool cannot start —

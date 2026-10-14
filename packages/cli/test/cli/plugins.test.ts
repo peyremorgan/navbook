@@ -299,9 +299,12 @@ describe("a plugin writing to a pull request", () => {
     const tmp = join(repo.home, "tmp");
     try {
       mkdirSync(tmp, { recursive: true });
+      // `os.tmpdir()` reads TMPDIR on POSIX but TEMP, then TMP, on Windows.
       const result = repo.nav(["probe", "note", "prbe1111", "Noted.", "-y", "--async"], {
         ...withProbe(repo),
         TMPDIR: tmp,
+        TEMP: tmp,
+        TMP: tmp,
       });
       assert.equal(result.code, 1, result.stderr);
       assert.match(result.stderr, /must be synchronous, and this one returned a promise/);

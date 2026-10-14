@@ -1047,7 +1047,8 @@ function landReplay(ws: WsCtx, plan: MergePlan): Recorded {
   const what = plan.rewriteSource
     ? plan.sourceRef
     : (resolveSha(cwd, plan.sourceRef) ?? plan.sourceRef);
-  const replay = replayOnto(cwd, onto, base, what);
+  // A replay that lands as a merge commit keeps the source's own merges too.
+  const replay = replayOnto(cwd, onto, base, what, plan.strategy === "replay-merge-commit");
   if (replay.tip === null) {
     // A rebase leaves HEAD on what it is replaying, not on the target. Worth
     // saying, because it is the one conflict a person resolves somewhere other

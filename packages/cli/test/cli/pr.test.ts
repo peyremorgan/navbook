@@ -223,7 +223,11 @@ describe("nav pr open --source", () => {
       repo.git(["worktree", "add", "--quiet", tree, "feat/work"]);
       const opened = repo.nav([...OPEN, "-y", "--commit"], { NAV_IDS: "src22222" });
       assert.equal(opened.code, 0, opened.stderr);
-      assert.match(opened.stderr, new RegExp(`written in ${tree.replaceAll("/", "\\/")}`));
+      // As git names the worktree: resolved, and with `/` (see the
+      // `pr comment` case below).
+      const recorded = realpathSync.native(tree).replaceAll("\\", "/");
+      const said = opened.stderr.replaceAll("\\", "/");
+      assert.match(said, new RegExp(`written in ${recorded.replace(/[.*+?^$()|[\]\\]/g, "\\$&")}`));
       assert.match(repo.git(["-C", tree, "log", "-1", "--format=%s"]).stdout, /open #src22222/);
     } finally {
       repo.git(["worktree", "remove", "--force", tree]);
