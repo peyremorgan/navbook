@@ -40,7 +40,9 @@ export class DiscordError extends Error {
   readonly code: number | null;
 
   constructor(method: Method, route: string, status: number, code: number | null, detail: string) {
-    super(`Discord answered ${status} to ${method} ${route}${detail === "" ? "" : `: ${detail}`}`);
+    super(
+      `Discord answered ${status} to ${method} ${redacted(route)}${detail === "" ? "" : `: ${detail}`}`,
+    );
     this.name = "DiscordError";
     this.status = status;
     this.code = code;
@@ -216,6 +218,16 @@ export function routeKey(method: Method, route: string): string {
     .map((segment, index) => (index > 2 && /^\d{5,}$/.test(segment) ? ":id" : segment))
     .join("/");
   return `${method} ${generic}`;
+}
+
+/**
+ * A route as a message may show it: an interaction's token, which answers
+ * for the interaction to whoever holds it for fifteen minutes, left out.
+ */
+export function redacted(route: string): string {
+  return route
+    .replace(/^(\/interactions\/[^/]+\/)[^/?]+/, "$1:token")
+    .replace(/^(\/webhooks\/[^/]+\/)[^/?]+/, "$1:token");
 }
 
 function isInteractionRoute(route: string): boolean {

@@ -16,7 +16,7 @@
  */
 
 import type { DiscordRest } from "./rest.ts";
-import { sleep } from "./rest.ts";
+import { DiscordError, sleep } from "./rest.ts";
 import {
   API_VERSION,
   type GatewayBot,
@@ -109,6 +109,14 @@ export class DiscordGateway {
         });
       } catch (error) {
         if (this.stopper.signal.aborted) return;
+        // Asked for where to connect, Discord refused the token: what 4004
+        // would say once connected, and as final.
+        if (error instanceof DiscordError && error.status === 401) {
+          this.opts.report(
+            "Discord refused the token (401 to GET /gateway/bot); the bridge will not reconnect",
+          );
+          return;
+        }
         this.opts.report(
           `could not reach Discord's gateway: ${error instanceof Error ? error.message : String(error)}`,
         );

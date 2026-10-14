@@ -56,6 +56,30 @@ describe("the REST client", () => {
     });
   });
 
+  it("leaves an interaction's token out of the refusals it names", async () => {
+    stub.fail("POST", /^\/interactions\//, 400, { body: { message: "bad", code: 0 } });
+    await assert.rejects(
+      rest().post("/interactions/123456789012345678/secret-tok/callback", { type: 5 }),
+      (error: Error) => {
+        assert.doesNotMatch(error.message, /secret-tok/);
+        assert.match(
+          error.message,
+          /POST \/interactions\/123456789012345678\/:token\/callback: bad/,
+        );
+        return true;
+      },
+    );
+    stub.fail("PATCH", /^\/webhooks\//, 400, { body: { message: "bad", code: 0 } });
+    await assert.rejects(
+      rest().patch("/webhooks/123456789012345678/secret-tok/messages/@original", { content: "x" }),
+      (error: Error) => {
+        assert.doesNotMatch(error.message, /secret-tok/);
+        assert.match(error.message, /\/webhooks\/123456789012345678\/:token\/messages\/@original/);
+        return true;
+      },
+    );
+  });
+
   it("waits out a 429 and sends the request again", async () => {
     stub.fail("GET", new RegExp(`^/channels/${TEXT}$`), 429, {
       body: { message: "You are being rate limited.", retry_after: 0.15, global: false },
@@ -277,6 +301,26 @@ describe("the gateway client", () => {
       await sleep(150);
       assert.equal(stub.identifies, identified);
       assert.equal(client.ready, false);
+    } finally {
+      await client.stop();
+    }
+  });
+
+  it("does not reconnect when asking where to connect is refused the token", async () => {
+    const reported: string[] = [];
+    stub.fail("GET", /^\/gateway\/bot$/, 401, {
+      body: { message: "401: Unauthorized", code: 0 },
+      times: 1_000,
+    });
+    const asked = () => stub.requests.filter((request) => request.path === "/gateway/bot").length;
+    const before = asked();
+    const client = gateway([], reported);
+    client.start();
+    try {
+      await waitFor(() => reported.some((line) => /refused the token \(401/.test(line)));
+      await sleep(150);
+      assert.equal(asked() - before, 1);
+      assert.equal(reported.length, 1);
     } finally {
       await client.stop();
     }

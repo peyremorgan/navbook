@@ -44,13 +44,18 @@ export interface BridgeState {
    * it is looked for before another is asked for.
    */
   opening: Record<string, { channel: string; at: number }>;
+  /**
+   * How many times each record's changes were told, by record: part of each
+   * message's key, so a change made a second time is told a second time.
+   */
+  rounds: Record<string, number>;
 }
 
 /** How many keys are kept: enough to cover any run tried again. */
 export const TOLD_LIMIT = 5_000;
 
 export function emptyState(): BridgeState {
-  return { version: 1, seen: null, threads: {}, told: [], opening: {} };
+  return { version: 1, seen: null, threads: {}, told: [], opening: {}, rounds: {} };
 }
 
 export class StateFile {
@@ -83,6 +88,10 @@ export class StateFile {
         opening:
           parsed.opening && typeof parsed.opening === "object" && !Array.isArray(parsed.opening)
             ? parsed.opening
+            : {},
+        rounds:
+          parsed.rounds && typeof parsed.rounds === "object" && !Array.isArray(parsed.rounds)
+            ? parsed.rounds
             : {},
       };
     } catch (error) {
