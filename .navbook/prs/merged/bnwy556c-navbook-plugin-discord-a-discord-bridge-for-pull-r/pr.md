@@ -9,6 +9,9 @@ revisions:
   - head: 9dae9ebaf7073685573007db711a775991689e88
     base: 9f82073e48e1466079fcfaa1b25059fbdfad802e
     date: 2026-10-14T01:35:38Z
+merged:
+  date: 2026-10-14T01:36:26Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 The second of two pull requests for #xsd6wgvi, and the one that closes it: `@navbook/plugin-discord`, a bridge between the tracker and a Discord server. It runs as a service inside `nav-server`, on the seams #vm2byi9o added.
