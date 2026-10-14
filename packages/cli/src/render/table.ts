@@ -90,7 +90,8 @@ function shrinkToFit(columns: readonly Column[], widths: number[], available: nu
 }
 
 function joinCells(cells: readonly string[]): string {
-  return cells.join(GAP).replace(/\s+$/, "");
+  // Not `/\s+$/`, which is quadratic in a long run of spaces inside a cell.
+  return cells.join(GAP).trimEnd();
 }
 
 /** Pad `text` with spaces to `width` terminal columns. */

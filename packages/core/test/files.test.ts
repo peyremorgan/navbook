@@ -580,4 +580,19 @@ describe("normalizeBody", () => {
   it("preserves interior blank lines", () => {
     assert.equal(normalizeBody("one\n\ntwo\n"), "one\n\ntwo\n");
   });
+
+  it("takes linear time over a long run of spaces inside the body", () => {
+    // Anchored at the end, `/\s+$/` retried from every space: 200k of them
+    // before a last word took over thirty seconds, which an API write could
+    // ask for. A test's own timeout cannot stop a synchronous call, so the
+    // time is measured; the bound is a hundred times what it takes.
+    const body = `${" ".repeat(200_000)}x`;
+    const started = performance.now();
+    assert.equal(normalizeBody(body), `${body}\n`);
+    assert.ok(performance.now() - started < 2_000, "normalizeBody is not linear");
+  });
+
+  it("trims the whitespace JavaScript does, NBSP and U+FEFF included", () => {
+    assert.equal(normalizeBody("text\u00a0\ufeff\u2028\u3000"), "text\n");
+  });
 });
