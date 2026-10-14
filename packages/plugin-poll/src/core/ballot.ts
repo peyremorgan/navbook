@@ -110,7 +110,10 @@ export function counted<V extends CastVote>(readings: readonly BallotReading<V>[
   return readings.filter((reading) => reading.state === "counted").map((reading) => reading.vote);
 }
 
-/** Each question's tally over the ballots that count (§6.3). */
+/**
+ * Each question's tally over the ballots that count (§6.3): linear in the
+ * picks, each found by its option's ID rather than searched for.
+ */
 export function tally(
   questions: readonly PollQuestion[],
   ballots: readonly CastVote[],
@@ -119,6 +122,7 @@ export function tally(
     const options = question.options.map(
       (option): OptionTally => ({ option: option.id, count: 0, voters: [] }),
     );
+    const byId = new Map(options.map((entry) => [entry.option, entry]));
     const others: { text: string; voter: string }[] = [];
     let answered = 0;
     for (const ballot of ballots) {
@@ -126,14 +130,14 @@ export function tally(
       if (answer === undefined) continue;
       answered++;
       for (const pick of answer.picks) {
-        const entry = options.find((option) => option.option === pick);
+        const entry = byId.get(pick);
         if (entry === undefined) continue;
         entry.count++;
         entry.voters.push(ballot.author);
       }
       if (answer.other !== null) others.push({ text: answer.other, voter: ballot.author });
     }
-    const top = Math.max(0, ...options.map((option) => option.count));
+    const top = options.reduce((most, option) => Math.max(most, option.count), 0);
     const leaders = top === 0 ? [] : options.filter((o) => o.count === top).map((o) => o.option);
     return {
       question: question.id,
@@ -156,8 +160,9 @@ export function proposedDecision(
   tallies: readonly QuestionTally[],
 ): Answers {
   const decision: Answers = new Map();
+  const byQuestion = new Map(tallies.map((entry) => [entry.question, entry]));
   for (const question of questions) {
-    const entry = tallies.find((candidate) => candidate.question === question.id);
+    const entry = byQuestion.get(question.id);
     if (entry === undefined || entry.leaders.length === 0 || entry.tied) continue;
     decision.set(question.id, { picks: [...entry.leaders], other: null });
   }
@@ -202,8 +207,9 @@ export function prefill(
   for (const question of questions) {
     const was = ballot.vote.answers.get(question.id);
     if (was === undefined) continue;
+    const options = new Set(question.options.map((option) => option.id));
     const answer: Answer = {
-      picks: was.picks.filter((pick) => question.options.some((option) => option.id === pick)),
+      picks: was.picks.filter((pick) => options.has(pick)),
       other: question.other ? was.other : null,
     };
     if (answerFaults(question, answer).length === 0) answers.set(question.id, answer);
@@ -214,9 +220,7 @@ export function prefill(
 /** Whether two answers say the same thing. */
 export function sameAnswer(a: Answer | undefined, b: Answer | undefined): boolean {
   if (a === undefined || b === undefined) return a === b;
-  return (
-    a.other === b.other &&
-    a.picks.length === b.picks.length &&
-    a.picks.every((pick) => b.picks.includes(pick))
-  );
+  if (a.other !== b.other || a.picks.length !== b.picks.length) return false;
+  const picks = new Set(b.picks);
+  return a.picks.every((pick) => picks.has(pick));
 }

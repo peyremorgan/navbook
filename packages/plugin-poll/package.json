@@ -119,7 +119,7 @@
         {
           "id": "X-poll-2",
           "level": "warning",
-          "description": "a vote cast after its poll was closed, which is not counted"
+          "description": "a vote cast after its poll was closed, which is not counted, or stamped more than five minutes ahead of the clock"
         },
         {
           "id": "X-poll-3",

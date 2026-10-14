@@ -19,10 +19,16 @@ import {
 } from "@navbook/core";
 import { prefill } from "../src/core/ballot.ts";
 import {
+  type Answer,
+  answerFaults,
+  answersFaults,
   canonicalJson,
   completeQuestions,
+  descriptionOf,
   fingerprint,
+  LIMITS,
   newVoteFile,
+  type PollQuestion,
   readPoll,
   readVote,
 } from "../src/core/files.ts";
@@ -65,6 +71,25 @@ const checks = (entries: Record<string, string>): string[] =>
   validateRepo(read(entries), { ext })
     .filter((d) => d.check.startsWith("X-poll"))
     .map((d) => `${d.check} ${d.path}: ${d.message}`);
+
+/**
+ * A list that counts how often its entries are read: what a lookup costs,
+ * told without a clock. A search per entry reads it squared.
+ */
+function counting<T>(items: T[]): { list: T[]; reads: () => number } {
+  let reads = 0;
+  const list = new Proxy(items, {
+    get(target, key, receiver) {
+      if (typeof key === "string" && /^\d+$/.test(key)) reads++;
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  return { list, reads: () => reads };
+}
+
+/** `count` options `o1`, `o2`… as YAML flow maps, one per line under `options:`. */
+const optionLines = (count: number): string[] =>
+  Array.from({ length: count }, (_, o) => `      - { id: o${o + 1}, label: Option ${o + 1} }`);
 
 const T1 = "2026-10-04T101500Z";
 const T2 = "2026-10-04T111500Z";
@@ -137,6 +162,34 @@ describe("reading poll/", () => {
       `${ISSUE_DIR}/poll/stray.md: 'poll/' must contain poll directories, not files`,
       `${ISSUE_DIR}/poll/abcdefg1-empty: poll directory is missing its poll.md`,
     ]);
+  });
+
+  it("checks the votes of a directory with no poll to read, and counts none of them", () => {
+    const stray = `${ISSUE_DIR}/poll/abcdefg1-orphan`;
+    const broken = `${ISSUE_DIR}/poll/hjkmnpq2-broken`;
+    const entries = base({
+      [`${stray}/${T1}-aaaa1111.md`]: vote({ fingerprint: "ABC" }),
+      [`${stray}/${T2}-${ISSUE_ID}.md`]: vote(),
+      [`${broken}/poll.md`]: "Not even frontmatter.\n",
+      [`${broken}/${T1}-bbbb2222.md`]: vote({ answers: "answers: [s3]" }),
+      [`${broken}/${T2}-aaaa1111.md`]: vote(),
+    });
+    const found = checks(entries);
+    assert.deepEqual(
+      found.filter((line) => !line.includes(`${broken}/poll.md:`)),
+      [
+        `X-poll-1 ${stray}: poll directory is missing its poll.md`,
+        `X-poll-1 ${stray}/${T1}-aaaa1111.md: 'fingerprint' must be 16 lowercase hexadecimal digits, got "ABC"`,
+        `X-poll-1 ${broken}/${T1}-bbbb2222.md: 'answers' must be a map of answers by question ID`,
+        `X-poll-3 ${stray}/${T2}-${ISSUE_ID}.md: the ID ${ISSUE_ID} is also ${ISSUE_DIR}'s; IDs must be unique across the repository`,
+        `X-poll-3 ${broken}/${T2}-aaaa1111.md: the ID aaaa1111 is also ${stray}/${T1}-aaaa1111.md's; IDs must be unique across the repository`,
+      ],
+    );
+    assert.ok(found.some((line) => line.startsWith(`X-poll-1 ${broken}/poll.md:`)));
+    assert.deepEqual(
+      allPolls(read(entries)).map((p) => p.id),
+      [POLL_ID],
+    );
   });
 
   it("reads the polls of closed and archived issues, and leaves a pull request's poll/ alone", () => {
@@ -252,6 +305,84 @@ describe("poll.md", () => {
     );
   });
 
+  it("reads a null as the key left out, never as the text 'null' (§3.1)", () => {
+    const text = poll({
+      questions: [
+        "questions:",
+        "  - id: ~",
+        "    text: null",
+        "    multi: ~",
+        "    options:",
+        "      - { id: a, label: ~, description: ~ }",
+        "      - { id: b, label: 'null', description: null }",
+      ].join("\n"),
+    });
+    assert.deepEqual(faults(text), [
+      "questions[1]: missing required key 'id'",
+      "questions[1]: 'text' must be a non-empty string",
+      "questions[1].options[1]: 'label' must be a non-empty string",
+    ]);
+    const quoted = poll({
+      questions: [
+        "questions:",
+        "  - id: q",
+        "    text: 'null'",
+        "    multi: ~",
+        "    other: null",
+        "    options:",
+        "      - { id: a, label: 'null', description: ~ }",
+        "      - { id: b, label: '~' }",
+      ].join("\n"),
+    });
+    assert.deepEqual(faults(quoted), []);
+    const [q] = only(base({}, quoted)).questions;
+    assert.deepEqual(
+      [q?.text, q?.multi, q?.other, q?.options.map((o) => [o.label, o.description])],
+      [
+        "null",
+        false,
+        false,
+        [
+          ["null", null],
+          ["~", null],
+        ],
+      ],
+    );
+  });
+
+  it("knows whitespace and line breaks as §3.1 lists them, not as ASCII has them", () => {
+    for (const lineBreak of ["\\r", "\\u0085", "\\u2028", "\\u2029"]) {
+      const text = poll({
+        title: `"Two${lineBreak}lines"`,
+        questions: [
+          "questions:",
+          `  - { id: q, text: "Which${lineBreak}one?", options: [{ id: a, label: "A${lineBreak}B" }, { id: b, label: B }] }`,
+        ].join("\n"),
+      });
+      assert.deepEqual(
+        faults(text),
+        [
+          "'title' must be on one line",
+          "questions[1]: 'text' must be on one line",
+          "questions[1].options[1]: 'label' must be on one line",
+        ],
+        lineBreak,
+      );
+    }
+    // Blank by §3.1's list: a no-break space, a byte-order mark, an ideographic space.
+    const blank = poll({
+      questions: [
+        "questions:",
+        '  - { id: q, text: "\\u00a0\\ufeff\\u3000", options: [{ id: a, label: A }, { id: b, label: B }] }',
+      ].join("\n"),
+    });
+    assert.deepEqual(faults(blank), ["questions[1]: 'text' must be a non-empty string"]);
+    assert.equal(descriptionOf("Cheap.\u00a0\ufeff\u2028\u3000 \n"), "Cheap.");
+    // U+0085 breaks a line but is not whitespace: a description keeps it.
+    assert.equal(descriptionOf("Cheap.\u0085"), "Cheap.\u0085");
+    assert.equal(descriptionOf("\u00a0\u2029\t"), null);
+  });
+
   it("checks results, deadline and the closing keys", () => {
     assert.deepEqual(faults(poll({ raw: "results: secret\ndeadline: 2026-10-10T10:00:00Z" })), [
       "'results' must be hidden or visible, got \"secret\"",
@@ -315,6 +446,15 @@ describe("the fingerprint (§5)", () => {
       "  - { id: limits, text: Which limits do we enforce?, multi: true, other: false, options: [{ id: size, label: Max file size }, { id: count, label: Max files per issue, description: '  ' }] }",
     ].join("\n");
     assert.equal(fingerprintOf(poll({ questions: same })), SPEC_VECTOR);
+  });
+
+  it("is taken of a description without the trailing whitespace §3.1 lists", () => {
+    const padded = QUESTIONS.replace(
+      "          Cheap and durable; the server needs credentials in its environment.",
+      '          "Cheap and durable; the server needs credentials in its environment.\\u00a0\\ufeff\\u2028"',
+    ).replace("description: |", "description:");
+    assert.notEqual(padded, QUESTIONS);
+    assert.equal(fingerprintOf(poll({ questions: padded })), SPEC_VECTOR);
   });
 
   it("sees every change to the questions, and none to the rest", () => {
@@ -450,6 +590,27 @@ describe("votes", () => {
     ]);
   });
 
+  it("takes a 'status' as the unknown key it is in a vote, which only poll.md forbids", () => {
+    const text = vote().replace("---\n", "---\nstatus: open\n");
+    assert.match(text, /^status: open$/m);
+    assert.deepEqual(faultsOf(text), []);
+    const p = only(base({ [votePath(T1, "v7q2w8e4")]: text }));
+    assert.deepEqual(
+      p.ballots.map((b) => b.state),
+      ["counted"],
+    );
+    assert.equal(p.votes[0]?.parsed.fm.status, "open");
+  });
+
+  it("refuses a write-in on more than one line, by any line break", () => {
+    for (const lineBreak of ["\\n", "\\u0085", "\\u2028", "\\u2029"])
+      assert.deepEqual(
+        faultsOf(vote({ answers: answers(`  backend: { picks: [], other: "a${lineBreak}b" }`) })),
+        ["answers.backend: 'other' must be on one line"],
+        lineBreak,
+      );
+  });
+
   it("reads a fingerprint YAML would take for a number as the digits written, and writes it quoted", () => {
     for (const digits of ["1234567890123456", "1234e56789012345"]) {
       assert.deepEqual(faultsOf(vote({ fingerprint: digits })), [], digits);
@@ -489,6 +650,176 @@ describe("votes", () => {
       ),
       ["question 'backend' does not accept an answer in other words"],
     );
+  });
+});
+
+describe("limits (§4.2)", () => {
+  const pollFaults = (text: string): string[] =>
+    only(base({}, text)).problems.map((p) => p.message);
+  const voteFaults = (text: string): string[] =>
+    only(base({ [votePath(T1, "v7q2w8e4")]: text })).votes[0]?.problems.map((p) => p.message) ?? [];
+  const question = (id: string, options: number) =>
+    [`  - id: ${id}`, `    text: Question ${id}?`, "    options:", ...optionLines(options)].join(
+      "\n",
+    );
+
+  it("are what the spec says", () => {
+    assert.deepEqual(
+      { ...LIMITS },
+      {
+        questions: 50,
+        options: 100,
+        answers: 50,
+        picks: 100,
+        title: 200,
+        label: 200,
+        text: 500,
+        other: 500,
+        description: 4000,
+        note: 10000,
+        preamble: 20000,
+      },
+    );
+  });
+
+  it("hold a poll to fifty questions of a hundred options each, refusing more unread", () => {
+    const fifty = Array.from({ length: 50 }, (_, q) => question(`q${q + 1}`, 100));
+    assert.deepEqual(pollFaults(poll({ questions: ["questions:", ...fifty].join("\n") })), []);
+    // One question over: refused as a whole, its entries not read — the
+    // bad ID of the last is not reported.
+    const many = [...fifty, "  - id: Bad ID"];
+    assert.deepEqual(pollFaults(poll({ questions: ["questions:", ...many].join("\n") })), [
+      "the number of questions must be at most 50, got 51",
+    ]);
+    const wide = [
+      "questions:",
+      question("wide", 101),
+      "      - { id: o1, label: 'Repeated, unread' }",
+    ];
+    assert.deepEqual(pollFaults(poll({ questions: wide.join("\n") })), [
+      "questions[1]: the number of options must be at most 100, got 102",
+    ]);
+  });
+
+  it("hold a poll's texts to their lengths, in code points", () => {
+    const at = (title: string, label: string, text = "Which?", description = "") =>
+      pollFaults(
+        poll({
+          title: JSON.stringify(title),
+          questions: [
+            "questions:",
+            "  - id: q",
+            `    text: ${JSON.stringify(text)}`,
+            "    options:",
+            `      - { id: a, label: ${JSON.stringify(label)}${description === "" ? "" : `, description: ${JSON.stringify(description)}`} }`,
+            "      - { id: b, label: B }",
+          ].join("\n"),
+        }),
+      );
+    // An emoji is two UTF-16 units and one code point.
+    assert.deepEqual(at("😀".repeat(200), "x".repeat(200), "y".repeat(500)), []);
+    assert.deepEqual(at("😀".repeat(201), "x".repeat(201), "y".repeat(501)), [
+      "'title' must be at most 200 characters",
+      "questions[1]: 'text' must be at most 500 characters",
+      "questions[1].options[1]: 'label' must be at most 200 characters",
+    ]);
+    // A description is measured as it is read: its trailing whitespace is not in it.
+    assert.deepEqual(at("T", "A", "Q", `${"d".repeat(4000)}\n   \n`), []);
+    assert.deepEqual(at("T", "A", "Q", "d".repeat(4001)), [
+      "questions[1].options[1]: 'description' must be at most 4000 characters",
+    ]);
+    assert.deepEqual(pollFaults(poll({ preamble: `${"p".repeat(20000)}\n\n  ` })), []);
+    assert.deepEqual(pollFaults(poll({ preamble: "p".repeat(20001) })), [
+      "the preamble must be at most 20000 characters",
+    ]);
+    const closed = (note: string) =>
+      pollFaults(
+        poll({ closed: "2026-10-05T10:00:00Z", raw: `decision-note: ${JSON.stringify(note)}` }),
+      );
+    assert.deepEqual(closed("n".repeat(10000)), []);
+    assert.deepEqual(closed("n".repeat(10001)), [
+      "'decision-note' must be at most 10000 characters",
+    ]);
+  });
+
+  it("hold a vote to fifty answers of a hundred picks, refusing more unread", () => {
+    const picks = (count: number) =>
+      Array.from({ length: count }, (_, o) => `o${o + 1}`).join(", ");
+    // A hundred picks are read, and judged against the poll: none is an option.
+    assert.equal(
+      voteFaults(vote({ answers: answers(`  limits: { picks: [${picks(100)}] }`) })).length,
+      100,
+    );
+    // Twenty thousand, every one of them repeated and none of them an option,
+    // are one fault: the list is not read, so neither costs a search per pick.
+    const twice = `${picks(10000)}, ${picks(10000)}`;
+    assert.deepEqual(voteFaults(vote({ answers: answers(`  limits: { picks: [${twice}] }`) })), [
+      "answers.limits: the number of picks must be at most 100, got 20000",
+    ]);
+    // Five hundred questions the poll does not have are one fault, not five
+    // hundred. (Many more would cost YAML's own check that no key repeats.)
+    const questions = Array.from({ length: 500 }, (_, q) => `  q${q}: { picks: [x] }`);
+    assert.deepEqual(voteFaults(vote({ answers: answers(...questions) })), [
+      "the number of answers in 'answers' must be at most 50, got 500",
+    ]);
+    assert.deepEqual(
+      voteFaults(
+        vote({ answers: answers(`  backend: { picks: [], other: "${"w".repeat(501)}" }`) }),
+      ),
+      ["answers.backend: 'other' must be at most 500 characters"],
+    );
+    assert.deepEqual(voteFaults(vote({ note: "n".repeat(10000) })), []);
+    assert.deepEqual(voteFaults(vote({ note: "n".repeat(10001) })), [
+      "the note must be at most 10000 characters",
+    ]);
+  });
+
+  it("read a body's trailing whitespace in one pass, however long a run of it is", {
+    timeout: 20_000,
+  }, () => {
+    // `/\s+$/` retried from each of these spaces: some minutes, not milliseconds.
+    const note = `${" ".repeat(300_000)}x`;
+    assert.deepEqual(voteFaults(vote({ note })), ["the note must be at most 10000 characters"]);
+    assert.equal(descriptionOf(`${"\u00a0".repeat(300_000)}x \n`), `${"\u00a0".repeat(300_000)}x`);
+  });
+
+  it("judge each pick by one lookup, not a search of the options", () => {
+    const options = counting(
+      Array.from({ length: 2000 }, (_, o) => ({ id: `o${o}`, label: `O${o}`, description: null })),
+    );
+    const question: PollQuestion = {
+      id: "q",
+      text: "Q?",
+      multi: true,
+      other: false,
+      options: options.list,
+    };
+    const picks = counting(options.list.map((option) => option.id));
+    const reads = options.reads() + picks.reads();
+    assert.deepEqual(answerFaults(question, { picks: picks.list, other: null }), []);
+    // Each list read about once: a search per pick read the options four
+    // million times, and the picks as many again to find the repeated ones.
+    assert.ok(options.reads() + picks.reads() - reads <= 3 * 2000, "linear in the picks");
+  });
+
+  it("judge each answer by one lookup, not a search of the questions", () => {
+    const questions = counting(
+      Array.from(
+        { length: 2000 },
+        (_, q): PollQuestion => ({
+          id: `q${q}`,
+          text: "Q?",
+          multi: false,
+          other: true,
+          options: [{ id: "a", label: "A", description: null }],
+        }),
+      ),
+    );
+    const given = new Map<string, Answer>(
+      Array.from({ length: 2000 }, (_, q) => [`q${q}`, { picks: ["a"], other: null }]),
+    );
+    assert.deepEqual(answersFaults(questions.list, given), []);
+    assert.ok(questions.reads() <= 2 * 2000, `${questions.reads()} reads of 2000 questions`);
   });
 });
 
@@ -836,6 +1167,27 @@ describe("checks", () => {
     assert.deepEqual(found, [
       `X-poll-2 ${votePath(T3, "cccc3333")}: this vote was cast at 2026-10-04T12:15:00Z, after poll ${POLL_ID} was closed at 2026-10-04T11:15:00Z; it is not counted`,
     ]);
+  });
+
+  it("X-poll-2 warns of a vote stamped further ahead of the clock than a clock runs fast", () => {
+    const was = process.env.NAV_NOW;
+    process.env.NAV_NOW = "2026-10-04T12:00:00Z";
+    try {
+      const found = checks(
+        base({
+          [votePath("2026-10-04T120400Z", "aaaa1111")]: vote(),
+          [votePath("2099-01-01T000000Z", "bbbb2222")]: vote({ author: "c@example.com" }),
+          [votePath("2099-01-01T000000Z", "cccc3333")]: vote({ fingerprint: null }),
+        }),
+      );
+      assert.deepEqual(found, [
+        `X-poll-1 ${votePath("2099-01-01T000000Z", "cccc3333")}: missing required key 'fingerprint'`,
+        `X-poll-2 ${votePath("2099-01-01T000000Z", "bbbb2222")}: this vote is stamped 2099-01-01T00:00:00Z, more than 5 minutes ahead of the clock; a tool closing poll ${POLL_ID} does not wait for it`,
+      ]);
+    } finally {
+      if (was === undefined) delete process.env.NAV_NOW;
+      else process.env.NAV_NOW = was;
+    }
   });
 
   it("X-poll-3 reports a poll or vote ID another file already has", () => {

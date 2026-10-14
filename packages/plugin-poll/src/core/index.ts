@@ -8,7 +8,7 @@
  */
 
 import type { CorePluginHost, Repo } from "@navbook/core";
-import { POLL_DIR, runningCore, SCOPE, useCore } from "./files.ts";
+import { CLOCK_SKEW_MS, POLL_DIR, runningCore, SCOPE, useCore } from "./files.ts";
 import {
   allPolls,
   awaits,
@@ -16,6 +16,7 @@ import {
   type PollReader,
   pollsOf,
   readsIssuePath,
+  strayVotesOf,
 } from "./tree.ts";
 
 /** A diagnostic in the shape a registered check returns. */
@@ -80,7 +81,7 @@ export function activate(host: CorePluginHost): void {
     ],
     doctorChecks: [
       { id: "X-poll-1", level: "error", run: (repo) => layoutAndSchema(repo) },
-      { id: "X-poll-2", level: "warning", run: (repo) => lateVotes(repo) },
+      { id: "X-poll-2", level: "warning", run: (repo) => lateVotes(repo, doctorNow()) },
       { id: "X-poll-3", level: "error", run: (repo) => idCollisions(repo) },
     ],
     commitScopes: [SCOPE],
@@ -106,18 +107,43 @@ function layoutAndSchema(repo: Repo): Found[] {
   return out;
 }
 
-/** X-poll-2: votes cast after their poll was closed, which take no part (§6.1). */
-function lateVotes(repo: Repo): Found[] {
-  return allPolls(repo).flatMap((poll) =>
-    poll.ballots
-      .filter((reading) => reading.state === "late")
-      .map((reading) => ({
-        check: "X-poll-2",
-        level: "warning" as const,
-        path: reading.vote.path,
-        message: `this vote was cast at ${reading.vote.cast}, after poll ${poll.id} was closed at ${poll.closed}; it is not counted`,
-      })),
-  );
+/**
+ * The instant `doctor` runs at: the conformance suite's fixed clock when it
+ * sets one, as every command's is, else the real one. A check is handed the
+ * tree and no context, so it reads the variable the context is made from.
+ */
+function doctorNow(): number {
+  const fixed = process.env[runningCore().NAV_NOW_ENV];
+  const at = fixed ? new Date(fixed).getTime() : Number.NaN;
+  return Number.isNaN(at) ? Date.now() : at;
+}
+
+/**
+ * X-poll-2: votes cast after their poll was closed, which take no part
+ * (§6.1); and votes stamped further ahead of the clock than a clock runs fast,
+ * which a tool closing the poll does not wait for (§3.2).
+ */
+function lateVotes(repo: Repo, now: number): Found[] {
+  return allPolls(repo).flatMap((poll) => {
+    const out: Found[] = [];
+    for (const reading of poll.ballots) {
+      if (reading.state === "late")
+        out.push({
+          check: "X-poll-2",
+          level: "warning",
+          path: reading.vote.path,
+          message: `this vote was cast at ${reading.vote.cast}, after poll ${poll.id} was closed at ${poll.closed}; it is not counted`,
+        });
+      else if (reading.vote.date.getTime() > now + CLOCK_SKEW_MS)
+        out.push({
+          check: "X-poll-2",
+          level: "warning",
+          path: reading.vote.path,
+          message: `this vote is stamped ${reading.vote.cast}, more than ${CLOCK_SKEW_MS / 60_000} minutes ahead of the clock; a tool closing poll ${poll.id} does not wait for it`,
+        });
+    }
+    return out;
+  });
 }
 
 /** X-poll-3: a poll or vote ID that is also another's, an entity's or a comment's. */
@@ -142,6 +168,7 @@ function idCollisions(repo: Repo): Found[] {
     claim(poll.id, poll.dirPath);
     for (const vote of poll.votes) claim(vote.id, vote.path);
   }
+  for (const vote of strayVotesOf(repo)) claim(vote.id, vote.path);
   return out;
 }
 

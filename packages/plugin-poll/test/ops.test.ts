@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import * as core from "@navbook/core";
 import { validateRepo, type WsCtx } from "@navbook/core";
-import type { Answer, PollDraft } from "../src/core/files.ts";
+import { type Answer, newVoteFile, type PollDraft } from "../src/core/files.ts";
 import {
   castVote,
   closePoll,
@@ -99,6 +99,17 @@ const answers = (entries: Record<string, Partial<Answer>>) =>
   new Map(
     Object.entries(entries).map(([q, a]) => [q, { picks: a.picks ?? [], other: a.other ?? null }]),
   );
+/** A refusal's code, message and details, or "not refused". */
+const refusalWithDetails = (run: () => unknown): string[] => {
+  try {
+    run();
+  } catch (error) {
+    if (error instanceof core.WorkspaceError)
+      return [`${error.code}: ${error.message}`, ...error.details];
+    throw error;
+  }
+  return ["not refused"];
+};
 const refusal = (run: () => unknown): string => {
   try {
     run();
@@ -413,6 +424,64 @@ describe("voting", () => {
     });
   });
 
+  it("neither stamps after nor closes at a vote stamped far ahead of the clock", () => {
+    inRepo((act, dir, issueId) => {
+      const id = opened(act, issueId);
+      const bob = act(2, "bob@example.com");
+      castVote(
+        core,
+        bob,
+        pollOf(bob, id),
+        { answers: answers({ q1: { picks: ["s3-compatible"] } }) },
+        { commit: true },
+      );
+      // By hand: a vote of Bob's from 2099; one of Dan's four minutes ahead of
+      // the clock, which a fast clock explains; and one of Eve's, which has
+      // faults and counts for nothing.
+      const poll = pollOf(bob, id);
+      const ballot = (author: string, picks: string[]) =>
+        newVoteFile({
+          author,
+          fingerprint: poll.fingerprint,
+          answers: answers({ q1: { picks } }),
+          note: "",
+        });
+      const files: Record<string, string> = {
+        "2099-01-01T000000Z-zzzz9999.md": ballot("bob@example.com", ["s3-compatible"]),
+        "2026-10-04T100700Z-dddd4444.md": ballot("dan@example.com", ["local-disk"]),
+        "2026-10-04T100730Z-eeee5555.md": ballot("eve@example.com", ["nope"]),
+      };
+      for (const [name, content] of Object.entries(files))
+        writeFileSync(join(dir, ".navbook", poll.dirPath, name), content);
+      git(dir, "add", ".navbook");
+      git(dir, "commit", "-qm", "docs: votes by hand");
+
+      const again = act(3, "bob@example.com");
+      const recast = castVote(
+        core,
+        again,
+        pollOf(again, id),
+        { answers: answers({ q1: { picks: ["local-disk"] } }) },
+        { commit: true },
+      );
+      assert.match(recast.path, /2026-10-04T100300Z-/);
+
+      const ws = act(3);
+      closePoll(core, ws, pollOf(ws, id), { decide: new Map([["q1", null]]) }, { commit: true });
+      const closed = pollOf(ws, id);
+      assert.equal(closed.closed, "2026-10-04T10:07:00Z");
+      assert.deepEqual(
+        closed.ballots.map((b) => `${b.vote.author} ${b.vote.cast} ${b.state}`),
+        [
+          "bob@example.com 2026-10-04T10:02:00Z superseded",
+          "bob@example.com 2026-10-04T10:03:00Z counted",
+          "dan@example.com 2026-10-04T10:07:00Z counted",
+          "bob@example.com 2099-01-01T00:00:00Z late",
+        ],
+      );
+    });
+  });
+
   it("mints IDs no poll or vote holds, those of archived issues included", () => {
     inRepo((act, dir, issueId) => {
       const archived = join(
@@ -460,6 +529,112 @@ describe("voting", () => {
           ),
         ),
         `stale-content: the questions of poll ${id} changed since you opened it`,
+      );
+    });
+  });
+});
+
+describe("limits (§4.2)", () => {
+  const options = (count: number) =>
+    Array.from({ length: count }, (_, o) => ({ label: `Option ${o + 1}` }));
+  const draft = (questions: PollDraft["questions"]): PollDraft => ({
+    title: "Big",
+    preamble: "",
+    results: null,
+    deadline: null,
+    questions,
+  });
+
+  it("refuses to open or edit a poll over them, before making anything of it", () => {
+    inRepo((act, _dir, issueId) => {
+      const ws = act(1);
+      const open = (questions: PollDraft["questions"]) =>
+        refusal(() => openPoll(core, ws, issueOf(ws, issueId), draft(questions), {}));
+      assert.equal(
+        open([{ text: "Wide?", options: options(101) }]),
+        "invalid-input: the poll is not valid: questions[1]: the number of options must be at most 100, got 101",
+      );
+      assert.equal(
+        open(Array.from({ length: 51 }, () => ({ text: "Again?", options: options(2) }))),
+        "invalid-input: the poll is not valid: the number of questions must be at most 50, got 51",
+      );
+      assert.equal(
+        open([{ text: "Long?", options: [{ label: "x".repeat(201) }, { label: "y" }] }]),
+        "invalid-input: the poll is not valid: questions[1].options[1]: 'label' must be at most 200 characters",
+      );
+      assert.equal(
+        refusal(() =>
+          openPoll(
+            core,
+            ws,
+            issueOf(ws, issueId),
+            { ...draft([{ text: "Q?", options: options(2) }]), preamble: "p".repeat(20001) },
+            {},
+          ),
+        ),
+        "invalid-input: the poll is not valid: the preamble must be at most 20000 characters",
+      );
+      const id = opened(act, issueId);
+      const edit = act(2);
+      assert.equal(
+        refusal(() =>
+          editPoll(
+            core,
+            edit,
+            pollOf(edit, id),
+            { questions: [{ text: "Wide?", options: options(1000) }] },
+            {},
+          ),
+        ),
+        "invalid-input: the poll is not valid: questions[1]: the number of options must be at most 100, got 1000",
+      );
+    });
+  });
+
+  it("refuses a ballot or a closing over them, listing a few faults and counting the rest", () => {
+    inRepo((act, _dir, issueId) => {
+      const id = opened(act, issueId);
+      const ws = act(2);
+      const unknown = new Map(
+        Array.from({ length: 20000 }, (_, q): [string, Answer] => [
+          `x${q}`,
+          { picks: ["a"], other: null },
+        ]),
+      );
+      const refused = refusalWithDetails(() =>
+        castVote(core, ws, pollOf(ws, id), { answers: unknown }, {}),
+      );
+      assert.equal(refused[0], "invalid-input: 'x0' is not a question of this poll");
+      assert.equal(refused.length, 22, "the message, twenty details, and a count");
+      assert.equal(refused[20], "'x20' is not a question of this poll");
+      assert.equal(refused[21], "and 19979 more");
+      assert.equal(
+        refusal(() =>
+          castVote(
+            core,
+            ws,
+            pollOf(ws, id),
+            { answers: answers({ q1: { other: "w".repeat(501) } }) },
+            {},
+          ),
+        ),
+        "invalid-input: the answer in other words to question 'q1' must be at most 500 characters",
+      );
+      assert.equal(
+        refusal(() =>
+          castVote(
+            core,
+            ws,
+            pollOf(ws, id),
+            { answers: answers({ q1: { picks: ["local-disk"] } }), note: "n".repeat(10001) },
+            {},
+          ),
+        ),
+        "invalid-input: the note must be at most 10000 characters",
+      );
+      assert.equal(
+        refusal(() => closePoll(core, ws, pollOf(ws, id), { note: "n".repeat(10001) }, {})),
+        "invalid-input: the note must be at most 10000 characters",
       );
     });
   });
