@@ -9,6 +9,9 @@ revisions:
   - head: f73f745cbd1efaafa672efa7d6bf8320cad6eb44
     base: 5ed0ecb6e697b4b1925b8d67ca08fd4dcdff8f32
     date: 2026-10-14T00:55:08Z
+merged:
+  date: 2026-10-14T00:55:27Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 The first of two pull requests for #xsd6wgvi: the seams `nav-server`'s plugin host needs before a chat bridge can live in it as a service (spec 06 §6.2). The second, `@navbook/plugin-discord`, is stacked on this one.
