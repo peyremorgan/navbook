@@ -9,14 +9,14 @@
 -->
 <script setup lang="ts">
 import type { PollCardFragment } from "../../src/generated/gql/graphql";
-import { closeDefaults, type Decision, decisionsToInput } from "../utils/poll";
+import { byQuestion, closeDefaults, type Decision, decisionsToInput, own } from "../utils/poll";
 
 const open = defineModel<boolean>("open", { required: true });
 const props = defineProps<{ poll: PollCardFragment }>();
 const emit = defineEmits<{ closed: []; reload: [] }>();
 
 const mutations = usePollMutations();
-const decisions = ref<Record<string, Decision>>({});
+const decisions = ref<Record<string, Decision>>(byQuestion());
 /** The tied questions, until the closer has said something about each. */
 const pending = ref<string[]>([]);
 /**
@@ -34,7 +34,7 @@ function follow(): void {
   const start = closeDefaults(props.poll);
   for (const question of props.poll.questions) {
     if (!touched.value.has(question.id))
-      decisions.value[question.id] = start.decisions[question.id] ?? null;
+      decisions.value[question.id] = own(start.decisions, question.id) ?? null;
   }
   pending.value = start.mustChoose.filter((id) => !touched.value.has(id));
 }
@@ -44,7 +44,7 @@ watch(
   (value) => {
     if (!value) return;
     touched.value = new Set();
-    decisions.value = {};
+    decisions.value = byQuestion();
     follow();
     note.value = "";
     stale.value = null;
@@ -76,7 +76,7 @@ function choices(question: PollCardFragment["questions"][number]) {
  */
 function chosen(id: string): string | undefined {
   if (pending.value.includes(id)) return undefined;
-  const decision = decisions.value[id] ?? null;
+  const decision = own(decisions.value, id) ?? null;
   return decision === null ? UNDECIDED : decision.picks[0];
 }
 
@@ -91,14 +91,14 @@ function pickOne(id: string, value: string): void {
 }
 
 function pickSeveral(id: string, values: string[]): void {
-  const other = decisions.value[id]?.other ?? "";
+  const other = own(decisions.value, id)?.other ?? "";
   decisions.value[id] =
     values.length === 0 && other.trim() === "" ? null : { picks: values, other };
   decided(id);
 }
 
 function writeIn(id: string, multi: boolean, text: string): void {
-  const picks = multi ? (decisions.value[id]?.picks ?? []) : [];
+  const picks = multi ? (own(decisions.value, id)?.picks ?? []) : [];
   decisions.value[id] = picks.length === 0 && text.trim() === "" ? null : { picks, other: text };
   decided(id);
 }
@@ -168,13 +168,13 @@ async function confirm(): Promise<void> {
           />
           <UCheckboxGroup
             v-else
-            :model-value="decisions[question.id]?.picks ?? []"
+            :model-value="own(decisions, question.id)?.picks ?? []"
             :items="question.options.map((option) => ({ value: option.id, label: option.label }))"
             @update:model-value="(values: string[]) => pickSeveral(question.id, values)"
           />
           <UInput
             v-if="question.other"
-            :model-value="decisions[question.id]?.other ?? ''"
+            :model-value="own(decisions, question.id)?.other ?? ''"
             placeholder="Or decide on something else…"
             class="w-full"
             :data-testid="`poll-decide-other-${question.id}`"
