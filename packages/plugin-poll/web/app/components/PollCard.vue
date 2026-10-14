@@ -19,10 +19,12 @@ import {
   type BallotDraft,
   ballotFaults,
   bodyText,
+  byQuestion,
   carryOver,
   describeAnswer,
   draftFrom,
   draftToInput,
+  own,
   resultsShown,
   sameBallot,
 } from "../utils/poll";
@@ -31,7 +33,7 @@ const props = defineProps<{ poll: PollCardFragment }>();
 const emit = defineEmits<{ reload: [] }>();
 
 const mutations = usePollMutations();
-const draft = ref<BallotDraft>({});
+const draft = ref<BallotDraft>(byQuestion());
 const note = ref("");
 const asked = ref(false);
 const stale = ref<string | null>(null);
@@ -213,12 +215,12 @@ const EMPTY = { picks: [], other: "" };
       <PollQuestionField
         v-for="(entry, index) in props.poll.questions"
         :key="entry.id"
-        :model-value="draft[entry.id] ?? EMPTY"
+        :model-value="own(draft, entry.id) ?? EMPTY"
         @update:model-value="(value) => (draft[entry.id] = value)"
         :question="entry"
         :number="index + 1"
         :disabled="faulty || mutations.busy.value"
-        :fault="faults[entry.id] ?? null"
+        :fault="own(faults, entry.id) ?? null"
       />
       <UFormField label="Why" description="Optional, in Markdown: a note the other voters read.">
         <UTextarea v-model="note" :rows="1" autoresize class="w-full" :disabled="faulty" data-testid="poll-note" />

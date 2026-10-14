@@ -193,6 +193,16 @@ describe("polls over the API", () => {
       "NOT_FOUND",
       /zzzz9999/,
     );
+    // The limits of §4.2: twenty thousand options are refused before any of
+    // them is made into a file.
+    const wide = Array.from({ length: 20000 }, (_, o) => ({ label: `Option ${o}` }));
+    refused(
+      await h.gql(OPEN, {
+        input: { issue, title: "X", questions: [{ text: "Q?", options: wide }] },
+      }),
+      "INVALID_INPUT",
+      /the number of options must be at most 100, got 20000/,
+    );
   });
 
   it("casts each person's ballot, and says where each stands", async () => {
@@ -285,6 +295,14 @@ describe("polls over the API", () => {
       "INVALID_INPUT",
       /'nope' is not a question/,
     );
+    // Twenty thousand questions the poll does not have: a few are named, and
+    // the rest counted, not a megabyte of refusal.
+    const many = await vote(
+      Array.from({ length: 20000 }, (_, q) => ({ question: `x${q}`, picks: ["a"] })),
+    );
+    refused(many, "INVALID_INPUT", /'x0' is not a question/);
+    assert.ok(JSON.stringify(many).length < 10_000, `${JSON.stringify(many).length} characters`);
+    assert.match(JSON.stringify(many), /and 19979 more/);
     refused(
       await vote([
         { question: "backend", picks: ["s3"] },

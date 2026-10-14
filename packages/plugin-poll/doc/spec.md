@@ -132,7 +132,8 @@ built we need to agree on where they are kept and what we refuse.
 | `decision-note` | MAY, with `closed` | string | Why, in Markdown |
 
 The body is the **preamble**: Markdown, and MAY be empty. A poll MUST NOT carry
-`status`. Unknown top-level keys are preserved (02 §2.4).
+`status`. Unknown top-level keys are preserved (02 §2.4). How much a poll may
+hold — how many questions, how long a title — is §4.2.
 
 ### 3.1 Questions
 
@@ -162,12 +163,22 @@ Each entry of `options` is a map:
 - A `description` is read without its trailing whitespace — the line break a
   YAML block scalar ends with is formatting, not text — and one left empty by
   that is no description.
+- **Whitespace**, in this document, is exactly what ECMAScript's
+  `String.prototype.trim` removes, listed so that every reader removes the
+  same: U+0009 to U+000D, U+0020, U+00A0, U+1680, U+2000 to U+200A, U+2028,
+  U+2029, U+202F, U+205F, U+3000 and U+FEFF. A **line break** is U+000A,
+  U+000D, U+0085, U+2028 or U+2029. A description that ends in a no-break
+  space is read without it, and its fingerprint (§5) is taken without it.
 - A key not defined here, in a question or an option, is a fault. Unlike a
   top-level key it cannot be preserved harmlessly: a reader that ignored a
   future `max-picks` would count ballots the poll says are invalid.
 - A scalar YAML would read as something other than a string — a label `1.10`,
   an ID `42`, a text `yes` — is read as the text written, exactly as a built-in
   string key is (02 §2.4). A tool writing one quotes it.
+- A null — `~`, `null`, or nothing after the colon — is not text: the key reads
+  as left out, as a built-in key's does. `label: null` is a fault, `id: ~` is a
+  missing ID, `description: ~` is no description and `multi: ~` is false. A
+  label that says null is written `label: "null"`.
 
 ### 3.2 Closing
 
@@ -192,9 +203,13 @@ decision-note: |
   closer left a tie undecided.
 - `closed-by` MUST be present exactly when `closed` is. `decision` and
   `decision-note` MUST NOT be present without `closed`.
-- A tool closing a poll writes `closed` no earlier than the latest vote in the
-  poll's directory (§4 can stamp one ahead of the clock), so that no vote it
-  counted reads as late.
+- A tool closing a poll writes `closed` no earlier than the latest valid vote
+  in the poll's directory (§4 can stamp one ahead of the clock), so that no
+  ballot it read reads as late — a withdrawal made late would bring back the
+  ballot it withdrew. It does not wait for a vote stamped more than five
+  minutes ahead of its own clock: only a wrong clock or a hand edit writes one
+  (X-poll-2, §8), and waiting for it would close the poll in 2099 because one
+  file says so. That vote is then late, like any vote cast after the close.
 
 **Reopening** removes all four keys. The poll is open again; the decision it
 had is in the history. A vote cast while it was closed — which no tool writes,
@@ -231,7 +246,8 @@ We already run MinIO for the CI cache.
 | `answers` | MUST | map | The voter's answers by question `id` (§4.1); MAY be empty |
 
 The body is the voter's **note**: Markdown, and MAY be empty. Unknown top-level
-keys are preserved (02 §2.4).
+keys are preserved (02 §2.4) — `status` among them: only `poll.md` is forbidden
+it, and a vote carrying one is not at fault.
 
 An empty `answers` (`answers: {}`) is a **withdrawal**: the voter takes back
 their earlier ballot and answers nothing.
@@ -239,8 +255,10 @@ their earlier ballot and answers nothing.
 A vote is never edited. Voting again writes a new file; the old one stays, and
 is what the history of somebody's opinion is made of. A file name records the
 second, so a tool writing a vote stamps it at least a second after the same
-voter's latest vote in that poll, whatever its clock says: one person's votes
-then sort in the order they were cast.
+voter's latest valid vote in that poll, whatever its clock says: one person's
+votes then sort in the order they were cast. A vote stamped more than five
+minutes ahead of the tool's clock is the exception, and is not one it stamps
+after (§3.2).
 
 ### 4.1 Answers
 
@@ -255,7 +273,7 @@ These faults are judged from the file alone, whatever the poll says:
 
 - a key of `answers` that is not a slug, or a value that is not a map;
 - a missing `picks`, or one that is not a list of slugs; a slug picked twice;
-- an `other` that is empty, only whitespace, or spans lines;
+- an `other` that is empty, only whitespace, or contains a line break (§3.1);
 - an answer with no picks and no `other` (skip a question by leaving it out);
 - a key in an answer other than `picks` and `other`.
 
@@ -270,6 +288,39 @@ questions that no longer exist, and is not at fault for it:
   write-in and no pick;
 - on a multiple-choice question, any number of picks, with or without a
   write-in, so long as there is at least one of either.
+
+### 4.2 Limits
+
+Everybody who opens an issue reads its polls, and every vote in them; a server
+reads them for everybody who asks. Nothing in a poll needs to be large, and a
+file made large on purpose would cost each of them the time it takes to read.
+So a poll and a vote MUST NOT hold more than:
+
+| What | At most |
+|---|---|
+| Questions in `questions` | 50 |
+| Options in a question's `options` | 100 |
+| Answers in a vote's `answers`, or in `decision` | 50 |
+| Picks in an answer's `picks` | 100 |
+| `title`; an option's `label` | 200 characters |
+| A question's `text`; a write-in (`other`) | 500 characters |
+| An option's `description` | 4,000 characters |
+| A vote's note (its body); `decision-note` | 10,000 characters |
+| The preamble (the body of `poll.md`) | 20,000 characters |
+
+- A character is a Unicode code point. A text is measured as it is read: a
+  `description` without its trailing whitespace (§3.1), and a body or a
+  `decision-note` without the blank lines that begin it and the whitespace
+  that ends it.
+- The counts of answers and picks are judged from the file alone, like the
+  faults of the first list of §4.1. Picks are also no more than the options of
+  the question they answer, since each names a different one.
+- A list or a map over its limit is the fault, and a reader need not look at
+  its entries: they are not read, and their own faults are not reported. A file
+  made huge by hand then costs no more to read than one at the limit.
+- A tool MUST NOT write a poll or a vote over a limit: it refuses the input
+  that would make one, and says so. A refusal that lists faults lists a few and
+  counts the rest.
 
 ## 5. The fingerprint
 
@@ -383,15 +434,19 @@ nothing about them.
 
 Numbered in the extension series of spec 04 §4.3.
 
-- **X-poll-1** (error) — the layout of §2 and every fault of §3, §3.1, §3.2, §4
-  and §4.1: a file directly in `poll/`, a poll directory whose name does not
-  follow the grammar or that has no `poll.md`, an `.md` file beside `poll.md`
-  that is not a vote, and every schema fault of a poll or a vote.
-- **X-poll-2** (warning) — what a race or a hand edit explains: a vote cast
-  after its poll was closed, which takes no part (§6.1).
+- **X-poll-1** (error) — the layout of §2 and every fault of §3, §3.1, §3.2,
+  §4, §4.1 and §4.2: a file directly in `poll/`, a poll directory whose name
+  does not follow the grammar or that has no `poll.md`, an `.md` file beside
+  `poll.md` that is not a vote, and every schema fault of a poll or a vote. A
+  vote in a directory with no `poll.md` to read — missing, or not readable as
+  one — is still checked for every fault judged from the file alone.
+- **X-poll-2** (warning) — what a race, a wrong clock or a hand edit explains:
+  a vote cast after its poll was closed, which takes no part (§6.1); and a
+  valid vote stamped more than five minutes after the moment the check runs,
+  which a tool closing the poll does not wait for (§3.2).
 - **X-poll-3** (error) — a poll or vote ID that is also another poll's or vote's,
-  an entity's or a comment's. Check D3 does not see them, so this is its
-  counterpart.
+  an entity's or a comment's; a vote beside no readable `poll.md` included.
+  Check D3 does not see them, so this is its counterpart.
 
 A revoked ballot is not a fault: it is what editing a poll does.
 

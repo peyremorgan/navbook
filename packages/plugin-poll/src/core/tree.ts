@@ -98,12 +98,20 @@ export interface PollRecord extends PollFields {
   extraFiles: string[];
 }
 
+/** A vote in a poll directory that holds no readable poll: its faults are layout problems. */
+export interface StrayVote {
+  id: string;
+  path: string;
+}
+
 /** What this plugin hangs off an issue, under `poll` in `EntityRecord.ext`. */
 export interface IssuePollsModel {
   polls: PollRecord[];
+  /** Votes beside no readable `poll.md`: read for their faults and IDs, never counted. */
+  strays: StrayVote[];
 }
 
-const NO_POLLS: IssuePollsModel = { polls: [] };
+const NO_POLLS: IssuePollsModel = { polls: [], strays: [] };
 
 /**
  * How a file's text becomes a record: the host's parser and hash, passed in so
@@ -181,16 +189,47 @@ export function buildIssuePolls(
   }
 
   const polls: PollRecord[] = [];
+  const strays: StrayVote[] = [];
   for (const draft of drafts.values()) {
-    if (draft.pollFile === undefined) {
+    if (draft.pollFile === undefined)
       problems.push({ path: draft.dirPath, message: `poll directory is missing its ${POLL_FILE}` });
-      continue;
-    }
-    const poll = materialize(files, draft, draft.pollFile, entity, problems, reader);
+    const poll =
+      draft.pollFile === undefined
+        ? null
+        : materialize(files, draft, draft.pollFile, entity, problems, reader);
     if (poll !== null) polls.push(poll);
+    else strays.push(...strayVotes(files, draft, problems, reader));
   }
   polls.sort(byCreated);
-  return { model: polls.length === 0 ? NO_POLLS : { polls }, problems };
+  return {
+    model: polls.length === 0 && strays.length === 0 ? NO_POLLS : { polls, strays },
+    problems,
+  };
+}
+
+/**
+ * The votes of a directory with no poll to read them against — its `poll.md`
+ * is missing, or does not parse. They are still files of this format: what
+ * can be judged from a vote alone (§4, §4.1) is reported, as layout problems,
+ * and their IDs are still IDs (X-poll-3). Nothing is counted.
+ */
+function strayVotes(
+  files: NavTree,
+  draft: PollDraft,
+  problems: StructuralProblem[],
+  reader: PollReader,
+): StrayVote[] {
+  const core = runningCore();
+  const out: StrayVote[] = [];
+  for (const path of draft.votes.sort()) {
+    const stamp = core.parseCommentFileName(path.slice(path.lastIndexOf("/") + 1));
+    if (stamp === null) continue;
+    out.push({ id: stamp.id, path });
+    const vote = parseOrReport(files, path, problems, reader);
+    if (vote === null) continue;
+    for (const { message } of validateVote(vote.parsed)) problems.push({ path, message });
+  }
+  return out;
 }
 
 function materialize(
@@ -306,6 +345,13 @@ export function pollsOf(entity: Pick<EntityRecord, "ext">): PollRecord[] {
 /** Every poll in the tree, oldest first. */
 export function allPolls(repo: Repo): PollRecord[] {
   return repo.issues.flatMap(pollsOf).sort(byCreated);
+}
+
+/** Every vote in the tree that sits beside no readable poll. */
+export function strayVotesOf(repo: Repo): StrayVote[] {
+  return repo.issues.flatMap(
+    (issue) => ((issue.ext?.get(POLL_DIR) as IssuePollsModel | undefined) ?? NO_POLLS).strays,
+  );
 }
 
 /** Where `person` stands on a poll. */

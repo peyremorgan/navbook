@@ -54,6 +54,33 @@ export type Results = (typeof RESULTS)[number];
 /** The keys closing a poll writes, and reopening removes (§3.2). */
 export const CLOSING_KEYS = ["closed", "closed-by", "decision", "decision-note"] as const;
 
+/**
+ * How much a poll or a vote may hold (§4.2): counts, and lengths in Unicode
+ * code points. A reader refuses a list or a map over its limit without reading
+ * its entries, so a file written by hand to be huge costs no more to read than
+ * one at the limit; a writer refuses the input before anything is written.
+ */
+export const LIMITS = {
+  questions: 50,
+  options: 100,
+  answers: 50,
+  picks: 100,
+  title: 200,
+  label: 200,
+  text: 500,
+  other: 500,
+  description: 4_000,
+  note: 10_000,
+  preamble: 20_000,
+} as const;
+
+/**
+ * How far ahead of the clock a vote's stamp may be before a tool stops waiting
+ * for it (§3.2, §4): a voter's clock running a little fast is ordinary, a vote
+ * stamped next year is a hand edit or a broken clock.
+ */
+export const CLOCK_SKEW_MS = 5 * 60_000;
+
 /* ------------------------------------------------------------------ shapes */
 
 export interface PollOption {
@@ -110,7 +137,8 @@ type Path = readonly (string | number)[];
 /**
  * A scalar as text: a string as it is, and a number or a boolean as it was
  * written — `1.10` stays `1.10` (§3.1) — which the document at `path` says.
- * Anything else, `null` included, is not text.
+ * Anything else is not text; nor is a null (`~`, `null`, nothing at all), which
+ * is a key left out, as everywhere in the format — `core.stringAt` reads it so.
  */
 function textAt(value: unknown, path: Path, nav: NavDoc): string | null {
   if (typeof value === "string") return value;
@@ -131,11 +159,67 @@ function where(path: Path): string {
   return out;
 }
 
-/** Text that is set, not blank, and on one line. */
-function lineFault(text: string | null, what: string): string | null {
-  if (text === null || text.trim() === "") return `${what} must be a non-empty string`;
-  if (/[\r\n]/.test(text)) return `${what} must be on one line`;
-  return null;
+/**
+ * Whitespace as this format means it (§3.1): what ECMAScript's `trim` removes,
+ * listed here as the spec lists it rather than left to a regular expression's
+ * Unicode tables.
+ */
+const WHITESPACE = new Set([
+  0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0xa0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005,
+  0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff,
+]);
+
+/** A line break (§3.1): Unicode's, not only the two ASCII ones. */
+const LINE_BREAK = /[\n\r\u0085\u2028\u2029]/;
+
+/**
+ * `text` without its trailing whitespace (§3.1). A loop, not `/\s+$/`: a
+ * regular expression anchored at the end retries from every space of a long
+ * run, and a note of a few hundred thousand spaces then took minutes.
+ */
+function trimEnd(text: string): string {
+  let end = text.length;
+  while (end > 0 && WHITESPACE.has(text.charCodeAt(end - 1))) end--;
+  return text.slice(0, end);
+}
+
+/** True when `text` is empty or only whitespace (§3.1). */
+function isBlank(text: string): boolean {
+  for (let index = 0; index < text.length; index++)
+    if (!WHITESPACE.has(text.charCodeAt(index))) return false;
+  return true;
+}
+
+/** True when `text` spans lines (§3.1). */
+function hasLineBreak(text: string): boolean {
+  return LINE_BREAK.test(text);
+}
+
+/** True when `text` is longer than `max` Unicode code points (§4.2). */
+function longerThan(text: string, max: number): boolean {
+  // A code point is one or two UTF-16 units: most texts are settled by length.
+  if (text.length <= max) return false;
+  if (text.length > 2 * max) return true;
+  let count = 0;
+  for (const _ of text) if (++count > max) return true;
+  return false;
+}
+
+/** What is wrong with a text over its limit (§4.2), or null. */
+export function lengthFault(text: string, max: number, what: string): string | null {
+  return longerThan(text, max) ? `${what} must be at most ${max} characters` : null;
+}
+
+/** What is wrong with a list or a map of `count` entries over its limit (§4.2), or null. */
+function countFault(count: number, max: number, what: string): string | null {
+  return count > max ? `${what} must be at most ${max}, got ${count}` : null;
+}
+
+/** Text that is set, not blank, on one line, and no longer than `max`. */
+function lineFault(text: string | null, what: string, max: number): string | null {
+  if (text === null || isBlank(text)) return `${what} must be a non-empty string`;
+  if (hasLineBreak(text)) return `${what} must be on one line`;
+  return lengthFault(text, max, what);
 }
 
 const QUESTION_KEYS = new Set(["id", "text", "multi", "other", "options"]);
@@ -170,6 +254,11 @@ function readQuestions(
     });
     return [];
   }
+  const tooMany = countFault(value.length, LIMITS.questions, "the number of questions");
+  if (tooMany !== null) {
+    problems.push({ key: "questions", message: tooMany });
+    return [];
+  }
   const questions: PollQuestion[] = [];
   const questionIds = new Set<string>();
   value.forEach((raw, q) => {
@@ -195,7 +284,7 @@ function readQuestions(
       questionIds.add(id);
     }
     const text = textAt(raw.text, [...at, "text"], nav);
-    const textFault = lineFault(text, "'text'");
+    const textFault = lineFault(text, "'text'", LIMITS.text);
     if (textFault !== null) {
       fault(at, textFault);
       ok = false;
@@ -236,6 +325,11 @@ function readOptions(
     fault(at, "'options' must be a list of at least one option");
     return null;
   }
+  const tooMany = countFault(value.length, LIMITS.options, "the number of options");
+  if (tooMany !== null) {
+    fault(at, tooMany);
+    return null;
+  }
   const options: PollOption[] = [];
   const ids = new Set<string>();
   let ok = true;
@@ -262,7 +356,7 @@ function readOptions(
       ids.add(id);
     }
     const label = textAt(raw.label, [...here, "label"], nav);
-    const labelFault = lineFault(label, "'label'");
+    const labelFault = lineFault(label, "'label'", LIMITS.label);
     if (labelFault !== null) {
       fault(here, labelFault);
       ok = false;
@@ -273,7 +367,14 @@ function readOptions(
       if (text === null) {
         fault(here, "'description' must be a string");
         ok = false;
-      } else description = descriptionOf(text);
+      } else {
+        description = descriptionOf(text);
+        const tooLong = lengthFault(description ?? "", LIMITS.description, "'description'");
+        if (tooLong !== null) {
+          fault(here, tooLong);
+          ok = false;
+        }
+      }
     }
     if (id !== null && labelFault === null)
       options.push({ id, label: label as string, description });
@@ -287,8 +388,8 @@ function readOptions(
  * text — and none at all when that leaves nothing.
  */
 export function descriptionOf(text: string | null | undefined): string | null {
-  const trimmed = (text ?? "").replace(/\s+$/, "");
-  return trimmed.trim() === "" ? null : trimmed;
+  const trimmed = trimEnd(text ?? "");
+  return isBlank(trimmed) ? null : trimmed;
 }
 
 /** An ID: a slug, written however YAML read it. "" for a draft's missing one; null for a fault. */
@@ -349,25 +450,35 @@ function readAnswer(
     }
   }
   const picks: string[] = [];
+  const tooMany = Array.isArray(raw.picks)
+    ? countFault(raw.picks.length, LIMITS.picks, "the number of picks")
+    : null;
   if (!Array.isArray(raw.picks)) {
     fault(at, "'picks' must be a list of option IDs");
     ok = false;
+  } else if (tooMany !== null) {
+    fault(at, tooMany);
+    ok = false;
   } else {
+    const seen = new Set<string>();
     raw.picks.forEach((value, index) => {
       const pick = textAt(value, [...at, "picks", index], nav);
       if (pick === null || !SLUG_PATTERN.test(pick)) {
         fault([...at, "picks", index], `${JSON.stringify(pick ?? value)} is not an option ID`);
         ok = false;
-      } else if (picks.includes(pick)) {
+      } else if (seen.has(pick)) {
         fault(at, `'${pick}' is picked twice`);
         ok = false;
-      } else picks.push(pick);
+      } else {
+        seen.add(pick);
+        picks.push(pick);
+      }
     });
   }
   let other: string | null = null;
   if (raw.other !== undefined && raw.other !== null) {
     other = textAt(raw.other, [...at, "other"], nav);
-    const otherFault = lineFault(other, "'other'");
+    const otherFault = lineFault(other, "'other'", LIMITS.other);
     if (otherFault !== null) {
       fault(at, otherFault);
       ok = false;
@@ -392,6 +503,15 @@ function readAnswers(
   };
   if (!isMap(value)) {
     problems.push({ key, message: `'${key}' must be a map of answers by question ID` });
+    return null;
+  }
+  const tooMany = countFault(
+    Object.keys(value).length,
+    LIMITS.answers,
+    `the number of answers in '${key}'`,
+  );
+  if (tooMany !== null) {
+    problems.push({ key, message: tooMany });
     return null;
   }
   const answers: Answers = new Map();
@@ -444,9 +564,7 @@ export function readPoll(parsed: ParsedFile): PollFields {
 export function validatePoll(parsed: ParsedFile): Problem[] {
   const problems = [...parsed.problems];
   const fm = parsed.fm;
-  const title = core.requireString(parsed, "title", problems);
-  if (title !== null && /[\r\n]/.test(title))
-    problems.push({ key: "title", message: "'title' must be on one line" });
+  checkTitleAndPreamble(parsed, problems);
   core.checkPerson(parsed, "author", problems);
   core.checkTimestamp(parsed, "created", problems);
   core.checkNoStatusKey(parsed, problems);
@@ -477,8 +595,14 @@ export function validatePoll(parsed: ParsedFile): Problem[] {
         message: `'${key}' without 'closed': only a closed poll has a decision`,
       });
   }
-  if (present("decision-note") && typeof fm["decision-note"] !== "string")
-    problems.push({ key: "decision-note", message: "'decision-note' must be a string" });
+  if (present("decision-note")) {
+    const note = fm["decision-note"];
+    const fault =
+      typeof note !== "string"
+        ? "'decision-note' must be a string"
+        : lengthFault(bodyText(note), LIMITS.note, "'decision-note'");
+    if (fault !== null) problems.push({ key: "decision-note", message: fault });
+  }
   if (present("decision")) {
     const decision = readAnswers(fm.decision, "decision", parsed.nav, problems);
     if (decision !== null) {
@@ -487,6 +611,19 @@ export function validatePoll(parsed: ParsedFile): Problem[] {
     }
   }
   return problems;
+}
+
+/** A title on one line and within its limit, and a preamble within its own (§3, §4.2). */
+function checkTitleAndPreamble(parsed: ParsedFile, problems: Problem[]): void {
+  const title = core.requireString(parsed, "title", problems);
+  if (title !== null) {
+    const fault = hasLineBreak(title)
+      ? "'title' must be on one line"
+      : lengthFault(title, LIMITS.title, "'title'");
+    if (fault !== null) problems.push({ key: "title", message: fault });
+  }
+  const preamble = lengthFault(bodyText(parsed.body), LIMITS.preamble, "the preamble");
+  if (preamble !== null) problems.push({ message: preamble });
 }
 
 function checkResultsAndDeadline(fm: Record<string, unknown>, problems: Problem[]): void {
@@ -521,8 +658,9 @@ function checkResultsAndDeadline(fm: Record<string, unknown>, problems: Problem[
  */
 export function answersFaults(questions: readonly PollQuestion[], answers: Answers): string[] {
   const faults: string[] = [];
+  const byId = questionsById(questions);
   for (const [qid, answer] of answers) {
-    const question = questions.find((candidate) => candidate.id === qid);
+    const question = byId.get(qid);
     if (question === undefined) {
       faults.push(`'${qid}' is not a question of this poll`);
       continue;
@@ -532,19 +670,30 @@ export function answersFaults(questions: readonly PollQuestion[], answers: Answe
   return faults;
 }
 
-/** What is wrong with one answer to one question. */
+/** A poll's questions by ID: one lookup per answer, not a search. */
+export function questionsById(questions: readonly PollQuestion[]): Map<string, PollQuestion> {
+  return new Map(questions.map((question) => [question.id, question]));
+}
+
+/**
+ * What is wrong with one answer to one question. Linear in the picks and the
+ * options: a ballot picking every option of a long question must not cost
+ * their product.
+ */
 export function answerFaults(question: PollQuestion, answer: Answer): string[] {
   const faults: string[] = [];
   const named = `question '${question.id}'`;
-  answer.picks.forEach((pick, index) => {
-    if (!question.options.some((option) => option.id === pick))
-      faults.push(`'${pick}' is not an option of ${named}`);
-    else if (answer.picks.indexOf(pick) !== index) faults.push(`'${pick}' is picked twice`);
-  });
+  const options = new Set(question.options.map((option) => option.id));
+  const seen = new Set<string>();
+  for (const pick of answer.picks) {
+    if (!options.has(pick)) faults.push(`'${pick}' is not an option of ${named}`);
+    else if (seen.has(pick)) faults.push(`'${pick}' is picked twice`);
+    seen.add(pick);
+  }
   if (answer.other !== null) {
     if (!question.other) faults.push(`${named} does not accept an answer in other words`);
     else {
-      const fault = lineFault(answer.other, `the answer in other words to ${named}`);
+      const fault = lineFault(answer.other, `the answer in other words to ${named}`, LIMITS.other);
       if (fault !== null) faults.push(fault);
     }
   }
@@ -610,9 +759,7 @@ export function draftFromParsed(parsed: ParsedFile): PollDraft | { problems: Pro
  */
 export function validatePollDraft(parsed: ParsedFile): Problem[] {
   const problems = [...parsed.problems];
-  const title = core.requireString(parsed, "title", problems);
-  if (title !== null && /[\r\n]/.test(title))
-    problems.push({ key: "title", message: "'title' must be on one line" });
+  checkTitleAndPreamble(parsed, problems);
   core.checkNoStatusKey(parsed, problems);
   checkResultsAndDeadline(parsed.fm, problems);
   readQuestions(parsed.fm.questions, parsed.nav, problems, false);
@@ -655,6 +802,23 @@ export function completeQuestions(draft: readonly DraftQuestion[]): PollQuestion
       options,
     };
   });
+}
+
+/**
+ * The counts of §4.2 a draft's questions are over, said before anything is
+ * made of them: filling in the IDs of a question of thousands of options costs
+ * more than refusing it. Lengths are left to the file the draft becomes, which
+ * is checked whole before it is written.
+ */
+export function draftCountFaults(questions: readonly DraftQuestion[]): string[] {
+  const tooMany = countFault(questions.length, LIMITS.questions, "the number of questions");
+  if (tooMany !== null) return [tooMany];
+  const faults: string[] = [];
+  questions.forEach((question, q) => {
+    const fault = countFault(question.options.length, LIMITS.options, "the number of options");
+    if (fault !== null) faults.push(`questions[${q + 1}]: ${fault}`);
+  });
+  return faults;
 }
 
 /** The longest an ID made from a label is. */
@@ -705,7 +869,7 @@ function bodyOf(text: string): string {
  * is the author's, and is kept.
  */
 export function bodyText(body: string): string {
-  return body.replace(/^\s*\n/, "").replace(/\s+$/, "");
+  return trimEnd(body.replace(/^\s*\n/, ""));
 }
 
 /** Render a new `poll.md`, its question and option IDs filled in. */
@@ -836,7 +1000,10 @@ export function validateVote(parsed: ParsedFile): Problem[] {
       message: "missing required key 'answers'; '{}' withdraws a vote",
     });
   } else readAnswers(fm.answers, "answers", parsed.nav, problems);
-  core.checkNoStatusKey(parsed, problems);
+  // No `checkNoStatusKey`: a vote is not an entity file, and a `status` in it
+  // is an unknown key like any other — preserved, not a fault (§4).
+  const note = lengthFault(bodyText(parsed.body), LIMITS.note, "the note");
+  if (note !== null) problems.push({ message: note });
   return problems;
 }
 
@@ -882,7 +1049,7 @@ export function fingerprint(questions: readonly PollQuestion[]): string {
     multi: question.multi,
     other: question.other,
     options: question.options.map((option) =>
-      option.description === null || option.description.trim() === ""
+      option.description === null || isBlank(option.description)
         ? { id: option.id, label: option.label }
         : { id: option.id, label: option.label, description: option.description },
     ),

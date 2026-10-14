@@ -362,7 +362,9 @@ describe("nav poll edit, close and reopen", () => {
   });
 
   it("leaves a clean doctor behind", () => {
-    const doctor = repo.nav(["doctor"]);
+    // Run when the suite's last act was, not at the fixture's pinned instant
+    // before any of it: a vote stamped hours after the clock is X-poll-2's.
+    const doctor = repo.nav(["doctor"], { NAV_NOW: "2026-08-01T13:00:00Z" });
     assert.equal(doctor.code, 0, doctor.stdout + doctor.stderr);
     assert.doesNotMatch(doctor.stdout, /X-poll/);
   });

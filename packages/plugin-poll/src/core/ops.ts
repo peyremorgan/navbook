@@ -19,10 +19,15 @@ import {
   answerFaults,
   answersFaults,
   bodyText,
+  CLOCK_SKEW_MS,
   CLOSING_KEYS,
   closedPoll,
+  type DraftQuestion,
+  draftCountFaults,
   draftFromParsed,
   fingerprint,
+  LIMITS,
+  lengthFault,
   newPollFile,
   newVoteFile,
   POLL_DIR,
@@ -30,6 +35,7 @@ import {
   type PollChanges,
   type PollDraft,
   type PollQuestion,
+  questionsById,
   readPoll,
   reopenedPoll,
   rewritePoll,
@@ -142,6 +148,25 @@ function change(
   );
 }
 
+/** How many faults a refusal lists; the rest it counts. */
+export const LISTED_FAULTS = 20;
+
+/**
+ * Refuse with `faults`, the first as the message and the next few as details:
+ * a ballot naming twenty thousand questions this poll does not have is
+ * answered in a few lines, not in a megabyte.
+ */
+function refuse(
+  core: Core,
+  code: Parameters<Core["wsFail"]>[0],
+  lead: string,
+  faults: readonly string[],
+): never {
+  const listed = faults.slice(0, LISTED_FAULTS);
+  const more = faults.length - listed.length;
+  core.wsFail(code, lead, [...listed, ...(more > 0 ? [`and ${more} more`] : [])]);
+}
+
 /* --------------------------------------------------------------------- drafts */
 
 /**
@@ -158,7 +183,8 @@ export function parseDraft(core: Core, text: string): PollDraft {
   const draft = draftFromParsed(parsed);
   if ("problems" in draft) {
     const [first, ...rest] = draft.problems;
-    core.wsFail(
+    refuse(
+      core,
       "invalid-input",
       `the poll is not valid: ${first?.message ?? "unknown fault"}`,
       rest.map((problem) => problem.message),
@@ -177,13 +203,27 @@ function requireValid(core: Core, content: string): ParsedFile {
   const problems = validatePoll(parsed);
   if (problems.length > 0) {
     const [first, ...rest] = problems;
-    core.wsFail(
+    refuse(
+      core,
       "invalid-input",
       `the poll is not valid: ${first?.message}`,
       rest.map((problem) => problem.message),
     );
   }
   return parsed;
+}
+
+/**
+ * Refuse questions over the counts of §4.2 before anything is made of them:
+ * what {@link requireValid} would find too, but only after filling in the IDs
+ * and writing out every option.
+ */
+function requireCountable(core: Core, questions: readonly DraftQuestion[]): void {
+  const faults = draftCountFaults(questions);
+  if (faults.length > 0) {
+    const [first, ...rest] = faults;
+    refuse(core, "invalid-input", `the poll is not valid: ${first}`, rest);
+  }
 }
 
 /** An answer as it is checked and written: its write-in trimmed, and a blank one none. */
@@ -217,6 +257,7 @@ export function openPoll(
   opts: CommitOptions,
 ): OpenPollResult {
   requireOpenIssue(core, issue);
+  requireCountable(core, draft.questions);
   const { created } = core.prepareOpen(ws);
   const content = newPollFile(draft, { author: core.currentAuthor(ws), created });
   requireValid(core, content);
@@ -240,7 +281,8 @@ export function openPoll(
 /** Refuse a change to a poll whose file has faults: what it says cannot be read whole. */
 function requireSound(core: Core, poll: PollRecord, doing: string): void {
   if (poll.problems.length === 0) return;
-  core.wsFail(
+  refuse(
+    core,
     "precondition",
     `poll ${poll.id} has faults; fix ${POLL_FILE} by hand before you ${doing}`,
     poll.problems.map((problem) => problem.message),
@@ -286,6 +328,7 @@ export function editPoll(
 ): EditPollResult {
   requireOpenPoll(core, poll, "edit it");
   assertUnchanged(core, poll.blobSha, `poll ${poll.id}`, opts.baseSha);
+  if (changes.questions !== undefined) requireCountable(core, changes.questions);
   const text = readFileSync(core.absPath(ws, poll.filePath), "utf8");
   const content = rewritePoll(text, changes);
   if (content === text) core.wsFail("precondition", `that changes nothing in poll ${poll.id}`);
@@ -419,21 +462,40 @@ export function takenIds(core: Core, ws: WsCtx): Set<string> {
   return taken;
 }
 
+/** The clock, to the second a file name records. */
+function nowToTheSecond(ws: WsCtx): number {
+  return Math.floor(ws.now().getTime() / 1000) * 1000;
+}
+
 /**
- * When a new vote is cast: now, or a second after the voter's last vote when
- * that is not earlier — file names are to the second, and a person's votes
- * must sort in the order they cast them (§4), or a quick second vote could
- * lose to the first.
+ * The latest of these votes' stamps, short of any more than a few minutes
+ * ahead of `now` (§3.2, §4): a vote a broken clock or a hand edit stamped in
+ * 2099 must not drag every vote and close after it into 2099 too. -Infinity
+ * when there is none.
+ */
+function latestStamp(votes: Iterable<{ date: Date }>, now: number): number {
+  let latest = Number.NEGATIVE_INFINITY;
+  for (const { date } of votes) {
+    const at = date.getTime();
+    if (at <= now + CLOCK_SKEW_MS && at > latest) latest = at;
+  }
+  return latest;
+}
+
+/**
+ * When a new vote is cast: now, or a second after the voter's last valid vote
+ * when that is not earlier — file names are to the second, and a person's
+ * votes must sort in the order they cast them (§4), or a quick second vote
+ * could lose to the first.
  */
 function castAt(poll: PollRecord, ws: WsCtx, author: string): Date {
-  const now = new Date(Math.floor(ws.now().getTime() / 1000) * 1000);
+  const now = nowToTheSecond(ws);
   const key = voterKey(author);
-  const last = Math.max(
-    ...poll.votes
-      .filter((vote) => voterKey(vote.author) === key)
-      .map((vote) => vote.date.getTime()),
+  const last = latestStamp(
+    poll.ballots.map((reading) => reading.vote).filter((vote) => voterKey(vote.author) === key),
+    now,
   );
-  return last >= now.getTime() ? new Date(last + 1000) : now;
+  return new Date(last >= now ? last + 1000 : now);
 }
 
 /** Cast a vote (§4): a new ballot for the person acting, replacing their last. */
@@ -450,20 +512,21 @@ export function castVote(
       "reload it, and answer the questions it asks now",
     ]);
   }
-  const unknown = [...input.answers.keys()].filter(
-    (qid) => !poll.questions.some((question) => question.id === qid),
-  );
+  const byId = questionsById(poll.questions);
+  const unknown = [...input.answers.keys()].filter((qid) => !byId.has(qid));
   const answers = writtenAnswers(poll.questions, input.answers);
+  const note = bodyText(input.note ?? "");
+  const tooLong = lengthFault(note, LIMITS.note, "the note");
   const faults = [
     ...unknown.map((qid) => `'${qid}' is not a question of this poll`),
     ...answersFaults(poll.questions, answers),
+    ...(tooLong === null ? [] : [tooLong]),
   ];
   if (faults.length > 0) {
     const [first, ...rest] = faults;
-    core.wsFail("invalid-input", first as string, rest);
+    refuse(core, "invalid-input", first as string, rest);
   }
   const author = core.currentAuthor(ws);
-  const note = bodyText(input.note ?? "");
   const withdrawn = answers.size === 0;
   const ballot = ballotOf(poll.ballots, author);
   if (withdrawn && (ballot === undefined || ballot.state === "withdrawn")) {
@@ -530,24 +593,28 @@ export function decisionFor(core: Core, poll: PollRecord, input: CloseInput): An
     ]),
   );
   const faults: string[] = [];
+  const byId = questionsById(poll.questions);
   for (const [qid, answer] of decide) {
-    const question = poll.questions.find((candidate) => candidate.id === qid);
+    const question = byId.get(qid);
     if (question === undefined) faults.push(`'${qid}' is not a question of poll ${poll.id}`);
     else if (answer !== null) faults.push(...answerFaults(question, answer));
   }
+  const note = lengthFault(bodyText(input.note ?? ""), LIMITS.note, "the note");
+  if (note !== null) faults.push(note);
   if (faults.length > 0) {
     const [first, ...rest] = faults;
-    core.wsFail("invalid-input", first as string, rest);
+    refuse(core, "invalid-input", first as string, rest);
   }
   const decision: Answers = new Map();
   const tied: string[] = [];
+  const tallies = new Map(poll.tallies.map((entry) => [entry.question, entry]));
   for (const question of poll.questions) {
     if (decide.has(question.id)) {
       const answer = decide.get(question.id);
       if (answer) decision.set(question.id, { picks: [...answer.picks], other: answer.other });
       continue;
     }
-    const entry = poll.tallies.find((candidate) => candidate.question === question.id);
+    const entry = tallies.get(question.id);
     if (entry?.tied) tied.push(`'${question.id}' is tied between ${entry.leaders.join(", ")}`);
     const proposed = poll.proposed.get(question.id);
     if (proposed !== undefined) decision.set(question.id, proposed);
@@ -563,13 +630,25 @@ export function decisionFor(core: Core, poll: PollRecord, input: CloseInput): An
 }
 
 /**
- * When a poll is closed: now, or the latest vote's second when that is later —
- * a vote stamped after its voter's last one may run ahead of the clock (§4),
- * and closing must not make a vote it has just counted late (§3.2).
+ * When a poll is closed: now, or the latest valid vote's second when that is
+ * later — a vote stamped after its voter's last one may run ahead of the clock
+ * (§4), and closing must not make a ballot it has just read late (§3.2).
+ *
+ * Every valid vote, not only those that count: a withdrawal made late would
+ * bring back the ballot it withdrew. Not a vote with faults, which counts for
+ * nothing either way; nor one stamped further ahead than a clock runs fast.
  */
 function closeAt(poll: PollRecord, ws: WsCtx): Date {
-  const now = Math.floor(ws.now().getTime() / 1000) * 1000;
-  return new Date(Math.max(now, ...poll.votes.map((vote) => vote.date.getTime())));
+  const now = nowToTheSecond(ws);
+  return new Date(
+    Math.max(
+      now,
+      latestStamp(
+        poll.ballots.map((reading) => reading.vote),
+        now,
+      ),
+    ),
+  );
 }
 
 /** Close a poll (§3.2), recording the decision. */
