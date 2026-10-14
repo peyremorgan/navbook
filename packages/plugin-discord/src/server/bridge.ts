@@ -595,8 +595,9 @@ export class Bridge {
    * The messages `events` make that the thread has not been told yet.
    *
    * Each is keyed by what it tells: a comment by its id, anything else by the
-   * record's round — how many times its changes were told — its state before
-   * and the event, so the same change tried again after a failure part of the
+   * record's round — how many times its changes were told, left out until
+   * there is one so a state file from before rounds still matches — its
+   * state before and the event, so the same change tried again after a failure part of the
    * way through is not posted twice, and the same change made again later is.
    */
   private untold(
@@ -608,12 +609,19 @@ export class Bridge {
     events: readonly EntityEvent[],
   ): Telling[] {
     const out: Telling[] = [];
+    // A record not yet told anything in a round is keyed as before rounds
+    // were kept, so a state file from then still knows what it told.
+    const round = this.state.rounds[id];
     for (const event of events) {
       const key =
         event.type === "comment"
           ? `comment:${event.id}`
           : `${id}:${createHash("sha1")
-              .update(JSON.stringify([this.state.rounds[id] ?? 0, before ?? null, event]))
+              .update(
+                JSON.stringify(
+                  round === undefined ? [before ?? null, event] : [round, before ?? null, event],
+                ),
+              )
               .digest("hex")
               .slice(0, 20)}`;
       if (this.told.has(key)) continue;

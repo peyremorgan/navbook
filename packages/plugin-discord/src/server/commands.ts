@@ -253,12 +253,20 @@ export class Commands {
   private async command(interaction: Interaction, user: User): Promise<void> {
     const data = interaction.data ?? {};
     if (data.type === CommandType.Message && data.name === COMMENT_ON) {
+      const actor = this.actor(user);
+      if ("refused" in actor) return this.reply(interaction, actor.refused);
       await this.commentOnMessage(interaction);
       return;
     }
     if (data.name !== "nav") return;
     const sub = data.options?.[0];
     if (sub === undefined) return;
+    // Asked first, before the record is: an id refused or completed tells
+    // whoever reads the refusal that a record is there, and what it is.
+    if (!["link", "unlink", "whoami"].includes(sub.name)) {
+      const actor = this.actor(user);
+      if ("refused" in actor) return this.reply(interaction, actor.refused);
+    }
     const option = (name: string): string | undefined => {
       const value = sub.options?.find((each) => each.name === name)?.value;
       return typeof value === "string" ? value : undefined;
@@ -340,8 +348,6 @@ export class Commands {
           : this.write(interaction, user, (ctx) => this.reopen(ctx, record));
       }
       case "show": {
-        const actor = this.actor(user);
-        if ("refused" in actor) return this.reply(interaction, actor.refused);
         const target = this.target(interaction, option("id"));
         if ("refused" in target) return this.reply(interaction, target.refused);
         const view = this.bridge.view;
@@ -361,8 +367,6 @@ export class Commands {
       case "thread": {
         const target = this.target(interaction, option("id"));
         if ("refused" in target) return this.reply(interaction, target.refused);
-        const actor = this.actor(user);
-        if ("refused" in actor) return this.reply(interaction, actor.refused);
         await this.defer(interaction);
         const opened = await this.bridge
           .openOnRequest(target.record.id)
@@ -405,7 +409,8 @@ export class Commands {
       await this.reply(interaction, "Your Discord account is not linked to anybody.");
       return;
     }
-    await this.write(interaction, user, async (ctx) => {
+    // Unlinking only takes away: allowed whether or not the links are trusted.
+    await this.act(interaction, user, person, async (ctx) => {
       await writePeople(this.host, ctx, "unlink", person.email, (people) => {
         delete people[user.id];
       });
@@ -565,7 +570,16 @@ export class Commands {
       await this.reply(interaction, actor.refused);
       return;
     }
-    const { person } = actor;
+    await this.act(interaction, user, actor.person, run);
+  }
+
+  /** {@link write}, for a person already judged. */
+  private async act(
+    interaction: Interaction,
+    user: User,
+    person: Identity,
+    run: (ctx: GraphQLCtx) => Promise<string>,
+  ): Promise<void> {
     await this.defer(interaction);
     let answer: string;
     try {

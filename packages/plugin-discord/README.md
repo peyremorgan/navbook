@@ -179,7 +179,11 @@ keep acting from Discord. So on a server that requires a claim or a
 verified address, linked accounts act for nobody, and the log says so at
 start, unless `NAV_SERVER_DISCORD_TRUST_LINKS` is `true`. With it, the links
 are trusted in those rules' place, and taking somebody's access away means
-unlinking their account as well: `nav discord unlink <address> --commit`.
+a maintainer unlinking their account as well, at a terminal:
+`nav discord unlink <address> --commit`, then push. The web tracker's page
+unlinks only the accounts of whoever is signed in, and `/nav unlink` only
+the account that types it — which it does whether or not links are trusted,
+since unlinking only takes away.
 
 ## What is kept, and where
 
