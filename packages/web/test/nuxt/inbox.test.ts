@@ -23,7 +23,11 @@ import {
   resetInboxSources,
   sortInbox,
 } from "../../app/utils/inbox";
-import { queryToInboxParams } from "../../app/utils/inbox-params";
+import {
+  defaultInboxParams,
+  inboxParamsToQuery,
+  queryToInboxParams,
+} from "../../app/utils/inbox-params";
 import type { IssueListItemFragment, PrListItemFragment } from "../../src/generated/gql/graphql";
 
 /**
@@ -373,6 +377,16 @@ describe("narrowInbox", () => {
     assert.equal(narrowInbox(sample, { ...everything, ext: { nosuch: "x" } }).length, 3);
   });
 
+  it("reads nothing chosen in a group keyed as something every object answers to", () => {
+    // Looked up on a plain object, `constructor` would be Object's, and a
+    // group nobody chose anything in would empty the inbox.
+    const key: string = "constructor";
+    registerInboxGrouping({ ...TOPICS, key });
+    assert.equal(narrowInbox(sample, everything).length, 3);
+    assert.deepEqual(railCounts(sample, everything).ext[key]?.[0], { value: null, count: 3 });
+    assert.deepEqual(inboxParamsToQuery(defaultInboxParams()), {});
+  });
+
   it("ANDs the three groups", () => {
     assert.deepEqual(
       narrowInbox(sample, { view: "authored", kind: "pr", ext: { topic: "authentication" } }).map(
@@ -576,6 +590,24 @@ describe("a registered source", () => {
     assert.equal(queryToInboxParams({ view: "polls" }).view, "polls");
     resetInboxSources();
     assert.equal(queryToInboxParams({ view: "polls" }).view, "everything");
+  });
+
+  it("shows its own rows under a reason every object answers to", () => {
+    // `constructor` and `toString` are Object.prototype's: read off a plain
+    // object, the view would ask for a function and show nothing.
+    resetInboxSources();
+    assert.equal(registerInboxSource("constructor"), true);
+    assert.equal(registerInboxSource("toString"), true);
+    const rows = mergeInbox({
+      issues: [
+        { reason: "constructor", entities: [issue("aaaa0001")] },
+        { reason: "toString", entities: [issue("aaaa0002")] },
+      ],
+      prs: [],
+    });
+    const ids = (view: string) => narrowInbox(rows, { ...everything, view }).map((item) => item.id);
+    assert.deepEqual(ids("constructor"), ["aaaa0001"]);
+    assert.deepEqual(ids("toString"), ["aaaa0002"]);
   });
 
   it("refuses a reason already taken", () => {
