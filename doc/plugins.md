@@ -31,9 +31,8 @@ Naming a plugin does not install it. On a fresh clone:
 
 ```console
 $ nav plugin install
-The following plugins are declared but not installed:
-  @navbook/plugin-kb
-This will run: npm install --ignore-scripts @navbook/plugin-kb
+nav plugin install will:
+  run npm install --ignore-scripts --omit=peer --legacy-peer-deps --no-audit --no-fund --save-exact @navbook/plugin-kb
 Continue? [y/N]
 ```
 
