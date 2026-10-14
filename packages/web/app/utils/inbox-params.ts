@@ -14,6 +14,7 @@
 
 import { joinTerms, queryValues, type RouteQuery, splitTerms } from "~/utils/filter-params";
 import {
+  chosenIn,
   INBOX_GROUPINGS,
   INBOX_KIND_CHOICES,
   type InboxKindChoice,
@@ -103,7 +104,7 @@ export function inboxParamsToQuery(params: InboxParams): Record<string, string> 
   if (params.view !== "everything") query.view = params.view;
   if (params.kind !== "any") query.kind = params.kind;
   for (const group of INBOX_GROUPINGS) {
-    const value = params.ext[group.key] ?? null;
+    const value = chosenIn(params.ext, group.key);
     if (value !== null && value !== "") query[group.key] = value;
   }
   if (params.finished) query.status = "all";

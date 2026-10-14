@@ -179,9 +179,25 @@ const VIEW_REASON: Record<Exclude<BuiltinView, "everything">, BuiltinReason> = {
   reviews: "awaiting",
 };
 
+/**
+ * What `record` holds under `key` itself, never what it inherits.
+ *
+ * A plugin's reason or group key is somebody's word, and `constructor` or
+ * `toString` is one an object literal answers from `Object.prototype` — a
+ * view that would then show nothing, a choice that would be a function.
+ */
+export function ownEntry<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
 /** The reason a view shows: a built-in's, or a registered source's own. */
 function reasonOfView(view: Exclude<InboxView, "everything">): InboxReason {
-  return VIEW_REASON[view as keyof typeof VIEW_REASON] ?? view;
+  return ownEntry<InboxReason>(VIEW_REASON, view) ?? view;
+}
+
+/** What a selection chose in one registered group: null for its "any". */
+export function chosenIn(ext: InboxSelection["ext"], key: string): string | null {
+  return ownEntry(ext, key) ?? null;
 }
 
 export interface InboxSelection {
@@ -233,7 +249,7 @@ export function matchesSelection(item: InboxItem, selection: InboxSelection): bo
   }
   if (selection.kind !== "any" && item.kind !== selection.kind) return false;
   for (const group of INBOX_GROUPINGS) {
-    const wanted = selection.ext[group.key] ?? null;
+    const wanted = chosenIn(selection.ext, group.key);
     if (wanted !== null && !group.matches(item, wanted)) return false;
   }
   return true;
@@ -284,7 +300,7 @@ export function railCounts(items: readonly InboxItem[], selection: InboxSelectio
   const ext: Record<string, RailEntry<string | null>[]> = {};
   for (const group of INBOX_GROUPINGS) {
     const values = group.values(items);
-    const chosen = selection.ext[group.key] ?? null;
+    const chosen = chosenIn(selection.ext, group.key);
     // Chosen but carried by nothing here: kept, or the only way to undo it
     // would be to edit the address bar. Whether anything carries it is the
     // group's own question — it may match values the way the format matches a
