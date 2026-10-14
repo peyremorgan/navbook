@@ -307,12 +307,17 @@ told after every pull that fetched, background or not, and every write, once
 the clone has let go. It says only that refs may have moved; the listener
 reads what moved against what it saw last, for instance with
 `core.listRefShasAsync` and the tracker commits between two of them. A write's
-sync event comes after its mutation event. Listeners are told nothing while
-services are not running, and nothing about what an operation they started
-themselves did — a listener that reads would otherwise fetch, and be told, and
-read again — so what such an operation brought in is told with the next pull
-or write. At shutdown, the services are given ten seconds in all to `stop`,
-after which the server goes on without the ones still running, and says so.
+sync event comes after its mutation event. Sync listeners are told nothing
+while services are not running — not even of what happened just before
+shutdown began, if their turn had not come — nor about what an operation they
+started themselves did, since a listener that reads would otherwise fetch, and
+be told, and read again; what such an operation brought in is told with the
+next pull or write. At shutdown, the server has ten seconds in all: sync
+listeners already running are given up to half of it to finish, then every
+service is told to stop at once and they are waited for together, after which
+the server goes on without the ones still running, and says so. The clone
+refuses whatever they ask of it from then on, with `UNAVAILABLE`, rather than
+have the process exit in the middle of it.
 
 Never call `execute` from inside `ctx.sync.read`, `ctx.sync.write`,
 `ctx.sync.locked` or a `writeEntity` body. The operation's own resolvers take

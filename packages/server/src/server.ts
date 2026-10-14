@@ -254,13 +254,16 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
    *
    * Services stop before the clone settles: one of them may still be holding
    * a socket that would deliver a message nothing is left to handle. Then the
-   * clone is never cut off mid-operation: a mutation between its commit and
-   * its push is the one moment the clone's state depends on finishing.
+   * clone takes no more operations — one that a service shutdown went on
+   * without asks for later would be running when the process exits — and
+   * what it has is never cut off mid-operation: a mutation between its commit
+   * and its push is the one moment the clone's state depends on finishing.
    * `housekeeping` is maintenance already told to stop, whose budget runs
    * beside everything here rather than after it.
    */
   const release = async (housekeeping: Promise<void>): Promise<void> => {
     await loaded.runtime.stop();
+    sync.close();
     await sync.stop();
     await trees.stop();
     await Promise.all([sync.drain(), housekeeping]);

@@ -908,6 +908,46 @@ describe("RepoSync ordering", () => {
     await drained;
     assert.deepEqual(calls, ["fetch origin", "push origin main -> ok"]);
   });
+
+  it("refuses what is asked for once closed, and still runs what was queued", async () => {
+    const push = gate();
+    const { sync, calls } = makeSync({ pushGate: push.closed });
+    const queued = sync.write(
+      () => "queued",
+      () => true,
+    );
+    sync.close();
+    const drained = sync.drain();
+
+    // What a service shutdown went on without might still ask for.
+    const refusals = [
+      sync.read(() => "read"),
+      sync.locked(() => "locked"),
+      sync.write(
+        () => "write",
+        () => true,
+      ),
+      sync.writeOn({
+        open: () => ({ root: ROOT }),
+        body: () => "writeOn",
+        committed: () => true,
+        close: () => undefined,
+      }),
+      sync.exclusive(() => "exclusive"),
+    ];
+    for (const refused of refusals) {
+      await assert.rejects(refused, (error: unknown) => {
+        assert.equal(extensionsOf(error).code, "UNAVAILABLE");
+        return true;
+      });
+    }
+
+    push.open();
+    assert.deepEqual(await queued, { result: "queued", pushed: true });
+    await drained;
+    // Nothing ran but the write that was queued before the close.
+    assert.deepEqual(calls, ["fetch origin", "push origin main -> ok"]);
+  });
 });
 
 describe("RepoSync timeouts", () => {
