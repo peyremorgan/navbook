@@ -14,11 +14,20 @@
  */
 
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { chmodSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { errorCode, ok, startHarness } from "../helpers/harness.ts";
-import { originSubjects } from "../helpers/temprepo.ts";
+import { makeFixture, originSubjects, serverCommand } from "../helpers/temprepo.ts";
+
+const STOP_WHEN_READY = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "fixtures",
+  "stop-when-ready.js",
+);
 
 const OPEN = `mutation Open($title: String!) {
   openIssue(input: { title: $title, body: "x" }) {
@@ -120,6 +129,49 @@ describe("--git-timeout-ms", () => {
 });
 
 describe("stopping", () => {
+  it("stops cleanly when told to the moment it says it is listening", async () => {
+    // Started by hand: the harness would take an exit this early for a
+    // server that never came up. Nothing here reaches the issuer.
+    const fixture = makeFixture();
+    try {
+      const [command, ...leading] = serverCommand();
+      const child = spawn(
+        command as string,
+        [
+          ...leading,
+          "--repo",
+          fixture.server.dir,
+          "--port",
+          "0",
+          "--oidc-audience",
+          "navbook-test",
+          "--oidc-issuer",
+          "https://issuer.invalid",
+          "--oidc-jwks-url",
+          "https://issuer.invalid/jwks",
+          "--no-graphiql",
+        ],
+        {
+          env: { ...fixture.env, NODE_OPTIONS: `--import ${STOP_WHEN_READY}` },
+          stdio: ["ignore", "ignore", "pipe"],
+        },
+      );
+      let stderr = "";
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk: string) => {
+        stderr += chunk;
+      });
+      const [code, signal] = await new Promise<[number | null, NodeJS.Signals | null]>((resolve) =>
+        child.once("exit", (exitCode, exitSignal) => resolve([exitCode, exitSignal])),
+      );
+      // Killed by the signal, it would have exited with no code and said nothing.
+      assert.deepEqual({ code, signal }, { code: 0, signal: null }, stderr);
+      assert.match(stderr, /received SIGTERM, finishing in-flight work/);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   it("finishes a push in flight before exiting", async () => {
     const h = await startHarness({ pullIntervalMs: 0 });
     try {

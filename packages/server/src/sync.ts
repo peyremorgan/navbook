@@ -346,7 +346,7 @@ export class RepoSync {
   /** How the background pull's latest attempt went; null before its first. */
   private lastRefresh: "ok" | "failed" | null = null;
   /** Set by {@link close}: every operation asked for from then on is refused. */
-  private closed = false;
+  private shut = false;
 
   constructor(opts: SyncOptions) {
     this.opts = opts;
@@ -609,7 +609,16 @@ export class RepoSync {
    * process exits. The background pull is {@link stop}'s, not this.
    */
   close(): void {
-    this.closed = true;
+    this.shut = true;
+  }
+
+  /**
+   * True once {@link close} has been called: shutdown has begun releasing the
+   * clone, and every operation asked for is refused. For a service that would
+   * rather not ask.
+   */
+  get closed(): boolean {
+    return this.shut;
   }
 
   /** Wait for in-flight work to finish, so shutdown never cuts one in half. */
@@ -619,7 +628,7 @@ export class RepoSync {
 
   /** Queue `body` on the clone, unless {@link close} said to take no more. */
   private enter<T>(body: () => Promise<T> | T): Promise<T> {
-    if (this.closed) return Promise.reject(syncClosed());
+    if (this.shut) return Promise.reject(syncClosed());
     return this.lock.run(body);
   }
 
