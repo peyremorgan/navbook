@@ -909,6 +909,26 @@ describe("RepoSync ordering", () => {
     assert.deepEqual(calls, ["fetch origin", "push origin main -> ok"]);
   });
 
+  it("drains what is queued while it drains, not only what was queued before", async () => {
+    const push = gate();
+    const { sync } = makeSync({ pushGate: push.closed });
+    const order: string[] = [];
+    void sync.write(
+      () => order.push("write"),
+      () => true,
+    );
+    const drained = sync.drain().then(() => order.push("drained"));
+    // Queued after the drain began, while the write's push is out.
+    await settle();
+    const later = sync.locked(async () => {
+      await settle();
+      order.push("later");
+    });
+    push.open();
+    await Promise.all([drained, later]);
+    assert.deepEqual(order, ["write", "later", "drained"]);
+  });
+
   it("refuses what is asked for once closed, and still runs what was queued", async () => {
     const push = gate();
     const { sync, calls } = makeSync({ pushGate: push.closed });
@@ -916,7 +936,9 @@ describe("RepoSync ordering", () => {
       () => "queued",
       () => true,
     );
+    assert.equal(sync.closed, false);
     sync.close();
+    assert.equal(sync.closed, true);
     const drained = sync.drain();
 
     // What a service shutdown went on without might still ask for.

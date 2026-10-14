@@ -166,10 +166,13 @@ describe("a plugin's service", () => {
     const log = logFile("late");
     const harness = await startHarness({ env: probeEnv(log.path, { SRVPROBE_LATE_READ: "1" }) });
     await harness.stop();
+    const said = `${log.lines().join(", ")}\n${harness.stderr()}`;
+    assert.ok(log.lines().includes("service:stop"), said);
     // Refused, rather than left running while the process exits under it.
     assert.deepEqual(
       log.lines().filter((line) => line.startsWith("late read")),
       ["late read refused UNAVAILABLE"],
+      said,
     );
     log.clear();
   });

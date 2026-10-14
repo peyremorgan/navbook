@@ -317,7 +317,7 @@ listeners already running are given up to half of it to finish, then every
 service is told to stop at once and they are waited for together, after which
 the server goes on without the ones still running, and says so. The clone
 refuses whatever they ask of it from then on, with `UNAVAILABLE`, rather than
-have the process exit in the middle of it.
+have the process exit in the middle of it; `host.sync.closed` says when.
 
 Never call `execute` from inside `ctx.sync.read`, `ctx.sync.write`,
 `ctx.sync.locked` or a `writeEntity` body. The operation's own resolvers take

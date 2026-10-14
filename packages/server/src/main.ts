@@ -26,10 +26,6 @@ async function main(argv: readonly string[]): Promise<number> {
     report: (line) => process.stderr.write(`${line}\n`),
   });
 
-  // The readiness line, and the only way to learn the port when 0 was asked
-  // for. On stdout because it is the program's output, not a diagnostic.
-  process.stdout.write(`nav-server listening on http://localhost:${handle.port}\n`);
-
   let stopping = false;
   const stop = (signal: NodeJS.Signals): void => {
     if (stopping) return;
@@ -42,6 +38,13 @@ async function main(argv: readonly string[]): Promise<number> {
   };
   process.on("SIGINT", () => stop("SIGINT"));
   process.on("SIGTERM", () => stop("SIGTERM"));
+
+  // The readiness line, and the only way to learn the port when 0 was asked
+  // for. On stdout because it is the program's output, not a diagnostic.
+  // Said only once the signals are handled: whoever reads it may stop the
+  // server at once, and a signal that came before the handlers would end the
+  // process where it stood — no service stopped, no push in flight finished.
+  process.stdout.write(`nav-server listening on http://localhost:${handle.port}\n`);
 
   // Resolving here would end the process while the server is still listening.
   return await new Promise<number>(() => undefined);
