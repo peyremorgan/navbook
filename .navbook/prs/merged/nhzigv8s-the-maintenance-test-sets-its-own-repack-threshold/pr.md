@@ -12,6 +12,9 @@ revisions:
   - head: 8772db1ffe4b146f175ae2a6dea9c042b98e5940
     base: 4f9199ada8754a9257ff5bc926a663f7080ecca4
     date: 2026-10-14T00:19:14Z
+merged:
+  date: 2026-10-14T00:19:59Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Closes #s9qwm9vd.
