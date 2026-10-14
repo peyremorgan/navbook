@@ -4,7 +4,8 @@
  */
 
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
@@ -1834,6 +1835,139 @@ describe("what the release review found", () => {
       assert.doesNotMatch(harness.stderr(), /passed over/);
     } finally {
       await bridged.stop();
+    }
+  });
+});
+
+describe("what the second review found", () => {
+  const CAROL_USER = { id: "333333333333333333", username: "carol", global_name: "Carol" };
+
+  it("tells an account it may not act nothing of records, and lets it unlink itself", async () => {
+    const settings = { ...SETTINGS, people: { [ALICE]: "alice@example.com" } };
+    const bridged = await startBridged({
+      settings,
+      harness: { policy: { requireClaims: ["groups=navbook"] } },
+    });
+    const { stub, harness } = bridged;
+    try {
+      await bridged.connected();
+      const member = await harness.token({
+        name: "M",
+        email: "m@example.com",
+        claims: { groups: ["navbook"] },
+      });
+      const id = await openIssue(harness, "Guarded", {}, member);
+      // Neither says what the record is, nor whether an id names one.
+      const review = { verdict: "approve", body: "Fine.", id };
+      assert.match(await answer(stub, slash(stub, CAROL_USER, "review", review)), /not linked/);
+      assert.match(await answer(stub, slash(stub, ALICE_USER, "review", review)), /sign-in/);
+      const nothing = { body: "Hello?", id: "zzzz" };
+      assert.match(await answer(stub, slash(stub, CAROL_USER, "comment", nothing)), /not linked/);
+      assert.match(
+        await answer(stub, slash(stub, ALICE_USER, "thread", { id: "zzzz" })),
+        /sign-in/,
+      );
+
+      assert.equal(
+        await answer(stub, slash(stub, ALICE_USER, "unlink")),
+        "Unlinked: your Discord account no longer acts as alice@example.com.",
+      );
+      assert.ok(
+        originSubjects(harness.fixture.origin).includes("docs(discord): unlink alice@example.com"),
+      );
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("does not take a thread somebody else named for a post whose answer was lost", async () => {
+    const bridged = await startBridged();
+    const { stub, harness } = bridged;
+    try {
+      // Refused without being made, so the post the bridge asked for is not there.
+      stub.fail("POST", new RegExp(`^/channels/${FORUM}/threads$`), 502);
+      const { peer } = harness.fixture;
+      peer.filePr("Squatted", "Lost answer.", "pr666666", "squatted");
+      assert.equal(peer.git(["push", "--quiet", "origin", "squatted"]).code, 0);
+      await eventually(
+        () => /could not tell the thread of #pr666666/.test(harness.stderr()),
+        () => harness.stderr(),
+      );
+      const squatter = "500000000000000003";
+      stub.channels.set(squatter, {
+        id: squatter,
+        type: 11,
+        guild_id: GUILD,
+        parent_id: FORUM,
+        owner_id: "444444444444444444",
+        name: "#pr666666 squatter",
+        thread_metadata: { archived: false, locked: false },
+      });
+      const deadline = Date.now() + 20_000;
+      let thread = await bridgedThread(harness, "pr666666");
+      while (thread === null) {
+        if (Date.now() > deadline) assert.fail(`never threaded:\n${harness.stderr()}`);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        thread = await bridgedThread(harness, "pr666666");
+      }
+      assert.notEqual(thread, squatter);
+      assert.equal(stub.channels.get(thread)?.owner_id, BOT);
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("knows what a state file from before rounds told", async () => {
+    const stub = await startStubDiscord();
+    const fixture = makeFixture({ marker: markerWith(SETTINGS) });
+    const path = join(fixture.server.dir, ".git", "navbook", "discord.json");
+    const state = () => JSON.parse(readFileSync(path, "utf8"));
+    try {
+      const first = await startBridged({ stub, harness: { fixture } });
+      let id = "";
+      let thread = "";
+      let before: unknown;
+      try {
+        id = await openIssue(first.harness, "Upgraded");
+        await eventually(
+          () => stub.threadsOf(TEXT).length === 1,
+          () => first.harness.stderr(),
+        );
+        thread = threadOf(stub, TEXT, id);
+        await eventually(() => state().seen?.[id] !== undefined && state().rounds?.[id] === 1);
+        before = state().seen[id];
+        await closeIssue(first.harness, id, "fixed");
+        await eventually(
+          () => said(stub, thread).length === 1,
+          () => first.harness.stderr(),
+        );
+      } finally {
+        await first.harness.stop();
+      }
+
+      // As an older bridge would have left it, stopped after telling the
+      // close and before noting it seen: no rounds, and the key of its day.
+      const old = state();
+      const event = { type: "status", from: "open", to: "closed", resolution: "fixed" };
+      const key = createHash("sha1")
+        .update(JSON.stringify([before, event]))
+        .digest("hex")
+        .slice(0, 20);
+      old.seen[id] = before;
+      delete old.rounds;
+      old.told.push(`${id}:${key}`);
+      writeFileSync(path, `${JSON.stringify(old)}\n`);
+
+      const second = await startBridged({ stub, harness: { fixture } });
+      try {
+        // Its first run is done once it says what it follows.
+        assert.deepEqual(said(stub, thread), ["🔒 Closed as fixed."]);
+      } finally {
+        await second.harness.stop();
+      }
+    } finally {
+      fixture.cleanup();
+      await stub.close();
     }
   });
 });
