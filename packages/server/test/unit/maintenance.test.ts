@@ -265,22 +265,32 @@ describe("Maintenance against git", () => {
     const dir = mkdtempSync(join(tmpdir(), "navbook-maintenance-"));
     // Configuration as the server's own git sees it: auto maintenance off,
     // and detaching on, which the run has to override to stay a child.
+    //
+    // And a threshold of the test's own, so that what makes `--auto` act is
+    // not whatever git's default is this year: git 2.56 raised the geometric
+    // repack's from 100 loose objects to 6700 (#s9qwm9vd), past what this
+    // test makes. The geometric task reads the first key, and an older git's
+    // `gc` task the second; each git ignores the one that is not its own.
     const env = {
       ...process.env,
-      GIT_CONFIG_COUNT: "3",
+      GIT_CONFIG_COUNT: "5",
       GIT_CONFIG_KEY_0: "maintenance.auto",
       GIT_CONFIG_VALUE_0: "false",
       GIT_CONFIG_KEY_1: "maintenance.autoDetach",
       GIT_CONFIG_VALUE_1: "true",
       GIT_CONFIG_KEY_2: "gc.autoDetach",
       GIT_CONFIG_VALUE_2: "true",
+      GIT_CONFIG_KEY_3: "maintenance.geometric-repack.auto",
+      GIT_CONFIG_VALUE_3: "100",
+      GIT_CONFIG_KEY_4: "gc.auto",
+      GIT_CONFIG_VALUE_4: "100",
     };
     const git = (...args: string[]) => spawnSync("git", args, { cwd: dir, encoding: "utf8", env });
     try {
       git("init", "--quiet", "-b", "main");
       mkdirSync(join(dir, "files"));
       // Enough that git's estimate — it samples one of the 256 object
-      // directories — clears its threshold whichever it samples.
+      // directories — clears that threshold whichever it samples.
       for (let i = 0; i < 3000; i++) writeFileSync(join(dir, "files", String(i)), `blob ${i}\n`);
       git("add", "files");
       git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "many");
