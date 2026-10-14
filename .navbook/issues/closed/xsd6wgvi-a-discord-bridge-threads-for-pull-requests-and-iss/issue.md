@@ -5,6 +5,7 @@ created: 2026-10-14T00:54:15Z
 labels: [enhancement, plugin]
 assignee: Claude <noreply@anthropic.com>
 feature: plugins
+resolution: fixed
 ---
 
 A Discord bridge for the tracker, as a server plugin (spec 06 §6.2 names a chat bridge as the case plugin services exist for). Developers should be able to follow and discuss pull requests and issues from a Discord server, and act on them from there as themselves.
