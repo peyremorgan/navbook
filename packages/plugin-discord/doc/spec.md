@@ -123,8 +123,9 @@ How it behaves is the README's to describe; what it keeps is below.
 
 ## What the bridge keeps outside the tree
 
-The bridge remembers which thread belongs to which record, and what each
-record looked like when it last looked, in `navbook/discord.json` under the
+The bridge remembers which thread belongs to which record, what each record
+looked like when it last looked, and which threads it asked Discord for
+without hearing back, in `navbook/discord.json` under the
 served clone's git directory. That file is outside the working tree, so it is
 never committed and never makes the clone dirty. It is disposable in the sense
 of [06 §6.6](../../../doc/spec/06-future.md):

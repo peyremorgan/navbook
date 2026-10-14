@@ -101,6 +101,7 @@ export class DiscordGateway {
     let backoff = initial;
     while (!this.stopper.signal.aborted) {
       let close: { code: number; reason: string } | null = null;
+      const resuming = this.resumeUrl !== null;
       try {
         const url = this.resumeUrl ?? (await this.opts.rest.get<GatewayBot>("/gateway/bot")).url;
         close = await this.session(url, () => {
@@ -111,6 +112,9 @@ export class DiscordGateway {
         this.opts.report(
           `could not reach Discord's gateway: ${error instanceof Error ? error.message : String(error)}`,
         );
+        // The address to resume at is unreachable: start a new session at
+        // the one Discord gives now, rather than knock at that one for ever.
+        if (resuming) this.forgetSession();
       }
       if (this.stopper.signal.aborted) return;
       if (close !== null) {

@@ -17,7 +17,7 @@
 import { createHash } from "node:crypto";
 import type { CoreExtensions, EntityRecord, ReviewPolicy } from "@navbook/core";
 import type { ServerPluginHost } from "@navbook/server/plugin";
-import type { IssueRule, Settings } from "../core/settings.ts";
+import type { Settings } from "../core/settings.ts";
 import { PLUGIN_NAME, parseSettings, peopleOf } from "../core/settings.ts";
 import { DiscordError, type DiscordRest } from "./discord/rest.ts";
 import { type Channel, ChannelType, type MessageBody } from "./discord/types.ts";
@@ -30,9 +30,12 @@ import {
   seenOf,
 } from "./model.ts";
 import { card, messageFor, type RenderContext, tagIds, tagNames, threadName } from "./render.ts";
-import { type CompiledRule, compileRules, openingFor, watchedFields } from "./rules.ts";
+import { type CompiledRule, channelFor, compileRules, openingFor, watchedFields } from "./rules.ts";
 import { type BridgeState, type StateFile, type ThreadRef, TOLD_LIMIT } from "./state.ts";
 import { ChannelRefused, isGone, RENAME_SPACING_MS, Threads } from "./threads.ts";
+
+/** The least time between two saves of the state in one run. */
+const SAVE_SPACING_MS = 1_000;
 
 /** A message the thread has not been told yet, and the key it is remembered by. */
 interface Telling {
@@ -93,6 +96,7 @@ export class Bridge {
   private backoffMs: number;
   /** What was last said about each recurring fault, so the log says it once. */
   private readonly said = new Map<string, string>();
+  private savedAt = 0;
 
   constructor(opts: BridgeOptions) {
     this.host = opts.host;
@@ -105,6 +109,11 @@ export class Bridge {
     this.firstBackoffMs = opts.backoffMs ?? 5_000;
     this.backoffMs = this.firstBackoffMs;
     this.useSettings(opts.settings);
+  }
+
+  private save(): void {
+    this.file.save(this.state);
+    this.savedAt = Date.now();
   }
 
   /** The Discord accounts the settings link, to the addresses they act as. */
@@ -145,9 +154,13 @@ export class Bridge {
     }
   }
 
-  /** The records with a thread whose id starts with `prefix`. */
-  threaded(prefix: string): string[] {
-    return Object.keys(this.state.threads).filter((id) => id.startsWith(prefix));
+  /**
+   * The record with a thread that `ref` names, by id or by prefix as the
+   * tracker reads one; null for none, or for a prefix of several.
+   */
+  threaded(ref: string): string | null {
+    const found = this.core.resolvePrefix(ref, Object.keys(this.state.threads));
+    return found.ok ? found.id : null;
   }
 
   /** Where a record's thread is, as a link anybody in the server can follow. */
@@ -186,7 +199,7 @@ export class Bridge {
     if (this.retry !== null) clearTimeout(this.retry.timer);
     this.retry = null;
     await this.queue.catch(() => undefined);
-    this.file.save(this.state);
+    this.save();
   }
 
   /**
@@ -203,7 +216,14 @@ export class Bridge {
       const view = await this.readView();
       const record = view.records.get(id);
       if (record === undefined) return { refused: `#${id} is not an issue or pull request here` };
-      const channel = this.channelFor(record, view);
+      const channel = channelFor(
+        this.core,
+        record,
+        this.settings,
+        this.rulesFor(view.ext),
+        view.policy,
+        view.ext,
+      );
       if (channel === null) {
         return {
           refused:
@@ -214,19 +234,9 @@ export class Bridge {
       }
       const thread = await this.open(record, channel, view);
       this.state.threads[id] = thread;
-      this.file.save(this.state);
+      this.save();
       return { thread, created: true };
     });
-  }
-
-  private channelFor(record: EntityRecord, view: View): string | null {
-    if (record.kind === "pr") return this.settings.prs?.channel ?? null;
-    const fits = (rule: IssueRule, query: CompiledRule["query"]): boolean =>
-      (rule.scope !== "root" || this.core.readParent(record.fm) === null) &&
-      this.core.matchesQuery(query, record, view.policy, view.ext);
-    return (
-      this.rulesFor(view.ext).find(({ rule, query }) => fits(rule, query))?.rule.channel ?? null
-    );
   }
 
   /**
@@ -261,7 +271,7 @@ export class Bridge {
       this.reloadSettings(view.settings);
       await this.findThreads();
       const { failed, waiting } = await this.reconcile(view);
-      this.file.save(this.state);
+      this.save();
       // What was read is done with either way: a sync that moved nothing
       // reads nothing again. What failed is tried again on the backoff, or
       // sooner when the tracker moves; a rename waiting for Discord's limit,
@@ -297,11 +307,7 @@ export class Bridge {
    * first thread is due.
    */
   async checkChannels(): Promise<void> {
-    const named = [
-      ...(this.settings.prs === null ? [] : [this.settings.prs.channel]),
-      ...this.settings.issues.map((rule) => rule.channel),
-    ];
-    for (const id of new Set(named)) {
+    for (const id of this.namedChannels()) {
       try {
         const channel = await this.threads.channel(id, true);
         if (channel.guild_id !== undefined && channel.guild_id !== this.settings.guild) {
@@ -323,6 +329,16 @@ export class Bridge {
     }
   }
 
+  /** Every channel the settings name, once each. */
+  private namedChannels(): string[] {
+    return [
+      ...new Set([
+        ...(this.settings.prs === null ? [] : [this.settings.prs.channel]),
+        ...this.settings.issues.map((rule) => rule.channel),
+      ]),
+    ];
+  }
+
   /**
    * Find the bridge's threads in Discord, once, when it knows of none: its
    * state was lost, or this is its first start. Each is known by its name,
@@ -334,13 +350,7 @@ export class Bridge {
       this.searched = true;
       return;
     }
-    const parents = [
-      ...new Set([
-        ...(this.settings.prs === null ? [] : [this.settings.prs.channel]),
-        ...this.settings.issues.map((rule) => rule.channel),
-      ]),
-    ];
-    const found = await this.threads.find(this.settings.guild, parents);
+    const found = await this.threads.find(this.settings.guild, this.namedChannels());
     for (const [id, thread] of found) this.state.threads[id] = thread;
     if (found.size > 0) this.host.report(`found ${found.size} threads the bridge made before`);
     this.searched = true;
@@ -444,14 +454,21 @@ export class Bridge {
           this.host.report(
             `Discord refused what #${id} needed, and it is passed over: ${messageOf(error)}`,
           );
+          // A name Discord refused would be refused again every minute: it is
+          // asked for again only once the title changes.
+          const held = this.state.threads[id];
+          if (held !== undefined && record !== undefined) held.name = threadName(record);
         }
       }
       this.clear(`record ${id}`);
       if (after === undefined) delete seen[id];
       else seen[id] = after;
-      // Saved as soon as Discord was told something, so a restart does not
-      // tell it again; a record that told Discord nothing waits for the run's end.
-      if (this.threads.writes !== writes) this.file.save(this.state);
+      // Saved soon after Discord was told something, so a restart does not
+      // tell it again — at most once a second, since the whole state is
+      // written each time; the run's end saves the rest.
+      if (this.threads.writes !== writes && Date.now() - this.savedAt >= SAVE_SPACING_MS) {
+        this.save();
+      }
     }
     return { failed, waiting: this.renamesWaiting(view) };
   }
@@ -482,7 +499,7 @@ export class Bridge {
     if (thread === undefined) {
       if (record === undefined || after === undefined) return;
       const weighed = before === undefined ? firstSighting(this.core, after) : events;
-      const opening = openingFor(
+      const channel = openingFor(
         this.core,
         record,
         weighed,
@@ -491,17 +508,20 @@ export class Bridge {
         view.policy,
         view.ext,
       );
-      if (opening === null) return;
-      thread = await this.open(record, opening.channel, view);
+      if (channel === null) return;
+      thread = await this.open(record, channel, view);
       this.state.threads[id] = thread;
       // Saved before anything else is posted: a thread made twice is the one
       // mistake a run tried again could not take back.
-      this.file.save(this.state);
+      this.save();
       // The card names who is asked for something; only a message notifies them.
       const told = before === undefined ? asked(this.core, record) : events;
       for (const each of this.untold(id, before, ctx, record, after, told)) {
         await this.tell(thread, each);
       }
+      // Opened by a rule on a record already settled — `status:closed` — and
+      // so archived, as its thread would have been had it had one before.
+      if (record.status !== "open") await this.threads.patch(thread, { archived: true });
       return;
     }
 
@@ -593,8 +613,27 @@ export class Bridge {
     if (this.state.told.length > TOLD_LIMIT) this.told.delete(this.state.told.shift() as string);
   }
 
-  /** Start a record's thread in `channel`, with its card drawn. */
+  /**
+   * Start a record's thread in `channel`, with its card drawn.
+   *
+   * Discord takes no nonce for a forum post, so a request whose answer was
+   * lost — a 5xx, a dropped connection, a stop — may have made the thread
+   * anyway. Each request is noted in the state before it is sent, and one
+   * noted and never answered is looked for in Discord before another is made.
+   */
   private async open(record: EntityRecord, channel: string, view: View): Promise<ThreadRef> {
+    const asked = this.state.opening[record.id];
+    const again = asked?.channel === channel;
+    if (again) {
+      const made = await this.threads.made(this.settings.guild, channel, record.id);
+      if (made !== null) {
+        delete this.state.opening[record.id];
+        return made;
+      }
+    }
+    const at = again ? asked.at : Date.now();
+    this.state.opening[record.id] = { channel, at };
+    this.save();
     const body = card(this.renderContext(view), record);
     const thread = await this.threads.open(
       channel,
@@ -602,7 +641,9 @@ export class Bridge {
       threadName(record),
       body,
       (available) => tagIds(tagNames(this.core, record), available ?? []),
+      createHash("sha1").update(`card:${record.id}:${at}`).digest("hex"),
     );
+    delete this.state.opening[record.id];
     thread.card = hashOf(body);
     return thread;
   }

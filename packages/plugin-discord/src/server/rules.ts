@@ -34,13 +34,7 @@ export function compileRules(
   return { rules, problems };
 }
 
-export interface Opening {
-  channel: string;
-  /** What fired, as the rule wrote it; null for a pull request, which always gets one. */
-  trigger: Trigger | null;
-}
-
-/** Where `record` gets a thread for `events`, if anywhere. */
+/** Where `record` gets a thread for `events`, if anywhere: the channel. */
 export function openingFor(
   core: Core,
   record: EntityRecord,
@@ -49,20 +43,49 @@ export function openingFor(
   rules: readonly CompiledRule[],
   policy: ReviewPolicy,
   ext: CoreExtensions,
-): Opening | null {
+): string | null {
   if (record.kind === "pr") {
     return settings.prs !== null && events.some((event) => event.type === "opened")
-      ? { channel: settings.prs.channel, trigger: null }
+      ? settings.prs.channel
       : null;
   }
-  for (const { rule, query } of rules) {
-    if (rule.scope === "root" && core.readParent(record.fm) !== null) continue;
-    const trigger = rule.on.find((each) => fires(each, events));
-    if (trigger === undefined) continue;
-    if (!core.matchesQuery(query, record, policy, ext)) continue;
-    return { channel: rule.channel, trigger };
-  }
-  return null;
+  const fired = rules.find(
+    (rule) =>
+      rule.rule.on.some((trigger) => fires(trigger, events)) &&
+      takes(core, rule, record, policy, ext),
+  );
+  return fired?.rule.channel ?? null;
+}
+
+/**
+ * Where `record` goes when somebody asks for its thread, whatever the
+ * triggers say: the pull requests' channel, or the first rule whose scope
+ * and query the issue is in.
+ */
+export function channelFor(
+  core: Core,
+  record: EntityRecord,
+  settings: Settings,
+  rules: readonly CompiledRule[],
+  policy: ReviewPolicy,
+  ext: CoreExtensions,
+): string | null {
+  if (record.kind === "pr") return settings.prs?.channel ?? null;
+  return rules.find((rule) => takes(core, rule, record, policy, ext))?.rule.channel ?? null;
+}
+
+/** Whether an issue is in a rule's scope, and matches its query as it stands now. */
+function takes(
+  core: Core,
+  { rule, query }: CompiledRule,
+  record: EntityRecord,
+  policy: ReviewPolicy,
+  ext: CoreExtensions,
+): boolean {
+  return (
+    (rule.scope !== "root" || core.readParent(record.fm) === null) &&
+    core.matchesQuery(query, record, policy, ext)
+  );
 }
 
 /** Whether one trigger matches any of the events. */

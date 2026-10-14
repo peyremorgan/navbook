@@ -169,7 +169,10 @@ While the server is down nothing is lost: when it comes back, the bridge
 tells each thread what happened meanwhile, once. While Discord is down, the
 bridge tries again when the tracker moves, and otherwise after a wait that
 grows from five seconds to five minutes; a message is never posted twice for
-one change.
+one change, and a thread whose making Discord did not confirm is looked for
+before another is made. What Discord refuses for good — a channel no thread
+can be made in, a name its moderation rejects — is said once in the log and
+not asked again.
 
 ## What is sent to Discord
 

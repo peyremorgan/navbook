@@ -60,9 +60,7 @@ export function activate(host: ServerPluginHost): void {
     DiscordBridge: {
       thread: (_parent: unknown, args: { ref: string }) => {
         if (bridge === null) return null;
-        const prefix = args.ref.trim().replace(/^#/, "").toLowerCase();
-        const ids = prefix.length >= 4 ? bridge.threaded(prefix) : [];
-        const id = ids.length === 1 ? (ids[0] as string) : null;
+        const id = bridge.threaded(args.ref.trim().replace(/^#/, ""));
         const url = id === null ? null : bridge.threadUrl(id);
         return id === null || url === null ? null : { id: bridge.threadOf(id)?.thread, url };
       },

@@ -626,7 +626,9 @@ export class Commands {
     });
     const held = (read[pr ? "pr" : "issue"] ?? {}) as { assignees?: string[]; baseSha?: string };
     const assignees = held.assignees ?? [];
-    if (assignees.some((each) => addressOf(each) === email.toLowerCase())) {
+    if (
+      assignees.some((each) => this.host.core.sameEmail(addressOf(this.host.core, each), email))
+    ) {
       return `${email} is already assigned to #${record.id}.`;
     }
     const name = this.bridge.view?.names.get(email.toLowerCase());
@@ -674,8 +676,9 @@ export class Commands {
   }
 
   /**
-   * The record a command is about: the one named, by id or a prefix of at
-   * least four characters, or else the one whose thread it was typed in.
+   * The record a command is about: the one named, by id or a prefix of one
+   * as everywhere else in the tracker, or else the one whose thread it was
+   * typed in.
    */
   private target(
     interaction: Interaction,
@@ -685,19 +688,21 @@ export class Commands {
     if (records === undefined)
       return { refused: "The tracker has not been read yet; try again in a moment." };
     if (named !== undefined && named.trim() !== "") {
-      const prefix = named.trim().replace(/^#/, "").toLowerCase();
-      if (prefix.length < 4)
-        return {
-          refused: `\`${oneLine(named)}\` is too short: give at least four characters of an id.`,
-        };
-      const matches = [...records.keys()].filter((id) => id.startsWith(prefix));
-      if (matches.length === 0)
-        return { refused: `Nothing here has an id starting \`${prefix}\`.` };
-      if (matches.length > 1)
-        return {
-          refused: `\`${prefix}\` could be any of ${matches.map((id) => `#${id}`).join(", ")}.`,
-        };
-      return { record: records.get(matches[0] as string) as EntityRecord };
+      const prefix = named.trim().replace(/^#/, "");
+      const found = this.host.core.resolvePrefix(prefix, [...records.keys()]);
+      if (found.ok) return { record: records.get(found.id) as EntityRecord };
+      switch (found.reason) {
+        case "too-short":
+          return {
+            refused: `\`${oneLine(named)}\` is too short: give at least ${this.host.core.MIN_PREFIX_LENGTH} characters of an id.`,
+          };
+        case "not-found":
+          return { refused: `Nothing here has an id starting \`${oneLine(prefix)}\`.` };
+        default:
+          return {
+            refused: `\`${oneLine(prefix)}\` could be any of ${found.matches.map((id) => `#${id}`).join(", ")}.`,
+          };
+      }
     }
     const id = this.bridge.recordOfChannel(interaction.channel_id);
     const record = id === null ? undefined : records.get(id);

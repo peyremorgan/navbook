@@ -15,6 +15,7 @@
  * the caller's to report.
  */
 
+import { readFileSync } from "node:fs";
 import { DEFAULT_API_URL } from "./types.ts";
 
 export interface RestOptions {
@@ -46,7 +47,14 @@ export class DiscordError extends Error {
   }
 }
 
-const USER_AGENT = "DiscordBot (https://github.com/peyremorgan/navbook, 0.6.1)";
+/** The package's version, from its manifest: beside `src/` and `dist/` alike. */
+const VERSION = (
+  JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8")) as {
+    version: string;
+  }
+).version;
+
+const USER_AGENT = `DiscordBot (https://github.com/peyremorgan/navbook, ${VERSION})`;
 
 export class DiscordRest {
   private readonly token: string;

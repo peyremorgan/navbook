@@ -77,22 +77,14 @@ export function diffSeen(
   if (before === undefined) return [{ type: "opened" }];
 
   const events: EntityEvent[] = [];
-  if (before.status !== after.status) {
-    const resolution = after.fm.resolution;
-    events.push({
-      type: "status",
-      from: before.status,
-      to: after.status,
-      resolution: typeof resolution === "string" && resolution !== "" ? resolution : null,
-    });
-  }
+  if (before.status !== after.status) events.push(statusEvent(before.status, after));
   if (before.title !== after.title) {
     events.push({ type: "retitled", from: before.title, to: after.title });
   }
-  const assigned = peopleDiff(core.readAssignees(before.fm), core.readAssignees(after.fm));
+  const assigned = peopleDiff(core, core.readAssignees(before.fm), core.readAssignees(after.fm));
   if (assigned !== null) events.push({ type: "assigned", ...assigned });
   if (after.kind === "pr") {
-    const reviewers = peopleDiff(core.readReviewers(before.fm), core.readReviewers(after.fm));
+    const reviewers = peopleDiff(core, core.readReviewers(before.fm), core.readReviewers(after.fm));
     if (reviewers !== null) events.push({ type: "reviewers", ...reviewers });
     const was = new Set(core.readRevisions(before.fm).map((revision) => revision.head));
     const heads = core
@@ -114,12 +106,14 @@ export function diffSeen(
 
 /**
  * The events a rule weighs when a record is seen for the first time: it was
- * opened, assigned to whoever it names, and given every field it carries — so
- * an issue filed already assigned, or already `priority: high`, matches the
- * rule that waits for either, as one assigned a minute later would.
+ * opened, settled if it already is, assigned to whoever it names, and given
+ * every field it carries — so an issue filed already assigned, or already
+ * `priority: high`, or closed before the bridge looked, matches the rule that
+ * waits for it, as one changed a minute later would.
  */
 export function firstSighting(core: Core, after: Seen): EntityEvent[] {
   const events: EntityEvent[] = [{ type: "opened" }];
+  if (after.status !== "open") events.push(statusEvent("open", after));
   const assignees = core.readAssignees(after.fm);
   if (assignees.length > 0) events.push({ type: "assigned", added: assignees, removed: [] });
   for (const [key, value] of Object.entries(after.fm)) {
@@ -129,22 +123,33 @@ export function firstSighting(core: Core, after: Seen): EntityEvent[] {
   return events;
 }
 
+/** The move from `from` to the status `after` is in, with the resolution it gives. */
+function statusEvent(from: string, after: Seen): EntityEvent {
+  const resolution = after.fm.resolution;
+  return {
+    type: "status",
+    from,
+    to: after.status,
+    resolution: typeof resolution === "string" && resolution !== "" ? resolution : null,
+  };
+}
+
 /** Who was added and removed, compared by address; null when nobody was. */
 function peopleDiff(
+  core: Core,
   before: readonly string[],
   after: readonly string[],
 ): { added: string[]; removed: string[] } | null {
-  const was = new Set(before.map(addressOf));
-  const is = new Set(after.map(addressOf));
-  const added = after.filter((person) => !was.has(addressOf(person)));
-  const removed = before.filter((person) => !is.has(addressOf(person)));
+  const was = new Set(before.map((person) => addressOf(core, person)));
+  const is = new Set(after.map((person) => addressOf(core, person)));
+  const added = after.filter((person) => !was.has(addressOf(core, person)));
+  const removed = before.filter((person) => !is.has(addressOf(core, person)));
   return added.length === 0 && removed.length === 0 ? null : { added, removed };
 }
 
 /** The address a person field names, lower-cased: the identity key (spec 02 §2.4). */
-export function addressOf(person: string): string {
-  const named = /<([^<>]+)>\s*$/.exec(person);
-  return (named ? (named[1] as string) : person).trim().toLowerCase();
+export function addressOf(core: Core, person: string): string {
+  return (core.parsePerson(person)?.email ?? person).trim().toLowerCase();
 }
 
 /** A frontmatter value's items as text: a scalar is one, a list is each. */

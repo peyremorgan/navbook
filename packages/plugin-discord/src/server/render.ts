@@ -247,25 +247,6 @@ export function parseActionId(
   return { action: match[1] as string, id: match[2] as string, extra: match[3] };
 }
 
-/**
- * The messages a thread is told for `events`, in order. Fields are told only
- * when a rule watches them (`watched`); the rest change the card alone.
- */
-export function messages(
-  ctx: RenderContext,
-  record: EntityRecord | null,
-  last: { kind: string; title: string },
-  events: readonly EntityEvent[],
-  watched: ReadonlySet<string>,
-): MessageBody[] {
-  const out: MessageBody[] = [];
-  for (const event of events) {
-    const body = messageFor(ctx, record, last, event, watched);
-    if (body !== null) out.push(body);
-  }
-  return out;
-}
-
 /** The message one event makes, or null for one that changes only the card. */
 export function messageFor(
   ctx: RenderContext,
@@ -363,7 +344,7 @@ function peopleMessage(
   if (added.length > 0) {
     lines.push(`${addedLabel} ${added.map((each) => person(ctx, each)).join(", ")}.`);
     for (const each of added) {
-      const id = ctx.discordOf(addressOf(each));
+      const id = ctx.discordOf(addressOf(ctx.core, each));
       if (id !== null && !pinged.includes(id)) pinged.push(id);
     }
   }
@@ -381,7 +362,7 @@ function quiet(content: string): MessageBody {
 /** A person as a thread shows them: their Discord account when linked, else their name. */
 export function person(ctx: RenderContext, value: string): string {
   if (value.trim() === "") return "";
-  const id = ctx.discordOf(addressOf(value));
+  const id = ctx.discordOf(addressOf(ctx.core, value));
   return id === null ? personName(ctx, value) : `<@${id}>`;
 }
 

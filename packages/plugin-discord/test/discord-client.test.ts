@@ -7,6 +7,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { after, afterEach, before, describe, it } from "node:test";
 import { DiscordGateway } from "../src/server/discord/gateway.ts";
 import { DiscordError, DiscordRest, routeKey, sleep } from "../src/server/discord/rest.ts";
@@ -31,6 +32,11 @@ describe("the REST client", () => {
     assert.equal(channel.type, 15);
     const last = stub.requests.at(-1);
     assert.equal(last?.auth, "Bot t0ken");
+    // Discord asks for the library and its version; the version is the package's own.
+    const { version } = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as { version: string };
+    assert.equal(last?.agent, `DiscordBot (https://github.com/peyremorgan/navbook, ${version})`);
   });
 
   it("never sends the token where an interaction's own token authorises the request", async () => {
@@ -234,6 +240,25 @@ describe("the gateway client", () => {
       await waitFor(() => stub.identifies === identified + 1 && client.ready);
       assert.deepEqual(events, ["READY", "READY"]);
     } finally {
+      await client.stop();
+    }
+  });
+
+  it("identifies afresh when the address to resume at cannot be reached", async () => {
+    const events: string[] = [];
+    const reported: string[] = [];
+    stub.resumeUrl = "ws://127.0.0.1:9";
+    const client = gateway(events, reported);
+    client.start();
+    try {
+      await waitFor(() => client.ready);
+      const identified = stub.identifies;
+      stub.drop(4000);
+      await waitFor(() => stub.identifies === identified + 1 && client.ready);
+      assert.deepEqual(events, ["READY", "READY"]);
+      assert.equal(reported.filter((line) => /could not reach/.test(line)).length, 1);
+    } finally {
+      stub.resumeUrl = null;
       await client.stop();
     }
   });

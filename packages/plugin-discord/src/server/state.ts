@@ -38,13 +38,19 @@ export interface BridgeState {
    * again after failing part of the way does not post them twice.
    */
   told: string[];
+  /**
+   * The threads asked of Discord whose answer was not kept, by record: when
+   * the asking began, and in which channel. Discord may have made one, so
+   * it is looked for before another is asked for.
+   */
+  opening: Record<string, { channel: string; at: number }>;
 }
 
 /** How many keys are kept: enough to cover any run tried again. */
 export const TOLD_LIMIT = 5_000;
 
 export function emptyState(): BridgeState {
-  return { version: 1, seen: null, threads: {}, told: [] };
+  return { version: 1, seen: null, threads: {}, told: [], opening: {} };
 }
 
 export class StateFile {
@@ -74,6 +80,10 @@ export class StateFile {
         seen: parsed.seen && typeof parsed.seen === "object" ? parsed.seen : null,
         threads: parsed.threads,
         told: Array.isArray(parsed.told) ? parsed.told : [],
+        opening:
+          parsed.opening && typeof parsed.opening === "object" && !Array.isArray(parsed.opening)
+            ? parsed.opening
+            : {},
       };
     } catch (error) {
       this.report(

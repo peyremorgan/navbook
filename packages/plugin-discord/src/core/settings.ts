@@ -230,20 +230,6 @@ export function parseTrigger(text: string): Trigger | null {
   return value === "" ? null : { kind: "field", key, value };
 }
 
-/** The trigger as a rule would write it: what the bridge says when one fires. */
-export function triggerText(trigger: Trigger): string {
-  switch (trigger.kind) {
-    case "status":
-      return `status:${trigger.status}`;
-    case "field":
-      return trigger.value === undefined
-        ? `field:${trigger.key}`
-        : `field:${trigger.key}=${trigger.value}`;
-    default:
-      return trigger.kind;
-  }
-}
-
 function triggerFault(text: unknown): string {
   if (typeof text !== "string") return `${describe(text)} is not a trigger`;
   if (text.trim() === "closed" || text.trim() === "close") {

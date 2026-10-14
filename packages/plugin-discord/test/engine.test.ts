@@ -9,8 +9,9 @@ import * as core from "@navbook/core";
 import { editPeople, MarkerError } from "../src/core/marker.ts";
 import { parseSettings, parseTrigger, peopleOf, type Settings } from "../src/core/settings.ts";
 import { fieldValues } from "../src/server/commands.ts";
+import type { MessageBody } from "../src/server/discord/types.ts";
 import { LinkCodes } from "../src/server/link.ts";
-import { diffSeen, firstSighting, seenOf } from "../src/server/model.ts";
+import { diffSeen, type EntityEvent, firstSighting, seenOf } from "../src/server/model.ts";
 import {
   actionId,
   card,
@@ -19,19 +20,30 @@ import {
   embedSize,
   excerpt,
   idOfThreadName,
-  messages,
+  messageFor,
   parseActionId,
   type RenderContext,
   tagIds,
   tagNames,
   threadName,
 } from "../src/server/render.ts";
-import { compileRules, fires, openingFor, watchedFields } from "../src/server/rules.ts";
+import { channelFor, compileRules, fires, openingFor, watchedFields } from "../src/server/rules.ts";
 import { comment, HEAD, HEAD_2, issue, pr } from "./helpers/records.ts";
 
 const GUILD = "100000000000000001";
 const CHANNEL = "100000000000000003";
 const ALICE = "111111111111111111";
+
+/** What a thread is told for `events`, in order, as the bridge tells them one by one. */
+function messages(
+  ctx: RenderContext,
+  record: Parameters<typeof messageFor>[1],
+  last: Parameters<typeof messageFor>[2],
+  events: readonly EntityEvent[],
+  watched: ReadonlySet<string>,
+): MessageBody[] {
+  return events.flatMap((event) => messageFor(ctx, record, last, event, watched) ?? []);
+}
 
 function settings(raw: Record<string, unknown>): Settings {
   const reading = parseSettings({ guild: GUILD, ...raw }, core);
@@ -282,6 +294,12 @@ describe("what changed between two sightings", () => {
       { type: "assigned", added: ["alice@example.com"], removed: [] },
       { type: "field", key: "priority", before: undefined, after: "high" },
     ]);
+    // Closed before the bridge first looked: closed, as far as a rule can tell.
+    const closed = seenOf(issue({ status: "closed", fm: "resolution: fixed\n" }));
+    assert.deepEqual(firstSighting(core, closed).slice(0, 2), [
+      { type: "opened" },
+      { type: "status", from: "open", to: "closed", resolution: "fixed" },
+    ]);
   });
 });
 
@@ -335,21 +353,21 @@ describe("which rule opens a thread", () => {
     const root = issue({ fm: "labels: [bug]\n" });
     const child = issue({ fm: "labels: [bug]\nparent: par11111\n" });
     const plain = issue({ fm: "parent: par11111\n" });
-    assert.equal(
-      openingFor(core, root, assigned, read, rules, policy, ext)?.channel,
-      "100000000000000004",
-    );
-    assert.equal(
-      openingFor(core, child, assigned, read, rules, policy, ext)?.channel,
-      "100000000000000005",
-    );
+    assert.equal(openingFor(core, root, assigned, read, rules, policy, ext), "100000000000000004");
+    assert.equal(openingFor(core, child, assigned, read, rules, policy, ext), "100000000000000005");
     assert.equal(openingFor(core, plain, assigned, read, rules, policy, ext), null);
     assert.equal(openingFor(core, root, [{ type: "opened" }], read, rules, policy, ext), null);
-    assert.deepEqual(openingFor(core, pr(), [{ type: "opened" }], read, rules, policy, ext), {
-      channel: "100000000000000002",
-      trigger: null,
-    });
+    assert.equal(
+      openingFor(core, pr(), [{ type: "opened" }], read, rules, policy, ext),
+      "100000000000000002",
+    );
     assert.equal(openingFor(core, pr(), assigned, read, rules, policy, ext), null);
+    // Asked for, a thread goes where the first rule taking the record says, whatever fired.
+    assert.equal(channelFor(core, root, read, rules, policy, ext), "100000000000000004");
+    assert.equal(channelFor(core, child, read, rules, policy, ext), "100000000000000005");
+    assert.equal(channelFor(core, plain, read, rules, policy, ext), null);
+    assert.equal(channelFor(core, pr(), read, rules, policy, ext), "100000000000000002");
+    assert.equal(channelFor(core, pr(), settings({}), [], policy, ext), null);
     assert.deepEqual(
       [
         ...watchedFields(

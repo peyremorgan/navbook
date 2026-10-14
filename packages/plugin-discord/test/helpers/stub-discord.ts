@@ -30,6 +30,8 @@ export const TEXT = "100000000000000003";
 export const APP = "100000000000000009";
 /** A forum in a guild the bridge does not serve. */
 export const ELSEWHERE = "100000000000000005";
+/** A voice channel: in the guild, but one no thread can be made in. */
+export const VOICE = "100000000000000006";
 export const BOT = "100000000000000010";
 
 export interface StubMessage extends Message {
@@ -44,6 +46,7 @@ export interface RecordedRequest {
   path: string;
   body: unknown;
   auth: string | null;
+  agent: string | null;
 }
 
 export interface StubResponse {
@@ -106,6 +109,8 @@ export interface StubDiscord {
   drop(code: number): void;
   /** Set the heartbeat interval sent in HELLO, before a connection is made. */
   heartbeatMs: number;
+  /** The `resume_gateway_url` READY gives; the stub's own gateway when null. */
+  resumeUrl: string | null;
   /** Stop answering heartbeats, as a dead connection does. */
   silent: boolean;
   /** Make the open connections ignore everything, a close included, as a peer that is gone does. */
@@ -141,6 +146,7 @@ export async function startStubDiscord(
     available_tags: opts.forumTags ?? [],
   });
   channels.set(TEXT, { id: TEXT, type: 0, guild_id: GUILD, name: "issues" });
+  channels.set(VOICE, { id: VOICE, type: 2, guild_id: GUILD, name: "standup" });
   channels.set(ELSEWHERE, {
     id: ELSEWHERE,
     type: 15,
@@ -161,6 +167,7 @@ export async function startStubDiscord(
     identifies: 0,
     resumes: 0,
     heartbeatMs: 45_000,
+    resumeUrl: null,
     silent: false,
     clearFaults() {
       faults.splice(0);
@@ -344,6 +351,12 @@ export async function startStubDiscord(
         const parent = channels.get(m[1] as string);
         const starter = messages.get(m[1] as string)?.find((message) => message.id === m[2]);
         if (!parent || !starter) return [404, { message: "Unknown Message", code: 10008 }];
+        if (channels.has(starter.id)) {
+          return [
+            400,
+            { message: "A thread has already been created for this message", code: 160004 },
+          ];
+        }
         const thread: Channel = {
           id: starter.id,
           type: 11,
@@ -482,7 +495,13 @@ export async function startStubDiscord(
         body = text;
       }
       const method = request.method ?? "GET";
-      requests.push({ method, path, body, auth: request.headers.authorization ?? null });
+      requests.push({
+        method,
+        path,
+        body,
+        auth: request.headers.authorization ?? null,
+        agent: request.headers["user-agent"] ?? null,
+      });
 
       let fault = faults.find((each) => each.method === method && each.path.test(path));
       if (fault !== undefined && fault.skip > 0) {
@@ -667,7 +686,7 @@ class GatewaySocket {
         this.dispatch("READY", {
           v: 10,
           session_id: `session-${this.stub.identifies}`,
-          resume_gateway_url: this.stub.url.replace(/^http/, "ws"),
+          resume_gateway_url: this.stub.resumeUrl ?? this.stub.url.replace(/^http/, "ws"),
           user: { id: BOT, username: "navbook", bot: true },
           application: { id: APP },
           guilds: [{ id: GUILD, unavailable: true }],

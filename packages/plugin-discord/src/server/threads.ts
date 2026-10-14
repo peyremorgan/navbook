@@ -23,17 +23,30 @@ export const RENAME_SPACING_MS = 5 * 60_000;
 /** How long a channel's description (its type, its tags) is trusted before it is asked again. */
 const CHANNEL_TTL_MS = 10 * 60_000;
 
-/** The errors after which a thread is gone: unknown channel, unknown message. */
+/**
+ * The error after which a thread is gone: unknown channel. An unknown message
+ * is only its card, which somebody deleted; the thread is still there.
+ */
 export function isGone(error: unknown): boolean {
-  return error instanceof DiscordError && (error.code === 10003 || error.code === 10008);
+  return error instanceof DiscordError && error.code === 10003;
 }
 
 /**
- * A channel the bridge will not post in: it is in another guild than the
- * settings name. The settings are committed, and a channel id is all it would
- * take to send the tracker's records somewhere the deployment never chose.
+ * A channel the bridge will not post in: one in another guild than the
+ * settings name — they are committed, and a channel id is all it would take
+ * to send the tracker's records somewhere the deployment never chose — or one
+ * that holds no threads the bridge can make. Asking again would not help.
  */
 export class ChannelRefused extends Error {}
+
+/** Whether a failed request certainly did nothing: Discord refused it as asked. */
+function refused(error: unknown): boolean {
+  return error instanceof DiscordError && error.status < 500 && error.status !== 429;
+}
+
+function isUnknownMessage(error: unknown): boolean {
+  return error instanceof DiscordError && error.code === 10008;
+}
 
 /** The refusal to touch an archived thread's messages, which reopening it answers. */
 function isArchived(error: unknown): boolean {
@@ -59,13 +72,18 @@ export class Threads {
     return channel;
   }
 
-  /** Start a thread in `parent`, which must be in `guild`, with `card` as its first message. */
+  /**
+   * Start a thread in `parent`, which must be in `guild`, with `card` as its
+   * first message. `nonce` names the card in a text channel, so asking again
+   * after an answer was lost gets the card Discord made rather than a second.
+   */
   async open(
     parent: string,
     guild: string,
     name: string,
     card: MessageBody,
     tags: (available: Channel["available_tags"]) => string[],
+    nonce: string,
   ): Promise<ThreadRef> {
     const channel = await this.channel(parent);
     if (channel.guild_id !== guild) {
@@ -85,9 +103,13 @@ export class Threads {
       return ref(thread.id, parent, true, name, applied);
     }
     if (channel.type !== ChannelType.GuildText) {
-      throw new Error(`channel ${parent} is neither a forum nor a text channel`);
+      throw new ChannelRefused(`channel ${parent} is neither a forum nor a text channel`);
     }
-    const message = await this.rest.post<Message>(`/channels/${parent}/messages`, card);
+    const message = await this.rest.post<Message>(`/channels/${parent}/messages`, {
+      ...card,
+      nonce: nonce.slice(0, 25),
+      enforce_nonce: true,
+    });
     let thread: Channel;
     try {
       thread = await this.rest.post<Channel>(`/channels/${parent}/messages/${message.id}/threads`, {
@@ -96,11 +118,30 @@ export class Threads {
       });
     } catch (error) {
       // A card with no thread would be left in the channel, and another one
-      // posted beside it when this is tried again.
-      await this.rest.delete(`/channels/${parent}/messages/${message.id}`).catch(() => undefined);
+      // posted beside it when this is tried again. Unless Discord may have
+      // made the thread after all: then the card is its, and stays.
+      if (refused(error)) {
+        await this.rest.delete(`/channels/${parent}/messages/${message.id}`).catch(() => undefined);
+      }
       throw error;
     }
     return ref(thread.id, parent, false, name, []);
+  }
+
+  /**
+   * The thread a request to {@link open} made for record `id` in `parent`
+   * when its answer was lost, if it made one: the active thread there whose
+   * name begins with the id. Null when there is none.
+   */
+  async made(guild: string, parent: string, id: string): Promise<ThreadRef | null> {
+    const forum = (await this.channel(parent)).type === ChannelType.GuildForum;
+    const active = await this.rest.get<{ threads: Channel[] }>(`/guilds/${guild}/threads/active`);
+    const thread = active.threads.find(
+      (each) => each.parent_id === parent && idOfThreadName(each.name) === id,
+    );
+    return thread === undefined
+      ? null
+      : ref(thread.id, parent, forum, thread.name ?? "", thread.applied_tags ?? []);
   }
 
   /**
@@ -121,7 +162,9 @@ export class Threads {
   /**
    * Redraw the card: in the thread for a forum post, in the parent channel
    * otherwise. A forum post Discord archived on its own after a quiet week
-   * refuses the edit; it is reopened and the edit made again.
+   * refuses the edit; it is reopened and the edit made again. A card somebody
+   * deleted is not drawn again: Discord gives a thread no second starter, and
+   * the thread is still told what happens.
    */
   async editCard(thread: ThreadRef, body: MessageBody): Promise<void> {
     const where = thread.forum ? thread.thread : thread.parent;
@@ -130,9 +173,12 @@ export class Threads {
     try {
       await this.rest.patch(route, body);
     } catch (error) {
+      if (isUnknownMessage(error)) return;
       if (!thread.forum || !isArchived(error)) throw error;
       await this.patch(thread, { archived: false });
-      await this.rest.patch(route, body);
+      await this.rest.patch(route, body).catch((again: unknown) => {
+        if (!isUnknownMessage(again)) throw again;
+      });
     }
   }
 

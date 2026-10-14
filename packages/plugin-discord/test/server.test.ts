@@ -22,6 +22,7 @@ import {
   type StubDiscord,
   startStubDiscord,
   TEXT,
+  VOICE,
 } from "./helpers/stub-discord.ts";
 import {
   closeIssue,
@@ -89,6 +90,26 @@ describe("threads", () => {
 /** The text of every message posted in a thread after its card. */
 function said(stub: StubDiscord, thread: string): string[] {
   return stub.posts(thread).map((message) => message.content);
+}
+
+/** The thread the bridge says a record has, through the API, or null. */
+async function bridgedThread(h: Harness, ref: string): Promise<string | null> {
+  const read = ok(
+    await h.gql<{ discord: { thread: { id: string } | null } }>(
+      "query Q($ref: ID!) { discord { thread(ref: $ref) { id } } }",
+      { ref },
+    ),
+  );
+  return read.discord.thread?.id ?? null;
+}
+
+/** Wait until the bridge says `thread` is the record's, as it does once it took it. */
+async function taken(h: Harness, ref: string, thread: string): Promise<void> {
+  const deadline = Date.now() + 20_000;
+  while ((await bridgedThread(h, ref)) !== thread) {
+    if (Date.now() > deadline) assert.fail(`never taken:\n${h.stderr()}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
 /** The thread a record got in a channel, by the id its name starts with. */
@@ -1168,6 +1189,183 @@ describe("acting for somebody the server would not let in", () => {
 });
 
 describe("what the review found", () => {
+  it("asks for a name Discord refused only once, until the title changes again", async () => {
+    const bridged = await startBridged();
+    const { stub, harness } = bridged;
+    try {
+      const id = await openIssue(harness, "Plain name");
+      await eventually(
+        () => stub.threadsOf(TEXT).length === 1,
+        () => harness.stderr(),
+      );
+      const thread = threadOf(stub, TEXT, id);
+      const renames = () =>
+        stub.requests.filter(
+          (request) =>
+            request.method === "PATCH" &&
+            request.path === `/channels/${thread}` &&
+            (request.body as { name?: string }).name !== undefined,
+        ).length;
+      stub.fail("PATCH", new RegExp(`^/channels/${thread}$`), 400, {
+        body: { message: "Invalid Form Body", code: 50035 },
+        times: 10,
+      });
+      await updateIssue(harness, id, { title: "A name the guild's AutoMod refuses" });
+      await eventually(
+        () => /Discord refused what #\w{8} needed, and it is passed over/.test(harness.stderr()),
+        () => harness.stderr(),
+      );
+      assert.equal(renames(), 1);
+      // The next change is told, and the refused name is not asked for again with it.
+      await comment(harness, "ISSUE", id, "Still here.");
+      await eventually(
+        () => said(stub, thread).some((line) => /Still here/.test(line)),
+        () => harness.stderr(),
+      );
+      assert.equal(renames(), 1);
+      stub.clearFaults();
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("keeps telling a thread whose card somebody deleted", async () => {
+    const bridged = await startBridged();
+    const { stub, harness } = bridged;
+    try {
+      const id = await openIssue(harness, "Card gone");
+      await eventually(
+        () => stub.threadsOf(TEXT).length === 1,
+        () => harness.stderr(),
+      );
+      const thread = threadOf(stub, TEXT, id);
+      stub.messages.set(
+        TEXT,
+        (stub.messages.get(TEXT) ?? []).filter((message) => message.id !== thread),
+      );
+      await updateIssue(harness, id, { body: "Redrawn, if there were a card." });
+      await comment(harness, "ISSUE", id, "Heard anyway.");
+      await eventually(
+        () => said(stub, thread).some((line) => /Heard anyway/.test(line)),
+        () => harness.stderr(),
+      );
+      assert.doesNotMatch(harness.stderr(), /is gone from Discord/);
+      await comment(harness, "ISSUE", id, "And again.");
+      await eventually(
+        () => said(stub, thread).some((line) => /And again/.test(line)),
+        () => harness.stderr(),
+      );
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("makes no second forum post when Discord's answer to the first was lost", async () => {
+    const bridged = await startBridged();
+    const { stub, harness } = bridged;
+    try {
+      stub.fail("POST", new RegExp(`^/channels/${FORUM}/threads$`), 502, { apply: true });
+      const { peer } = harness.fixture;
+      peer.filePr("Made once", "Lost answer.", "pr555555", "made-once");
+      assert.equal(peer.git(["push", "--quiet", "origin", "made-once"]).code, 0);
+      await eventually(
+        () => /could not tell the thread of #pr555555/.test(harness.stderr()),
+        () => harness.stderr(),
+      );
+      // Tried again on the backoff: the post Discord made is found and taken, not made again.
+      const thread = threadOf(stub, FORUM, "pr555555");
+      await taken(harness, "pr555555", thread);
+      assert.equal(stub.threadsOf(FORUM).length, 1);
+      assert.equal(
+        stub.requests.filter(
+          (request) => request.method === "POST" && request.path === `/channels/${FORUM}/threads`,
+        ).length,
+        1,
+      );
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("hangs no second thread in a text channel when Discord's answer to the first was lost", async () => {
+    const bridged = await startBridged();
+    const { stub, harness } = bridged;
+    try {
+      stub.fail("POST", new RegExp(`^/channels/${TEXT}/messages/\\d+/threads$`), 502, {
+        apply: true,
+      });
+      const id = await openIssue(harness, "Hung once");
+      await eventually(
+        () => /could not tell the thread of/.test(harness.stderr()),
+        () => harness.stderr(),
+      );
+      const thread = threadOf(stub, TEXT, id);
+      await taken(harness, id, thread);
+      await comment(harness, "ISSUE", id, "Into the one thread.");
+      await eventually(
+        () => said(stub, thread).some((line) => /Into the one thread/.test(line)),
+        () => harness.stderr(),
+        20_000,
+      );
+      assert.equal(stub.threadsOf(TEXT).length, 1);
+      // The card stayed with the thread Discord made.
+      assert.equal((stub.messages.get(TEXT) ?? []).length, 1);
+      assert.equal(stub.card(thread)?.embeds[0]?.footer?.text, `navbook:${id}`);
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("passes over a channel no thread can be made in, rather than trying it again", async () => {
+    const bridged = await startBridged({
+      settings: { ...SETTINGS, issues: [{ channel: VOICE, on: ["open"] }] },
+    });
+    const { harness } = bridged;
+    try {
+      const id = await openIssue(harness, "Nowhere to go");
+      await eventually(
+        () =>
+          new RegExp(
+            `Discord refused what #${id} needed, and it is passed over: channel ${VOICE} is neither a forum nor a text channel`,
+          ).test(harness.stderr()),
+        () => harness.stderr(),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 6_000));
+      assert.doesNotMatch(harness.stderr(), /could not tell the thread of/);
+      assert.equal(
+        harness
+          .stderr()
+          .split("\n")
+          .filter((line) => line.includes("passed over")).length,
+        1,
+      );
+    } finally {
+      await bridged.stop();
+    }
+  });
+
+  it("archives a thread a rule opens for a record already closed", async () => {
+    const bridged = await startBridged({
+      settings: { ...SETTINGS, issues: [{ channel: TEXT, on: ["status:closed"] }] },
+    });
+    const { stub, harness } = bridged;
+    try {
+      const id = await openIssue(harness, "Done already");
+      await closeIssue(harness, id, "fixed");
+      await eventually(
+        () => stub.threadsOf(TEXT).length === 1,
+        () => harness.stderr(),
+      );
+      const thread = threadOf(stub, TEXT, id);
+      await eventually(
+        () => stub.channels.get(thread)?.thread_metadata?.archived === true,
+        () => harness.stderr(),
+      );
+    } finally {
+      await bridged.stop();
+    }
+  });
+
   it("posts nothing in a channel of another guild, whatever the settings say", async () => {
     const bridged = await startBridged({ settings: { ...SETTINGS, prs: { channel: ELSEWHERE } } });
     const { stub, harness } = bridged;
