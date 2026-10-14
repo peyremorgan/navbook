@@ -335,8 +335,8 @@ describe("the gateway client", () => {
       await waitFor(() => client.ready);
       const resumed = stub.resumes;
       stub.silent = true;
-      await waitFor(() => stub.resumes > resumed, 3_000);
-      assert.ok(events.includes("RESUMED"));
+      // The stub counts the resume as it answers; the client hears it a moment later.
+      await waitFor(() => stub.resumes > resumed && events.includes("RESUMED"), 3_000);
     } finally {
       stub.silent = false;
       stub.heartbeatMs = 45_000;
