@@ -127,6 +127,27 @@ export function peopleOf(
   return { people: parsePeopleInto(raw, core, problems), problems };
 }
 
+/**
+ * The settings as a running server goes by them: a fault in `people` drops
+ * that entry, and is returned beside the settings rather than refusing them.
+ * A link is one person's, written by them from the web tracker or by hand;
+ * one that does not read is no reason to stop the bridge for everybody, or
+ * the server at its next start. Any other fault is the block's.
+ */
+export function serverSettings(
+  raw: unknown,
+  core: PersonReader,
+): { ok: true; settings: Settings; dropped: string[] } | { ok: false; problems: string[] } {
+  const reading = parseSettings(raw, core);
+  if (reading.ok) return { ...reading, dropped: [] };
+  if (!isPlainObject(raw)) return reading;
+  const { people: _people, ...rest } = raw;
+  const without = parseSettings(rest, core);
+  if (!without.ok) return reading;
+  const { people, problems } = peopleOf(raw, core);
+  return { ok: true, settings: { ...without.settings, people }, dropped: problems };
+}
+
 /** The entries that are sound; a fault for each that is not. */
 function parsePeopleInto(
   raw: unknown,

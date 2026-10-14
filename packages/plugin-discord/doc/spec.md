@@ -132,7 +132,7 @@ of [06 §6.6](../../../doc/spec/06-future.md):
 
 - Lost, the bridge starts from the tracker as it is then and announces nothing
   that happened before, and it finds its threads again by their names, which
-  begin with `#<id> `.
+  begin with `#<id> ` — of the threads the bot made, in its guild's channels.
 - Kept, a restart announces what happened while the server was down, and
   nothing twice.
 

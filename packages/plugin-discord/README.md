@@ -56,16 +56,26 @@ which ones exist is the server's moderators' choice. Create `open`, `closed`,
 | `/nav show [id]` | Shows a record's card to you alone |
 | `/nav thread <id>` | Gives a record a thread now, whatever the rules say |
 
+Every command but `link`, `unlink` and `whoami` is for an account linked to
+somebody (below): it acts as them, and shows them what they could read in
+the tracker. An account linked to nobody is told how to link, and is shown
+nothing — not a record's card, nor the ids and titles `id` offers to
+complete.
+
 In a record's thread, `id` can be left out. The card has buttons too:
 Approve, Request changes and Comment on a pull request; Comment, Assign to me
 and Close, or Reopen, on an issue. An approval made from a card is of the
 revision that card showed: one pressed after a new revision is pushed is
 refused rather than recorded against code nobody looked at. And any message
 in a thread can be turned into a comment from its menu: **Apps → Comment on
-this issue/PR**.
+this issue/PR**. It opens a form holding the message, quoted, with its
+author's Discord name; what the form holds when it is sent is commented as
+whoever sent it.
 
-Nothing anybody writes in a thread is copied to the tracker unless they ask
-with one of these. A conversation in Discord stays in Discord.
+Nothing written in a thread reaches the tracker unless somebody linked asks
+with one of these — and the menu lets them quote somebody else's message,
+as the form shows before anything is sent. A conversation in Discord
+otherwise stays in Discord.
 
 ## Setting it up
 
@@ -92,10 +102,11 @@ server to refuse any other:
 |---|---|
 | `NAV_SERVER_DISCORD_TOKEN` | The bot's token. Without it there is no bridge |
 | `NAV_SERVER_DISCORD_GUILD` | The one guild the bridge may serve; settings naming another stop the server |
+| `NAV_SERVER_DISCORD_TRUST_LINKS` | `true`: linked accounts act although the server requires a claim or a verified address (below) |
 
-In `docker compose`, that is `NAVBOOK_DISCORD_TOKEN` and
-`NAVBOOK_DISCORD_GUILD` in `.env`, with `@navbook/plugin-discord` among
-`NAVBOOK_PLUGINS`.
+In `docker compose`, that is `NAVBOOK_DISCORD_TOKEN`,
+`NAVBOOK_DISCORD_GUILD` and `NAVBOOK_DISCORD_TRUST_LINKS` in `.env`, with
+`@navbook/plugin-discord` among `NAVBOOK_PLUGINS`.
 
 **3. The settings.** In the repository's `navbook.json`, committed like the
 rest of the tracker. Ids are the strings Discord shows with Developer Mode on
@@ -154,7 +165,21 @@ $ nav discord unlink alice@example.com --commit
 ```
 
 The links are in the repository, so anybody who can read it can see which
-Discord account is whose.
+Discord account is whose. An address the settings cannot hold — one with no
+dot in its domain, say — is not linked, and a link committed by hand that
+does not read is left out, said once in the log, rather than stopping the
+bridge.
+
+**A link stands in for a sign-in.** Somebody acting from Discord shows the
+server no token, so of the rules that decide who is allowed in
+(`--allow-email-domain`, `--require-claim`, `--require-email-verified`) only
+the first, which reads the address alone, can be applied to them — and is.
+The other two cannot: a person removed from the group a claim names would
+keep acting from Discord. So on a server that requires a claim or a
+verified address, linked accounts act for nobody, and the log says so at
+start, unless `NAV_SERVER_DISCORD_TRUST_LINKS` is `true`. With it, the links
+are trusted in those rules' place, and taking somebody's access away means
+unlinking their account as well: `nav discord unlink <address> --commit`.
 
 ## What is kept, and where
 
@@ -163,7 +188,8 @@ remembers which thread belongs to which record, and what it last saw of each,
 in `navbook/discord.json` under the clone's git directory — never committed,
 and disposable. Lose it and the bridge starts from the tracker as it is,
 announcing nothing that happened before, and finds its threads again by their
-names, which begin with the record's id.
+names, which begin with the record's id — only threads the bot made, in the
+channels of its own guild.
 
 While the server is down nothing is lost: when it comes back, the bridge
 tells each thread what happened meanwhile, once. While Discord is down, the
@@ -172,7 +198,10 @@ grows from five seconds to five minutes; a message is never posted twice for
 one change, and a thread whose making Discord did not confirm is looked for
 before another is made. What Discord refuses for good — a channel no thread
 can be made in, a name its moderation rejects — is said once in the log and
-not asked again.
+not asked again. A token Discord refuses is no such refusal: nothing is
+passed over while it is, and once a new one is in, the threads are told what
+they missed. The gateway, refused the token, stops trying until the server
+restarts.
 
 ## What is sent to Discord
 
@@ -180,7 +209,9 @@ Titles, descriptions (the first 1500 characters), comments and reviews (the
 first 1500 characters of each), and who did what, of every record that has a
 thread — to the channels the settings name, where anybody who can read the
 channel can read them. Pick the channels as you would pick who reads the
-tracker.
+tracker. Beyond those, `/nav show` shows any record's card, and `id` offers
+any record's id and title, to the person whose account is linked — what
+they could read in the tracker — and to nobody else.
 
 No message the bridge posts can ping anybody but the people a change assigns
 or asks for a review, whatever the tracker's text says.

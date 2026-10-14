@@ -13,7 +13,7 @@
 import { join } from "node:path";
 import type { Identity } from "@navbook/core";
 import type { GraphQLCtx, ServerPluginHost } from "@navbook/server/plugin";
-import { PLUGIN_NAME, parseSettings, peopleOf, SNOWFLAKE } from "../core/settings.ts";
+import { bareAddress, PLUGIN_NAME, peopleOf, SNOWFLAKE, serverSettings } from "../core/settings.ts";
 import { Bridge } from "./bridge.ts";
 import { Commands } from "./commands.ts";
 import { DiscordGateway } from "./discord/gateway.ts";
@@ -25,6 +25,7 @@ import { StateFile } from "./state.ts";
 const TOKEN = "NAV_SERVER_DISCORD_TOKEN";
 const GUILD = "NAV_SERVER_DISCORD_GUILD";
 const API_URL = "NAV_SERVER_DISCORD_API_URL";
+const TRUST_LINKS = "NAV_SERVER_DISCORD_TRUST_LINKS";
 
 export function activate(host: ServerPluginHost): void {
   const { core } = host;
@@ -79,6 +80,14 @@ export function activate(host: ServerPluginHost): void {
       linkDiscord: (_parent: unknown, args: { code: string }, ctx: GraphQLCtx) =>
         host.api.run(async () => {
           if (bridge === null) throw notRunning();
+          // Checked as the settings read a link, before the code is spent:
+          // one the bridge would refuse is not committed for it to refuse.
+          const email = bareAddress(ctx.viewer.email, core);
+          if (email === null) {
+            throw host.api.invalidInput(
+              `${JSON.stringify(ctx.viewer.email)} is not an address navbook.json can link a Discord account to`,
+            );
+          }
           // Taken before the write, so two redemptions racing cannot both
           // link; put back if the write fails, so it can be tried again.
           const pending = codes.take(args.code);
@@ -87,7 +96,6 @@ export function activate(host: ServerPluginHost): void {
               "this link code is unknown or has expired; run /nav link in Discord for a new one",
             );
           }
-          const email = ctx.viewer.email;
           let written: Awaited<ReturnType<typeof writePeople>>;
           try {
             written = await writePeople(host, ctx, "link", email, (people) => {
@@ -128,12 +136,14 @@ function startBridge(
     host.report(`bridge not offered: ${TOKEN} is not set`);
     return null;
   }
-  const reading = parseSettings(host.settings, host.core);
+  const reading = serverSettings(host.settings, host.core);
   if (!reading.ok) {
     throw new Error(
       `${PLUGIN_NAME} has a token but its settings in navbook.json do not read: ${reading.problems.join("; ")}`,
     );
   }
+  // A link that does not read is dropped, not fatal: the bridge's first run
+  // reads the settings again and says which.
   const pinned = host.pluginConfig[GUILD];
   if (pinned !== undefined) {
     if (!SNOWFLAKE.test(pinned))
@@ -162,7 +172,14 @@ function startBridge(
     rest,
     state: new StateFile(join(gitDir, "navbook", "discord.json"), host.report),
   });
-  const commands = new Commands({ host, bridge, rest, codes, usernames });
+  const commands = new Commands({
+    host,
+    bridge,
+    rest,
+    codes,
+    usernames,
+    untrusted: untrustedLinks(host),
+  });
   const gateway = new DiscordGateway({
     rest,
     token,
@@ -226,4 +243,41 @@ function startBridge(
     },
   });
   return bridge;
+}
+
+/**
+ * Why no linked Discord account may act on this server, or null when they
+ * may — said once in the log either way, when it is a choice.
+ *
+ * A link vouches for an address, and `host.api.contextFor` applies the one
+ * admission rule an address answers. The rules that read a token — a claim,
+ * a verified address — cannot be asked of somebody acting from Discord: so
+ * a person a server admits by their group would keep acting from Discord
+ * after the group dropped them. Where such rules are in force, the operator
+ * says whether the links will do in their place.
+ */
+function untrustedLinks(host: ServerPluginHost): string | null {
+  const { policy } = host.config;
+  const rules = [
+    ...(policy.requireClaims.length > 0 ? ["--require-claim"] : []),
+    ...(policy.requireEmailVerified ? ["--require-email-verified"] : []),
+  ];
+  const given = host.pluginConfig[TRUST_LINKS]?.trim().toLowerCase();
+  if (given !== undefined && !["true", "false", "yes", "no", "1", "0"].includes(given)) {
+    throw new Error(`${TRUST_LINKS} takes true or false, got ${JSON.stringify(given)}`);
+  }
+  if (rules.length === 0) return null;
+  const which = rules.join(" and ");
+  if (given === "true" || given === "yes" || given === "1") {
+    host.report(
+      `linked Discord accounts act without ${which}, which no Discord account carries, as ${TRUST_LINKS} allows; ` +
+        "unlink a person who loses access (nav discord unlink)",
+    );
+    return null;
+  }
+  host.report(
+    `linked Discord accounts act for nobody: this server admits people by ${which}, which Discord cannot show; ` +
+      `set ${TRUST_LINKS}=true to let the links stand in for them`,
+  );
+  return "This server admits people by what their sign-in says, which Discord cannot show it, so nothing is done or shown here in anybody's name. Use the web tracker.";
 }
