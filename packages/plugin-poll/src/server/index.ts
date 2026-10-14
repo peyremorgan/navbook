@@ -16,6 +16,8 @@ import { awaitedOf, POLL_STATES, pollStateOf } from "../core/index.ts";
 import {
   castVote,
   closePoll,
+  closingOf,
+  closingTies,
   editPoll,
   issueOf,
   openPoll,
@@ -200,7 +202,12 @@ export function activate(host: ServerPluginHost): void {
       results: (poll: PollRecord) => toEnum(poll.results),
       status: (poll: PollRecord) => toEnum(poll.status),
       outcome: (poll: PollRecord) => answerList(poll.outcome),
-      proposed: (poll: PollRecord) => answerList(poll.proposed),
+      // What closing it now would do: an open poll's close may make a vote
+      // stamped far ahead of the clock late, and propose without it.
+      proposed: (poll: PollRecord, _args: unknown, ctx: GraphQLCtx) =>
+        answerList(poll.closed === null ? closingOf(poll, ctx.ws).proposed : poll.proposed),
+      closingTies: (poll: PollRecord, _args: unknown, ctx: GraphQLCtx) =>
+        poll.closed === null ? closingTies(closingOf(poll, ctx.ws)) : [],
       votes: (poll: PollRecord) => {
         // Each vote's state once, not a search per vote.
         const states = new Map(poll.ballots.map((reading) => [reading.vote, reading.state]));

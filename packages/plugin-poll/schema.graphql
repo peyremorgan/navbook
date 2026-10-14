@@ -119,8 +119,18 @@ type Poll {
   outcome: [PollAnswer!]
   "Why, in Markdown, as the closer put it."
   decisionNote: String
-  "What closing it now would record unless the closer decided otherwise; ties are left out."
+  """
+  What closing it now would record unless the closer decided otherwise; ties
+  are left out. Taken over the ballots closing would read, which leaves out a
+  vote stamped further ahead of the clock than closing waits for.
+  """
   proposed: [PollAnswer!]!
+  """
+  The questions closing it now would leave to the closer: tied over the
+  ballots closing would read. `closePoll` refuses to close without a decision
+  for each. Empty once it is closed.
+  """
+  closingTies: [String!]!
   "How many ballots count."
   voters: Int!
   "Each question's tally over the ballots that count."

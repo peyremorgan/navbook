@@ -27,7 +27,7 @@ const ENV = { NAVBOOK_PLUGIN_PATH: join(dirname(fileURLToPath(import.meta.url)),
 type Payload = any;
 
 const POLL_FIELDS = `id path baseSha title author created preamble results deadline fingerprint
-  status closedByIssue closed closedBy decisionNote voters problems myState
+  status closedByIssue closed closedBy decisionNote voters problems myState closingTies
   questions { id text multi other options { id label description } }
   outcome { question picks other }
   proposed { question picks other }
@@ -474,6 +474,12 @@ describe("polls over the API", () => {
     );
     let poll_ = await current();
     assert.equal(poll_.tallies[0].tied, true);
+    // What closing now would leave to the closer, as the close dialog reads it.
+    assert.deepEqual(poll_.closingTies, ["backend"]);
+    assert.equal(
+      poll_.proposed.find((answer: Payload) => answer.question === "backend"),
+      undefined,
+    );
     refused(
       await h.gql(CLOSE, { input: { poll, baseSha: poll_.baseSha } }),
       "PRECONDITION",
@@ -491,6 +497,7 @@ describe("polls over the API", () => {
     ).closePoll;
     assert.equal(closed.commit.subject, `docs(poll): close ${poll} on #${issue}`);
     assert.equal(closed.poll.status, "CLOSED");
+    assert.deepEqual(closed.poll.closingTies, []);
     assert.equal(closed.poll.closedBy, "A Person <person@example.invalid>");
     assert.deepEqual(closed.poll.outcome, [
       { question: "backend", picks: ["local-disk"], other: null },

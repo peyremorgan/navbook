@@ -12,7 +12,16 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import type * as NavbookCore from "@navbook/core";
 import type { EntityRecord, ParsedFile, Plan, Repo, RunPlanResult, WsCtx } from "@navbook/core";
-import { ballotOf, sameAnswer, voterKey } from "./ballot.ts";
+import {
+  ballotOf,
+  counted,
+  proposedDecision,
+  type QuestionTally,
+  readBallots,
+  sameAnswer,
+  tally,
+  voterKey,
+} from "./ballot.ts";
 import {
   type Answer,
   type Answers,
@@ -468,16 +477,14 @@ function nowToTheSecond(ws: WsCtx): number {
 }
 
 /**
- * The latest of these votes' stamps, short of any more than a few minutes
- * ahead of `now` (§3.2, §4): a vote a broken clock or a hand edit stamped in
- * 2099 must not drag every vote and close after it into 2099 too. -Infinity
- * when there is none.
+ * The latest of these votes' stamps, short of any more than `skew` ahead of
+ * `now`; -Infinity when there is none.
  */
-function latestStamp(votes: Iterable<{ date: Date }>, now: number): number {
+function latestStamp(votes: Iterable<{ date: Date }>, now: number, skew: number): number {
   let latest = Number.NEGATIVE_INFINITY;
   for (const { date } of votes) {
     const at = date.getTime();
-    if (at <= now + CLOCK_SKEW_MS && at > latest) latest = at;
+    if (at <= now + skew && at > latest) latest = at;
   }
   return latest;
 }
@@ -487,6 +494,11 @@ function latestStamp(votes: Iterable<{ date: Date }>, now: number): number {
  * when that is not earlier — file names are to the second, and a person's
  * votes must sort in the order they cast them (§4), or a quick second vote
  * could lose to the first.
+ *
+ * However far ahead of the clock that last vote is: one stamped by a laptop
+ * running ten minutes fast is still the voter's latest word, and a new vote
+ * stamped before it would sort before it and change nothing. Closing does not
+ * wait for a vote that far ahead (§3.2); X-poll-2 points it out.
  */
 function castAt(poll: PollRecord, ws: WsCtx, author: string): Date {
   const now = nowToTheSecond(ws);
@@ -494,6 +506,7 @@ function castAt(poll: PollRecord, ws: WsCtx, author: string): Date {
   const last = latestStamp(
     poll.ballots.map((reading) => reading.vote).filter((vote) => voterKey(vote.author) === key),
     now,
+    Number.POSITIVE_INFINITY,
   );
   return new Date(last >= now ? last + 1000 : now);
 }
@@ -581,11 +594,43 @@ export interface CloseResult {
 }
 
 /**
- * The decision closing would record: the closer's, else what the tallies come
- * to. Refused when a tied question is left to the tallies, which cannot break
- * a tie (§6.3).
+ * What closing a poll now would do: the instant it would write, and the
+ * tallies and the decision of the ballots it would read (§3.2, §6.3) — which
+ * are not the poll's own when a vote is stamped further ahead than closing
+ * waits for, since closing makes that vote late.
  */
-export function decisionFor(core: Core, poll: PollRecord, input: CloseInput): Answers {
+export interface Closing {
+  at: Date;
+  tallies: QuestionTally[];
+  proposed: Answers;
+}
+
+/** What closing `poll` at the clock of `ws` would do. */
+export function closingOf(poll: PollRecord, ws: WsCtx): Closing {
+  const at = closeAt(poll, ws);
+  const valid = poll.ballots.map((reading) => reading.vote);
+  if (!valid.some((vote) => vote.date.getTime() > at.getTime()))
+    return { at, tallies: poll.tallies, proposed: poll.proposed };
+  const tallies = tally(poll.questions, counted(readBallots(valid, poll.fingerprint, at)));
+  return { at, tallies, proposed: proposedDecision(poll.questions, tallies) };
+}
+
+/** The questions closing would leave to the closer: tied over the ballots it reads (§6.3). */
+export function closingTies(closing: Pick<Closing, "tallies">): string[] {
+  return closing.tallies.filter((entry) => entry.tied).map((entry) => entry.question);
+}
+
+/**
+ * The decision closing would record: the closer's, else what the tallies of
+ * `closing` come to — the poll's own unless told otherwise. Refused when a
+ * tied question is left to the tallies, which cannot break a tie (§6.3).
+ */
+export function decisionFor(
+  core: Core,
+  poll: PollRecord,
+  input: CloseInput,
+  closing: Pick<Closing, "tallies" | "proposed"> = poll,
+): Answers {
   const decide = new Map<string, Answer | null>(
     [...(input.decide ?? [])].map(([qid, answer]) => [
       qid,
@@ -607,7 +652,7 @@ export function decisionFor(core: Core, poll: PollRecord, input: CloseInput): An
   }
   const decision: Answers = new Map();
   const tied: string[] = [];
-  const tallies = new Map(poll.tallies.map((entry) => [entry.question, entry]));
+  const tallies = new Map(closing.tallies.map((entry) => [entry.question, entry]));
   for (const question of poll.questions) {
     if (decide.has(question.id)) {
       const answer = decide.get(question.id);
@@ -616,7 +661,7 @@ export function decisionFor(core: Core, poll: PollRecord, input: CloseInput): An
     }
     const entry = tallies.get(question.id);
     if (entry?.tied) tied.push(`'${question.id}' is tied between ${entry.leaders.join(", ")}`);
-    const proposed = poll.proposed.get(question.id);
+    const proposed = closing.proposed.get(question.id);
     if (proposed !== undefined) decision.set(question.id, proposed);
   }
   if (tied.length > 0) {
@@ -646,6 +691,7 @@ function closeAt(poll: PollRecord, ws: WsCtx): Date {
       latestStamp(
         poll.ballots.map((reading) => reading.vote),
         now,
+        CLOCK_SKEW_MS,
       ),
     ),
   );
@@ -662,10 +708,13 @@ export function closePoll(
   requireSound(core, poll, "close it");
   if (poll.closed !== null) core.wsFail("precondition", `poll ${poll.id} is already closed`);
   assertUnchanged(core, poll.blobSha, `poll ${poll.id}`, opts.baseSha);
-  const decision = decisionFor(core, poll, input);
+  // Proposed from the ballots the close reads, not those the poll counts while
+  // open: a vote stamped too far ahead is one the close makes late.
+  const closing = closingOf(poll, ws);
+  const decision = decisionFor(core, poll, input, closing);
   const text = readFileSync(core.absPath(ws, poll.filePath), "utf8");
   const content = closedPoll(text, {
-    at: core.toIsoSeconds(closeAt(poll, ws)),
+    at: core.toIsoSeconds(closing.at),
     by: core.currentAuthor(ws),
     decision,
     note: input.note ?? null,
