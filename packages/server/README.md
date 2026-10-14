@@ -275,7 +275,7 @@ required one that is missing is refused at startup like the server's own.
 
 A plugin adds types and fields to the schema, runs long-lived services — started
 before the port opens, stopped before the clone is released, and given ten
-seconds to do so — hears every mutation once it has committed, with whether the
+seconds in all to do so — hears every mutation once it has committed, with whether the
 push went through, and hears every pull that fetched, which is how it learns of
 what somebody pushed from a terminal. A service may act for a person with no
 request in flight (`host.api.contextFor`); no token vouches for them, so only

@@ -8,6 +8,7 @@
  * would be a schema that changed shape after the first request.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { EntityRecord, Identity } from "@navbook/core";
 import {
   type DocumentNode,
@@ -58,6 +59,10 @@ export class PluginRuntime {
   readonly extReaders: ExtReader[] = [];
   #listeners: ((event: MutationEvent) => void)[] = [];
   #syncListeners: ((event: SyncEvent) => void | Promise<void>)[] = [];
+  /** Whether services are running, so that sync listeners may be told. */
+  #accepting = false;
+  /** Set while a sync listener runs, in everything it starts. */
+  readonly #inListener = new AsyncLocalStorage<true>();
   /** The services running now, in the order they started. */
   #started: PluginService[] = [];
   #report: (line: string) => void;
@@ -274,20 +279,36 @@ export class PluginRuntime {
    * The clone has already let go when this is called (`RepoSync`'s
    * `onChange`), and a listener's work — reading what moved, telling a chat
    * service — must not hold up the pull or write that called it. So each runs
-   * after this returns, and one that throws or rejects is reported, as a
-   * mutation listener is.
+   * on a later turn of the event loop than the one that called this: after
+   * the write's own continuation has emitted its mutation event, which a
+   * service that hears both is therefore told first. One that throws or
+   * rejects is reported, as a mutation listener is.
+   *
+   * Two things are not told:
+   *
+   * - What happens while services are not running: before they have all
+   *   started, and from the moment they are told to stop. A listener is part
+   *   of its plugin's service, and one told after it stopped could queue work
+   *   on a clone the server has already released.
+   * - What an operation a sync listener started did. A listener that reads
+   *   fetches when nothing else does (`--pull-interval-ms 0`), and telling it
+   *   of its own fetch would have it read, and fetch, for ever. Whatever that
+   *   fetch brought in is told with the next pull or write.
    */
   emitSync(event: SyncEvent): void {
+    if (!this.#accepting || this.#inListener.getStore() === true) return;
     for (const listener of this.#syncListeners) {
-      void Promise.resolve()
-        .then(() => listener(event))
-        .catch((error: unknown) => {
-          this.#report(
-            `plugin sync listener failed after a ${event.cause}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        });
+      setImmediate(() => {
+        void this.#inListener
+          .run(true, async () => listener(event))
+          .catch((error: unknown) => {
+            this.#report(
+              `plugin sync listener failed after a ${event.cause}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          });
+      });
     }
   }
 
@@ -309,6 +330,7 @@ export class PluginRuntime {
       this.#started.push(service);
       this.#report(`started plugin service '${service.name}'`);
     }
+    this.#accepting = true;
   }
 
   /**
@@ -321,16 +343,20 @@ export class PluginRuntime {
    *
    * Nor may one that never returns hold the rest up: a socket that will not
    * close is a service's bug, and the clone it would keep from being released
-   * is everybody's. After {@link SERVICE_STOP_TIMEOUT_MS} it is left to the
-   * process exit, and the log says so.
+   * is everybody's. All of them together are given {@link
+   * SERVICE_STOP_TIMEOUT_MS}, however many there are, so that a container's
+   * time to stop is not spent here; one still running then is left to the
+   * process exit, and the log says so. Each is still told to stop.
    */
   async stop(): Promise<void> {
+    this.#accepting = false;
     const running = this.#started.reverse();
     this.#started = [];
+    const deadline = Date.now() + this.#stopTimeoutMs;
     for (const service of running) {
       let timer: NodeJS.Timeout | undefined;
       const abandoned = new Promise<"abandoned">((resolve) => {
-        timer = setTimeout(() => resolve("abandoned"), this.#stopTimeoutMs);
+        timer = setTimeout(() => resolve("abandoned"), Math.max(0, deadline - Date.now()));
       });
       try {
         const stopped = Promise.resolve()
@@ -338,7 +364,7 @@ export class PluginRuntime {
           .then(() => "stopped" as const);
         if ((await Promise.race([stopped, abandoned])) === "abandoned") {
           this.#report(
-            `plugin service '${service.name}' did not stop within ${this.#stopTimeoutMs} ms; going on without it`,
+            `plugin service '${service.name}' had not stopped when the ${this.#stopTimeoutMs} ms shutdown allows ran out; going on without it`,
           );
           // Whatever it does later is still news, not an unhandled rejection.
           stopped.catch(() => undefined);

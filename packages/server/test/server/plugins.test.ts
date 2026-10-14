@@ -451,6 +451,36 @@ describe("what a service hears of, and does, outside any request", () => {
         log.lines().filter((line) => line.startsWith("sync ")),
         ["sync write"],
       );
+      // After the mutation event that names it, so a service hearing both
+      // knows the write for the API's before it diffs its refs.
+      const lines = log.lines();
+      const mutation = lines.findIndex((line) => line.startsWith("mutation "));
+      assert.ok(mutation !== -1 && mutation < lines.indexOf("sync write"), lines.join("\n"));
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("tells a listener nothing of its own reads, which fetch for themselves", async () => {
+    const log = logFile("sync-loop");
+    // No background pull: every read fetches, a listener's own included.
+    const harness = await startHarness({
+      env: probeEnv(log.path, { SRVPROBE_SYNC_READ: "1" }),
+      pullIntervalMs: 0,
+    });
+    try {
+      await harness.gql(
+        `mutation { openIssue(input: { title: "Once", body: "Body." }) { issue { id } } }`,
+      );
+      await eventually(
+        () => log.lines().some((line) => line.startsWith("sync write")),
+        () => log.lines().join("\n"),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      assert.deepEqual(
+        log.lines().filter((line) => line.startsWith("sync ")),
+        ["sync write titles=Once"],
+      );
     } finally {
       await harness.stop();
     }
@@ -499,7 +529,15 @@ describe("what a service hears of, and does, outside any request", () => {
     try {
       const refused = log.lines().find((line) => line.startsWith("refused "));
       assert.ok(refused, log.lines().join("\n"));
-      assert.match(refused, /^refused FORBIDDEN: bridge@elsewhere\.invalid is not allowed/);
+      // The plugin hears that it was refused; the operator, why.
+      assert.equal(
+        refused,
+        "refused FORBIDDEN: bridge@elsewhere.invalid is not allowed on this repository",
+      );
+      assert.match(
+        harness.stderr(),
+        /refused a plugin acting as "bridge@elsewhere\.invalid": the email domain .* is not one of example\.invalid/,
+      );
       assert.deepEqual(
         originSubjects(harness.fixture.origin).filter((line) => /open/.test(line)),
         [],

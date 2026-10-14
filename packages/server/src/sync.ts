@@ -52,6 +52,7 @@ import {
   type PushTarget,
   pushBranchAsync,
   resolveShaAsync,
+  toIsoSeconds,
   type WorktreeOptions,
 } from "@navbook/core";
 import { apiError } from "./errors.ts";
@@ -597,10 +598,7 @@ export class RepoSync {
   private changed(cause: SyncChange["cause"], op: Moved): void {
     if (!op.moved) return;
     try {
-      this.opts.onChange?.({
-        cause,
-        at: new Date(this.now()).toISOString().replace(/\.\d+Z$/, "Z"),
-      });
+      this.opts.onChange?.({ cause, at: toIsoSeconds(new Date(this.now())) });
     } catch (error) {
       this.report(
         `nav-server: a sync listener failed: ${error instanceof Error ? error.message : String(error)}`,

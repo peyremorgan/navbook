@@ -75,7 +75,7 @@ export interface MutationEvent {
  * never hears of that one; this does. It says only that something may have
  * moved — a fetch that brought nothing is still a fetch — because what moved
  * is the listener's to read against what it last saw: the refs, and the
- * commits between (`core.listRefShas`, `ctx.revisions.activityOf`).
+ * commits between (`core.listRefShasAsync`, `ctx.revisions.activityOf`).
  *
  * Told once the clone has let go, so a listener may read it, or act through
  * `api.execute`, straight away. A listener that throws is reported.
@@ -86,8 +86,9 @@ export type SyncEvent = SyncChange;
  * Something that runs for as long as the server does.
  *
  * `stop` is awaited during shutdown, before the clone is released, so a
- * service that holds a socket or a poll loop can close it — for ten seconds,
- * after which shutdown goes on without it and says so. A service that
+ * service that holds a socket or a poll loop can close it — within ten seconds
+ * for all the services together, after which shutdown goes on without the ones
+ * still running and says so. A service that
  * throws while starting stops the server: it was configured, so it was wanted,
  * and a bridge that silently did not connect is worse than one that refused
  * to come up.

@@ -47,22 +47,28 @@ export function listBranchRefs(cwd: string): Ref[] {
  *
  * What a service compares between two moments to learn what moved — a branch
  * somebody pushed, one that went — so symbolic refs (`origin/HEAD`) are left
- * out: they only ever repeat a ref already listed. Keyed by full name
- * (`refs/remotes/origin/main`). Throws a `GitError` when git cannot list them.
+ * out: they only ever repeat a ref already listed. An annotated tag is given
+ * the commit it tags, not the tag object. Keyed by full name
+ * (`refs/remotes/origin/main`); no prefixes lists every ref. Throws a
+ * `GitError` when git cannot list them.
  */
 export async function listRefShasAsync(
   cwd: string,
   prefixes: readonly string[],
 ): Promise<Map<string, string>> {
   const output = await gitAsync(
-    ["for-each-ref", "--format=%(refname)%00%(objectname)%00%(symref)", ...prefixes],
+    [
+      "for-each-ref",
+      "--format=%(refname)%00%(objectname)%00%(*objectname)%00%(symref)",
+      ...prefixes,
+    ],
     { cwd },
   );
   const refs = new Map<string, string>();
   for (const line of splitLines(output)) {
-    const [full, sha, symref] = line.split("\0");
-    if (!full || !sha || (symref !== undefined && symref !== "")) continue;
-    refs.set(full, sha);
+    const [full, object, peeled, symref] = line.split("\0");
+    if (!full || !object || (symref !== undefined && symref !== "")) continue;
+    refs.set(full, peeled || object);
   }
   return refs;
 }

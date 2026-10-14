@@ -226,7 +226,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
   // Likewise before any service starts: a bridge acts for people from its own,
   // and reads as the server itself, whose own identity no rule is about.
   loaded.runtime.setContextFactory((person) =>
-    contextOf(person === undefined ? identity : admitted(person, config)),
+    contextOf(person === undefined ? identity : admitted(person, config, report)),
   );
   const yoga = createYoga({
     schema,
@@ -310,7 +310,7 @@ export async function startServer(opts: StartOptions): Promise<ServerHandle> {
  * format's own reading checks — an address, and a name with no line break
  * or angle bracket to end it early.
  */
-function admitted(person: Identity, config: Config): Identity {
+function admitted(person: Identity, config: Config, report: (line: string) => void): Identity {
   const email = typeof person.email === "string" ? person.email.trim() : "";
   const name = typeof person.name === "string" ? person.name.trim() : "";
   const wanted: Identity = name === "" ? { email } : { name, email };
@@ -322,7 +322,10 @@ function admitted(person: Identity, config: Config): Identity {
   }
   const violation = domainViolation(email, config.policy);
   if (violation !== null) {
-    throw apiError(`${email} is not allowed on this repository: ${violation}`, "FORBIDDEN");
+    // As at the door: which rule refused whom is the operator's to read, and
+    // the plugin — and whoever it tells — hears only that it was refused.
+    report(`refused a plugin acting as ${JSON.stringify(email)}: ${violation}`);
+    throw apiError(`${email} is not allowed on this repository`, "FORBIDDEN");
   }
   return wanted;
 }

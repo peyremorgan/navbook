@@ -117,12 +117,39 @@ describe("plugin services", () => {
     assert.ok(Date.now() - started < 1_000, "waited past the deadline");
     assert.deepEqual(log, ["start a", "start b", "stop b", "stop a"]);
     assert.ok(
-      reported.includes("plugin service 'hung' did not stop within 20 ms; going on without it"),
+      reported.includes(
+        "plugin service 'hung' had not stopped when the 20 ms shutdown allows ran out; going on without it",
+      ),
       reported.join("\n"),
     );
     // Its failure after the fact is nobody's unhandled rejection.
     late();
     await settle();
+  });
+
+  it("give every service together one deadline, however many hang", async () => {
+    const log: string[] = [];
+    const hang = (name: string): PluginService => ({
+      name,
+      start: async () => undefined,
+      stop: () => {
+        log.push(`stop ${name}`);
+        return new Promise<void>(() => undefined);
+      },
+    });
+    const { runtime, reported } = runtimeTimed(
+      { stopTimeoutMs: 60 },
+      hang("a"),
+      hang("b"),
+      hang("c"),
+    );
+    await runtime.start();
+    const started = Date.now();
+    await runtime.stop();
+    assert.ok(Date.now() - started < 150, `took ${Date.now() - started} ms`);
+    // Each was still told to stop.
+    assert.deepEqual(log, ["stop c", "stop b", "stop a"]);
+    assert.equal(reported.filter((line) => /had not stopped/.test(line)).length, 3);
   });
 
   it("wait for a service that stops within the deadline, however slowly", async () => {
@@ -161,6 +188,7 @@ describe("telling plugins the clone may have moved", () => {
 
   it("tells every listener, each after the emitter has returned", async () => {
     const { runtime } = runtimeWith();
+    await runtime.start();
     const told: string[] = [];
     runtime.onSync((event) => void told.push(`a ${event.cause}`));
     runtime.onSync(async (event) => {
@@ -176,6 +204,7 @@ describe("telling plugins the clone may have moved", () => {
 
   it("reports a listener that throws or rejects, and tells the others all the same", async () => {
     const { runtime, reported } = runtimeWith();
+    await runtime.start();
     const told: string[] = [];
     runtime.onSync(() => {
       throw new Error("thrown");
@@ -191,6 +220,44 @@ describe("telling plugins the clone may have moved", () => {
       "plugin sync listener failed after a write: rejected",
       "plugin sync listener failed after a write: thrown",
     ]);
+  });
+
+  it("tells nothing before the services have started, nor once they are stopping", async () => {
+    const { runtime } = runtimeWith();
+    const told: string[] = [];
+    runtime.onSync((event) => void told.push(event.cause));
+    runtime.emitSync(pulled);
+    await settle();
+    assert.deepEqual(told, [], "told before the services started");
+    await runtime.start();
+    runtime.emitSync(pulled);
+    await settle();
+    assert.deepEqual(told, ["pull"]);
+    await runtime.stop();
+    runtime.emitSync(pulled);
+    await settle();
+    assert.deepEqual(told, ["pull"], "told after the services stopped");
+  });
+
+  it("tells a listener nothing about what an operation it started did", async () => {
+    const { runtime } = runtimeWith();
+    await runtime.start();
+    let told = 0;
+    runtime.onSync(async () => {
+      told++;
+      // A read the listener makes fetches, and its sync comes back here.
+      await settle();
+      runtime.emitSync(pulled);
+    });
+    runtime.emitSync(pulled);
+    await settle();
+    await settle();
+    await settle();
+    assert.equal(told, 1);
+    // Anybody else's is told as before.
+    runtime.emitSync(pulled);
+    await settle();
+    assert.equal(told, 2);
   });
 
   it("says nothing to nobody", async () => {

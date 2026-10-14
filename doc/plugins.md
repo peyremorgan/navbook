@@ -306,9 +306,13 @@ terminal and pushed — subscribes with `host.onSync(listener)` as well: it is
 told after every pull that fetched, background or not, and every write, once
 the clone has let go. It says only that refs may have moved; the listener
 reads what moved against what it saw last, for instance with
-`core.listRefShasAsync` and the tracker commits between two of them. A service
-is given ten seconds to `stop` at shutdown, after which the server goes on
-without it and says so.
+`core.listRefShasAsync` and the tracker commits between two of them. A write's
+sync event comes after its mutation event. Listeners are told nothing while
+services are not running, and nothing about what an operation they started
+themselves did — a listener that reads would otherwise fetch, and be told, and
+read again — so what such an operation brought in is told with the next pull
+or write. At shutdown, the services are given ten seconds in all to `stop`,
+after which the server goes on without the ones still running, and says so.
 
 Never call `execute` from inside `ctx.sync.read`, `ctx.sync.write`,
 `ctx.sync.locked` or a `writeEntity` body. The operation's own resolvers take

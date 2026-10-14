@@ -46,6 +46,15 @@ describe("listRefShasAsync", () => {
     ]);
   });
 
+  it("gives an annotated tag the commit it tags, not the tag object", async () => {
+    const head = git(["rev-parse", "HEAD"], { cwd: dir }).trim();
+    git(["tag", "-a", "-m", "a release", "v1", head], { cwd: dir });
+    const tagObject = git(["rev-parse", "refs/tags/v1"], { cwd: dir }).trim();
+    assert.notEqual(tagObject, head);
+    const refs = await listRefShasAsync(dir, ["refs/tags/"]);
+    assert.equal(refs.get("refs/tags/v1"), head);
+  });
+
   it("answers an empty map when nothing is under the prefixes", async () => {
     assert.deepEqual(await listRefShasAsync(dir, ["refs/remotes/nowhere/"]), new Map());
   });
