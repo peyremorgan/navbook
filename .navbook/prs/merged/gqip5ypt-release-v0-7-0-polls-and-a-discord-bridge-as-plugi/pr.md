@@ -10,6 +10,9 @@ revisions:
   - head: c6ef644841f7571ec460cd8f4612e57dcaf75942
     base: b1c88dc52f49706b728d87c82af0d3b8defa5758
     date: 2026-10-14T09:53:48Z
+merged:
+  date: 2026-10-16T05:07:07Z
+  by: Claude <noreply@anthropic.com>
 ---
 
 Releases v0.7.0: everything on `dev` since v0.6.1, the version bump, and the fixes from this release's adversarial review.
